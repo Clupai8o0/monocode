@@ -305,10 +305,9 @@ fn write_opencode_server(path: &Path, name: &str, server: Value, major: u32) -> 
             }
             mcp
         } else {
-            if mcp
-                .iter()
-                .any(|(key, value)| key != "servers" && value.is_object())
-            {
+            if mcp.iter().any(|(key, value)| {
+                !matches!(key.as_str(), "servers" | "timeout") && value.is_object()
+            }) {
                 return Err("Existing OpenCode config uses the 1.x MCP layout".into());
             }
             mcp.entry("servers")
@@ -802,6 +801,45 @@ mod tests {
         assert_eq!(config["mcp"]["servers"]["docs"]["disabled"], true);
         assert!(config["mcp"]["docs"].is_null());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn adds_opencode_two_server_without_changing_existing_timeouts_or_servers() {
+        let root = std::env::temp_dir().join(format!(
+            "monocode-opencode-timeout-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = root.join("opencode.json");
+        std::fs::create_dir_all(&root).unwrap();
+        let original = serde_json::json!({
+            "mcp": {
+                "timeout": {"startup": 45000, "catalog": 30000, "execution": 600000},
+                "servers": {
+                    "existing": {"type": "local", "command": ["node", "server.js"]}
+                }
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+
+        let result = write_opencode_server(
+            &path,
+            "docs",
+            serde_json::json!({"url": "https://example.com/mcp"}),
+            2,
+        );
+        let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+
+        result.unwrap();
+        assert_eq!(config["mcp"]["timeout"], original["mcp"]["timeout"]);
+        assert_eq!(
+            config["mcp"]["servers"]["existing"],
+            original["mcp"]["servers"]["existing"]
+        );
+        assert_eq!(
+            config["mcp"]["servers"]["docs"],
+            serde_json::json!({"type": "remote", "url": "https://example.com/mcp"})
+        );
     }
 
     #[test]
