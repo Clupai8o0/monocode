@@ -49,6 +49,13 @@ describe("bounded code highlight plugin", () => {
     expect(plugin.cachedResults()).toBe(2);
   }, 20_000);
 
+  it("delivers but does not cache a block larger than the budget", async () => {
+    const plugin = createBoundedCodePlugin({ maxChars: 500 });
+    const huge = `// big\n${"y".repeat(1_000)}`;
+    expect(text(await highlight(plugin, huge))).toBe(huge);
+    expect(plugin.cachedResults()).toBe(0);
+  }, 20_000);
+
   it("returns cached tokens synchronously and keeps distinct blocks apart", async () => {
     const plugin = createBoundedCodePlugin();
     const head = "const a = 1;\n".repeat(10);

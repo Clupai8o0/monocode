@@ -80,12 +80,11 @@ export function createBoundedCodePlugin(
 
   const remember = (key: string, result: HighlightResult) => {
     if (results.delete(key)) cachedChars -= key.length;
+    // A block larger than the whole budget is delivered but never cached.
+    if (key.length > maxChars) return;
     results.set(key, result);
     cachedChars += key.length;
-    while (
-      results.size > maxEntries ||
-      (cachedChars > maxChars && results.size > 1)
-    ) {
+    while (results.size > maxEntries || cachedChars > maxChars) {
       const oldest = results.keys().next().value;
       if (oldest === undefined) break;
       results.delete(oldest);
