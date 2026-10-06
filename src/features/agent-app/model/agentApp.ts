@@ -411,6 +411,9 @@ function startLaunch(
   const worktreeCwd = optionalString(input.worktreeCwd, "worktreeCwd");
   if (worktreeCwd && workspaceMode !== "current")
     throw new Error("worktreeCwd requires workspaceMode current");
+  const currentWorktree =
+    worktreeCwd ||
+    (pathKey(cwd) === pathKey(source.cwd) ? source.worktreeCwd : undefined);
   return {
     cwd,
     prompt,
@@ -427,8 +430,8 @@ function startLaunch(
     // A Mono delegates work without navigating the user out of their chat.
     reveal: host.isMono(source.id) ? false : reveal,
     workspaceMode,
-    ...(workspaceMode === "current" && (worktreeCwd || source.worktreeCwd)
-      ? { worktreeCwd: worktreeCwd || source.worktreeCwd }
+    ...(workspaceMode === "current" && currentWorktree
+      ? { worktreeCwd: currentWorktree }
       : {}),
     ...(worktreeBase ? { worktreeBase } : {}),
   };

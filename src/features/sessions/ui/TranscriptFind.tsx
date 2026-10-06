@@ -41,7 +41,18 @@ export function TranscriptFind({
     () => findTranscriptBlocks(blocks, query),
     [blocks, query],
   );
-  const matches = onSearch ? storedMatches : localMatches;
+  const matches = useMemo(() => {
+    if (!onSearch) return localMatches;
+    // Search the archive once per query; streamed blocks keep matching locally.
+    const liveIds = new Set(blocks.map((block) => block.id));
+    const localIds = new Set(localMatches);
+    return [
+      ...new Set([
+        ...storedMatches.filter((id) => !liveIds.has(id) || localIds.has(id)),
+        ...localMatches,
+      ]),
+    ];
+  }, [onSearch, storedMatches, blocks, localMatches]);
   useEffect(() => {
     if (!onSearch || !open || !query.trim()) {
       setStoredMatches([]);
@@ -71,7 +82,7 @@ export function TranscriptFind({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [onSearch, open, query, blocks]);
+  }, [onSearch, open, query]);
   const selected = matches[Math.min(active, matches.length - 1)] ?? null;
 
   const openFind = () => {

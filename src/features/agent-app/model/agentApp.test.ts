@@ -578,6 +578,47 @@ describe("agent app commands", () => {
     expect(host.start).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["/tmp/project", "/tmp/project-worktrees/source"],
+    ["/tmp/other", undefined],
+  ])("inherits a worktree only when launching in the source project: %s", async (project, expectedWorktree) => {
+    const { source, host } = fixture();
+    source.worktreeCwd = "/tmp/project-worktrees/source";
+    host.isMono = () => true;
+    host.monoOf = () => ({ id: "mono", projects: [source.cwd, "/tmp/other"] });
+    await handleAgentApp(source, "launch", "sessions.start", {
+      prompt: "Review the project",
+      project,
+      notifyOnComplete: false,
+    }, host);
+    const launch = vi.mocked(host.start).mock.calls[0][0];
+    expect(launch.cwd).toBe(project);
+    expect(launch.worktreeCwd).toBe(expectedWorktree);
+  });
+
+  it("validates an explicit worktree in the Mono's selected project", async () => {
+    const { source, host } = fixture();
+    source.worktreeCwd = "/tmp/project-worktrees/source";
+    host.isMono = () => true;
+    host.monoOf = () => ({ id: "mono", projects: [source.cwd, "/tmp/other"] });
+    const chosen = "/tmp/other-worktrees/feature";
+    vi.mocked(host.worktrees).mockResolvedValue({
+      worktrees: [{ ...featureWorktree, path: chosen }],
+      defaultRoot: "/tmp/other-worktrees",
+    });
+    await handleAgentApp(source, "launch", "sessions.start", {
+      prompt: "Review the feature",
+      project: "/tmp/other",
+      worktreeCwd: chosen,
+      notifyOnComplete: false,
+    }, host);
+    expect(host.worktrees).toHaveBeenCalledWith("/tmp/other");
+    expect(host.start).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/tmp/other", worktreeCwd: chosen }),
+      "app-lead-launch",
+    );
+  });
+
   it("creates a worktree on a named new or existing branch", async () => {
     const { source, host } = fixture();
     expect(

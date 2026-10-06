@@ -3,10 +3,12 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const saveMonoFile = vi.fn(async () => "next-hash");
+const saveMonoFile = vi.fn(async (..._args: unknown[]) => "next-hash");
 vi.mock("../model/monoFiles", async (original) => ({
   ...(await original<object>()),
-  saveMonoFile: (...args: unknown[]) => saveMonoFile(...(args as [])),
+  saveMonoFile: (...args: unknown[]) => saveMonoFile(...args),
+  editMonoFile: async (monoId: string, file: string, edit: (text: string) => string) =>
+    saveMonoFile(monoId, file, edit(files.memory), files.memoryHash),
 }));
 
 const { MonoSettingsPage } = await import("./MonoSettingsPage");
@@ -149,7 +151,7 @@ it("shows a failed reset and lets the user retry", async () => {
   expect(reset).toHaveBeenCalledTimes(2);
 });
 
-it("shows memory as facts and forgets one without touching the rest", () => {
+it("shows memory as facts and forgets one without touching the rest", async () => {
   act(() =>
     root.render(
       createElement(MemoryPage, { monoId: "mono-1", files, onBack: () => {} }),
@@ -158,7 +160,7 @@ it("shows memory as facts and forgets one without touching the rest", () => {
   const facts = [...container.querySelectorAll("[data-memory-line]")].map((row) => row.textContent);
   expect(facts[0]).toBe("i am a cool pirate");
   expect(facts[1]).toContain("The user's name is Nick");
-  act(() => (container.querySelector('[aria-label="Forget: i am a cool pirate"]') as HTMLElement).click());
+  await act(async () => (container.querySelector('[aria-label="Forget: i am a cool pirate"]') as HTMLElement).click());
   expect(saveMonoFile).toHaveBeenCalledWith(
     "mono-1",
     "memory",
@@ -167,7 +169,7 @@ it("shows memory as facts and forgets one without touching the rest", () => {
   );
 });
 
-it("adds a fact typed in the Memory page as a dated entry", () => {
+it("adds a fact typed in the Memory page as a dated entry", async () => {
   saveMonoFile.mockClear();
   act(() =>
     root.render(
@@ -182,7 +184,7 @@ it("adds a fact typed in the Memory page as a dated entry", () => {
     set.call(input, "Deploys go through Fly");
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  act(() => {
+  await act(async () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
   const [, , text, hash] = saveMonoFile.mock.calls[0] as unknown as string[];

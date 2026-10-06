@@ -129,6 +129,24 @@ export function saveMonoFile(
   return writeAgentFile(monoId, FILE_PATH[file], text, expectedHash);
 }
 
+/** Reapply a small edit to the latest file, including after a concurrent save. */
+export async function editMonoFile(
+  monoId: string,
+  file: MonoFile,
+  edit: (text: string) => string,
+): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    const current = await readAgentFile(monoId, FILE_PATH[file]);
+    const text = edit(current.text ?? "");
+    if (text === (current.text ?? "")) return current.hash;
+    try {
+      return await saveMonoFile(monoId, file, text, current.hash);
+    } catch (error) {
+      if (!(error instanceof MonoFileConflict) || attempt >= 2) throw error;
+    }
+  }
+}
+
 /** One agent file and the hash a save over it must name. */
 export async function readAgentFile(
   monoId: string,

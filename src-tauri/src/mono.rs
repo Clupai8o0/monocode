@@ -143,13 +143,29 @@ pub fn content_hash(text: &str) -> String {
 /// Write beside the target and rename over it, so a crash mid-write leaves
 /// the old file whole. Owner-only, since memory can hold personal details.
 fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+
     let temp = path.with_extension("md.tmp");
-    std::fs::write(&temp, text).map_err(|e| format!("{}: {e}", temp.display()))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temp)
+        .map_err(|e| format!("{}: {e}", temp.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600));
+        // A temporary file left by an older version may have wider permissions.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("{}: {e}", temp.display()))?;
     }
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("{}: {e}", temp.display()))?;
+    drop(file);
     std::fs::rename(&temp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -403,6 +419,35 @@ mod tests {
         let loaded = load(&root, "m", None).unwrap();
         assert_eq!(loaded.memory, "- c");
         assert_eq!(loaded.soul.as_deref(), Some("soul"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_private_files_even_with_a_leftover_public_temp_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root();
+        let path = root.join(MEMORY_FILE);
+        write_atomic(&path, "private memory").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let temp = path.with_extension("md.tmp");
+        std::fs::write(&temp, "leftover").unwrap();
+        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_atomic(&path, "new private memory").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "new private memory"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(!temp.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

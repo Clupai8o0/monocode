@@ -18,7 +18,6 @@ import {
   habitSchedule,
   MISSED_RUN_GRACE_MS,
   newHabit,
-  newHabit,
   parseHabits,
   QUIET_MARKER,
   serializeHabits,

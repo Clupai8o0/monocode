@@ -4,7 +4,7 @@ import { Pencil, Plus, StickyNote, Trash2 } from "../../../shared/ui/icons";
 import type { MonoLook } from "../model/mono";
 import {
   MonoFileConflict,
-  saveMonoFile,
+  editMonoFile,
   type MonoFiles,
 } from "../model/monoFiles";
 import {
@@ -14,6 +14,7 @@ import {
   memoryLines,
   withLineEdited,
   withoutLine,
+  type MemoryLine,
 } from "../model/monoMemory";
 import { HabitButton } from "./MonoHabits";
 import {
@@ -32,6 +33,20 @@ const dateFormat = new Intl.DateTimeFormat(undefined, {
 function shortDate(date: string): string {
   const [year, month, day] = date.split("-").map(Number);
   return dateFormat.format(new Date(year, month - 1, day));
+}
+
+type MemoryFact = MemoryLine & { line: string };
+
+/** Locate the original fact after other writers have inserted or moved rows. */
+function factIndex(memory: string, original: string): number {
+  const indices = memory
+    .split("\n")
+    .flatMap((line, index) => (line === original ? [index] : []));
+  if (indices.length !== 1)
+    throw new Error(
+      "This memory changed or is ambiguous. Check it before trying again.",
+    );
+  return indices[0];
 }
 
 /** The soul as its markdown source, editable in place; saved when you leave it. */
@@ -80,23 +95,39 @@ export function MemoryPage({
   onBack: () => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<number>();
-  const facts = files ? memoryLines(files.memory) : [];
-  const save = (edit: (memory: string) => string) => {
-    if (!files) return;
-    void saveMonoFile(
-      monoId,
-      "memory",
-      edit(files.memory),
-      files.memoryHash,
-    ).catch((error) => {
-      // A newer version arrives on its own; the edit can be made again.
-      if (!(error instanceof MonoFileConflict))
-        console.warn("Could not update memory", error);
-    });
+  const [editing, setEditing] = useState<MemoryFact>();
+  const [saveError, setSaveError] = useState<string>();
+  const lines = files?.memory.split("\n") ?? [];
+  const facts: MemoryFact[] = files
+    ? memoryLines(files.memory).map((fact) => ({
+        ...fact,
+        line: lines[fact.index],
+      }))
+    : [];
+  // Keep the editor and its draft even if a reload removes the original row.
+  if (editing && !facts.some((fact) => fact.line === editing.line))
+    facts.splice(Math.min(editing.index, facts.length), 0, editing);
+  const editingIndex = editing
+    ? facts.findIndex((fact) => fact.line === editing.line)
+    : -1;
+  const save = async (edit: (memory: string) => string): Promise<boolean> => {
+    try {
+      await editMonoFile(monoId, "memory", edit);
+      setSaveError(undefined);
+      return true;
+    } catch (error) {
+      setSaveError(
+        error instanceof MonoFileConflict
+          ? "Memory kept changing while saving. Your edit was not saved; try again."
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
+      return false;
+    }
   };
-  const forget = (index: number) =>
-    save((memory) => withoutLine(memory, index));
+  const forget = (line: string) =>
+    save((memory) => withoutLine(memory, factIndex(memory, line)));
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-mono-memory>
       <PageHeader title="Memory" onBack={onBack}>
@@ -113,6 +144,11 @@ export function MemoryPage({
           </IconButton>
         ) : null}
       </PageHeader>
+      {saveError ? (
+        <p role="alert" className="px-4 py-2 text-[12px] text-red-400">
+          {saveError}
+        </p>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-none px-2 py-2">
         {!files ? (
           <Empty>Loading…</Empty>
@@ -139,24 +175,30 @@ export function MemoryPage({
                 />
               </li>
             ) : null}
-            {facts.map((fact) =>
-              editing === fact.index ? (
-                <li key={fact.index} data-memory-line={fact.index}>
+            {facts.map((fact, index) => {
+              const edit = editingIndex === index ? editing : undefined;
+              return edit ? (
+                <li key={`editing:${edit.line}`} data-memory-line={fact.index}>
                   <FactEditor
                     label="Edit memory"
-                    initial={fact.text}
-                    onSave={(text) => {
-                      if (text !== fact.text)
-                        save((memory) =>
-                          withLineEdited(
-                            memory,
-                            fact.index,
-                            text,
-                            memoryDate(),
-                          ),
-                        );
-                    }}
-                    onClose={() => setEditing(undefined)}
+                    initial={edit.text}
+                    onSave={(text) =>
+                      text === edit.text
+                        ? Promise.resolve(true)
+                        : save((memory) =>
+                            withLineEdited(
+                              memory,
+                              factIndex(memory, edit.line),
+                              text,
+                              memoryDate(),
+                            ),
+                          )
+                    }
+                    onClose={() =>
+                      setEditing((current) =>
+                        current === edit ? undefined : current,
+                      )
+                    }
                   />
                 </li>
               ) : (
@@ -168,12 +210,14 @@ export function MemoryPage({
                   struck={fact.struck}
                   onEdit={() => {
                     setAdding(false);
-                    setEditing(fact.index);
+                    setEditing(fact);
                   }}
-                  onForget={() => forget(fact.index)}
+                  onForget={() => {
+                    void forget(fact.line);
+                  }}
                 />
-              ),
-            )}
+              );
+            })}
           </ul>
         )}
       </div>
@@ -283,16 +327,31 @@ function FactEditor({
   placeholder?: string;
   /** Clear the field after a save instead of closing it, for adding several. */
   keepOpen?: boolean;
-  onSave: (fact: string) => void;
+  onSave: (fact: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
   const closed = useRef(false);
-  const commit = (close: boolean) => {
+  const pending = useRef(false);
+  const closeAfterSave = useRef(false);
+  const commit = async (close: boolean) => {
     if (closed.current) return;
+    if (pending.current) {
+      if (close) closeAfterSave.current = true;
+      return;
+    }
+    closeAfterSave.current = close;
     const fact = draft.replace(/\s+/g, " ").trim();
-    if (fact) onSave(fact);
-    if (keepOpen && fact && !close) {
+    if (fact) {
+      pending.current = true;
+      setSaving(true);
+      const saved = await onSave(fact);
+      pending.current = false;
+      setSaving(false);
+      if (!saved || closed.current) return;
+    }
+    if (keepOpen && fact && !closeAfterSave.current) {
       setDraft("");
       return;
     }
@@ -306,6 +365,8 @@ function FactEditor({
         autoFocus
         aria-label={label}
         value={draft}
+        readOnly={saving}
+        aria-busy={saving}
         rows={1}
         maxLength={1000}
         placeholder={placeholder}
@@ -314,14 +375,16 @@ function FactEditor({
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            commit(false);
+            void commit(false);
           }
           if (event.key === "Escape") {
             closed.current = true;
             onClose();
           }
         }}
-        onBlur={() => commit(true)}
+        onBlur={() => {
+          void commit(true);
+        }}
         className="block min-h-7 min-w-0 flex-1 resize-none bg-transparent py-[5px] text-[12px] leading-[18px] text-content/90 outline-none placeholder:text-content/35"
       />
     </div>

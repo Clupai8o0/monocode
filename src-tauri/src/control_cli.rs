@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 25] = [
+const APP_ACTIONS: [&str; 26] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -108,6 +108,7 @@ const APP_ACTIONS: [&str; 25] = [
     "habits.update",
     "habits.run",
     "habits.remove",
+    "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /operator.
 
@@ -212,6 +213,14 @@ Actions:
                   "schedule":{...},"enabled":false}  Change or pause one.
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
+  chat.card      Mono or habit only. Post a card to the Mono's chat:
+                  {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
+                  {"type":"session","sessionId":"...","note":"..."}
+                  {"type":"choices","options":["First choice","Second choice"]}
+                  {"type":"habit","name":"...","instructions":"...",
+                   "schedule":{"kind":"daily","time":"09:00"}}
+                  choices accepts 1–4 options. A habit card is a suggestion;
+                  the user must start it before it is scheduled.
 
 The output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 Use --input - to pass JSON on stdin. Never print MonoCode credentials.
@@ -615,6 +624,29 @@ mod tests {
         assert!(denied.get("requestId").is_none());
         let uncertain = with_retry_hint(json!({"ok":false,"error":"timeout"}), "id-1");
         assert_eq!(uncertain["retryWith"], "--request-id id-1");
+    }
+
+    #[test]
+    fn app_mode_accepts_chat_cards_and_documents_every_type() {
+        for input in [
+            r#"{"type":"pr","repo":"owner/repo","number":123}"#,
+            r#"{"type":"session","sessionId":"other"}"#,
+            r#"{"type":"choices","options":["Review","Ship"]}"#,
+            r#"{"type":"habit","name":"Check CI","instructions":"Check CI","schedule":{"kind":"daily","time":"09:00"}}"#,
+        ] {
+            assert!(matches!(
+                parse_args_for(&args(&["chat.card", "--json", input]), true),
+                Ok(Parsed::Call(action, parsed_input, _))
+                    if action == "chat.card"
+                        && parsed_input == serde_json::from_str::<Value>(input).unwrap()
+            ));
+        }
+        assert!(parse_args_for(&args(&["chat.card"]), false).is_err());
+        let help = app_help();
+        assert!(help.contains("chat.card"));
+        for kind in ["pr", "session", "choices", "habit"] {
+            assert!(help.contains(&format!(r#""type":"{kind}""#)));
+        }
     }
 
     #[test]
