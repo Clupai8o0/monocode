@@ -226,6 +226,7 @@ import {
 } from "../features/terminal/model/terminalClose";
 import {
   listRunningTerminals,
+  newTerminalCwd,
   terminalTabLabel,
   type TerminalMetaPatch,
 } from "../features/terminal/model/terminalTab";
@@ -1583,6 +1584,11 @@ function Workspace({
     !historyFailed;
   const gitCwd =
     activeFile?.cwd ?? (active ? sessionWorkCwd(active) : sidebarCwd);
+  const terminalCwd = newTerminalCwd({
+    activeFile,
+    session: active,
+    fallback: sidebarCwd,
+  });
   const gitCwdBranches = useProjectBranches(
     gitCwd,
     Boolean(gitCwd) && gitCwd !== "~" && !isRemoteProjectPath(sidebarCwd),
@@ -2542,7 +2548,7 @@ function Workspace({
 
   const onOpenTerminal = useCallback(
     (cwd: string, asWorkspaceTab = false, occupySessionId?: string) => {
-      const workdir = cwd || gitCwd;
+      const workdir = cwd || terminalCwd;
       if (!isLocalProject(projectCwdRef.current) || !isLocalProject(workdir)) return;
       if (openProjectTerminal(workdir)) return;
 
@@ -2582,12 +2588,12 @@ function Workspace({
       );
       setComposerFocused(false);
     },
-    [gitCwd, activeTab, appendTab, openProjectTerminal, sidebarCwd],
+    [terminalCwd, activeTab, appendTab, openProjectTerminal, sidebarCwd],
   );
 
   const onNewTerminal = useCallback(() => {
-    onOpenTerminal(gitCwd);
-  }, [gitCwd, onOpenTerminal]);
+    onOpenTerminal(terminalCwd);
+  }, [terminalCwd, onOpenTerminal]);
 
   const onShowProjectTerminal = useCallback(() => {
     const dock = findProjectTerminal(projectTerminalsRef.current, projectCwd);
@@ -2602,8 +2608,8 @@ function Workspace({
       focusProjectTerminal();
       return;
     }
-    onOpenTerminal(gitCwd);
-  }, [gitCwd, focusProjectTerminal, onOpenTerminal, projectCwd]);
+    onOpenTerminal(terminalCwd);
+  }, [terminalCwd, focusProjectTerminal, onOpenTerminal, projectCwd]);
 
   const onNewTerminalInSession = useCallback(
     (sessionId: string) => {
@@ -2624,7 +2630,7 @@ function Workspace({
     if (!isLocalProject(projectCwd)) return;
     const dock = findProjectTerminal(projectTerminalsRef.current, projectCwd);
     if (!dock) {
-      openProjectTerminal(gitCwd);
+      openProjectTerminal(terminalCwd);
       return;
     }
     const nextOpen = !dock.open;
@@ -2635,7 +2641,7 @@ function Workspace({
     );
     if (nextOpen) focusProjectTerminal();
     else setProjectTerminalFocused(false);
-  }, [gitCwd, focusProjectTerminal, openProjectTerminal, projectCwd]);
+  }, [terminalCwd, focusProjectTerminal, openProjectTerminal, projectCwd]);
 
   const onHideProjectTerminal = useCallback(() => {
     setProjectTerminals((prev) =>
@@ -2804,8 +2810,8 @@ function Workspace({
   );
 
   const onNewTerminalTab = useCallback(() => {
-    onOpenTerminal(gitCwd, true);
-  }, [gitCwd, onOpenTerminal]);
+    onOpenTerminal(terminalCwd, true);
+  }, [terminalCwd, onOpenTerminal]);
 
   const onCloseTab = useCallback(
     (id: string, opts?: { confirmedTerminalIds?: string[] }) => {
