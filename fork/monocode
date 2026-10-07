@@ -17,8 +17,18 @@ dir=${dir:A}
 
 if [[ -d $state/MonoCode.app ]] && ! pgrep -xq monocode; then
     if [[ "$(cat $state/built-sha 2>/dev/null)" != "$(cat $state/installed-sha 2>/dev/null)" ]]; then
-        rm -rf $app && mv $state/MonoCode.app $app && cp $state/built-sha $state/installed-sha
-        echo "MonoCode updated to $(cut -c1-7 $state/installed-sha)"
+        # Move the old app aside first and put it back if the new one can't go in.
+        rm -rf $app.old
+        if [[ ! -e $app ]] || mv $app $app.old; then
+            if mv $state/MonoCode.app $app; then
+                rm -rf $app.old
+                cp $state/built-sha $state/installed-sha
+                echo "MonoCode updated to $(cut -c1-7 $state/installed-sha)"
+            else
+                [[ -e $app.old ]] && mv $app.old $app
+                echo "monocode: update failed to install, kept the current version" >&2
+            fi
+        fi
     fi
 fi
 
