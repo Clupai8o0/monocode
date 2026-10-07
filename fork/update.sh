@@ -20,6 +20,10 @@ AGENT_MODEL=claude-sonnet-5-5
 mkdir -p "$STATE"
 exec >>"$LOG" 2>&1
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Upstream's tests assume a US locale and Node without its own localStorage (CI runs Node 20/24);
+# without these, 325 tests fail on a clean checkout under Node 26 in en_AU.
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export NODE_OPTIONS="--no-experimental-webstorage${NODE_OPTIONS:+ $NODE_OPTIONS}"
 
 log()
 {
