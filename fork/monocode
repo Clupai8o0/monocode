@@ -1,0 +1,30 @@
+#!/bin/zsh
+# monocode [dir]: open the personal MonoCode build, then update it in the background.
+# A build staged by fork/update.sh is swapped in first (only while MonoCode is closed),
+# so each open runs the newest build that passed its tests.
+# MonoCode has no CLI or URL hook for opening a folder, so dir's path goes on the
+# clipboard: Open folder (+ next to Projects) -> Cmd+Shift+G -> Cmd+V -> Enter.
+repo=${0:A:h:h}
+state=$HOME/.local/state/monocode-fork
+app=/Applications/MonoCode.app
+
+dir=${1:-.}
+if [[ ! -d $dir ]]; then
+    echo "monocode: not a folder: $dir" >&2
+    exit 1
+fi
+dir=${dir:A}
+
+if [[ -d $state/MonoCode.app ]] && ! pgrep -xq monocode; then
+    if [[ "$(cat $state/built-sha 2>/dev/null)" != "$(cat $state/installed-sha 2>/dev/null)" ]]; then
+        rm -rf $app && mv $state/MonoCode.app $app && cp $state/built-sha $state/installed-sha
+        echo "MonoCode updated to $(cut -c1-7 $state/installed-sha)"
+    fi
+fi
+
+print -n -- "$dir" | pbcopy
+open -a $app
+echo "MonoCode opened. Path copied: $dir"
+echo "Open folder -> Cmd+Shift+G -> Cmd+V -> Enter"
+
+nohup $repo/fork/update.sh >/dev/null 2>&1 &!
