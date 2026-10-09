@@ -6,7 +6,8 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -38,52 +39,74 @@ fn run(cwd: &str, input: &str) -> Result<Option<String>, String> {
     let dir = Path::new(cwd);
     let dir = if dir.is_absolute() && dir.is_dir() { dir } else { home.as_path() };
     let input = with_transcript_path(input, &home);
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
         .arg(&command)
         .current_dir(dir)
         .env("PATH", crate::harness::gui_search_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    // Its own process group, so a timeout also stops anything it started.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("status line failed to start: {e}"))?;
 
-    // Feed stdin and drain stdout on their own threads so a full pipe never
-    // blocks the timeout below.
+    // Feed stdin and drain stdout on their own threads; neither is joined, so a
+    // background job that keeps stdout open can't hold this call past the timeout.
     let mut stdin = child.stdin.take();
-    let body = input;
-    let writer = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         if let Some(stdin) = stdin.as_mut() {
-            let _ = stdin.write_all(body.as_bytes());
+            let _ = stdin.write_all(input.as_bytes());
         }
     });
     let stdout = child.stdout.take();
-    let reader = std::thread::spawn(move || {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
         let mut out = Vec::new();
         if let Some(stdout) = stdout {
             let _ = stdout.take(MAX_OUTPUT).read_to_end(&mut out);
         }
-        out
+        let _ = tx.send(out);
     });
 
-    let started = Instant::now();
+    let deadline = Instant::now() + TIMEOUT;
+    let out = rx.recv_timeout(TIMEOUT).ok();
+    if out.is_none() || !exited_by(&mut child, deadline) {
+        kill_group(&mut child);
+    }
+    let _ = child.wait();
+    match out {
+        Some(out) => Ok(first_line(&out)),
+        None => Err("status line timed out".into()),
+    }
+}
+
+fn exited_by(child: &mut Child, deadline: Instant) -> bool {
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if started.elapsed() < TIMEOUT => {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(20));
             }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("status line timed out".into());
-            }
+            _ => return false,
         }
     }
-    let _ = writer.join();
-    let out = reader.join().unwrap_or_default();
-    Ok(first_line(&out))
+}
+
+/// Kills the shell and everything in its group. Called before the shell is
+/// reaped, so its pid is still the group id.
+fn kill_group(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.kill();
 }
 
 /// Adds Claude Code's transcript path, so the status line can read effort,
@@ -156,6 +179,30 @@ mod tests {
         ))
         .unwrap();
         assert!(out.get("transcript_path").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_background_job_holding_stdout_cannot_outlast_the_timeout() {
+        let started = Instant::now();
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c").arg("echo line; sleep 30 &").stdout(Stdio::piped());
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+        let mut child = cmd.spawn().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = stdout.take(MAX_OUTPUT).read_to_end(&mut out);
+            let _ = tx.send(out);
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+        kill_group(&mut child);
+        let _ = child.wait();
+        let out = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(first_line(&out).as_deref(), Some("line"));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
