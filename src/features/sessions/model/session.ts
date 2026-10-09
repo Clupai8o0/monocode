@@ -25,7 +25,8 @@ export type HarnessId =
   | "omp"
   | "fx"
   | "hermes"
-  | "antigravity";
+  | "antigravity"
+  | "devin";
 
 export const HARNESSES: HarnessId[] = [
   "claude",
@@ -38,6 +39,7 @@ export const HARNESSES: HarnessId[] = [
   "fx",
   "hermes",
   "antigravity",
+  "devin",
 ];
 
 export type BlockRole =
@@ -374,6 +376,8 @@ export type Block = {
   /** Independent read-only side conversations anchored to this user turn. */
   btwThreads?: BtwThread[];
   noteCard?: NoteCardMeta;
+  /** Saved artifacts attached to this turn; their bodies live outside chat. */
+  artifactCards?: import("../../artifacts/artifacts").ArtifactCard[];
   /** Exact CI repair instructions and evidence supplied with this user turn. */
   ciContext?: string;
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */
@@ -536,6 +540,7 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   fx: "fx",
   hermes: "hermes",
   antigravity: "antigravity",
+  devin: "devin",
 };
 
 export const HARNESS_TITLE: Record<HarnessId, string> = {
@@ -549,6 +554,7 @@ export const HARNESS_TITLE: Record<HarnessId, string> = {
   fx: "fx",
   hermes: "Hermes Agent",
   antigravity: "Antigravity",
+  devin: "Devin",
 };
 
 /** fx ACP rejects attachment prompt blocks. */

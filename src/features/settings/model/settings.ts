@@ -192,10 +192,17 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "mono agent rail hide",
   },
   {
+    id: "rail-monos-pinned",
+    section: "monos",
+    label: "Pin monos to the icon rail",
+    keywords: "mono rail compact collapsed icons top divider project picker",
+  },
+  {
     id: "mono-list",
     section: "monos",
     label: "Your monos",
-    keywords: "mono reset soul name projects sessions sidebar visibility hidden show",
+    keywords:
+      "mono reset soul name projects sessions sidebar visibility hidden show",
   },
   {
     id: "project-worktrees",
@@ -370,6 +377,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
       "effort thinking reasoning fast service tier model picker composer",
   },
   {
+    id: "composer-autocorrect",
+    section: "chat",
+    label: "Autocorrect",
+    keywords: "spelling spell check autocorrect typo macos composer",
+  },
+  {
     id: "composer-mascot",
     section: "chat",
     label: "Composer mascot",
@@ -398,7 +411,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     section: "providers",
     label: "Agent CLIs",
     keywords:
-      "codex opencode cursor grok pi omp fx hermes antigravity binary path",
+      "codex opencode cursor grok pi omp fx hermes antigravity devin binary path",
   },
   {
     id: "provider-accounts",
@@ -804,6 +817,28 @@ export function subscribeMonosEnabled(onStoreChange: () => void) {
   window.addEventListener(MONOS_ENABLED_CHANGE_EVENT, onStoreChange);
   return () =>
     window.removeEventListener(MONOS_ENABLED_CHANGE_EVENT, onStoreChange);
+}
+
+const MONO_MENU_BAR_KEY = "monocode.monoMenuBarIcon";
+
+/** Fired on `window` when the menu bar icon is shown or hidden. */
+export const MONO_MENU_BAR_CHANGE_EVENT = "monocode:mono-menu-bar-change";
+
+export function loadMonoMenuBarIcon(): boolean {
+  return readFlag(MONO_MENU_BAR_KEY) ?? true;
+}
+
+export function saveMonoMenuBarIcon(value: boolean) {
+  writeFlag(MONO_MENU_BAR_KEY, value);
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MONO_MENU_BAR_CHANGE_EVENT));
+}
+
+export function subscribeMonoMenuBarIcon(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(MONO_MENU_BAR_CHANGE_EVENT, onStoreChange);
+  return () =>
+    window.removeEventListener(MONO_MENU_BAR_CHANGE_EVENT, onStoreChange);
 }
 
 const QUICK_COMPOSER_ENABLED_KEY = "monocode.quickComposerEnabled";
