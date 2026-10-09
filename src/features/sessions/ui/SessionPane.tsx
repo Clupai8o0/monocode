@@ -1,5 +1,6 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
+import { StatusStrip } from "../../../fork/statusline/StatusStrip";
 import {
   memo,
   useCallback,
@@ -622,7 +623,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
     (!draftBlock && (!isEmpty || inSplit || !!session.inboxAsk || !!agent));
   const composerDockMotion = useComposerDockMotion(dockComposer);
   const draftRef = useRef<string | undefined>(getComposerDraft(session.id));
+  // Fork: the status strip sits under the composer, docked or centred.
   const composer = (
+    <>
     <Composer
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id}
@@ -761,6 +764,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }}
       onEditingLastTurnChange={setEditingLastTurn}
     />
+    {remote ? null : <StatusStrip session={session} visible={visible} />}
+    </>
   );
 
   return (

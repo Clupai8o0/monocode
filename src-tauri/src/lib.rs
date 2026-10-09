@@ -1,6 +1,8 @@
 use tauri::Manager;
 
 mod account_identity;
+// Fork: runs the Claude Code status line for the composer strip.
+mod fork_statusline;
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -601,6 +603,7 @@ pub fn run() {
             project_logo::save_project_logo,
             project_logo::remove_project_logo,
             project_logo::forget_logo_file,
+            fork_statusline::fork_statusline, // Fork
         ])
         .build(tauri::generate_context!())
         .expect("error while building MonoCode");
