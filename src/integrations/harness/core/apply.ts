@@ -22,6 +22,7 @@ import { isReviewablePlan } from "../../../features/sessions/model/plan";
 import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
 import { usageLimitFromError } from "../../../features/sessions/model/usageLimit";
+import { setChecklistOp } from "../../../fork/checklist/apply";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -143,6 +144,8 @@ export function applyHarnessEvent(
       return mergeTurnMetrics(session, event);
     case "tasks.updated":
       return upsertTaskList(session, event);
+    case "checklist.updated":
+      return setChecklistOp(session, event.callId, event.input);
     case "background.updated":
       if (event.tasks.length === 0) {
         if (!session.backgroundTasks) return session;

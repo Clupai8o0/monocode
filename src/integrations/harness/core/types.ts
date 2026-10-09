@@ -127,6 +127,12 @@ export type HarnessEvent =
       decision: "answered" | "skipped" | "cancelled";
     }
   | {
+      /** Fork: one side-checklist tool call, kept on its tool block. */
+      type: "checklist.updated";
+      callId: string;
+      input: Record<string, unknown>;
+    }
+  | {
       type: "tasks.updated";
       key?: string;
       explanation?: string;

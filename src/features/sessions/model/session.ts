@@ -353,6 +353,8 @@ export type Block = {
   /** Inner activity of a delegated run. Present on Agent/Task tool blocks. */
   agentRun?: AgentRunMeta;
   taskList?: TaskListMeta;
+  /** Fork: this tool block's side-checklist call; see fork/checklist. */
+  checklist?: import("../../../fork/checklist/checklist").ChecklistOp;
   plan?: PlanBlockMeta;
   orchestration?: OrchestrationProposal;
   /** Parent conversation for an internal orchestration worker. */

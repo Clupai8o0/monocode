@@ -86,6 +86,7 @@ import type {
   SendTurnInput,
   SteerTurnInput,
 } from "../../core/types";
+import { isChecklistToolName } from "../../../../fork/checklist/checklist";
 
 /**
  * A PermissionRequest hook can decide before the user touches the prompt; Claude
@@ -782,7 +783,7 @@ function handleStreamEvent(live: Live, rec: Record<string, unknown>): void {
       status: isAgentToolName(tool.name) ? "in_progress" : "pending",
       preview: previewFromTool(tool.name, tool.input),
     });
-    emitTaskListIfNeeded(live, tool.name, tool.input);
+    emitTaskListIfNeeded(live, tool.name, tool.input, tool.id);
     return;
   }
 
@@ -808,7 +809,7 @@ function handleStreamEvent(live: Live, rec: Record<string, unknown>): void {
       detail: summarizeToolRequest(tool.name, parsed),
       preview: previewFromTool(tool.name, parsed),
     });
-    emitTaskListIfNeeded(live, tool.name, parsed);
+    emitTaskListIfNeeded(live, tool.name, parsed, tool.id);
     return;
   }
 }
@@ -853,7 +854,7 @@ function handleAssistant(live: Live, rec: Record<string, unknown>): void {
           status: isAgentToolName(streamed.name) ? "in_progress" : "pending",
           preview: previewFromTool(streamed.name, use.input),
         });
-        emitTaskListIfNeeded(live, streamed.name, use.input);
+        emitTaskListIfNeeded(live, streamed.name, use.input, streamed.id);
       }
       if (use.name === "ExitPlanMode") {
         const plan = extractExitPlanModePlan(use.input);
@@ -884,7 +885,7 @@ function handleAssistant(live: Live, rec: Record<string, unknown>): void {
       const plan = extractExitPlanModePlan(use.input);
       if (plan) live.onEvent({ type: "plan", text: plan });
     }
-    emitTaskListIfNeeded(live, tool.name, tool.input);
+    emitTaskListIfNeeded(live, tool.name, tool.input, tool.id);
   }
 
   // Each assistant record is one Claude message. Wait until the next message
@@ -1185,7 +1186,11 @@ function emitTaskListIfNeeded(
   live: Live,
   toolName: string,
   input: Record<string, unknown>,
+  callId?: string,
 ): void {
+  if (callId && isChecklistToolName(toolName)) {
+    live.onEvent({ type: "checklist.updated", callId, input });
+  }
   if (!isTodoTool(toolName)) return;
   const items = taskListFromTodos(input);
   if (items) live.onEvent({ type: "tasks.updated", items });

@@ -46,6 +46,7 @@ import type {
 } from "../model/session";
 
 import { HARNESSES, RUNTIME_MODES } from "../model/session";
+import { sanitizeChecklistOp } from "../../../fork/checklist/checklist";
 
 import { restoreOrchestrationProposal } from "../../orchestration/model/orchestrationPlan";
 
@@ -961,6 +962,8 @@ function sanitizeBlock(
   const taskList = sanitizeTaskList(block.taskList);
   if (taskList) next.taskList = taskList;
   else if (block.role === "tasks") return null;
+  const checklist = sanitizeChecklistOp(block.checklist);
+  if (checklist) next.checklist = checklist;
   const plan = sanitizePlan(block.plan, block.text);
   if (block.orchestration)
     next.orchestration = restoreOrchestrationProposal(block.orchestration);

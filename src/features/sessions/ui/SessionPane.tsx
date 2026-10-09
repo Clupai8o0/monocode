@@ -1,4 +1,5 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
+import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import {
   memo,
   useCallback,
@@ -758,6 +759,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
   );
 
   return (
+    // Fork: row wrapper so the checklist sidebar sits beside the pane.
+    <div className="flex h-full min-h-0 min-w-0 flex-1">
     <div
       data-session-drop={session.id}
       data-session-empty={isEmpty}
@@ -1179,6 +1182,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
           />
         </div>
       </div>
+    </div>
+    <ChecklistSidebar blocks={session.blocks} />
     </div>
   );
 });
