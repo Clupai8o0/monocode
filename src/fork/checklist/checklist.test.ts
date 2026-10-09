@@ -20,11 +20,11 @@ function fold(...ops: Record<string, unknown>[]): Checklist {
 }
 
 describe("checklist tool name", () => {
-  it("matches the mod's MCP name and the bare name only", () => {
+  it("matches only the mod's own tool", () => {
     expect(isChecklistToolName("mcp__side-checklist__checklist")).toBe(true);
-    expect(isChecklistToolName("checklist")).toBe(true);
+    expect(isChecklistToolName("checklist")).toBe(false);
+    expect(isChecklistToolName("mcp__other__checklist")).toBe(false);
     expect(isChecklistToolName("TodoWrite")).toBe(false);
-    expect(isChecklistToolName("mcp__x__checklist_extra")).toBe(false);
   });
 });
 

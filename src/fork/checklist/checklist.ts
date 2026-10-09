@@ -24,13 +24,9 @@ export type ChecklistOp = Record<string, unknown>;
 
 const DEFAULT_TITLE = "Checklist";
 
-/** The mod's tool, as an MCP name (`mcp__side-checklist__checklist`) or bare. */
+/** The mod's tool exactly; another server's `checklist` tool is not ours. */
 export function isChecklistToolName(name: string): boolean {
-  const normalized = name.trim().toLowerCase();
-  return (
-    normalized === "checklist" ||
-    (normalized.startsWith("mcp__") && normalized.endsWith("__checklist"))
-  );
+  return name.trim() === "mcp__side-checklist__checklist";
 }
 
 /** Keeps only the fields the fold reads, so a stored op stays small and safe. */
