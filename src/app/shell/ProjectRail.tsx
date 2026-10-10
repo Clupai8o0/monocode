@@ -66,6 +66,10 @@ import {
   type ProjectGroup,
 } from "../../features/projects/model/projectGroups";
 import type { LiveAgent } from "../../features/sessions/model/liveAgents";
+import {
+  ProjectAgentBadge,
+  ProjectAgentStatusProvider,
+} from "../../fork/projectStatus/ProjectAgentStatus";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectLogoIcon } from "../../features/projects/ui/ProjectLogoIcon";
 import { ProjectMascot } from "../../features/projects/ui/ProjectMascot";
@@ -340,7 +344,9 @@ export function ProjectRail({
   const projectIds = groupedProjectSections.ungrouped.map((item) => item.path);
   const pinnedSortable = useAnimatedReorder(pinnedIds, onReorderPinned, "y");
   const projectSortable = useAnimatedReorder(projectIds, onReorderProjects, "y");
+  // Fork: project rows read their agents' done / needs-you state from here.
   return (
+    <ProjectAgentStatusProvider agents={liveAgents}>
     <nav
       ref={resize.setPaneRef}
       aria-label="Projects"
@@ -572,6 +578,7 @@ export function ProjectRail({
         onDoubleClick={resize.onDoubleClick}
       />
     </nav>
+    </ProjectAgentStatusProvider>
   );
 }
 
@@ -990,6 +997,8 @@ function ProjectCard({
         ) : (
           <span className={labelClassName}>{name}</span>
         )}
+        {/* Fork: done / needs-you marker */}
+        <ProjectAgentBadge path={item.path} />
         {machine ? (
           <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-content/45">
             {machine.name}
