@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import claude from "../../../assets/providers/claude.svg";
 import codex from "../../../assets/providers/codex.svg";
 import cursor from "../../../assets/providers/cursor.svg";
+import deepseek from "../../../assets/providers/deepseek.svg";
 import devin from "../../../assets/providers/devin.svg";
 import fx from "../../../assets/providers/fx.svg";
 import grok from "../../../assets/providers/grok.svg";
@@ -22,6 +23,7 @@ export const HARNESS_ICONS: Record<HarnessId, string> = {
   omp,
   fx,
   hermes,
+  deepseek,
   antigravity,
   devin,
 };
@@ -34,6 +36,7 @@ export const MONOCHROME_HARNESSES = new Set<HarnessId>([
   "pi",
   "fx",
   "hermes",
+  "deepseek",
   "devin",
 ]);
 
@@ -82,7 +85,7 @@ export function HarnessIcon({
       </MonoIcon>
     );
   }
-  if (harness === "hermes" || harness === "devin") {
+  if (harness === "hermes" || harness === "deepseek" || harness === "devin") {
     const mark = HARNESS_ICONS[harness];
     return (
       <span

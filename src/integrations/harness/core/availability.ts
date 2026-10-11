@@ -9,6 +9,7 @@ import {
   resolveFxBinary,
   resolveGrokBinary,
   resolveHermesBinary,
+  resolveDeepSeekBinary,
   resolveOmpBinary,
   resolveOpenCodeBinary,
   resolvePiBinary,
@@ -51,6 +52,10 @@ const CLI: Record<HarnessId, { name: string; install?: string }> = {
     name: "Hermes Agent CLI",
     install:
       "Install from hermes-agent.nousresearch.com, then run hermes model",
+  },
+  deepseek: {
+    name: "DeepSeek Harness CLI (dsh)",
+    install: "npm i -g @deepseek-ai/dsh",
   },
   antigravity: { name: "Antigravity ACP server (agy_acp_server.par)" },
   devin: {
@@ -155,6 +160,14 @@ export function probeHarnessAvailability(
       if (id === "hermes") {
         try {
           await resolveHermesBinary();
+          return [id, true] as const;
+        } catch {
+          return [id, false] as const;
+        }
+      }
+      if (id === "deepseek") {
+        try {
+          await resolveDeepSeekBinary();
           return [id, true] as const;
         } catch {
           return [id, false] as const;

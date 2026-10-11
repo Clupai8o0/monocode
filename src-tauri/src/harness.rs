@@ -850,6 +850,19 @@ pub fn harness_resolve_hermes() -> Result<CursorBinary, String> {
         })
 }
 
+/// Resolve the DeepSeek Harness CLI (`dsh`).
+#[tauri::command(async)]
+pub fn harness_resolve_deepseek() -> Result<CursorBinary, String> {
+    resolve_deepseek()
+        .map(|path| CursorBinary {
+            path: path.to_string_lossy().into_owned(),
+        })
+        .ok_or_else(|| {
+            "DeepSeek Harness CLI not found. Install it with `npm i -g @deepseek-ai/dsh`, add an API key in `dsh`, then retry."
+                .into()
+        })
+}
+
 /// Resolve Cognition's Devin CLI (`devin`).
 #[tauri::command(async)]
 pub fn harness_resolve_devin() -> Result<CursorBinary, String> {
@@ -1823,6 +1836,7 @@ fn is_harness_argv_token(part: &str) -> bool {
             | "omp"
             | "fx"
             | "hermes"
+            | "dsh"
             | "devin"
             | "agy_acp_server.par"
             | "pi"
@@ -2063,6 +2077,7 @@ fn resolve_harness_binary_default(provider: &str) -> Option<PathBuf> {
         "omp" => resolve_omp(),
         "fx" => resolve_fx(),
         "hermes" => resolve_hermes(),
+        "deepseek" => resolve_deepseek(),
         "antigravity" => resolve_antigravity(),
         "devin" => resolve_devin(),
         _ => None,
@@ -2109,6 +2124,7 @@ fn resolve_harness_binary_override(provider: &str, binary_path: &str) -> Result<
         "omp" => &["omp"],
         "fx" => &["fx"],
         "hermes" => &["hermes"],
+        "deepseek" => &["dsh"],
         "antigravity" => &["agy_acp_server.par"],
         "devin" => &["devin"],
         _ => {
@@ -2236,6 +2252,7 @@ fn validate_configured_harness_binary_identity(
         "omp" => is_omp_agent(path),
         "fx" => is_fx_agent(path),
         "grok" => is_grok_agent(path),
+        "deepseek" => is_deepseek_dsh(path),
         _ => true,
     };
     if identity_valid {
@@ -2477,6 +2494,41 @@ fn resolve_hermes() -> Option<PathBuf> {
     }
 
     first_binary(candidates)
+}
+
+fn resolve_deepseek() -> Option<PathBuf> {
+    let home = dirs_home().map(PathBuf::from);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Some(home) = &home {
+        candidates.push(home.join(".local/bin/dsh"));
+        candidates.push(home.join(".npm-global/bin/dsh"));
+        candidates.push(home.join("n/bin/dsh"));
+    }
+    #[cfg(target_os = "macos")]
+    candidates.push(PathBuf::from("/opt/homebrew/bin/dsh"));
+    candidates.push(PathBuf::from("/usr/local/bin/dsh"));
+    candidates.push(PathBuf::from("/usr/bin/dsh"));
+    if let Some(from_shell) = which_via_login_shell("dsh") {
+        candidates.push(from_shell);
+    }
+
+    // `dsh` is also the name of an unrelated distributed shell.
+    first_binary_matching(candidates, is_deepseek_dsh)
+}
+
+fn is_deepseek_dsh(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut buf = vec![0u8; 16 * 1024];
+    let Ok(n) = file.read(&mut buf) else {
+        return false;
+    };
+    String::from_utf8_lossy(&buf[..n]).contains("@deepseek-ai/dsh")
 }
 
 fn resolve_devin() -> Option<PathBuf> {
@@ -3779,6 +3831,30 @@ mod tests {
         assert!(!is_pi_coding_agent(&other));
 
         assert!(!is_pi_coding_agent(&dir.join("missing")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deepseek_accepts_dsh_and_rejects_other_dsh() {
+        let dir = std::env::temp_dir().join(format!("monocode-dsh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let dsh = dir.join("dsh");
+        std::fs::write(
+            &dsh,
+            b"#!/usr/bin/env node\nimport { loadLayeredEnv } from \"@deepseek-ai/dsh-app-boot\";\n",
+        )
+        .unwrap();
+        assert!(is_deepseek_dsh(&dsh));
+        assert!(validate_configured_harness_binary_identity("deepseek", &dsh, "dsh").is_ok());
+
+        // The distributed shell shares the name and must not match.
+        std::fs::write(&dsh, b"\x7fELF distributed shell").unwrap();
+        assert!(!is_deepseek_dsh(&dsh));
+        assert!(validate_configured_harness_binary_identity("deepseek", &dsh, "dsh").is_err());
+
+        assert!(!is_deepseek_dsh(&dir.join("missing")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
