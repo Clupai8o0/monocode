@@ -76,6 +76,8 @@ import {
 } from "../../monos/model/mono";
 import { MonoHeader } from "../../monos/ui/MonoHeader";
 import { MonoComposer } from "../../monos/ui/MonoComposer";
+import { ModelControlPills, ModelPicker } from "./ModelPicker";
+import { ContextMeter } from "./ContextMeter";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
 import { QuestionForm } from "./QuestionForm";
 import {
@@ -1210,6 +1212,41 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     onFocus={() => onFocus(session.id)}
                     onSubmit={(text, attachments) =>
                       onSubmit(session.id, text, attachments)
+                    }
+                    controls={
+                      <>
+                        <ModelPicker
+                          harness={session.harness}
+                          model={session.model}
+                          values={session.modelSettings}
+                          allowedHarnesses={allowedModelHarnesses}
+                          project={workCwd}
+                          hideSettings
+                          hotkeys={focused && !btw.open}
+                          variant="text"
+                          onChange={(harness, model) =>
+                            onModelChange(session.id, harness, model)
+                          }
+                          onSettingsChange={(settings) =>
+                            onModelSettingsChange(session.id, settings)
+                          }
+                        />
+                        <ModelControlPills
+                          harness={session.harness}
+                          model={session.model}
+                          values={session.modelSettings}
+                          variant="text"
+                          onSettingsChange={(settings) =>
+                            onModelSettingsChange(session.id, settings)
+                          }
+                        />
+                        {/* A Mono is one long conversation; this is how full
+                            its current thread is. It rotates threads itself,
+                            so there is nothing to compact here. */}
+                        <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
+                          <ContextMeter usage={session.context} />
+                        </div>
+                      </>
                     }
                   />
                 </>
