@@ -166,11 +166,10 @@ describe("StatusLine", () => {
 
 describe("parseStatusData", () => {
   it("reads the composer layout's JSON", () => {
-    expect(
-      parseStatusData(
-        '{"account": "main", "compactions": 2, "claims": 3, "memories": 1}\n',
-      ),
-    ).toEqual({ account: "main", compactions: 2, claims: 3, memories: 1 });
+    expect(parseStatusData('{"account": "main", "compactions": 2}\n')).toEqual({
+      account: "main",
+      compactions: 2,
+    });
   });
 
   it("returns null for an older script's ANSI line or broken JSON", () => {
@@ -180,9 +179,9 @@ describe("parseStatusData", () => {
   });
 
   it("drops bad counts and a blank account", () => {
-    expect(
-      parseStatusData('{"account": " ", "compactions": -1, "claims": "3"}'),
-    ).toEqual({ compactions: 0, claims: 0, memories: 0 });
+    expect(parseStatusData('{"account": " ", "compactions": "3"}')).toEqual({
+      compactions: 0,
+    });
   });
 });
 
@@ -220,27 +219,11 @@ describe("usageFacts", () => {
 });
 
 describe("StatusFacts", () => {
-  const render = (
-    data: Parameters<typeof StatusFacts>[0]["data"],
-    usage: Parameters<typeof StatusFacts>[0]["usage"] = [],
-  ) => renderToStaticMarkup(createElement(StatusFacts, { data, usage }));
-
-  it("names locked files and memories in plain words, skipping zeros", () => {
-    const html = render({
-      account: "main",
-      compactions: 1,
-      claims: 3,
-      memories: 0,
-    });
-    expect(html).toContain("files locked");
-    expect(html).not.toContain("memor");
-    // The account and compactions live elsewhere in the composer.
-    expect(html).not.toContain("main");
-    expect(html).not.toContain("compaction");
-  });
+  const render = (usage: Parameters<typeof StatusFacts>[0]["usage"]) =>
+    renderToStaticMarkup(createElement(StatusFacts, { usage }));
 
   it("colours usage by how much is used", () => {
-    const html = render(null, [
+    const html = render([
       { key: "session", label: "5h", percent: 95, used: 95, resetsIn: "12m" },
     ]);
     expect(html).toContain("5h");
@@ -250,7 +233,7 @@ describe("StatusFacts", () => {
   });
 
   it("renders nothing when there is nothing to say", () => {
-    expect(render({ compactions: 0, claims: 0, memories: 0 })).toBe("");
+    expect(render([])).toBe("");
   });
 });
 

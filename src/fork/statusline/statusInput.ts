@@ -103,8 +103,6 @@ export function artifactLabel(url: string): string {
 export type StatusData = {
   account?: string;
   compactions: number;
-  claims: number;
-  memories: number;
 };
 
 function count(value: unknown): number {
@@ -132,8 +130,6 @@ export function parseStatusData(output: string): StatusData | null {
   return {
     ...(account ? { account } : {}),
     compactions: count(data.compactions),
-    claims: count(data.claims),
-    memories: count(data.memories),
   };
 }
 

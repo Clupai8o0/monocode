@@ -32,8 +32,6 @@ const NERD_FONTS =
 // terminal-style line.
 export const OC = {
   primary: "text-[#3b7dd8] dark:text-[#fab283]",
-  accent: "text-[#7b5bb6] dark:text-[#9d7cd8]",
-  info: "text-[#318795] dark:text-[#56b6c2]",
   warning: "text-[#d68c27] dark:text-[#f5a742]",
   error: "text-[#d1383d] dark:text-[#e06c75]",
   text: "text-[#1a1a1a] dark:text-[#eeeeee]",
@@ -178,96 +176,40 @@ export function AccountTag({ account }: { account?: string }) {
   );
 }
 
-function plural(n: number, one: string, many: string): string {
-  return n === 1 ? one : many;
-}
-
 function usageTone(used: number): string {
   if (used >= 90) return OC.error;
   if (used >= 70) return OC.warning;
   return OC.text;
 }
 
-type Fact = {
-  key: string;
-  value: string;
-  label: string;
-  suffix?: string;
-  tone: string;
-  title: string;
-};
-
-function factsFor(
-  data: StatusData | null,
-  usage: UsageFact[],
-  showRemaining: boolean,
-): Fact[] {
-  const facts: Fact[] = usage.map((window) => ({
-    key: window.key,
-    value: `${window.percent}%`,
-    label: window.label,
-    ...(window.resetsIn ? { suffix: window.resetsIn } : {}),
-    tone: usageTone(window.used),
-    title: `${window.key === "session" ? "5-hour" : "Weekly"} limit: ${window.percent}% ${
-      showRemaining ? "left" : "used"
-    }${window.resetsIn ? `, resets in ${window.resetsIn}` : ""}`,
-  }));
-  if (data && data.claims > 0) {
-    facts.push({
-      key: "claims",
-      value: String(data.claims),
-      label: plural(data.claims, "file locked", "files locked"),
-      tone: OC.accent,
-      title:
-        "Files this session is editing. Other sessions are kept off them until it ends.",
-    });
-  }
-  if (data && data.memories > 0) {
-    facts.push({
-      key: "memories",
-      value: String(data.memories),
-      label: plural(data.memories, "memory", "memories"),
-      tone: OC.info,
-      title: "Saved memories pulled into this session for your last message.",
-    });
-  }
-  return facts;
-}
-
+/** The 5-hour and weekly limits, as "5h 20% 4h48". */
 export function StatusFacts({
-  data,
-  usage = [],
+  usage,
   showRemaining = false,
   ref,
 }: {
-  data: StatusData | null;
-  usage?: UsageFact[];
+  usage: UsageFact[];
   showRemaining?: boolean;
   ref?: React.Ref<HTMLSpanElement>;
 }) {
-  const facts = factsFor(data, usage, showRemaining);
-  if (facts.length === 0) return null;
+  if (usage.length === 0) return null;
   return (
     <span
       ref={ref}
       className="flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap"
     >
-      {facts.map((fact) => (
-        <span key={fact.key} title={fact.title}>
-          {usage.some((window) => window.key === fact.key) ? (
-            <>
-              <span className={OC.muted}>{fact.label}</span>{" "}
-              <span className={fact.tone}>{fact.value}</span>
-              {fact.suffix ? (
-                <span className={OC.muted}> {fact.suffix}</span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <span className={fact.tone}>{fact.value}</span>{" "}
-              <span className={OC.muted}>{fact.label}</span>
-            </>
-          )}
+      {usage.map((window) => (
+        <span
+          key={window.key}
+          title={`${window.key === "session" ? "5-hour" : "Weekly"} limit: ${window.percent}% ${
+            showRemaining ? "left" : "used"
+          }${window.resetsIn ? `, resets in ${window.resetsIn}` : ""}`}
+        >
+          <span className={OC.muted}>{window.label}</span>{" "}
+          <span className={usageTone(window.used)}>{window.percent}%</span>
+          {window.resetsIn ? (
+            <span className={OC.muted}> {window.resetsIn}</span>
+          ) : null}
         </span>
       ))}
     </span>
@@ -275,8 +217,8 @@ export function StatusFacts({
 }
 
 /**
- * Fork feature: the composer's bottom row details. Usage limits, locked
- * files and recalled memories, then the session's artifact links.
+ * Fork feature: the composer's bottom row details. Usage limits, then the
+ * session's artifact links.
  */
 export function StatusExtras({ status }: { status: SessionStatus }) {
   const { data, line, links, limits } = status;
@@ -320,7 +262,7 @@ export function StatusExtras({ status }: { status: SessionStatus }) {
 
   // An older script sends an ANSI line instead of data; show it as it is.
   const legacy = !data && line;
-  if (!legacy && usage.length === 0 && !data && links.length === 0) {
+  if (!legacy && usage.length === 0 && links.length === 0) {
     return null;
   }
   const chips = links.map((url) => <LinkChip key={url} url={url} />);
@@ -334,7 +276,6 @@ export function StatusExtras({ status }: { status: SessionStatus }) {
         <StatusLine line={line} ref={details} />
       ) : (
         <StatusFacts
-          data={data}
           usage={usage}
           showRemaining={showRemaining}
           ref={details}
