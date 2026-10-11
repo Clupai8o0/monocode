@@ -141,11 +141,11 @@ describe("UsageProviderChip", () => {
 
     const trigger = button("Codex usage details");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(trigger.textContent).toBe("58% 2h·19% 2d 23h");
+    expect(trigger.textContent).toBe("5h58%2h·wk19%2d 23h");
     expect(trigger.title).toBe(
       "58% remaining · Resets in 2h · 19% remaining · Resets in 2d 23h",
     );
-    expect(trigger.querySelector(".w-8 > span")?.getAttribute("style")).toBe(
+    expect(trigger.querySelectorAll(".w-8 > span")[1]?.getAttribute("style")).toBe(
       "width: 19%;",
     );
     await act(async () => trigger.click());
@@ -185,11 +185,11 @@ describe("UsageProviderChip", () => {
     );
 
     const trigger = button("Codex usage details");
-    expect(trigger.textContent).toBe("42% 2h·81% 2d 23h");
+    expect(trigger.textContent).toBe("5h42%2h·wk81%2d 23h");
     expect(trigger.title).toBe(
       "42% used · Resets in 2h · 81% used · Resets in 2d 23h",
     );
-    expect(trigger.querySelector(".w-8 > span")?.getAttribute("style")).toBe(
+    expect(trigger.querySelectorAll(".w-8 > span")[1]?.getAttribute("style")).toBe(
       "width: 81%;",
     );
     await act(async () => trigger.click());
@@ -232,9 +232,9 @@ describe("UsageProviderChip", () => {
       };
 
       await changePreference(true);
-      expect(trigger.textContent).toBe("58% 2h·19% 2d 23h");
+      expect(trigger.textContent).toBe("5h58%2h·wk19%2d 23h");
       expect(trigger.title).toContain("19% remaining");
-      expect(trigger.querySelector(".w-8 > span")?.getAttribute("style")).toBe(
+      expect(trigger.querySelectorAll(".w-8 > span")[1]?.getAttribute("style")).toBe(
         "width: 19%;",
       );
       const remainingBar = document.querySelector(
@@ -246,9 +246,9 @@ describe("UsageProviderChip", () => {
       );
 
       await changePreference(false);
-      expect(trigger.textContent).toBe("42% 2h·81% 2d 23h");
+      expect(trigger.textContent).toBe("5h42%2h·wk81%2d 23h");
       expect(trigger.title).toContain("81% used");
-      expect(trigger.querySelector(".w-8 > span")?.getAttribute("style")).toBe(
+      expect(trigger.querySelectorAll(".w-8 > span")[1]?.getAttribute("style")).toBe(
         "width: 81%;",
       );
       const usedBar = document.querySelector(
@@ -270,7 +270,7 @@ describe("UsageProviderChip", () => {
 
     expect(
       button("Codex usage details")
-        .querySelector(".w-8 > span")
+        .querySelectorAll(".w-8 > span")[1]
         ?.getAttribute("style"),
     ).toBe("width: 0%;");
     await act(async () => button("Codex usage details").click());

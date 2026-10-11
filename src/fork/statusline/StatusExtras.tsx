@@ -8,7 +8,6 @@ import {
 } from "../../features/sessions/model/models";
 import { useCachedRateLimits } from "../../features/providers/model/rateLimitsCache";
 import type { ProviderRateLimits } from "../../features/providers/model/rateLimits";
-import { useShowRemainingUsage } from "../../features/settings/model/displayPrefs";
 import { ExternalLink } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { parseAnsi, type AnsiRun } from "./ansi";
@@ -17,9 +16,7 @@ import {
   artifactLinks,
   buildStatusInput,
   parseStatusData,
-  usageFacts,
   type StatusData,
-  type UsageFact,
 } from "./statusInput";
 
 const REFRESH_MS = 30_000;
@@ -176,61 +173,14 @@ export function AccountTag({ account }: { account?: string }) {
   );
 }
 
-function usageTone(used: number): string {
-  if (used >= 90) return OC.error;
-  if (used >= 70) return OC.warning;
-  return OC.text;
-}
-
-/** The 5-hour and weekly limits, as "5h 20% 4h48". */
-export function StatusFacts({
-  usage,
-  showRemaining = false,
-  ref,
-}: {
-  usage: UsageFact[];
-  showRemaining?: boolean;
-  ref?: React.Ref<HTMLSpanElement>;
-}) {
-  if (usage.length === 0) return null;
-  return (
-    <span
-      ref={ref}
-      className="flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap"
-    >
-      {usage.map((window) => (
-        <span
-          key={window.key}
-          title={`${window.key === "session" ? "5-hour" : "Weekly"} limit: ${window.percent}% ${
-            showRemaining ? "left" : "used"
-          }${window.resetsIn ? `, resets in ${window.resetsIn}` : ""}`}
-        >
-          <span className={OC.muted}>{window.label}</span>{" "}
-          <span className={usageTone(window.used)}>{window.percent}%</span>
-          {window.resetsIn ? (
-            <span className={OC.muted}> {window.resetsIn}</span>
-          ) : null}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /**
- * Fork feature: the composer's bottom row details. Usage limits, then the
- * session's artifact links.
+ * Fork feature: the session's artifact links in the composer's bottom row
+ * (or an older script's whole ANSI line).
  */
 export function StatusExtras({ status }: { status: SessionStatus }) {
-  const { data, line, links, limits } = status;
-  const showRemaining = useShowRemainingUsage();
-  // Re-read the clock with the limits; the script refresh re-renders too.
-  const usage = useMemo(
-    () => usageFacts(limits, showRemaining, Date.now()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [limits, showRemaining, line],
-  );
+  const { data, line, links } = status;
 
-  // The details have priority: when the chips would squeeze them, they
+  // An older script's line has priority: when the chips would squeeze them, they
   // fold into one "N links" chip that opens a menu.
   const strip = useRef<HTMLDivElement>(null);
   const details = useRef<HTMLSpanElement>(null);
@@ -258,11 +208,11 @@ export function StatusExtras({ status }: { status: SessionStatus }) {
       live = false;
       observer.disconnect();
     };
-  }, [line, links, usage]);
+  }, [line, links]);
 
   // An older script sends an ANSI line instead of data; show it as it is.
   const legacy = !data && line;
-  if (!legacy && usage.length === 0 && links.length === 0) {
+  if (!legacy && links.length === 0) {
     return null;
   }
   const chips = links.map((url) => <LinkChip key={url} url={url} />);
@@ -272,15 +222,7 @@ export function StatusExtras({ status }: { status: SessionStatus }) {
       data-fork-statusline
       className="relative flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden pl-2 font-mono text-[11px] leading-4"
     >
-      {legacy ? (
-        <StatusLine line={line} ref={details} />
-      ) : (
-        <StatusFacts
-          usage={usage}
-          showRemaining={showRemaining}
-          ref={details}
-        />
-      )}
+      {legacy ? <StatusLine line={line} ref={details} /> : null}
       {links.length > 0 ? (
         <>
           {/* Off-screen copy, measured to decide whether the chips fit. */}

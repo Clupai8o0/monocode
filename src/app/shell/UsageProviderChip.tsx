@@ -3,7 +3,6 @@ import {
   clampUsedPercent,
   DAILY_WINDOW_MINUTES,
   formatExtraUsageBalance,
-  formatRateLimitWindowChipLabel,
   formatResetCountdown,
   formatResetDuration,
   formatUsagePercent,
@@ -55,6 +54,7 @@ import {
 } from "../../features/providers/model/providerAccountIdentity";
 import { ProviderAccountSubtitle } from "../../features/providers/ui/ProviderAccountSubtitle";
 import { useShowRemainingUsage } from "../../features/settings/model/displayPrefs";
+import { FooterUsage, footerAccountLabel } from "../../fork/usage/FooterUsage";
 
 type UsageWindowEntry = {
   key: "session" | "weekly" | "monthly";
@@ -114,12 +114,6 @@ export function UsageProviderChip({
     windows.length === 0 &&
     (needsProviderLogin(limits) || reconnectState !== "idle"),
   );
-  const tightest = windows.reduce<RateLimitWindow | null>((best, entry) => {
-    if (!best || entry.window.usedPercent > best.usedPercent) {
-      return entry.window;
-    }
-    return best;
-  }, null);
   const tooltip = windows
     .map((entry) => rateLimitWindowTooltip(entry.window, now, showRemaining))
     .join(" · ");
@@ -250,30 +244,15 @@ export function UsageProviderChip({
           <>
             {accounts.length > 1 && activeAccount ? (
               <span className="max-w-24 truncate text-content/45">
-                {activeAccount.label}
+                {footerAccountLabel(activeAccount)}
               </span>
             ) : null}
-            {tightest ? <MiniBar usedPct={tightest.usedPercent} /> : null}
-            <span className="flex min-w-0 items-center gap-1 tabular-nums">
-              {windows.map((entry, index) => (
-                <span
-                  key={entry.key}
-                  className="inline-flex items-center gap-1"
-                >
-                  {index > 0 ? (
-                    <span className="text-content/25">·</span>
-                  ) : null}
-                  <span>
-                    {formatUsagePercent(
-                      showRemaining
-                        ? 100 - clampUsedPercent(entry.window.usedPercent)
-                        : entry.window.usedPercent,
-                    )}{" "}
-                    {formatRateLimitWindowChipLabel(entry.window, now)}
-                  </span>
-                </span>
-              ))}
-            </span>
+            {/* Fork: a bar per window instead of one bar and percentages. */}
+            <FooterUsage
+              windows={windows}
+              now={now}
+              showRemaining={showRemaining}
+            />
           </>
         )}
       </button>
@@ -1169,20 +1148,4 @@ function emptyUsageLabel(limits: ProviderRateLimits): string {
   const text = limits.error?.toLowerCase() ?? "";
   if (text.includes("expired") || text.includes("sign-in")) return "expired";
   return "—";
-}
-
-function MiniBar({ usedPct }: { usedPct: number }) {
-  const showRemaining = useShowRemainingUsage();
-  const pct = clampUsedPercent(usedPct);
-  return (
-    <span
-      className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-content/10"
-      aria-hidden
-    >
-      <span
-        className={`block h-full rounded-full ${barClass(pct)}`}
-        style={{ width: `${showRemaining ? 100 - pct : pct}%` }}
-      />
-    </span>
-  );
 }
