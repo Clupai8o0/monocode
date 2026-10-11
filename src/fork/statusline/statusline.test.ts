@@ -10,7 +10,7 @@ import {
   buildStatusInput,
   parseStatusData,
 } from "./statusInput";
-import { AccountTag, StatusLine } from "./StatusExtras";
+import { StatusLine } from "./StatusExtras";
 import { ContextLabel } from "./ContextLabel";
 
 describe("parseAnsi", () => {
@@ -203,14 +203,5 @@ describe("ContextLabel", () => {
     expect(render(2)).toContain("#f5a742");
     expect(render(3)).toContain("#e06c75");
     expect(render(0)).not.toContain("compaction");
-  });
-});
-
-describe("AccountTag", () => {
-  it("shows the account, or nothing", () => {
-    expect(
-      renderToStaticMarkup(createElement(AccountTag, { account: "main" })),
-    ).toContain(">main<");
-    expect(renderToStaticMarkup(createElement(AccountTag, {}))).toBe("");
   });
 });

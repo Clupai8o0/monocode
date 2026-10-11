@@ -160,19 +160,6 @@ export function useSessionStatus(
   );
 }
 
-/** Which Claude Code account runs the session; top left of the composer. */
-export function AccountTag({ account }: { account?: string }) {
-  if (!account) return null;
-  return (
-    <span
-      title={`Claude Code account: ${account}`}
-      className={`shrink-0 font-mono text-[11px] font-semibold ${OC.primary}`}
-    >
-      {account}
-    </span>
-  );
-}
-
 /**
  * Fork feature: the session's artifact links in the composer's bottom row
  * (or an older script's whole ANSI line).

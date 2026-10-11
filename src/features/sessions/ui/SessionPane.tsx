@@ -1,7 +1,6 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import {
-  AccountTag,
   StatusExtras,
   useSessionStatus,
 } from "../../../fork/statusline/StatusExtras";
@@ -785,7 +784,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }}
       onEditingLastTurnChange={setEditingLastTurn}
       toolbarExtra={status ? <StatusExtras status={status} /> : null}
-      headerStart={<AccountTag account={status?.data?.account} />}
       contextLabel={
         <ContextLabel
           usage={session.context}
