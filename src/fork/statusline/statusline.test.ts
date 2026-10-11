@@ -4,22 +4,35 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Block } from "../../features/sessions/model/session";
 import type { ProviderRateLimits } from "../../features/providers/model/rateLimits";
 import { parseAnsi } from "./ansi";
-import { artifactLabel, artifactLinks, buildStatusInput } from "./statusInput";
-import { StatusLine } from "./StatusExtras";
+import {
+  artifactLabel,
+  artifactLinks,
+  buildStatusInput,
+  parseStatusData,
+} from "./statusInput";
+import { StatusFacts, StatusLine } from "./StatusExtras";
 
 describe("parseAnsi", () => {
   it("keeps plain text as one run", () => {
-    expect(parseAnsi("opus · high")).toEqual([{ text: "opus · high", style: {} }]);
+    expect(parseAnsi("opus · high")).toEqual([
+      { text: "opus · high", style: {} },
+    ]);
   });
 
   it("reads truecolour, 256-colour, basic, bold and reset", () => {
     expect(
-      parseAnsi("\x1b[38;2;10;20;30mA\x1b[1;48;5;196mB\x1b[0m C\x1b[31mD\x1b[39mE"),
+      parseAnsi(
+        "\x1b[38;2;10;20;30mA\x1b[1;48;5;196mB\x1b[0m C\x1b[31mD\x1b[39mE",
+      ),
     ).toEqual([
       { text: "A", style: { color: "rgb(10,20,30)" } },
       {
         text: "B",
-        style: { color: "rgb(10,20,30)", bold: true, background: "rgb(255,0,0)" },
+        style: {
+          color: "rgb(10,20,30)",
+          bold: true,
+          background: "rgb(255,0,0)",
+        },
       },
       { text: " C", style: {} },
       { text: "D", style: { color: "#e06c75" } },
@@ -34,7 +47,9 @@ describe("parseAnsi", () => {
   });
 
   it("ignores malformed extended colours", () => {
-    expect(parseAnsi("\x1b[38;2;999;0;0mX")).toEqual([{ text: "X", style: {} }]);
+    expect(parseAnsi("\x1b[38;2;999;0;0mX")).toEqual([
+      { text: "X", style: {} },
+    ]);
   });
 });
 
@@ -50,11 +65,19 @@ describe("buildStatusInput", () => {
 
   it("matches the shape Claude Code pipes to a status line", () => {
     const limits = {
-      session: { usedPercent: 42, windowMinutes: 300, resetsAt: 1_800_000_000_000 },
+      session: {
+        usedPercent: 42,
+        windowMinutes: 300,
+        resetsAt: 1_800_000_000_000,
+      },
       weekly: { usedPercent: 7, windowMinutes: 10080, resetsAt: null },
     } as ProviderRateLimits;
     expect(
-      buildStatusInput(session, { id: "claude-opus-5-5", name: "Opus 5.5" }, limits),
+      buildStatusInput(
+        session,
+        { id: "claude-opus-5-5", name: "Opus 5.5" },
+        limits,
+      ),
     ).toEqual({
       hook_event_name: "Status",
       session_id: "abc-123",
@@ -90,17 +113,28 @@ describe("buildStatusInput", () => {
 
 describe("artifactLinks", () => {
   const blocks = [
-    { id: "1", role: "assistant", text: "See https://claude.ai/artifact/aaaa1111bbbb" },
+    {
+      id: "1",
+      role: "assistant",
+      text: "See https://claude.ai/artifact/aaaa1111bbbb",
+    },
     {
       id: "2",
       role: "tool",
       text: "Artifact",
       tool: {
         detail: "published https://claude.ai/code/artifact/cccc-2222",
-        preview: { kind: "shell", output: "again https://claude.ai/artifact/aaaa1111bbbb" },
+        preview: {
+          kind: "shell",
+          output: "again https://claude.ai/artifact/aaaa1111bbbb",
+        },
       },
     },
-    { id: "3", role: "assistant", text: "not https://claude.ai/chat/xyz or https://evil.com/artifact/x" },
+    {
+      id: "3",
+      role: "assistant",
+      text: "not https://claude.ai/chat/xyz or https://evil.com/artifact/x",
+    },
   ] as Block[];
 
   it("finds claude.ai artifact links, newest first, once each", () => {
@@ -111,7 +145,9 @@ describe("artifactLinks", () => {
   });
 
   it("labels a link by its id's start", () => {
-    expect(artifactLabel("https://claude.ai/artifact/aaaa1111bbbb")).toBe("aaaa1111");
+    expect(artifactLabel("https://claude.ai/artifact/aaaa1111bbbb")).toBe(
+      "aaaa1111",
+    );
   });
 });
 
@@ -123,5 +159,58 @@ describe("StatusLine", () => {
     expect(html).toContain('<span style="color:rgb(1,2,3)">Opus</span>');
     expect(html).toContain("Nerd Font");
     expect(html).toContain("│ 25%");
+  });
+});
+
+describe("parseStatusData", () => {
+  it("reads the composer layout's JSON", () => {
+    expect(
+      parseStatusData(
+        '{"account": "main", "compactions": 2, "claims": 3, "memories": 1}\n',
+      ),
+    ).toEqual({ account: "main", compactions: 2, claims: 3, memories: 1 });
+  });
+
+  it("returns null for an older script's ANSI line or broken JSON", () => {
+    expect(parseStatusData("\x1b[1m main \x1b[0m │ opus")).toBeNull();
+    expect(parseStatusData("{not json")).toBeNull();
+    expect(parseStatusData("[1, 2]")).toBeNull();
+  });
+
+  it("drops bad counts and a blank account", () => {
+    expect(
+      parseStatusData('{"account": " ", "compactions": -1, "claims": "3"}'),
+    ).toEqual({ compactions: 0, claims: 0, memories: 0 });
+  });
+});
+
+describe("StatusFacts", () => {
+  const render = (data: Parameters<typeof StatusFacts>[0]["data"]) =>
+    renderToStaticMarkup(createElement(StatusFacts, { data }));
+
+  it("shows the account and only the non-zero counts, in plain words", () => {
+    const html = render({
+      account: "main",
+      compactions: 1,
+      claims: 0,
+      memories: 2,
+    });
+    expect(html).toContain(">main<");
+    expect(html).toContain("compaction<");
+    expect(html).toContain("memories<");
+    expect(html).not.toContain("claim");
+  });
+
+  it("warns at two compactions and alarms at three", () => {
+    expect(render({ compactions: 2, claims: 0, memories: 0 })).toContain(
+      "#f5a742",
+    );
+    expect(render({ compactions: 3, claims: 0, memories: 0 })).toContain(
+      "#e06c75",
+    );
+  });
+
+  it("renders nothing when there is nothing to say", () => {
+    expect(render({ compactions: 0, claims: 0, memories: 0 })).toBe("");
   });
 });

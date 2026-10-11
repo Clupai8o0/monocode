@@ -50,7 +50,12 @@ export function buildStatusInput(
     input.context_window = {
       ...(context.window ? { context_window_size: context.window } : {}),
       ...(context.window
-        ? { used_percentage: Math.min(100, (context.used / context.window) * 100) }
+        ? {
+            used_percentage: Math.min(
+              100,
+              (context.used / context.window) * 100,
+            ),
+          }
         : {}),
       current_usage: { input_tokens: context.used },
     };
@@ -66,7 +71,8 @@ export function buildStatusInput(
   return input;
 }
 
-const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]+/g;
+const ARTIFACT_URL =
+  /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]+/g;
 
 /** Every claude.ai artifact link in the session, newest first, without repeats. */
 export function artifactLinks(blocks: readonly Block[]): string[] {
@@ -91,4 +97,42 @@ export function artifactLinks(blocks: readonly Block[]): string[] {
 export function artifactLabel(url: string): string {
   const id = url.slice(url.lastIndexOf("/") + 1);
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+/** What the status script sends for the composer layout. */
+export type StatusData = {
+  account?: string;
+  compactions: number;
+  claims: number;
+  memories: number;
+};
+
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+/** The composer layout's JSON, or null for an older script's ANSI line. */
+export function parseStatusData(output: string): StatusData | null {
+  const text = output.trim();
+  if (!text.startsWith("{")) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const data = raw as Record<string, unknown>;
+  const account =
+    typeof data.account === "string" && data.account.trim()
+      ? data.account.trim()
+      : undefined;
+  return {
+    ...(account ? { account } : {}),
+    compactions: count(data.compactions),
+    claims: count(data.claims),
+    memories: count(data.memories),
+  };
 }

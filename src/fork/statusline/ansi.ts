@@ -15,10 +15,22 @@ export type AnsiStyle = {
 export type AnsiRun = { text: string; style: AnsiStyle };
 
 const BASIC = [
-  "#1e1e1e", "#e06c75", "#98c379", "#e5c07b",
-  "#61afef", "#c678dd", "#56b6c2", "#d4d4d4",
-  "#7f848e", "#ff7b86", "#b5e890", "#ffd68a",
-  "#7cc5ff", "#de9bff", "#7fdbe6", "#ffffff",
+  "#1e1e1e",
+  "#e06c75",
+  "#98c379",
+  "#e5c07b",
+  "#61afef",
+  "#c678dd",
+  "#56b6c2",
+  "#d4d4d4",
+  "#7f848e",
+  "#ff7b86",
+  "#b5e890",
+  "#ffd68a",
+  "#7cc5ff",
+  "#de9bff",
+  "#7fdbe6",
+  "#ffffff",
 ];
 
 function color256(n: number): string | undefined {
@@ -38,14 +50,19 @@ function extended(codes: number[], at: number): [string | undefined, number] {
   if (codes[at] === 5) return [color256(codes[at + 1]), 2];
   if (codes[at] === 2) {
     const [r, g, b] = codes.slice(at + 1, at + 4);
-    const ok = [r, g, b].every((c) => Number.isInteger(c) && c >= 0 && c <= 255);
+    const ok = [r, g, b].every(
+      (c) => Number.isInteger(c) && c >= 0 && c <= 255,
+    );
     return [ok ? `rgb(${r},${g},${b})` : undefined, 4];
   }
   return [undefined, 0];
 }
 
 function applySgr(style: AnsiStyle, params: string): AnsiStyle {
-  const codes = params === "" ? [0] : params.split(";").map((p) => (p === "" ? 0 : Number(p)));
+  const codes =
+    params === ""
+      ? [0]
+      : params.split(";").map((p) => (p === "" ? 0 : Number(p)));
   let next = { ...style };
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i];
@@ -62,7 +79,8 @@ function applySgr(style: AnsiStyle, params: string): AnsiStyle {
     else if (code >= 30 && code <= 37) next.color = BASIC[code - 30];
     else if (code >= 90 && code <= 97) next.color = BASIC[code - 90 + 8];
     else if (code >= 40 && code <= 47) next.background = BASIC[code - 40];
-    else if (code >= 100 && code <= 107) next.background = BASIC[code - 100 + 8];
+    else if (code >= 100 && code <= 107)
+      next.background = BASIC[code - 100 + 8];
     else if (code === 38 || code === 48) {
       const [value, used] = extended(codes, i + 1);
       if (value) next[code === 38 ? "color" : "background"] = value;
@@ -73,7 +91,8 @@ function applySgr(style: AnsiStyle, params: string): AnsiStyle {
 }
 
 // SGR, other CSI sequences, and OSC sequences such as hyperlinks.
-const ESCAPES = /\x1b\[([0-9;]*)m|\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const ESCAPES =
+  /\x1b\[([0-9;]*)m|\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 export function parseAnsi(line: string): AnsiRun[] {
   const runs: AnsiRun[] = [];

@@ -10,7 +10,13 @@ import { useCachedRateLimits } from "../../features/providers/model/rateLimitsCa
 import { ExternalLink } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { parseAnsi, type AnsiRun } from "./ansi";
-import { artifactLabel, artifactLinks, buildStatusInput } from "./statusInput";
+import {
+  artifactLabel,
+  artifactLinks,
+  buildStatusInput,
+  parseStatusData,
+  type StatusData,
+} from "./statusInput";
 
 const REFRESH_MS = 30_000;
 const MAX_LINKS = 6;
@@ -52,6 +58,79 @@ export function StatusLine({
   );
 }
 
+// OpenCode's default theme (light / dark), which the owner prefers to a
+// terminal-style line.
+const OC = {
+  primary: "text-[#3b7dd8] dark:text-[#fab283]",
+  accent: "text-[#7b5bb6] dark:text-[#9d7cd8]",
+  info: "text-[#318795] dark:text-[#56b6c2]",
+  warning: "text-[#d68c27] dark:text-[#f5a742]",
+  error: "text-[#d1383d] dark:text-[#e06c75]",
+  muted: "text-[#8a8a8a] dark:text-[#808080]",
+};
+
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : many;
+}
+
+export function StatusFacts({
+  data,
+  ref,
+}: {
+  data: StatusData;
+  ref?: React.Ref<HTMLSpanElement>;
+}) {
+  const facts: { key: string; value: string; label: string; tone: string }[] =
+    [];
+  if (data.compactions > 0) {
+    facts.push({
+      key: "compactions",
+      value: String(data.compactions),
+      label: plural(data.compactions, "compaction", "compactions"),
+      // Past two, a /clear plus a handoff keeps more than another compact.
+      tone:
+        data.compactions >= 3
+          ? OC.error
+          : data.compactions === 2
+            ? OC.warning
+            : OC.muted,
+    });
+  }
+  if (data.claims > 0) {
+    facts.push({
+      key: "claims",
+      value: String(data.claims),
+      label: plural(data.claims, "claim", "claims"),
+      tone: OC.accent,
+    });
+  }
+  if (data.memories > 0) {
+    facts.push({
+      key: "memories",
+      value: String(data.memories),
+      label: plural(data.memories, "memory", "memories"),
+      tone: OC.info,
+    });
+  }
+  if (!data.account && facts.length === 0) return null;
+  return (
+    <span
+      ref={ref}
+      className="flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap"
+    >
+      {data.account ? (
+        <span className={`font-medium ${OC.primary}`}>{data.account}</span>
+      ) : null}
+      {facts.map((fact) => (
+        <span key={fact.key}>
+          <span className={fact.tone}>{fact.value}</span>{" "}
+          <span className={OC.muted}>{fact.label}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * Fork feature: in the composer's bottom row, the parts of the person's own
  * Claude Code status line the composer doesn't already show (account,
@@ -70,6 +149,7 @@ export function StatusExtras({
     session.providerAccountId ?? "default",
   );
   const [line, setLine] = useState<string | null>(null);
+  const data = useMemo(() => (line ? parseStatusData(line) : null), [line]);
   const latest = useRef(0);
 
   const input = useMemo(() => {
@@ -167,7 +247,11 @@ export function StatusExtras({
       data-fork-statusline
       className="relative flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden pl-2 font-mono text-[11px] leading-4 text-content/55"
     >
-      {line ? <StatusLine line={line} ref={status} /> : null}
+      {data ? (
+        <StatusFacts data={data} ref={status} />
+      ) : line ? (
+        <StatusLine line={line} ref={status} />
+      ) : null}
       {links.length > 0 ? (
         <>
           {/* Off-screen copy, measured to decide whether the chips fit. */}
