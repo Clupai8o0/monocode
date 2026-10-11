@@ -5,7 +5,7 @@ import type { Block } from "../../features/sessions/model/session";
 import type { ProviderRateLimits } from "../../features/providers/model/rateLimits";
 import { parseAnsi } from "./ansi";
 import { artifactLabel, artifactLinks, buildStatusInput } from "./statusInput";
-import { StatusLine } from "./StatusStrip";
+import { StatusLine } from "./StatusExtras";
 
 describe("parseAnsi", () => {
   it("keeps plain text as one run", () => {

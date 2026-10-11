@@ -53,10 +53,11 @@ export function StatusLine({
 }
 
 /**
- * Fork feature: under the composer, the person's own Claude Code status line
- * (model, effort, context, limits, cost ...) and the session's artifact links.
+ * Fork feature: in the composer's bottom row, the parts of the person's own
+ * Claude Code status line the composer doesn't already show (account,
+ * compactions, claims, memories ...) and the session's artifact links.
  */
-export function StatusStrip({
+export function StatusExtras({
   session,
   visible,
 }: {
@@ -74,13 +75,15 @@ export function StatusStrip({
   const input = useMemo(() => {
     if (!claude) return null;
     const model = resolveModel(session.harness, session.model);
-    return JSON.stringify(
-      buildStatusInput(
+    return JSON.stringify({
+      ...buildStatusInput(
         session,
         { id: nativeModelId(session.model), name: model.name },
         limits,
       ),
-    );
+      // Model, effort, branch, context and limits are already on screen.
+      layout: "composer",
+    });
     // Only the fields the status line reads; the whole session changes on every token.
   }, [
     claude,
@@ -139,11 +142,7 @@ export function StatusStrip({
       const chips = fullChips.current?.offsetWidth ?? 0;
       const text = status.current?.scrollWidth ?? 0;
       const style = getComputedStyle(el);
-      const room =
-        el.clientWidth -
-        parseFloat(style.paddingLeft) -
-        parseFloat(style.paddingRight) -
-        parseFloat(style.columnGap || "0");
+      const room = el.clientWidth - parseFloat(style.columnGap || "0");
       setFolded(chips > 0 && text + chips > room);
     };
     measure();
@@ -166,13 +165,9 @@ export function StatusStrip({
     <div
       ref={strip}
       data-fork-statusline
-      className="relative flex min-w-0 items-center gap-3 overflow-hidden px-3 pb-1.5 pt-1 font-mono text-[11px] leading-4 text-content/55"
+      className="relative flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden pl-2 font-mono text-[11px] leading-4 text-content/55"
     >
-      {line ? (
-        <StatusLine line={line} ref={status} />
-      ) : (
-        <span className="flex-1" />
-      )}
+      {line ? <StatusLine line={line} ref={status} /> : null}
       {links.length > 0 ? (
         <>
           {/* Off-screen copy, measured to decide whether the chips fit. */}
@@ -186,9 +181,7 @@ export function StatusStrip({
           {folded ? (
             <LinksMenu links={links} />
           ) : (
-            <span className="ml-auto flex shrink-0 items-center gap-1">
-              {chips}
-            </span>
+            <span className="flex shrink-0 items-center gap-1">{chips}</span>
           )}
         </>
       ) : null}
@@ -229,7 +222,7 @@ function LinksMenu({ links }: { links: string[] }) {
         aria-expanded={menuOpen}
         title="Artifact links"
         onClick={() => setMenuOpen((value) => !value)}
-        className={`ml-auto shrink-0 ${CHIP}`}
+        className={`shrink-0 ${CHIP}`}
       >
         <ExternalLink className="size-3" strokeWidth={2} />
         {links.length} {links.length === 1 ? "link" : "links"}

@@ -1,6 +1,6 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
-import { StatusStrip } from "../../../fork/statusline/StatusStrip";
+import { StatusExtras } from "../../../fork/statusline/StatusExtras";
 import {
   memo,
   useCallback,
@@ -774,8 +774,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
         recallLastTurnRef.current = recall;
       }}
       onEditingLastTurnChange={setEditingLastTurn}
+      toolbarExtra={
+        remote ? null : <StatusExtras session={session} visible={visible} />
+      }
     />
-    {remote ? null : <StatusStrip session={session} visible={visible} />}
     </>
   );
 
