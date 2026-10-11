@@ -75,6 +75,7 @@ import {
 } from "../../monos/model/mono";
 import { MonoHeader } from "../../monos/ui/MonoHeader";
 import { MonoComposer } from "../../monos/ui/MonoComposer";
+import type { LaunchedSessionView } from "../../monos/model/monoSpawnedSessions";
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { ContextMeter } from "./ContextMeter";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
@@ -82,6 +83,7 @@ import { QuestionForm } from "./QuestionForm";
 import {
   monoMessageDeliveries,
   monoPendingTranscriptBlocks,
+  visibleMonoCompletionMessages,
 } from "../../monos/model/monoMessaging";
 import { MessageQueue } from "./MessageQueue";
 import { useMonoTranscript } from "../../monos/hooks/useMonoTranscript";
@@ -143,12 +145,17 @@ export type SessionPaneProps = {
     blocks: Block[],
   ) => void;
   monoActivityTurnId?: string;
-  onShowMonoSessions?: (
+  /** Open a session a Mono's turn launched, in the Mono's sidebar. */
+  onOpenMonoSession?: (
     sessionId: string,
     turnId: string,
     blocks: Block[],
+    launchedId: string,
   ) => void;
-  monoSessionsTurnId?: string;
+  /** Live status of the sessions this Mono launched, by id. */
+  monoLaunchedSessions?: ReadonlyMap<string, LaunchedSessionView>;
+  /** The launched session open in the Mono's sidebar. */
+  openMonoSessionId?: string;
   recents: RecentProject[];
   hideProjectPicker?: boolean;
   onFocus: (sessionId: string) => void;
@@ -352,8 +359,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
   onCommitChanges,
   onShowMonoActivity,
   monoActivityTurnId,
-  onShowMonoSessions,
-  monoSessionsTurnId,
+  onOpenMonoSession,
+  monoLaunchedSessions,
+  openMonoSessionId,
   onOpenPlan,
   onBuildPlan,
   onSecondOpinion,
@@ -988,13 +996,19 @@ const LocalSessionPane = memo(function LocalSessionPane({
                         : undefined
                     }
                     activeWorkTurnId={monoActivityTurnId}
-                    onShowSessions={
-                      agent && onShowMonoSessions
-                        ? (turnId, blocks) =>
-                            onShowMonoSessions(session.id, turnId, blocks)
+                    onOpenSession={
+                      agent && onOpenMonoSession
+                        ? (turnId, blocks, launchedId) =>
+                            onOpenMonoSession(
+                              session.id,
+                              turnId,
+                              blocks,
+                              launchedId,
+                            )
                         : undefined
                     }
-                    activeSessionsTurnId={monoSessionsTurnId}
+                    launchedSessions={monoLaunchedSessions}
+                    openSessionId={openMonoSessionId}
                     // A Mono's turn keeps copy, save as note and the time.
                     daySeparators={!!agent}
                     hideTurnMetrics={!!agent}
@@ -1154,9 +1168,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
               {agent ? (
                 <>
                   <MessageQueue
-                    messages={(session.queuedMessages ?? []).filter(
-                      (message) => !!message.monoSessionCompletion,
-                    )}
+                    messages={visibleMonoCompletionMessages(session)}
                     status={session.queueStatus}
                     sendingId={session.sendingQueuedMessageId}
                     onDelete={(messageId) =>

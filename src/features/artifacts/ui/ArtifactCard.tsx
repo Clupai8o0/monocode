@@ -18,7 +18,7 @@ export function ArtifactCard({
       title={`Open ${label.toLowerCase()}`}
       onClick={() => onOpen?.(card.id)}
       disabled={!onOpen}
-      className="flex w-fit max-w-lg min-w-0 items-center gap-2.5 rounded-xl border border-content/10 py-1.5 pr-1.5 pl-3 text-left font-sans transition-colors hover:border-content/20 hover:bg-content/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-60"
+      className="flex w-fit max-w-sm min-w-0 items-center gap-2.5 rounded-xl border border-content/10 py-1.5 pr-1.5 pl-3 text-left font-sans transition-colors hover:border-content/20 hover:bg-content/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-60"
     >
       <CheckCircle
         className="size-4 shrink-0 text-emerald-400/90"
