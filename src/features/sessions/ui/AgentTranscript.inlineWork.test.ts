@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { copyMessage } from "../../../platform/tauri/clipboard";
 import type { Block } from "../model/session";
 import { AgentTranscript, MonoActivityTrail } from "./AgentTranscript";
-import { WORD_FADE_MS } from "./wordFade";
+import { PACED_REVEAL_KEY, WORD_FADE_MS } from "./wordFade";
 
 vi.mock("../../../platform/tauri/clipboard", () => ({
   copyMessage: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +55,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  localStorage.removeItem(PACED_REVEAL_KEY);
   act(() => root.unmount());
   container.remove();
   resultStyles.remove();
@@ -191,6 +192,7 @@ it("shows sessions beside the footer actions only for the turn that launched the
 });
 
 it("waits for the final reply's reveal, then shows its artifact before the actions", () => {
+  localStorage.setItem(PACED_REVEAL_KEY, "1");
   const user: Block = {
     id: "user",
     role: "user",

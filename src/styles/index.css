@@ -3143,7 +3143,7 @@ html.theme-light .mono-pill {
 }
 
 /*
- * A streamed word fading in as the paced reveal lets it out (wordFade.tsx).
+ * A streamed word fading in as it is shown (wordFade.tsx).
  * Opacity only: a word that moved would jostle the line it is set on. The
  * fade plays as a word's span is added, and words already on screen keep
  * theirs while the reply is coming in. The spans come off once the fade
@@ -3158,8 +3158,10 @@ html.theme-light .mono-pill {
   }
 }
 
+/* Unpaced replies set the timing from the stream's cadence (AgentMarkdown). */
 .agent-markdown.word-fading [data-word-fade]:not([data-word-settled]) {
-  animation: word-fade-in 320ms ease-out both;
+  animation: word-fade-in var(--word-fade-ms, 320ms)
+    var(--word-fade-ease, ease-out) both;
 }
 
 @keyframes zen-thinking-pulse {

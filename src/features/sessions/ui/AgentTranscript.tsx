@@ -1001,12 +1001,14 @@ function AgentTranscriptComponent({
 
   refreshChatMotion.current = useBottomChatMotion(
     scrollerEl,
-    visible && bottomAligned,
+    visible,
     stickToBottom,
     blocks,
-    !!busy && userTurnCount(blocks, managed) === 1,
+    bottomAligned && !!busy && userTurnCount(blocks, managed) === 1,
     !!busy,
     historicalBlockIds,
+    bottomAligned,
+    wheelHold,
   );
 
   return (
@@ -1604,13 +1606,16 @@ function TranscriptContent({
   bottomAligned: boolean;
   children: ReactNode;
 }) {
+  // The clip keeps the follow motion's in-flight offset out of scrollHeight.
   if (!bottomAligned) {
     return (
-      <div
-        data-transcript-content
-        className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-1 pb-8"
-      >
-        {children}
+      <div className="mx-auto w-full min-w-0 max-w-4xl overflow-clip">
+        <div
+          data-transcript-content
+          className="flex min-w-0 flex-col gap-1 pb-8"
+        >
+          {children}
+        </div>
       </div>
     );
   }
@@ -5118,7 +5123,7 @@ function pinToBottom(el: HTMLElement | null) {
 /** Keep the live turn's min-height in lockstep with the visible transcript. */
 function syncTranscriptViewport(el: HTMLElement | null) {
   if (!el || el.clientHeight <= 0) return;
-  const inner = el.firstElementChild as HTMLElement | null;
+  const inner = el.querySelector<HTMLElement>("[data-transcript-content]");
   const pad = inner
     ? Number.parseFloat(getComputedStyle(inner).paddingBottom) || 0
     : 0;

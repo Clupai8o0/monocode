@@ -212,15 +212,25 @@ function VideoView({
       document.removeEventListener("visibilitychange", pauseWhenHidden);
   }, [visible, failed]);
 
+  const releaseSource = useRef(0);
   useEffect(() => {
     const video = videoRef.current;
-    // Restore the source if React replays effects after the cleanup below.
-    if (video && !video.hasAttribute("src")) video.src = url;
+    // A StrictMode replay runs this again straight after the cleanup. Keep the
+    // load in flight: aborting and restarting it in one task can leave Linux
+    // WebKit's media pipeline stalled without metadata or an error.
+    window.clearTimeout(releaseSource.current);
+    if (video && !video.hasAttribute("src")) {
+      video.src = url;
+      video.load();
+    }
     return () => {
       if (!video) return;
       video.pause();
-      video.removeAttribute("src");
-      video.load();
+      // Free the decoder once the element is really gone.
+      releaseSource.current = window.setTimeout(() => {
+        video.removeAttribute("src");
+        video.load();
+      });
     };
   }, [url, failed]);
 

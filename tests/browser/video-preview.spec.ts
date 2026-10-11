@@ -7,10 +7,22 @@ test("file preview decodes, plays and seeks a video, then pauses on tab change",
   const video = page.locator('video[aria-label="Video preview: clip.mp4"]');
   await expect(video).toBeVisible();
   await expect
-    .poll(() =>
-      video.evaluate((element: HTMLVideoElement) => element.readyState),
+    .poll(
+      () =>
+        video.evaluate((element: HTMLVideoElement) => ({
+          metadataReady: element.readyState >= HTMLMediaElement.HAVE_METADATA,
+          error: element.error
+            ? { code: element.error.code, message: element.error.message }
+            : null,
+          networkState: element.networkState,
+        })),
+      // Allow the cold WebKit media pipeline to initialize on shared runners.
+      {
+        timeout: 15_000,
+        message: "Video should load metadata without a media error",
+      },
     )
-    .toBeGreaterThanOrEqual(1);
+    .toMatchObject({ metadataReady: true, error: null });
   await expect(page.locator("footer").first()).toContainText("160 × 90");
   await expect(page.locator("footer").first()).toContainText("0:03");
 
