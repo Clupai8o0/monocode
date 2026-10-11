@@ -1,6 +1,11 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
-import { StatusExtras } from "../../../fork/statusline/StatusExtras";
+import {
+  AccountTag,
+  StatusExtras,
+  useSessionStatus,
+} from "../../../fork/statusline/StatusExtras";
+import { ContextLabel } from "../../../fork/statusline/ContextLabel";
 import {
   memo,
   useCallback,
@@ -383,6 +388,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
   );
   const recallLastTurnRef = useRef<(() => void) | null>(null);
   const remote = remoteSession;
+  // Fork: the person's own status script, drawn around the composer.
+  const forkStatus = useSessionStatus(session, visible && !remote);
+  const status = remote ? null : forkStatus;
   // A Mono's chat is a running conversation; what was said stays said.
   const editLastTurnSupported =
     !remote && !monoForSession(session.id) && canEditLastTurn(session);
@@ -774,8 +782,13 @@ const LocalSessionPane = memo(function LocalSessionPane({
         recallLastTurnRef.current = recall;
       }}
       onEditingLastTurnChange={setEditingLastTurn}
-      toolbarExtra={
-        remote ? null : <StatusExtras session={session} visible={visible} />
+      toolbarExtra={status ? <StatusExtras status={status} /> : null}
+      headerStart={<AccountTag account={status?.data?.account} />}
+      contextLabel={
+        <ContextLabel
+          usage={session.context}
+          compactions={status?.data?.compactions}
+        />
       }
     />
     </>

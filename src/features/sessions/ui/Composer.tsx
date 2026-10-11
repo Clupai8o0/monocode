@@ -99,7 +99,6 @@ import {
 import { AccessPicker } from "./AccessPicker";
 import { ComposerRunner } from "./ComposerRunner";
 import { ContextMeter } from "./ContextMeter";
-import { ContextLabel } from "../../../fork/statusline/ContextLabel";
 import { AttachmentChip } from "./AttachmentChip";
 import { BranchPicker } from "../../source-control/ui/BranchPicker";
 import { WorktreePicker } from "../../source-control/ui/WorktreePicker";
@@ -230,6 +229,10 @@ type Props = {
   compactSupported?: boolean;
   /** Fork: status details shown at the end of the bottom toolbar. */
   toolbarExtra?: ReactNode;
+  /** Fork: shown first in the top bar (the Claude Code account). */
+  headerStart?: ReactNode;
+  /** Fork: shown beside the context ring (token count, compactions). */
+  contextLabel?: ReactNode;
   quoteRequest?: QuoteRequest;
   initialDraft?: string;
   draftResetToken?: number;
@@ -356,6 +359,8 @@ export function Composer({
   context,
   compactSupported = false,
   toolbarExtra,
+  headerStart,
+  contextLabel,
   quoteRequest,
   initialDraft,
   draftResetToken,
@@ -1931,6 +1936,7 @@ export function Composer({
           ) : null}
           {hideTopBar ? null : (
             <div className="flex min-w-0 items-center gap-2.5 overflow-hidden px-3 pt-2.5">
+              {headerStart}
               {!remote && !hideProjectPicker ? (
                 <CwdPicker
                   cwd={cwd}
@@ -1995,7 +2001,7 @@ export function Composer({
                 </>
               )}
               <div className="ml-auto flex shrink-0 items-center">
-                <ContextLabel usage={context} />
+                {contextLabel}
                 <ContextMeter
                   usage={context}
                   onCompact={

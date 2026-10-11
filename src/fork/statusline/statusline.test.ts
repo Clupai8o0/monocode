@@ -9,8 +9,10 @@ import {
   artifactLinks,
   buildStatusInput,
   parseStatusData,
+  usageFacts,
 } from "./statusInput";
-import { StatusFacts, StatusLine } from "./StatusExtras";
+import { AccountTag, StatusFacts, StatusLine } from "./StatusExtras";
+import { ContextLabel } from "./ContextLabel";
 
 describe("parseAnsi", () => {
   it("keeps plain text as one run", () => {
@@ -184,33 +186,101 @@ describe("parseStatusData", () => {
   });
 });
 
-describe("StatusFacts", () => {
-  const render = (data: Parameters<typeof StatusFacts>[0]["data"]) =>
-    renderToStaticMarkup(createElement(StatusFacts, { data }));
+describe("usageFacts", () => {
+  const now = Date.UTC(2026, 9, 11, 12, 0);
+  const limits = {
+    session: {
+      usedPercent: 20.4,
+      windowMinutes: 300,
+      resetsAt: now + 4 * 3600_000 + 48 * 60_000,
+    },
+    weekly: {
+      usedPercent: 83,
+      windowMinutes: 10080,
+      resetsAt: now + 46 * 3600_000,
+    },
+  } as unknown as ProviderRateLimits;
 
-  it("shows the account and only the non-zero counts, in plain words", () => {
+  it("shows 5h and weekly use with time to reset", () => {
+    expect(usageFacts(limits, false, now)).toEqual([
+      { key: "session", label: "5h", percent: 20, used: 20, resetsIn: "4h48" },
+      { key: "weekly", label: "wk", percent: 83, used: 83, resetsIn: "1d22h" },
+    ]);
+  });
+
+  it("flips to what is left when the person prefers that", () => {
+    expect(usageFacts(limits, true, now).map((f) => f.percent)).toEqual([
+      80, 17,
+    ]);
+  });
+
+  it("skips windows it does not know", () => {
+    expect(usageFacts(undefined, false, now)).toEqual([]);
+  });
+});
+
+describe("StatusFacts", () => {
+  const render = (
+    data: Parameters<typeof StatusFacts>[0]["data"],
+    usage: Parameters<typeof StatusFacts>[0]["usage"] = [],
+  ) => renderToStaticMarkup(createElement(StatusFacts, { data, usage }));
+
+  it("names locked files and memories in plain words, skipping zeros", () => {
     const html = render({
       account: "main",
       compactions: 1,
-      claims: 0,
-      memories: 2,
+      claims: 3,
+      memories: 0,
     });
-    expect(html).toContain(">main<");
-    expect(html).toContain("compaction<");
-    expect(html).toContain("memories<");
-    expect(html).not.toContain("claim");
+    expect(html).toContain("files locked");
+    expect(html).not.toContain("memor");
+    // The account and compactions live elsewhere in the composer.
+    expect(html).not.toContain("main");
+    expect(html).not.toContain("compaction");
   });
 
-  it("warns at two compactions and alarms at three", () => {
-    expect(render({ compactions: 2, claims: 0, memories: 0 })).toContain(
-      "#f5a742",
-    );
-    expect(render({ compactions: 3, claims: 0, memories: 0 })).toContain(
-      "#e06c75",
-    );
+  it("colours usage by how much is used", () => {
+    const html = render(null, [
+      { key: "session", label: "5h", percent: 95, used: 95, resetsIn: "12m" },
+    ]);
+    expect(html).toContain("5h");
+    expect(html).toContain("95%");
+    expect(html).toContain("#e06c75");
+    expect(html).toContain("12m");
   });
 
   it("renders nothing when there is nothing to say", () => {
     expect(render({ compactions: 0, claims: 0, memories: 0 })).toBe("");
+  });
+});
+
+describe("ContextLabel", () => {
+  const render = (compactions: number, used = 143_000) =>
+    renderToStaticMarkup(
+      createElement(ContextLabel, {
+        usage: { used, window: 1_000_000 },
+        compactions,
+      }),
+    );
+
+  it("puts compactions beside the token count", () => {
+    const html = render(1);
+    expect(html).toContain("143K · 14%");
+    expect(html).toContain("1 compaction<");
+  });
+
+  it("warns at two compactions and alarms at three", () => {
+    expect(render(2)).toContain("#f5a742");
+    expect(render(3)).toContain("#e06c75");
+    expect(render(0)).not.toContain("compaction");
+  });
+});
+
+describe("AccountTag", () => {
+  it("shows the account, or nothing", () => {
+    expect(
+      renderToStaticMarkup(createElement(AccountTag, { account: "main" })),
+    ).toContain(">main<");
+    expect(renderToStaticMarkup(createElement(AccountTag, {}))).toBe("");
   });
 });

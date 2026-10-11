@@ -136,3 +136,51 @@ export function parseStatusData(output: string): StatusData | null {
     memories: count(data.memories),
   };
 }
+
+export type UsageFact = {
+  key: "session" | "weekly";
+  label: string;
+  /** Percent shown: used, or remaining when the person prefers that. */
+  percent: number;
+  /** Percent of the window used, for the warning colour. */
+  used: number;
+  resetsIn?: string;
+};
+
+function compactDuration(ms: number): string {
+  if (ms <= 0) return "now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h${String(mins % 60).padStart(2, "0")}`;
+  return `${Math.floor(hours / 24)}d${hours % 24}h`;
+}
+
+/** The 5-hour and weekly windows, as the composer shows them. */
+export function usageFacts(
+  limits: ProviderRateLimits | undefined,
+  showRemaining: boolean,
+  now: number,
+): UsageFact[] {
+  const facts: UsageFact[] = [];
+  const add = (
+    key: UsageFact["key"],
+    label: string,
+    limit: RateLimitWindow | null | undefined,
+  ) => {
+    if (!limit || !Number.isFinite(limit.usedPercent)) return;
+    const used = Math.round(Math.min(100, Math.max(0, limit.usedPercent)));
+    facts.push({
+      key,
+      label,
+      percent: showRemaining ? 100 - used : used,
+      used,
+      ...(limit.resetsAt
+        ? { resetsIn: compactDuration(limit.resetsAt - now) }
+        : {}),
+    });
+  };
+  add("session", "5h", limits?.session);
+  add("weekly", "wk", limits?.weekly);
+  return facts;
+}
