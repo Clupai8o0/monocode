@@ -177,6 +177,15 @@ describe("parseStatusData", () => {
     expect(parseStatusData("[1, 2]")).toBeNull();
   });
 
+  it("reads the auto-compact threshold", () => {
+    expect(
+      parseStatusData('{"compactions": 0, "compact_at": 250000}')?.compactAt,
+    ).toBe(250_000);
+    expect(
+      parseStatusData('{"compactions": 0, "compact_at": null}'),
+    ).toEqual({ compactions: 0 });
+  });
+
   it("drops bad counts and a blank account", () => {
     expect(parseStatusData('{"account": " ", "compactions": "3"}')).toEqual({
       compactions: 0,

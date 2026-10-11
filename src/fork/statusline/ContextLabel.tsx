@@ -13,9 +13,12 @@ import { OC } from "./StatusExtras";
 export function ContextLabel({
   usage,
   compactions = 0,
+  untilCompact = false,
 }: {
   usage?: ContextUsage;
   compactions?: number;
+  /** The window is the auto-compact threshold, not the model's full window. */
+  untilCompact?: boolean;
 }) {
   const percent = contextPercent(usage);
   const ratio = contextRatio(usage);
@@ -27,7 +30,15 @@ export function ContextLabel({
     compactions >= 3 ? OC.error : compactions === 2 ? OC.warning : OC.muted;
   return (
     <span className="mr-1.5 flex items-center gap-1.5 whitespace-nowrap font-mono text-[11px] tabular-nums">
-      <span aria-hidden className={tone}>
+      <span
+        aria-hidden
+        className={tone}
+        title={
+          untilCompact
+            ? `${formatTokens(usage.used)} of ${formatTokens(usage.window ?? 0)} before auto-compact`
+            : undefined
+        }
+      >
         {formatTokens(usage.used)} · {percent}%
       </span>
       {compactions > 0 ? (

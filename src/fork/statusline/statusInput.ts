@@ -103,6 +103,8 @@ export function artifactLabel(url: string): string {
 export type StatusData = {
   account?: string;
   compactions: number;
+  /** Tokens at which Claude Code auto-compacts, when the account sets it. */
+  compactAt?: number;
 };
 
 function count(value: unknown): number {
@@ -127,8 +129,10 @@ export function parseStatusData(output: string): StatusData | null {
     typeof data.account === "string" && data.account.trim()
       ? data.account.trim()
       : undefined;
+  const compactAt = count(data.compact_at);
   return {
     ...(account ? { account } : {}),
     compactions: count(data.compactions),
+    ...(compactAt ? { compactAt } : {}),
   };
 }

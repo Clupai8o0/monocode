@@ -6,6 +6,7 @@ import {
   dropContextWindow,
   formatTokens,
   mergeContextUsage,
+  untilCompaction,
 } from "./contextUsage";
 
 describe("contextRatio", () => {
@@ -117,5 +118,20 @@ describe("dropContextWindow", () => {
 
   it("leaves the ring hidden until the next turn re-reports", () => {
     expect(contextRatio(dropContextWindow({ used: 30_000, window: 200_000 }))).toBeNull();
+  });
+});
+
+describe("untilCompaction", () => {
+  it("measures against the auto-compact threshold", () => {
+    const usage = untilCompaction({ used: 99_000, window: 1_000_000 }, 250_000);
+    expect(usage).toEqual({ used: 99_000, window: 250_000 });
+    expect(contextPercent(usage)).toBe(40);
+  });
+
+  it("keeps a window that is already smaller, or no threshold", () => {
+    const small = { used: 50_000, window: 200_000 };
+    expect(untilCompaction(small, 250_000)).toBe(small);
+    expect(untilCompaction(small, undefined)).toBe(small);
+    expect(untilCompaction(undefined, 250_000)).toBeUndefined();
   });
 });

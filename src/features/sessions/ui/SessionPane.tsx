@@ -5,6 +5,7 @@ import {
   useSessionStatus,
 } from "../../../fork/statusline/StatusExtras";
 import { ContextLabel } from "../../../fork/statusline/ContextLabel";
+import { untilCompaction } from "../model/contextUsage";
 import {
   memo,
   useCallback,
@@ -400,6 +401,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
   // Fork: the person's own status script, drawn around the composer.
   const forkStatus = useSessionStatus(session, visible && !remote);
   const status = remote ? null : forkStatus;
+  // Fork: ring and label count toward auto-compact, not the full window.
+  const context = untilCompaction(session.context, status?.data?.compactAt);
   // A Mono's chat is a running conversation; what was said stays said.
   const editLastTurnSupported =
     !remote && !monoForSession(session.id) && canEditLastTurn(session);
@@ -680,7 +683,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }
       hideBranchPicker={!!session.inboxAsk || managed}
       hideTopBar={!!session.inboxAsk}
-      context={session.context}
+      context={context}
       quoteRequest={quoteRequest}
       initialDraft={
         draftRef.current ??
@@ -794,8 +797,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
       toolbarExtra={status ? <StatusExtras status={status} /> : null}
       contextLabel={
         <ContextLabel
-          usage={session.context}
+          usage={context}
           compactions={status?.data?.compactions}
+          untilCompact={context !== session.context}
         />
       }
     />
@@ -1254,7 +1258,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
                             its current thread is. It rotates threads itself,
                             so there is nothing to compact here. */}
                         <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
-                          <ContextMeter usage={session.context} />
+                          <ContextMeter usage={context} />
                         </div>
                       </>
                     }

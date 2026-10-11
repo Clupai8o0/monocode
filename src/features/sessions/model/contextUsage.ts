@@ -71,6 +71,22 @@ export function mergeContextUsage(
 }
 
 /**
+ * Measure against the auto-compact threshold instead of the full window.
+ *
+ * A 1M window that compacts at 250K reads "10%" just before it compacts; the
+ * threshold is the limit that actually matters. The smaller of the two wins,
+ * since a harness never compacts past the model's own window.
+ */
+export function untilCompaction(
+  usage: ContextUsage | undefined,
+  compactAt: number | undefined,
+): ContextUsage | undefined {
+  if (!usage || !compactAt || compactAt <= 0) return usage;
+  if (usage.window && usage.window <= compactAt) return usage;
+  return { used: usage.used, window: compactAt };
+}
+
+/**
  * Forget the window while keeping the level.
  *
  * The window is a property of the model, so switching models invalidates it.
