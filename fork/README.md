@@ -6,6 +6,7 @@ Fork of [hardbeat920/monocode](https://github.com/hardbeat920/monocode) (MIT). O
 |---|---|
 | `fork/monocode` | The `monocode` command (symlinked from `~/.local/bin`). Swaps in a staged build if MonoCode is closed, opens it, starts `update.sh` in the background. |
 | `fork/update.sh` | Merges `upstream/main` into `mine`, lets a Claude agent fix conflicts or a broken build, runs `tsc` + `npm test` + `tauri build`, stages the app. Rolls back on failure and sends a notification. |
+| PDF preview | `src/fork/pdf`: `.pdf` files open in a viewer in the file pane instead of the editor. pdf.js draws pages onto canvases, loaded only when a PDF is opened, so the app CSP stays unchanged. Zoom with the footer, Cmd+scroll, pinch or the zoom keys. No text selection or links yet. Browser test: `npx playwright test tests/browser/pdf-preview.spec.ts --project webkit`. |
 | DeepSeek provider | `src/integrations/harness/providers/deepseek`: runs DeepSeek Harness (`dsh --profile acp`, standard ACP) as a MonoCode agent. Models and reasoning effort come from dsh. dsh sandboxes itself to the workspace and asks no edit approvals, so Supervised and Plan modes are not enforced by it. |
 
 - State and log: `~/.local/state/monocode-fork/` (`update.log`, staged `MonoCode.app`, `built-sha`, `installed-sha`).

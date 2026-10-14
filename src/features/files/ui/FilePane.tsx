@@ -32,6 +32,8 @@ import {
 import { AgentTabView } from "../../sessions/ui/AgentTabView";
 import { MarkdownPreview } from "../../sessions/ui/AgentMarkdown";
 import { BinaryFileView } from "./BinaryFileView";
+import { isPdfPath } from "../../../fork/pdf/pdfDocument";
+import { PdfView } from "../../../fork/pdf/PdfView";
 import { ReleaseNotesSurface } from "../../../app/ui/ReleaseNotesSurface";
 import { isRemoteProjectPath } from "../../projects/model/recents";
 
@@ -212,6 +214,8 @@ function FilePaneComponent({
                     onTerminalMetaChange?.(file.id, patch)
                   }
                 />
+              ) : isPdfPath(file.path) ? (
+                <PdfView path={file.path} cwd={file.cwd} />
               ) : isImagePath(file.path) || isVideoPath(file.path) ? (
                 <BinaryFileView
                   path={file.path}
