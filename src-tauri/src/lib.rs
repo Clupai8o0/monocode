@@ -5,6 +5,8 @@ mod account_identity;
 mod fork_statusline;
 // Fork: the shared Docker stacks panel (vault stacks.py).
 mod fork_stacks;
+mod fork_latex;
+mod fork_office;
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -636,6 +638,8 @@ pub fn run() {
             fork_statusline::fork_statusline, // Fork
             fork_stacks::fork_stacks_list,    // Fork
             fork_stacks::fork_stacks_stop,    // Fork
+            fork_latex::fork_latex_compile,   // Fork
+            fork_office::fork_office_convert, // Fork
         ])
         .build(context)
         .expect("error while building MonoCode");

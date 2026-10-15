@@ -32,21 +32,34 @@ type LoadState =
   | { status: "ready"; doc: PDFDocumentProxy; pages: PageSize[]; size: number }
   | { status: "error"; message: string };
 
-type Props = { path: string; cwd: string };
+type Props = {
+  path: string;
+  cwd: string;
+  /** Watch the file and reload on change (default). LaTeX turns this off and bumps `version` itself. */
+  watch?: boolean;
+  version?: number;
+};
 
 /**
  * Fork feature: read-only PDF preview. Pages are drawn onto canvases by
  * pdf.js, so the PDF never becomes a document in the webview and the CSP
  * stays as it is (`frame-src 'none'`, `object-src 'none'`).
+ *
+ * A reload keeps the current pages up until the new version is ready, so the
+ * scroll position survives a rebuild of the same file.
  */
-export function PdfView({ path, cwd }: Props) {
+export function PdfView({ path, cwd, watch = true, version = 0 }: Props) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+  const shown = useRef<{ path: string; task: PDFDocumentLoadingTask } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
     let task: PDFDocumentLoadingTask | null = null;
-    setState({ status: "loading" });
+    const keepShown = shown.current?.path === path;
+    if (!keepShown) setState({ status: "loading" });
 
     (async () => {
       const bytes = await readBinaryFile(path);
@@ -65,9 +78,16 @@ export function PdfView({ path, cwd }: Props) {
           return { width, height };
         }),
       );
-      if (!cancelled) setState({ status: "ready", doc, pages, size });
+      if (cancelled) return;
+      const previous = shown.current;
+      shown.current = { path, task };
+      setState({ status: "ready", doc, pages, size });
+      // Pages still drawing from the old document finish or fail quietly first.
+      if (previous) window.setTimeout(() => void previous.task.destroy(), 1000);
     })().catch((cause: unknown) => {
       if (cancelled) return;
+      // A half-written rebuild: keep showing the last good version.
+      if (keepShown && shown.current) return;
       setState({
         status: "error",
         message: cause instanceof Error ? cause.message : String(cause),
@@ -76,13 +96,22 @@ export function PdfView({ path, cwd }: Props) {
 
     return () => {
       cancelled = true;
-      void task?.destroy();
+      if (task && task !== shown.current?.task) void task.destroy();
     };
-  }, [path, reloadKey]);
+  }, [path, reloadKey, version]);
+
+  useEffect(
+    () => () => {
+      void shown.current?.task.destroy();
+      shown.current = null;
+    },
+    [],
+  );
 
   const reload = useCallback(() => setReloadKey((value) => value + 1), []);
 
   useEffect(() => {
+    if (!watch) return;
     let timer = 0;
     const stop = watchFile(path, () => {
       window.clearTimeout(timer);
@@ -92,7 +121,7 @@ export function PdfView({ path, cwd }: Props) {
       window.clearTimeout(timer);
       stop();
     };
-  }, [path, reload]);
+  }, [path, reload, watch]);
 
   if (state.status === "loading") {
     return (

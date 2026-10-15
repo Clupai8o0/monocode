@@ -96,6 +96,14 @@ import { editorLint } from "../editor/editorLint";
 import { editorSearch } from "../editor/editorSearch";
 import { editorScrollbar } from "../editor/editorScrollbar";
 import { FilePreviewSearch } from "./FilePreviewSearch";
+import { isDelimitedPath } from "../../../fork/table/csv";
+import { CsvPreview } from "../../../fork/table/CsvPreview";
+import { SvgView } from "../../../fork/svg/SvgView";
+import { isNotebookPath } from "../../../fork/notebook/notebookModel";
+import { NotebookView } from "../../../fork/notebook/NotebookView";
+import { isTexPath } from "../../../fork/latex/latexModel";
+import { LatexViewShell } from "../../../fork/latex/LatexViewShell";
+import { LatexPreview } from "../../../fork/latex/LatexPreview";
 
 type EditorNavigationRequest = EditorNavigation & { token: number };
 
@@ -147,22 +155,26 @@ export function FileEditor({
   } | null>(null);
   const markdown = isMarkdownPath(path);
   const svg = isSvgPath(path);
+  const table = isDelimitedPath(path);
+  const notebook = isNotebookPath(path);
+  const latex = isTexPath(path);
+  const ViewShell = latex ? LatexViewShell : MarkdownViewShell;
   // Diff tabs open as source: the git gutter only renders in the editor.
   const [mode, setMode] = useMarkdownMode(
     showDiff ? `review:${path}` : path,
-    showDiff ? "source" : loadFileViewMode(),
+    showDiff || latex ? "source" : loadFileViewMode(),
   );
   const sourceNavigationToken = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (
       !navigation ||
-      (!markdown && !svg) ||
+      (!markdown && !svg && !table && !notebook && !latex) ||
       sourceNavigationToken.current === navigation.token
     )
       return;
     sourceNavigationToken.current = navigation.token;
     setMode("source");
-  }, [markdown, svg, navigation, setMode]);
+  }, [markdown, svg, table, notebook, latex, navigation, setMode]);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveGeneration = useRef(0);
   const loadGeneration = useRef(0);
@@ -459,8 +471,8 @@ export function FileEditor({
           changes. Line breaks are normalized in this view.
         </p>
       )}
-      {markdown || svg ? (
-        <MarkdownViewShell
+      {markdown || svg || table || notebook || latex ? (
+        <ViewShell
           mode={mode}
           onModeChange={(next) => {
             setMode(next);
@@ -479,6 +491,17 @@ export function FileEditor({
                   onOpenFile={onOpenFile}
                 />
               </FilePreviewSearch>
+            ) : table ? (
+              <CsvPreview path={path} source={draft} />
+            ) : notebook ? (
+              <NotebookView source={draft} cwd={cwd} onOpenFile={onOpenFile} />
+            ) : latex ? (
+              <LatexPreview
+                key={path}
+                path={path}
+                cwd={cwd}
+                onOpenFile={onOpenFile}
+              />
             ) : (
               <SvgPreview source={draft} />
             )
@@ -1286,22 +1309,8 @@ function mergeLineRanges(ranges: LineRange[]): LineRange[] {
  * safe to preview a file the agent may have just written.
  */
 function SvgPreview({ source }: { source: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const next = URL.createObjectURL(
-      new Blob([source], { type: "image/svg+xml" }),
-    );
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [source]);
-
-  if (!url) return null;
-  return (
-    <div className="grid h-full place-items-center overflow-auto p-6">
-      <img src={url} alt="" className="max-h-full max-w-full object-contain" />
-    </div>
-  );
+  // Fork: zoom, background switch and size; still an <img> from a blob URL.
+  return <SvgView source={source} />;
 }
 
 function isSvgPath(path: string): boolean {
