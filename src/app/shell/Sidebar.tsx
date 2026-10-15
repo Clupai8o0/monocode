@@ -155,6 +155,10 @@ import {
 } from "../../features/files/ui/ExplorerMenu";
 import { FileTree } from "../../features/files/ui/FileTree";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
+import {
+  CloseAllSafeButton,
+  CloseBadge,
+} from "../../fork/closeBadges/CloseBadges";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
@@ -1593,6 +1597,7 @@ function SidebarComponent({
         needsApproval={listedApprovalSessionIds.has(session.id)}
         dropTarget={isSessionDrop("session", session.id)}
         compact={compact}
+        closeBadge={!remoteProject}
         now={now}
         onSelect={cardActions.select}
         onOpenWorkItem={
@@ -1868,6 +1873,26 @@ function SidebarComponent({
             >
               <ListFilter className="size-3" strokeWidth={1.75} />
             </SessionsHeaderButton>
+            {!remoteProject && (onArchiveSession || onArchiveSessions) ? (
+              <CloseAllSafeButton
+                candidates={listedSessions.filter(
+                  (session) =>
+                    !session.archived &&
+                    !session.pinned &&
+                    !session.draft &&
+                    session.id !== activeListedSessionId &&
+                    !listedBusySessionIds.has(session.id) &&
+                    !listedApprovalSessionIds.has(session.id),
+                )}
+                onArchive={(ids) => {
+                  if (ids.length > 1 && onArchiveSessions) {
+                    onArchiveSessions(ids, true);
+                  } else {
+                    for (const id of ids) onArchiveSession?.(id, true);
+                  }
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
         <div
@@ -3356,6 +3381,7 @@ export const SessionCard = memo(function SessionCard({
   needsApproval,
   dropTarget,
   compact = false,
+  closeBadge: showCloseBadge = false,
   modelInFooter = false,
   statusLabel,
   project,
@@ -3380,6 +3406,8 @@ export const SessionCard = memo(function SessionCard({
   needsApproval: boolean;
   dropTarget?: boolean;
   compact?: boolean;
+  /** Fork: the close-state badge, read from the local transcript. */
+  closeBadge?: boolean;
   /** Shows the model as its provider's mark beside the branch, so the title
    * shares its row with the time and the card is a line shorter. */
   modelInFooter?: boolean;
@@ -3438,6 +3466,13 @@ export const SessionCard = memo(function SessionCard({
         : draft
           ? "text-content/55"
           : "text-content/45";
+  const closeBadge = (
+    <CloseBadge
+      sessionId={session.id}
+      updatedAt={session.updatedAt}
+      idle={showCloseBadge && !busy && !needsApproval && !draft}
+    />
+  );
   const status = (
     <span
       className={`flex shrink-0 items-center gap-1 text-[11px] tabular-nums ${statusClass}`}
@@ -3746,6 +3781,7 @@ export const SessionCard = memo(function SessionCard({
               </span>
               <span className="flex shrink-0 items-center gap-1.5">
                 {linkedUpdateDot}
+                {closeBadge}
                 {status}
               </span>
             </span>
@@ -3768,6 +3804,7 @@ export const SessionCard = memo(function SessionCard({
             {headerRow ? null : (
               <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
                 {linkedUpdateDot}
+                {closeBadge}
                 {status}
               </span>
             )}

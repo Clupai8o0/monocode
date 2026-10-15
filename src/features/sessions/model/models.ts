@@ -5,6 +5,7 @@ import {
   hasProbedHarnessAvailability,
   isHarnessAvailable,
 } from "../../../integrations/harness/core/availabilityState";
+import { HIDDEN_PROVIDERS } from "../../../fork/hiddenFeatures";
 
 export type ModelSettingChoice = {
   value: string;
@@ -851,7 +852,10 @@ export function firstEnabledHarness(
       hasProbedHarnessAvailability(),
     );
   if (enabled(preferred)) return preferred;
-  return HARNESSES.find(enabled) ?? preferred;
+  return (
+    HARNESSES.find(enabled) ??
+    (HIDDEN_PROVIDERS.has(preferred) ? "claude" : preferred)
+  );
 }
 
 /** Provider + model new conversations should start with. */

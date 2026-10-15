@@ -409,7 +409,7 @@ import {
   type RemoveWorktree,
 } from "../../source-control/model/worktrees";
 import type { Session } from "../../sessions/model/session";
-import { HIDDEN } from "../../../fork/hiddenFeatures";
+import { HIDDEN, HIDDEN_PROVIDERS } from "../../../fork/hiddenFeatures";
 
 /**
  * The `data-setting-id` Settings should reveal when it opens: one of the ids in
@@ -3313,7 +3313,7 @@ function ProvidersPage({
             : "A provider is listed as installed once its CLI is found on your PATH. Uninstalled CLIs stay listed but are left out of the model picker, as are installed ones with Show in picker off. The model beside a provider is what its new conversations start with; Use by default picks the provider itself. CLI paths are global for MonoCode and apply to every project."
         }
       >
-        {HARNESSES.map((harness) => {
+        {HARNESSES.filter((harness) => !HIDDEN_PROVIDERS.has(harness)).map((harness) => {
           const inPicker = project
             ? !(projectSettings.hidden ?? []).includes(harness) &&
               !hiddenGlobally.includes(harness)

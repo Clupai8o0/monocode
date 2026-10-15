@@ -1,4 +1,5 @@
 import type { HarnessId } from "../../../features/sessions/model/session";
+import { HIDDEN_PROVIDERS } from "../../../fork/hiddenFeatures";
 
 /**
  * The probed installer state for every harness. Kept free of the binary
@@ -48,7 +49,7 @@ export function hasProbedHarnessAvailability(): boolean {
 }
 
 export function isHarnessAvailable(id: HarnessId): boolean {
-  return availability[id];
+  return availability[id] && !HIDDEN_PROVIDERS.has(id);
 }
 
 export function setHarnessAvailability(next: HarnessAvailability): void {
