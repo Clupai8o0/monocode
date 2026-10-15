@@ -253,11 +253,6 @@ type Props = {
   ) => void;
   /** Session-level output shown after the latest reply and before its action row. */
   latestTurnAccessory?: ReactNode;
-  /**
-   * Session-level control in the action row of the latest turn that edited
-   * files. A Mono's chat never ends, so its review stays where it began.
-   */
-  editTurnAction?: ReactNode;
   /** False while another tab is in front; local transcript state is retained. */
   visible?: boolean;
   /** Kept mounted after its pane closed. Showing it again counts as a new visit. */
@@ -317,7 +312,6 @@ function AgentTranscriptComponent({
   onRevealReady,
   onNavigateReady,
   latestTurnAccessory,
-  editTurnAction,
 
   visible = true,
   parked = false,
@@ -736,11 +730,6 @@ function AgentTranscriptComponent({
     (latest, turn, index) =>
       turn[0].monoHabit || turn[0].role === "handoff" ? latest : index,
     -1,
-  );
-  const hasEditTurnAction = editTurnAction != null;
-  const editTurnIndex = useMemo(
-    () => (hasEditTurnAction ? lastEditTurnIndex(turns) : -1),
-    [hasEditTurnAction, turns],
   );
   const firstVisibleTurn = Math.max(0, turns.length - visibleTurnCount);
   const visibleTurns = turns.slice(firstVisibleTurn);
@@ -1182,11 +1171,6 @@ function AgentTranscriptComponent({
               )
             : folded;
           const workOpen = openWork[turnId] ?? false;
-          // The action keeps the pane's props, which go stale once parked.
-          const turnEditAction =
-            firstVisibleTurn + turnIndex === editTurnIndex && !parked
-              ? editTurnAction
-              : undefined;
           // The fold line is the turn's status line from the first token to
           // the last: the mark, and the clock beside it. It never moves, so a
           // turn settling does not shuffle the layout around the answer.
@@ -1269,14 +1253,29 @@ function AgentTranscriptComponent({
             item.type === "block"
               ? item.block.id === searchCurrent
               : item.blocks.some((block) => block.id === searchCurrent);
+          // A reaction hides the reply between two messages, so the next
+          // turn's message stacks onto this one as if nothing came between.
+          const stacksIntoNextTurn =
+            reactedOnly &&
+            stacksAfterReaction(
+              turn,
+              turns[firstVisibleTurn + turnIndex + 1],
+              daySeparators,
+            );
+          const stackedOnPreviousTurn =
+            inlineWork &&
+            !!previousTurn &&
+            previousTurn.every((block) => block.role === "user") &&
+            stacksAfterReaction(previousTurn, turn, daySeparators);
           const isCompactFollowUp = (item: TurnItem, index: number) => {
             const next = items[index + 1];
             return (
               inlineWork &&
               item.type === "block" &&
               item.block.role === "user" &&
-              next?.type === "block" &&
-              next.block.role === "user"
+              (next
+                ? next.type === "block" && next.block.role === "user"
+                : stacksIntoNextTurn)
             );
           };
           const renderItem = (item: TurnItem, itemIndex: number) =>
@@ -1332,7 +1331,13 @@ function AgentTranscriptComponent({
                 }
                 layout={transcriptLayout}
                 bubbleTail={!!agentMascot}
+                localMedia={isMonoChat}
                 compactFollowUp={isCompactFollowUp(item, itemIndex)}
+                stackedOnPrevious={
+                  itemIndex === 0
+                    ? stackedOnPreviousTurn
+                    : isCompactFollowUp(items[itemIndex - 1], itemIndex - 1)
+                }
                 delivery={messageDeliveries?.get(item.block.id)}
                 onRetryMessage={onRetryMessage}
                 visible={item.block.role === "user" ? visible : undefined}
@@ -1437,7 +1442,9 @@ function AgentTranscriptComponent({
             <div
               key={turn[0].id}
               data-transcript-turn={turnId}
-              className={`transcript-turn flex min-w-0 flex-col${inlineWork && !reactedOnly ? " transcript-turn-mono" : ""}${
+              // A stacked message sits as close as one in the same turn, so
+              // the gap between turns gives way.
+              className={`transcript-turn flex min-w-0 flex-col${inlineWork && !reactedOnly ? " transcript-turn-mono" : ""}${stacksIntoNextTurn ? " -mb-1" : ""}${
                 isLastTurn ? " transcript-turn-live" : ""
               }${
                 promptAnchor && anchorTurn && isLastTurn && userBlock
@@ -1583,7 +1590,6 @@ function AgentTranscriptComponent({
               {settled &&
               !reactedOnly &&
               (durationMs != null ||
-                turnEditAction ||
                 standaloneReply ||
                 (inlineWork && firstWork >= 0)) ? (
                 <TurnDuration
@@ -1628,7 +1634,6 @@ function AgentTranscriptComponent({
                   onHandoff={
                     onHandoff ? (target) => onHandoff(target, turn) : undefined
                   }
-                  extraAction={turnEditAction}
                 />
               ) : null}
             </div>
@@ -1809,7 +1814,6 @@ function TurnDuration({
   fromModel,
   onSecondOpinion,
   onHandoff,
-  extraAction,
   revealOnHover = false,
 }: {
   elapsedMs: number | null;
@@ -1829,7 +1833,6 @@ function TurnDuration({
   fromModel?: string;
   onSecondOpinion?: (target: ModelTarget) => void;
   onHandoff?: (target: ModelTarget) => void;
-  extraAction?: ReactNode;
   /** Sit in the gap under the turn and show on hover, as a sent message's do. */
   revealOnHover?: boolean;
 }) {
@@ -1882,7 +1885,6 @@ function TurnDuration({
             excludeFromModel
           />
         ) : null}
-        {extraAction}
         <TurnMetricsBadge metrics={metrics} elapsedMs={elapsedMs} />
       </span>
       {labelHidden ? null : (
@@ -2172,6 +2174,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   layout,
   bubbleTail = false,
   compactFollowUp = false,
+  stackedOnPrevious = false,
   delivery,
   onRetryMessage,
   visible,
@@ -2180,6 +2183,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   underLine = false,
   embedded = false,
   cwd,
+  localMedia = false,
   onApproval,
   onSaveNote,
   onSendDraft,
@@ -2199,6 +2203,8 @@ const TranscriptBlock = memo(function TranscriptBlock({
   layout: TranscriptLayout;
   bubbleTail?: boolean;
   compactFollowUp?: boolean;
+  /** True when this message stacks onto the one above it. */
+  stackedOnPrevious?: boolean;
   delivery?: MessageDelivery;
   onRetryMessage?: (blockId: string) => void;
   visible?: boolean;
@@ -2209,6 +2215,8 @@ const TranscriptBlock = memo(function TranscriptBlock({
   /** True when the parent surface already provides the horizontal gutter. */
   embedded?: boolean;
   cwd?: string;
+  /** Show local images and videos a reply links to, as Mono chats do. */
+  localMedia?: boolean;
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
   onSaveNote?: (text: string) => void | Promise<void>;
   onSendDraft?: (block: Block) => boolean | void;
@@ -2231,6 +2239,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
         layout={layout}
         bubbleTail={bubbleTail}
         compactFollowUp={compactFollowUp}
+        stackedOnPrevious={stackedOnPrevious}
         delivery={delivery}
         onRetryMessage={onRetryMessage}
         visible={visible ?? true}
@@ -2352,6 +2361,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
         revealOnMount={revealOnMount}
         cwd={cwd}
         onOpenFile={onOpenFile}
+        localMedia={localMedia}
       />
     </div>
   );
@@ -2359,7 +2369,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
 
 /**
  * A Mono's emoji answer, on the corner of the message it answers. The top
- * left keeps it clear of the bubble's tail and the hover actions below.
+ * left keeps it clear of the hover actions below.
  */
 function MonoReactionBadge({ emoji, live }: { emoji: string; live: boolean }) {
   return (
@@ -2367,11 +2377,9 @@ function MonoReactionBadge({ emoji, live }: { emoji: string; live: boolean }) {
       role="img"
       aria-label={`Reacted ${emoji}`}
       data-mono-reaction={emoji}
-      className={`${live ? "mono-reaction-in " : ""}absolute -top-4 -left-2 z-[1] rounded-full bg-background-base p-0.5 leading-none`}
+      className={`${live ? "mono-reaction-in " : ""}mono-reaction-badge absolute -top-2.5 -left-2.5 z-[1] grid h-[22px] place-items-center rounded-[8px] px-[7px] font-sans text-[11px] leading-none`}
     >
-      <span className="grid h-6 min-w-7 place-items-center rounded-full bg-content/10 px-1.5 font-sans text-[14px]">
-        {emoji}
-      </span>
+      {emoji}
     </span>
   );
 }
@@ -2381,6 +2389,7 @@ function UserMessageBlock({
   layout,
   bubbleTail = false,
   compactFollowUp = false,
+  stackedOnPrevious = false,
   delivery,
   onRetryMessage,
   visible,
@@ -2396,6 +2405,7 @@ function UserMessageBlock({
   layout: TranscriptLayout;
   bubbleTail?: boolean;
   compactFollowUp?: boolean;
+  stackedOnPrevious?: boolean;
   delivery?: MessageDelivery;
   onRetryMessage?: (blockId: string) => void;
   visible: boolean;
@@ -2428,7 +2438,7 @@ function UserMessageBlock({
   const messageAt = block.sentAt ?? block.startedAt;
   const chatSpacing = compactFollowUp
     ? "pt-1 pb-0"
-    : bubbleTail && block.sentAt != null
+    : bubbleTail && (block.sentAt != null || stackedOnPrevious)
       ? "pt-1 pb-5"
       : "pt-1.5 pb-5";
   // A Mono's chat shows sent images above the bubble, like photos in a
@@ -2619,10 +2629,6 @@ function UserMessageBlock({
                   ? "border border-dashed border-content/30 bg-content/4"
                   : "bg-content/10"
               } ${editing ? "edit-last-turn-bubble" : ""} ${
-                bubbleTail && chat && !block.draft && !compactFollowUp
-                  ? `agent-chat-bubble-tail-right ${singleLine ? "[--agent-bubble-radius:1.125rem]" : "[--agent-bubble-radius:0.75rem]"}`
-                  : ""
-              } ${
                 chat
                   ? `w-fit max-w-[min(100%,36rem)] ${singleLine ? "rounded-full" : "rounded-xl"}`
                   : "rounded-lg border border-content/10"
@@ -3434,7 +3440,7 @@ export function MonoActivityTrail({
             <li
               key={first.id}
               data-mono-activity-block={first.id}
-              className="min-w-0 px-1 text-content/80"
+              className="mono-activity-prose min-w-0 px-1 text-content/80"
             >
               <AgentMarkdown
                 text={first.text}
@@ -5089,6 +5095,31 @@ function turnUserBlock(blocks: Block[], managed = false): Block | undefined {
   return undefined;
 }
 
+/**
+ * Whether a Mono turn that ended in only a reaction stacks into the next
+ * one: the next turn opens with a message of the user's own, in the same
+ * stretch of time.
+ */
+function stacksAfterReaction(
+  turn: Block[],
+  next: Block[] | undefined,
+  daySeparators: boolean,
+): boolean {
+  const start = next?.[0];
+  return (
+    !!start &&
+    turn.some((block) => !!block.monoReaction) &&
+    start.role === "user" &&
+    !start.internal &&
+    !start.monoHabit &&
+    !(
+      daySeparators &&
+      start.startedAt != null &&
+      opensNewStretch(start.startedAt, monoTurnLatestStart(turn))
+    )
+  );
+}
+
 function monoTurnUserBlock(
   blocks: Block[],
   deliveries?: ReadonlyMap<string, MessageDelivery>,
@@ -5103,23 +5134,6 @@ function monoTurnUserBlock(
       return block;
   }
   return blocks.find((block) => block.role === "user");
-}
-
-/** Matches the edit tools whose files the session's review records. */
-function lastEditTurnIndex(turns: Block[][]): number {
-  for (let index = turns.length - 1; index >= 0; index--) {
-    const edited = turns[index].some(
-      (block) =>
-        block.role === "tool" &&
-        isEditTool(
-          block.tool?.kind,
-          block.text || block.tool?.title,
-          block.tool?.preview,
-        ),
-    );
-    if (edited) return index;
-  }
-  return -1;
 }
 
 function sumDurations(durations: (number | undefined)[]): number | undefined {

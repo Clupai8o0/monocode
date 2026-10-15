@@ -201,6 +201,18 @@ test("scrolling up interrupts a completed Mono reply's glide", async ({
       ),
     )
     .toBeGreaterThan(100);
+  // The wheel can still be landing its last pixels; measure once it rests.
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (el) =>
+          new Promise<boolean>((resolve) => {
+            const before = el.scrollTop;
+            setTimeout(() => resolve(el.scrollTop === before), 150);
+          }),
+      ),
+    )
+    .toBe(true);
   const top = await scroller.evaluate((el) => el.scrollTop);
   await page.evaluate(() =>
     (window as MonoScrollWindow).completeMonoReply("More text. ".repeat(600)),
