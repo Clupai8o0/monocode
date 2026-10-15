@@ -74,7 +74,15 @@ fn python() -> &'static str {
 }
 
 /// Runs the script; (exited 0, stdout with stderr after it).
-fn run(script: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Vec<u8>), String> {
+pub(crate) fn run(
+    script: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(bool, Vec<u8>), String> {
+    let label = script
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut cmd = Command::new(python());
     cmd.arg(script)
         .args(args)
@@ -91,7 +99,7 @@ fn run(script: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Vec<u8>
     }
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("stacks.py failed to start: {e}"))?;
+        .map_err(|e| format!("{label} failed to start: {e}"))?;
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
 
@@ -99,7 +107,7 @@ fn run(script: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Vec<u8>
     if !exited_by(&mut child, deadline) {
         kill_group(&mut child);
         let _ = child.wait();
-        return Err("stacks.py timed out".into());
+        return Err(format!("{label} timed out"));
     }
     let ok = child.wait().map(|s| s.success()).unwrap_or(false);
     // A child it left running may hold the pipes open; don't wait on it.
@@ -132,7 +140,7 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
-fn last_line(out: &[u8]) -> Option<String> {
+pub(crate) fn last_line(out: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(out);
     let line = text.lines().rev().find(|line| !line.trim().is_empty())?;
     Some(line.trim().chars().take(300).collect())

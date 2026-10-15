@@ -40,6 +40,7 @@ import { FileActionError } from "../../files/ui/FileActionError";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
 import { HarnessIcon } from "../../sessions/ui/HarnessIcon";
 import { TabLabel } from "../../../shared/ui/TabLabel";
+import { ClaimTag } from "../../../fork/claims/ClaimTag"; // Fork
 
 type Props = {
   files: FilePaneTab[];
@@ -395,6 +396,10 @@ export function SurfaceTabs({
                 >
                   {label}
                 </TabLabel>
+                {/* Fork: who is editing this file */}
+                {terminal || agent || changes || commit || review ? null : (
+                  <ClaimTag root={file.cwd} path={file.path} />
+                )}
                 {dirty ? (
                   <span
                     className="size-1.5 shrink-0 rounded-full bg-content/70"

@@ -5,6 +5,8 @@ mod account_identity;
 mod fork_statusline;
 // Fork: the shared Docker stacks panel (vault stacks.py).
 mod fork_stacks;
+// Fork: who is editing which file (vault claims.py), for file tab and Explorer tags.
+mod fork_claims;
 mod fork_latex;
 mod fork_office;
 mod artifacts;
@@ -638,6 +640,7 @@ pub fn run() {
             fork_statusline::fork_statusline, // Fork
             fork_stacks::fork_stacks_list,    // Fork
             fork_stacks::fork_stacks_stop,    // Fork
+            fork_claims::fork_claims_list,    // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
         ])

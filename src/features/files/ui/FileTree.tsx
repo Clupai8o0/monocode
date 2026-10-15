@@ -70,6 +70,7 @@ import {
 } from "../../../shared/lib/drag";
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { ClaimTag } from "../../../fork/claims/ClaimTag"; // Fork
 
 const GIT_STATUS_COLOR: Record<string, string> = {
   modified: "text-amber-400",
@@ -111,6 +112,8 @@ type TreeCtxValue = {
   epoch: number;
   showExcludedFiles: boolean;
   gitStatuses?: GitStatusMap;
+  /** Fork: the tree's root, for the claim tags. */
+  forkRoot: string;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
   onFilePointerDown: (
@@ -991,6 +994,7 @@ export const FileTree = memo(function FileTree({
         epoch,
         showExcludedFiles,
         gitStatuses,
+        forkRoot: cwd, // Fork
         onToggle: toggle,
         onSelect,
         onFilePointerDown,
@@ -1215,6 +1219,7 @@ function TreeNode({ entry, depth }: { entry: FsEntry; depth: number }) {
     dragOverPath,
     epoch,
     gitStatuses,
+    forkRoot,
     onToggle,
     onSelect,
     onFilePointerDown,
@@ -1330,6 +1335,10 @@ function TreeNode({ entry, depth }: { entry: FsEntry; depth: number }) {
           >
             {entry.name}
           </span>
+          {/* Fork: who is editing this file (or, folded, files under it) */}
+          {entry.isDir && open ? null : (
+            <ClaimTag root={forkRoot} path={entry.path} isDir={entry.isDir} />
+          )}
         </button>
       )}
       {entry.isDir && open ? (
