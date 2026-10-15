@@ -534,6 +534,8 @@ import {
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
+import { setHandoffLauncher } from "../fork/handoff/handoffStore";
+import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
 import {
   adjacentItemId,
@@ -2752,6 +2754,26 @@ function Workspace({
     setComposerFocused(true);
     return session.id;
   }, [appendTab, sessionDefaults?.runtimeMode, sidebarCwd]);
+
+  // Fork: "Continue from handoff" opens a session with the prompt in its composer.
+  useEffect(() => {
+    setHandoffLauncher((cwd) => {
+      setSearchViewOpen(false);
+      setInboxViewOpen(false);
+      setNotesViewOpen(false);
+      setAutomationsViewOpen(false);
+      const session = {
+        ...newWorkspaceSession(cwd, sessionDefaults?.runtimeMode),
+        composerSeed: HANDOFF_PROMPT,
+      };
+      const tab = newTab(session.id);
+      setSessions((prev) => [...prev, session]);
+      appendTab(tab, cwd);
+      setActiveTabId(tab.id);
+      setComposerFocused(true);
+    });
+    return () => setHandoffLauncher(null);
+  }, [appendTab, sessionDefaults?.runtimeMode]);
 
   const onSelectRemoteSession = useCallback(
     (project: string, remoteSessionId: string) => {

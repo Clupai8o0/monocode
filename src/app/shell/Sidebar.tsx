@@ -160,6 +160,7 @@ import {
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
+import { HandoffCard } from "../../fork/handoff/HandoffCard"; // Fork
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
@@ -1895,6 +1896,10 @@ function SidebarComponent({
               />
             ) : null}
           </div>
+        ) : null}
+        {/* Fork: continue from the project's .claude/handoff.md */}
+        {tab === "sessions" && !remoteProject && cwd && cwd !== "~" ? (
+          <HandoffCard cwd={cwd} />
         ) : null}
         <div
           ref={(el) => {

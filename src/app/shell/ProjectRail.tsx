@@ -68,6 +68,7 @@ import {
   ProjectAgentBadge,
   ProjectAgentStatusProvider,
 } from "../../fork/projectStatus/ProjectAgentStatus";
+import { HandoffTag } from "../../fork/handoff/HandoffCard";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectLogoIcon } from "../../features/projects/ui/ProjectLogoIcon";
 import { ProjectMascot } from "../../features/projects/ui/ProjectMascot";
@@ -1016,6 +1017,7 @@ function ProjectCard({
         )}
         {/* Fork: done / needs-you marker */}
         <ProjectAgentBadge path={item.path} />
+        <HandoffTag path={item.path} />
         {machine ? (
           <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-content/45">
             {machine.name}
