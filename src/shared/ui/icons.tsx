@@ -108,6 +108,8 @@ import WholeWordIcon from "@hugeicons/core-free-icons/WholeWordIcon";
 import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
 // Fork: the footer Stacks button.
 import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
+import Mail01Icon from "@hugeicons/core-free-icons/Mail01Icon";
+import SendIcon from "@hugeicons/core-free-icons/SendIcon";
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -286,3 +288,6 @@ export const X = wrap(Cancel01Icon, "X");
 export const Zap = wrap(FlashIcon, "Zap");
 // Fork: the footer Stacks button.
 export const Container = wrap(ContainerIcon, "Container");
+// Fork: the session card message badge.
+export const Mail = wrap(Mail01Icon, "Mail");
+export const Send = wrap(SendIcon, "Send");

@@ -159,6 +159,7 @@ import {
   CloseAllSafeButton,
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
+import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
@@ -3467,11 +3468,22 @@ export const SessionCard = memo(function SessionCard({
           ? "text-content/55"
           : "text-content/45";
   const closeBadge = (
-    <CloseBadge
-      sessionId={session.id}
-      updatedAt={session.updatedAt}
-      idle={showCloseBadge && !busy && !needsApproval && !draft}
-    />
+    <>
+      {/* Fork: messages from and to other sessions */}
+      {showCloseBadge && !draft ? (
+        <PeerBadge
+          sessionId={session.id}
+          updatedAt={session.updatedAt}
+          busy={busy}
+          open={isActive}
+        />
+      ) : null}
+      <CloseBadge
+        sessionId={session.id}
+        updatedAt={session.updatedAt}
+        idle={showCloseBadge && !busy && !needsApproval && !draft}
+      />
+    </>
   );
   const status = (
     <span

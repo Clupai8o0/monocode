@@ -4,6 +4,7 @@ import { NOTIFICATION_CLICK_EVENT } from "../../features/notifications/model/not
 import { sessionIdForPid } from "../../integrations/harness/core/child";
 import { PeerMessageCard } from "./PeerMessageCard";
 import { parsePeerMessage, peerPid } from "./peerMessage";
+import { isUrgentPeer } from "./peerStats";
 
 /**
  * A peer message in the transcript. "Open session" shows only when the sender
@@ -29,6 +30,7 @@ export function PeerMessageBlock({
       <PeerMessageCard
         message={message}
         at={message.at}
+        urgent={isUrgentPeer(message.body)}
         onOpen={
           sessionId
             ? () => void emit(NOTIFICATION_CLICK_EVENT, sessionId)
