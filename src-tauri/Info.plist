@@ -10,5 +10,9 @@
 	<string>MonoCode opens project folders you choose, including Documents.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>MonoCode opens project folders you choose, including Downloads.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>MonoCode rings for alerts only at places you save, like home. Elsewhere alerts stay silent.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MonoCode rings for alerts only at places you save, like home. Elsewhere alerts stay silent.</string>
 </dict>
 </plist>

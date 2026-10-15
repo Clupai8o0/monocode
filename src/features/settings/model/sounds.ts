@@ -5,6 +5,7 @@ import {
   type NotificationSubject,
 } from "../../notifications/model/notificationPreferences";
 import { inboxNotificationProject } from "../../notifications/model/notificationProjects";
+import { forkRingAllowed } from "../../../fork/location/location"; // Fork
 
 const KEY = "monocode.sounds";
 const ENABLED_AT_KEY = "monocode.soundsEnabledAt";
@@ -85,6 +86,8 @@ export function playCue(
 export function playCue(cue: SoundCue, subject?: NotificationSubject): boolean {
   if (!loadSoundsEnabled()) return false;
   if (subject && !allowsProjectNotification(subject)) return false;
+  // Fork: alert cues ring only at the user's saved places.
+  if (subject && !forkRingAllowed()) return false;
   if (subject?.occurredAt !== undefined) {
     try {
       if (subject.occurredAt < Number(localStorage.getItem(ENABLED_AT_KEY)))

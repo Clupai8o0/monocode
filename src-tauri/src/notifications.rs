@@ -66,6 +66,8 @@ pub async fn show_notification(
     body: String,
     sound: bool,
 ) -> Result<(), String> {
+    // Fork: silent away from the user's saved places (fork_location.rs).
+    let sound = sound && crate::fork_location::ring_allowed();
     platform::show(&app, &session_id, &title, &subtitle, &body, sound).await
 }
 

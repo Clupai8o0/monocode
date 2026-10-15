@@ -11,6 +11,7 @@ mod fork_latex;
 mod fork_office;
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
+mod fork_location; // Fork
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -659,6 +660,11 @@ pub fn run() {
             fork_workspaces::fork_window_sessions_set,      // Fork
             fork_workspaces::fork_claim_session,            // Fork
             fork_workspaces::fork_workspace_chrome,         // Fork
+            fork_location::fork_location_status,            // Fork
+            fork_location::fork_location_set_mode,          // Fork
+            fork_location::fork_place_add,                  // Fork
+            fork_location::fork_place_remove,               // Fork
+            fork_location::fork_location_open_settings,     // Fork
         ])
         .build(context)
         .expect("error while building MonoCode");
@@ -684,6 +690,7 @@ pub fn run() {
                 macos::prefer_bundle_dock_icon();
             }
             fork_workspaces::reopen(handle); // Fork
+            fork_location::start(handle); // Fork
             window::ensure_launch_window_visible(handle);
         }
         tauri::RunEvent::WindowEvent {
