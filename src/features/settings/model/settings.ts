@@ -14,6 +14,7 @@ import {
   shortcutTokens,
 } from "../../quick-composer/model/quickComposerShortcut";
 import { readFlag, writeFlag } from "./storageFlags";
+import { HIDDEN } from "../../../fork/hiddenFeatures";
 
 const SECTION_KEY = "monocode.settingsSection";
 
@@ -780,6 +781,8 @@ export const NOTES_ENABLED_DEFAULT = true;
 export const NOTES_ENABLED_CHANGE_EVENT = "monocode:notes-enabled-change";
 
 export function loadNotesEnabled(): boolean {
+  // Fork: Notes is hidden in this build.
+  if (HIDDEN.notes) return false;
   return readFlag(NOTES_ENABLED_KEY) ?? NOTES_ENABLED_DEFAULT;
 }
 

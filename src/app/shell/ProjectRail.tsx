@@ -386,6 +386,7 @@ export function ProjectRail({
               ariaLabel={`Search (${MOD}K)`}
             />
             <div className="mt-0.5" />
+            {onOpenInbox ? (
             <RailAction
               label="Inbox"
               icon={Inbox}
@@ -402,6 +403,7 @@ export function ProjectRail({
               dot={inboxUnseen}
               ariaLabel={inboxUnseen ? "Inbox, new items" : "Inbox"}
             />
+            ) : null}
             {notesEnabled ? (
               <RailAction
                 label="Notes"
@@ -411,6 +413,7 @@ export function ProjectRail({
                 ariaLabel="Notes"
               />
             ) : null}
+            {onOpenAutomations ? (
             <RailAction
               label="Automations"
               icon={Zap}
@@ -418,6 +421,7 @@ export function ProjectRail({
               active={automationsActive}
               ariaLabel="Automations"
             />
+            ) : null}
           </div>
 
           <div

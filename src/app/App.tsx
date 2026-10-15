@@ -138,6 +138,7 @@ import {
 import { UsageFooter } from "./shell/UsageFooter";
 import { useProjectBranches } from "../features/source-control/hooks/useProjectBranches";
 import { useInboxActivity } from "../features/inbox/hooks/useInboxUnseen";
+import { HIDDEN, NO_PROJECTS } from "../fork/hiddenFeatures";
 import {
   loadProjectRailOpen,
   loadSessionSidebarOpen,
@@ -8661,6 +8662,8 @@ function Workspace({
   }, [launchAutomation]);
 
   useEffect(() => {
+    // Fork: automations are hidden, so nothing schedules them.
+    if (HIDDEN.automations) return;
     let disposed = false;
     let evaluating = false;
     const evaluate = async () => {
@@ -11343,9 +11346,13 @@ function Workspace({
     unseen: inboxUnseen,
     linkedSessionUpdateIds,
     linkedSessionUpdates,
-  } = useInboxActivity(recents, sidebarCwd, sidebarHistory, {
-    onAppeared: onInboxAppeared,
-  });
+  } = useInboxActivity(
+    // Fork: a hidden inbox polls nothing.
+    HIDDEN.inbox ? NO_PROJECTS : recents,
+    HIDDEN.inbox ? "" : sidebarCwd,
+    sidebarHistory,
+    { onAppeared: onInboxAppeared },
+  );
   linkedSessionUpdatesRef.current = linkedSessionUpdates;
   const inboxRelatedSessions = useMemo(() => {
     const byId = new Map<string, SessionSummary>();
@@ -11484,6 +11491,8 @@ function Workspace({
   }, []);
 
   const onOpenInbox = useCallback(() => {
+    // Fork: hidden in this build, so menu items do nothing.
+    if (HIDDEN.inbox) return;
     workspaceNavigation.cancel();
     startTransition(() => {
       setFilePickerOpen(false);
@@ -11616,6 +11625,8 @@ function Workspace({
   }, []);
 
   const onOpenAutomations = useCallback(() => {
+    // Fork: hidden in this build.
+    if (HIDDEN.automations) return;
     workspaceNavigation.cancel();
     startTransition(() => {
       setFilePickerOpen(false);
@@ -12750,7 +12761,7 @@ function Workspace({
       onSelect={activateTab}
       onNewTerminal={onNewTerminal}
       onOpenSettings={onOpenSettings}
-      onOpenInbox={onOpenInbox}
+      onOpenInbox={HIDDEN.inbox ? undefined : onOpenInbox}
       onOpenNotes={notesEnabled ? onOpenNotes : undefined}
       onClose={onCloseTitleTab}
       onCloseMany={onCloseTabs}
@@ -12862,10 +12873,10 @@ function Workspace({
               openSessions={openProjectSessions}
               onNewTerminal={onNewTerminal}
               onSearch={onOpenSearch}
-              onOpenInbox={onOpenInbox}
+              onOpenInbox={HIDDEN.inbox ? undefined : onOpenInbox}
               onOpenInboxItem={onOpenLinkedWorkItem}
               onOpenNotes={notesEnabled ? onOpenNotes : undefined}
-              onOpenAutomations={onOpenAutomations}
+              onOpenAutomations={HIDDEN.automations ? undefined : onOpenAutomations}
               onGoToFile={onGoToFile}
               searchActive={searchViewOpen}
               inboxActive={inboxViewOpen}
@@ -12934,7 +12945,7 @@ function Workspace({
                     onPickProject={pickProject}
                     onFindInProject={onFindInProject}
                     onSearch={onOpenSearch}
-                    onOpenInbox={onOpenInbox}
+                    onOpenInbox={HIDDEN.inbox ? undefined : onOpenInbox}
                     onOpenNotes={notesEnabled ? onOpenNotes : undefined}
                     onZoomIn={() => {
                       const next = saveUiScale(zoomInUiScale(loadUiScale()));

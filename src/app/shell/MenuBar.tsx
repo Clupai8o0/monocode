@@ -329,7 +329,9 @@ export function MenuBar({
               `${MOD}${SHIFT}B`,
             ),
           },
-          { kind: "item", id: "open_inbox", label: "Inbox" },
+          ...(onOpenInbox
+            ? [{ kind: "item" as const, id: "open_inbox", label: "Inbox" }]
+            : []),
           ...(onOpenNotes
             ? [{ kind: "item" as const, id: "open_notes", label: "Notes" }]
             : []),

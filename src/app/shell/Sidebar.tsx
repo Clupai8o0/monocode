@@ -2672,6 +2672,7 @@ function CompactProjectRail({
           active={searchActive}
           onClick={action(searchActive, onSearch)}
         />
+        {onOpenInbox ? (
         <CompactRailAction
           label={inboxUnseen ? "Inbox, new items" : "Inbox"}
           icon={Inbox}
@@ -2686,6 +2687,7 @@ function CompactProjectRail({
             setInboxMenu({ x, y });
           }}
         />
+        ) : null}
         {onOpenNotes ? (
           <CompactRailAction
             label="Notes"
@@ -2694,12 +2696,14 @@ function CompactProjectRail({
             onClick={action(notesActive, onOpenNotes)}
           />
         ) : null}
+        {onOpenAutomations ? (
         <CompactRailAction
           label="Automations"
           icon={Zap}
           active={automationsActive}
           onClick={action(automationsActive, onOpenAutomations)}
         />
+        ) : null}
       </div>
       <div className="min-h-2 flex-1" />
       <div className="flex w-full flex-col items-center gap-1 py-1.5">

@@ -409,6 +409,7 @@ import {
   type RemoveWorktree,
 } from "../../source-control/model/worktrees";
 import type { Session } from "../../sessions/model/session";
+import { HIDDEN } from "../../../fork/hiddenFeatures";
 
 /**
  * The `data-setting-id` Settings should reveal when it opens: one of the ids in
@@ -913,6 +914,8 @@ function GeneralPage({
             onChange={onTabAnimationsEnabled}
           />
         </Row>
+        {/* Fork: Notes is hidden in this build. */}
+        {HIDDEN.notes ? null : (
         <Row
           id="notes"
           label="Notes"
@@ -920,6 +923,7 @@ function GeneralPage({
         >
           <Toggle label="Notes" on={notesEnabled} onChange={onNotesEnabled} />
         </Row>
+        )}
         {IS_MAC && (
           <Row
             id="quick-composer"
