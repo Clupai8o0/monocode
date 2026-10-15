@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { readSession } from "../sessionRead";
 import type { Block } from "../../features/sessions/model/session";
 import { isMonoSession } from "../../features/monos/model/mono";
 
@@ -199,9 +199,7 @@ async function pump() {
       }
       let record: { blocks?: Block[] } | null;
       try {
-        record = await invoke<{ blocks?: Block[] } | null>("session_get", {
-          sessionId,
-        });
+        record = await readSession(sessionId, updatedAt);
       } catch {
         // Not cached, so the next save or the next mount tries again.
         continue;

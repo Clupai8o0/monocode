@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { readSession, type SessionRecord } from "../sessionRead";
 import type { Block } from "../../features/sessions/model/session";
 import { isMonoSession } from "../../features/monos/model/mono";
 import { parsePeerMessage } from "./peerMessage";
@@ -308,16 +308,9 @@ async function pump() {
         continue;
       }
       lastRead.set(sessionId, Date.now());
-      let record: { blocks?: Block[]; title?: string; cwd?: string } | null;
+      let record: SessionRecord;
       try {
-        // Direct row read, like the close badges: getSession may write repairs.
-        record = await invoke<{
-          blocks?: Block[];
-          title?: string;
-          cwd?: string;
-        } | null>("session_get", {
-          sessionId,
-        });
+        record = await readSession(sessionId, updatedAt);
       } catch {
         continue;
       }
