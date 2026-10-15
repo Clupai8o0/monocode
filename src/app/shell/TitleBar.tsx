@@ -56,6 +56,7 @@ import {
   useExternalTitleTabDrop,
 } from "../../features/workspace/model/paneDrop";
 import type { PaneEdge } from "../../features/workspace/model/layout";
+import { useForkTitle } from "../../fork/alerts/ForkTitle";
 
 export type Tab = {
   id: string;
@@ -785,12 +786,13 @@ function TitleBarComponent({
     return "MonoCode";
   }, [activeTab, cwd]);
 
+  const shownTitle = useForkTitle(systemTitle); // Fork: "2 need you · …"
   useEffect(() => {
-    document.title = systemTitle;
+    document.title = shownTitle;
     try {
-      void getCurrentWindow().setTitle(systemTitle);
+      void getCurrentWindow().setTitle(shownTitle);
     } catch {}
-  }, [systemTitle]);
+  }, [shownTitle]);
 
   const contextTab = tabMenu
     ? tabs.find((tab) => tab.id === tabMenu.tabId)

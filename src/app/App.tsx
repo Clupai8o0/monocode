@@ -532,6 +532,8 @@ import {
   setWindowFocused,
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
+import { useNeedsAgain } from "../fork/alerts/needsAgain";
+import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
 import {
   adjacentItemId,
@@ -2123,10 +2125,12 @@ function Workspace({
     [sessions],
   );
   useInputNotifications(promptableSessions, activeSessionId);
+  useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
 
   // Cache the OS decision so a turn ending later can skip a denied banner.
   useEffect(() => {
-    if (loadNotificationsEnabled()) void probeNotificationPermission();
+    if (loadNotificationsEnabled())
+      void probeNotificationPermission().then(askBannersOnce); // Fork
   }, []);
   const unseenFinishedIds = useUnseenFinishedSessions(
     sessions,

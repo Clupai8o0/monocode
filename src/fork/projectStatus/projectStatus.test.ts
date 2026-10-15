@@ -54,11 +54,15 @@ describe("projectAgentStatus", () => {
 describe("ProjectAgentBadge", () => {
   it("shows nothing for a quiet project or one still working", () => {
     expect(badge([], "/p/a")).toBe("");
-    expect(badge([agent("/p/a", "working"), agent("/p/a", "done")], "/p/a")).toBe("");
+    expect(
+      badge([agent("/p/a", "working"), agent("/p/a", "done")], "/p/a"),
+    ).toBe("");
   });
 
   it("shows done once every agent in the project has finished", () => {
-    expect(badge([agent("/p/a", "done")], "/p/a")).toContain('aria-label="Agent done"');
+    expect(badge([agent("/p/a", "done")], "/p/a")).toContain(
+      'aria-label="Agent done"',
+    );
     expect(
       badge([agent("/p/a", "done"), agent("/p/a", "done")], "/p/a"),
     ).toContain('aria-label="2 agents done"');
@@ -66,10 +70,28 @@ describe("ProjectAgentBadge", () => {
 
   it("puts an agent waiting on you ahead of everything else", () => {
     const html = badge(
-      [agent("/p/a", "working"), agent("/p/a", "waiting"), agent("/p/a", "done")],
+      [
+        agent("/p/a", "working"),
+        agent("/p/a", "waiting"),
+        agent("/p/a", "done"),
+      ],
       "/p/a",
     );
     expect(html).toContain('data-fork-agent-status="waiting"');
     expect(html).toContain('aria-label="Agent needs you"');
+    expect(html).toMatch(/>1<\/span>/);
+  });
+
+  it("counts the agents waiting on you", () => {
+    const html = badge(
+      [
+        agent("/p/a", "waiting"),
+        agent("/p/a", "waiting"),
+        agent("/p/b", "waiting"),
+      ],
+      "/p/a",
+    );
+    expect(html).toContain('aria-label="2 agents need you"');
+    expect(html).toMatch(/>2<\/span>/);
   });
 });

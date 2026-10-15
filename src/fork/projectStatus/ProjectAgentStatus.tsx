@@ -40,32 +40,42 @@ export function ProjectAgentStatusProvider({
   agents: readonly LiveAgent[];
   children: ReactNode;
 }) {
-  return <AgentsContext.Provider value={agents}>{children}</AgentsContext.Provider>;
+  return (
+    <AgentsContext.Provider value={agents}>{children}</AgentsContext.Provider>
+  );
 }
 
-/** Amber pulse when an agent is waiting on you; a green tick when all are done. */
+/**
+ * Amber pulse with the count of agents waiting on you; a green tick when all
+ * are done.
+ */
 export function ProjectAgentBadge({ path }: { path: string }) {
   const agents = useContext(AgentsContext);
   const status = projectAgentStatus(agents, path);
   if (status.waiting > 0) {
     const label =
-      status.waiting === 1 ? "Agent needs you" : `${status.waiting} agents need you`;
+      status.waiting === 1
+        ? "Agent needs you"
+        : `${status.waiting} agents need you`;
     return (
       <span
         role="img"
         data-fork-agent-status="waiting"
         aria-label={label}
         title={label}
-        className="relative grid size-4 shrink-0 place-items-center"
+        className="relative grid h-4 min-w-4 shrink-0 place-items-center"
       >
-        <span className="absolute size-2 animate-ping rounded-full bg-amber-400/60 motion-reduce:animate-none" />
-        <span className="relative size-1.5 rounded-full bg-amber-400" />
+        <span className="absolute size-3 animate-ping rounded-full bg-amber-400/50 motion-reduce:animate-none" />
+        <span className="relative grid h-3.5 min-w-3.5 place-items-center rounded-full bg-amber-400 px-1 text-[9px] font-bold tabular-nums leading-none text-black">
+          {status.waiting}
+        </span>
       </span>
     );
   }
   // While something is still working, upstream's animation already says so.
   if (status.done > 0 && status.working === 0) {
-    const label = status.done === 1 ? "Agent done" : `${status.done} agents done`;
+    const label =
+      status.done === 1 ? "Agent done" : `${status.done} agents done`;
     return (
       <span
         role="img"

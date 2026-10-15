@@ -11,7 +11,8 @@ import { knownNotificationProject } from "./notificationProjects";
 const KEY = "monocode.notifications";
 
 /** Off until the user opts in; enabling asks the OS for permission. */
-export const NOTIFICATIONS_DEFAULT = false;
+// Fork: on by default outside tests, so "needs you" reaches you in other apps.
+export const NOTIFICATIONS_DEFAULT = import.meta.env.MODE !== "test";
 
 export const NOTIFICATIONS_CHANGE_EVENT = "monocode:notifications-change";
 
@@ -86,6 +87,11 @@ let windowFocused =
 
 export function setWindowFocused(focused: boolean) {
   windowFocused = focused;
+}
+
+// Fork: read by src/fork/alerts (re-alert after 5 min).
+export function isWindowFocused(): boolean {
+  return windowFocused;
 }
 
 /**
