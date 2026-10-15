@@ -87,7 +87,7 @@ fn run(cwd: &str, input: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn exited_by(child: &mut Child, deadline: Instant) -> bool {
+pub(crate) fn exited_by(child: &mut Child, deadline: Instant) -> bool {
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return true,
@@ -101,7 +101,7 @@ fn exited_by(child: &mut Child, deadline: Instant) -> bool {
 
 /// Kills the shell and everything in its group. Called before the shell is
 /// reaped, so its pid is still the group id.
-fn kill_group(child: &mut Child) {
+pub(crate) fn kill_group(child: &mut Child) {
     #[cfg(unix)]
     unsafe {
         libc::kill(-(child.id() as i32), libc::SIGKILL);

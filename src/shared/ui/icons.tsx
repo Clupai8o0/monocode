@@ -106,6 +106,8 @@ import UngroupItemsIcon from "@hugeicons/core-free-icons/UngroupItemsIcon";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import WholeWordIcon from "@hugeicons/core-free-icons/WholeWordIcon";
 import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
+// Fork: the footer Stacks button.
+import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -282,3 +284,5 @@ export const WholeWord = wrap(WholeWordIcon, "WholeWord");
 export const Wrench = wrap(Wrench01Icon, "Wrench");
 export const X = wrap(Cancel01Icon, "X");
 export const Zap = wrap(FlashIcon, "Zap");
+// Fork: the footer Stacks button.
+export const Container = wrap(ContainerIcon, "Container");

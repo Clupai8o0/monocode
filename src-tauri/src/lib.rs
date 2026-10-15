@@ -3,6 +3,8 @@ use tauri::Manager;
 mod account_identity;
 // Fork: runs the Claude Code status line for the composer strip.
 mod fork_statusline;
+// Fork: the shared Docker stacks panel (vault stacks.py).
+mod fork_stacks;
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -632,6 +634,8 @@ pub fn run() {
             project_logo::remove_project_logo,
             project_logo::forget_logo_file,
             fork_statusline::fork_statusline, // Fork
+            fork_stacks::fork_stacks_list,    // Fork
+            fork_stacks::fork_stacks_stop,    // Fork
         ])
         .build(context)
         .expect("error while building MonoCode");
