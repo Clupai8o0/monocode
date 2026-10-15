@@ -25,6 +25,8 @@ const ACCURACY_SLACK_MAX_M: f64 = 100.0;
 const FIX_STALE: Duration = Duration::from_secs(15 * 60);
 /// How often a fresh fix is asked for.
 const POLL: Duration = Duration::from_secs(3 * 60);
+/// How often `location.json` is rewritten while the app runs.
+const PUBLISH_EVERY: Duration = Duration::from_secs(60);
 /// Adding "where I am now" waits this long for a first fix.
 const FIX_WAIT: Duration = Duration::from_secs(10);
 const PLACE_CHANGED: &str = "place changed";
@@ -319,7 +321,42 @@ fn status() -> Status {
 }
 
 fn emit(app: &AppHandle) {
-    let _ = app.emit(EVENT, status());
+    let _ = app.emit(EVENT, publish());
+}
+
+fn shared_path() -> Option<PathBuf> {
+    Some(PathBuf::from(crate::dirs_home()?).join(".local/state/monocode-fork/location.json"))
+}
+
+/// The answer for other tools on this Mac (the terminal's alerts.py reads it).
+/// `at` is refreshed every `PUBLISH_EVERY`, so a reader can tell a closed app
+/// from a quiet one. The status is read under the lock, so an older answer
+/// can never land after a newer one.
+fn publish() -> Status {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _writing = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let status = status();
+    let Some(path) = shared_path() else {
+        return status;
+    };
+    let at = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let body = serde_json::json!({
+        "ring": status.ring,
+        "place": status.place,
+        "reason": status.reason,
+        "at": at,
+    });
+    let tmp = path.with_extension("json.tmp");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::write(&tmp, body.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+    status
 }
 
 fn wants_location() -> bool {
@@ -373,6 +410,10 @@ pub fn start(app: &AppHandle) {
     if wants_location() {
         platform::start(app);
     }
+    std::thread::spawn(|| loop {
+        publish();
+        std::thread::sleep(PUBLISH_EVERY);
+    });
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         locate_missing(&app).await;

@@ -267,8 +267,15 @@ fn open_window(app: &AppHandle, slug: &str, name: &str) -> Result<(), String> {
         .map_err(|err| err.to_string())?
         .build()
         .map_err(|err| err.to_string())?;
+    // AppKit calls (constraints, shadow) must run on the main thread: from the
+    // async create/open commands they raised an ObjC exception that aborted
+    // the whole app.
     #[cfg(target_os = "macos")]
-    crate::macos::install(&window);
+    {
+        let styled = window.clone();
+        app.run_on_main_thread(move || crate::macos::install(&styled))
+            .map_err(|err| err.to_string())?;
+    }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = window.set_decorations(false);
@@ -278,16 +285,21 @@ fn open_window(app: &AppHandle, slug: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Launch: bring back every workspace that was open at the last quit.
+/// Launch: bring back every workspace that was open at the last quit. Runs
+/// at Ready on the main thread, so the windows are built from a worker, like
+/// the async commands do.
 pub fn reopen(app: &AppHandle) {
-    let Ok(rows) = with_conn(app, list_rows) else {
-        return;
-    };
-    for (slug, name, open, _) in rows {
-        if open {
-            let _ = open_window(app, &slug, &name);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Ok(rows) = with_conn(&app, list_rows) else {
+            return;
+        };
+        for (slug, name, open, _) in rows {
+            if open {
+                let _ = open_window(&app, &slug, &name);
+            }
         }
-    }
+    });
 }
 
 /// A window went away. Closing a workspace window by hand stops it reopening;
@@ -323,7 +335,8 @@ pub fn fork_workspace_list(app: AppHandle) -> Result<Vec<WorkspaceRow>, String> 
         .collect())
 }
 
-// Async so the window is built off the main thread (see `open_new_window`).
+// Async so the IPC call doesn't block the main thread; `open_window` hops
+// back to it for the AppKit styling.
 #[tauri::command]
 pub async fn fork_workspace_create(app: AppHandle, name: String) -> Result<String, String> {
     let name = clean_name(&name)?;
