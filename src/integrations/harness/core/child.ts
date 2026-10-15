@@ -113,6 +113,12 @@ const pendingExit = new Map<
   Array<{ code: number | null; pid: number }>
 >();
 
+// Fork: the session whose live child has this pid (peer messages' sender).
+export function sessionIdForPid(pid: number): string | undefined {
+  for (const [sessionId, live] of livePid) if (live === pid) return sessionId;
+  return undefined;
+}
+
 /** True when this exit belongs to the child we currently have spawned. */
 export function isCurrentChildExit(
   expectedPid: number | undefined,

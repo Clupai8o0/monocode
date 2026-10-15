@@ -88,6 +88,7 @@ import type {
   SteerTurnInput,
 } from "../../core/types";
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
+import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
 
 /**
  * A PermissionRequest hook can decide before the user touches the prompt; Claude
@@ -905,6 +906,12 @@ function closePendingAssistantMessage(live: Live): void {
 function handleUser(live: Live, rec: Record<string, unknown>): void {
   if (isSubagentMessage(rec)) {
     noteSubagentResults(live, rec);
+    return;
+  }
+  // Fork: keep a message from another Claude Code session as a transcript item.
+  const peer = peerInterjection(rec);
+  if (peer) {
+    live.onEvent(peer);
     return;
   }
   for (const result of toolResultsFromUserMessage(rec)) {

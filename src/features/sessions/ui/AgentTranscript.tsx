@@ -163,6 +163,8 @@ import {
   transcriptMutationNeedsRepaint,
   transcriptWordRanges,
 } from "../model/transcriptHighlights";
+import { PeerMessageBlock } from "../../../fork/peerMessages/PeerMessageBlock"; // Fork
+import { isPeerBlock } from "../../../fork/peerMessages/peerTranscript"; // Fork
 
 const NEAR_BOTTOM_PX = 16;
 const WHEEL_HOLD_MS = 150;
@@ -2334,6 +2336,10 @@ const TranscriptBlock = memo(function TranscriptBlock({
   }
 
   if (block.role === "system") {
+    // Fork: a message from another session gets the peer card.
+    if (isPeerBlock(block)) {
+      return <PeerMessageBlock block={block} embedded={embedded} />;
+    }
     if (block.interjection) {
       return <InterjectionDivider block={block} />;
     }
@@ -4123,6 +4129,8 @@ function ActivityRow({
       />
     );
   }
+  // Fork: a peer message stays a full card inside the work trail too.
+  if (isPeerBlock(block)) return <PeerMessageBlock block={block} embedded />;
   if (block.interjection) {
     return <ActivityInterjectionRow block={block} />;
   }
