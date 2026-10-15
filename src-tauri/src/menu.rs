@@ -166,6 +166,8 @@ pub fn dispatch(app: &AppHandle, id: &str) {
         | "reload"
         | "open_command_palette"
         | "close_all_tabs" => emit_to_focused(app, id),
+        // Fork: open the Workspaces list in the window the click came from.
+        "fork_workspaces" | "fork_new_workspace" => emit_to_focused(app, id),
         _ => {}
     }
 }
@@ -215,6 +217,10 @@ fn build(
         "App: New Window",
         overrides,
     )?;
+    // Fork: named workspace windows (src/fork/workspaces).
+    let fork_new_workspace =
+        MenuItemBuilder::with_id("fork_new_workspace", "New Workspace…").build(app)?;
+    let fork_workspaces = MenuItemBuilder::with_id("fork_workspaces", "Workspaces…").build(app)?;
     let open_project = menu_item(
         app,
         "open_project",
@@ -455,6 +461,8 @@ fn build(
 
     let file = SubmenuBuilder::with_id(app, "file", "File")
         .item(&new_window)
+        .item(&fork_new_workspace) // Fork
+        .item(&fork_workspaces) // Fork
         .item(&open_project)
         .item(&open_search)
         .item(&go_to_file)

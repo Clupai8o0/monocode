@@ -42,6 +42,7 @@ import {
 import { PiUsage } from "./PiUsage";
 import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
+import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
 import {
   ProviderSignInPanel,
   type ProviderSignInState,
@@ -142,6 +143,7 @@ export function UsageFooter({
       {/* Fork: the Stacks button always shows, so the right-hand group does too. */}
       {showTerminals || showTerminalButton || FORK_STACKS ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          <WorkspacesButton />
           <MessagesButton />
           <StacksButton />
           {showTerminals ? (

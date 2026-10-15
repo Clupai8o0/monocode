@@ -533,6 +533,11 @@ import {
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
+import {
+  focusSessionElsewhere,
+  OPEN_SESSION_EVENT,
+  useWindowSessions,
+} from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
@@ -2128,6 +2133,9 @@ function Workspace({
   );
   useInputNotifications(promptableSessions, activeSessionId);
   useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
+  // Fork: report this window's sessions so no other window opens them twice.
+  const forkSessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
+  useWindowSessions(forkSessionIds);
 
   // Cache the OS decision so a turn ending later can skip a denied banner.
   useEffect(() => {
@@ -4463,11 +4471,13 @@ function Workspace({
   );
 
   const ensureOpenSession = useCallback(
-    async (sessionId: string): Promise<Session | null> => {
+    async (sessionId: string, background = false): Promise<Session | null> => {
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
       if (open) return open;
+      // Fork: open in another window already? That one shows it instead.
+      if (await focusSessionElsewhere(sessionId, !background)) return null;
 
       openingSessionIds.current.add(sessionId);
       const restored = await loadStoredSession(sessionId);
@@ -8359,7 +8369,7 @@ function Workspace({
 
   useMonoHabits({
     sessions: () => sessionsRef.current,
-    open: async (id) => (await ensureOpenSession(id)) ?? undefined,
+    open: async (id) => (await ensureOpenSession(id, true)) ?? undefined, // Fork: quiet
     add: (session) => {
       sessionsRef.current = [...sessionsRef.current, session];
       setSessions(sessionsRef.current);
@@ -8595,7 +8605,7 @@ function Workspace({
       if (!isMonoSession(monoId) || removingSessionIds.current.has(monoId))
         return;
       if (
-        !(await ensureOpenSession(monoId)) ||
+        !(await ensureOpenSession(monoId, true)) || // Fork: quiet
         removingSessionIds.current.has(monoId)
       )
         return;
@@ -10936,7 +10946,7 @@ function Workspace({
                 ? readMonoConversation(target, options)
                 : sessionConversationPage(target, options),
             send: async (id, prompt, requestId, notifyMonoId) => {
-              const target = await ensureOpenSessionRef.current(id);
+              const target = await ensureOpenSessionRef.current(id, true); // Fork: quiet
               if (
                 !target ||
                 target.orchestrationLeadId ||
@@ -11007,7 +11017,7 @@ function Workspace({
               return { alreadySubmitted: false };
             },
             draft: async (id, prompt, requestId) => {
-              const target = await ensureOpenSessionRef.current(id);
+              const target = await ensureOpenSessionRef.current(id, true); // Fork: quiet
               if (
                 !target ||
                 target.orchestrationLeadId ||
@@ -11064,7 +11074,7 @@ function Workspace({
               dismissCompletion(id);
             },
             remove: async (id, mode) => {
-              const target = await ensureOpenSessionRef.current(id);
+              const target = await ensureOpenSessionRef.current(id, true); // Fork: quiet
               if (
                 !target ||
                 target.orchestrationLeadId ||
@@ -12377,6 +12387,10 @@ function Workspace({
           .unminimize()
           .then(() => win.setFocus())
           .catch(() => {});
+        actions.current.onOpenApprovalSession(sessionId);
+      }),
+      // Fork: another window asked for a session this one holds.
+      listen<string>(OPEN_SESSION_EVENT, ({ payload: sessionId }) => {
         actions.current.onOpenApprovalSession(sessionId);
       }),
       listen("zoom_in", () => {

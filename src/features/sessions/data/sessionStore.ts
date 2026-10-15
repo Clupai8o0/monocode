@@ -48,6 +48,8 @@ import type {
 
 import { HARNESSES, RUNTIME_MODES } from "../model/session";
 import { sanitizeChecklistOp } from "../../../fork/checklist/checklist";
+// Fork: a workspace window keeps its layout in its own row.
+import { storeCommand } from "../../../fork/workspaces/workspaceWindow";
 
 import { restoreOrchestrationProposal } from "../../orchestration/model/orchestrationPlan";
 
@@ -826,7 +828,7 @@ export async function replaceInFlightSessions(
   const run = inFlightWrite
     .catch(() => undefined)
     .then(() =>
-      invoke("session_set_in_flight", {
+      invoke(storeCommand("session_set_in_flight"), {
         sessions: refs.map((ref) => ({
           sessionId: ref.sessionId,
           cwd: normalizeProjectPath(ref.cwd),
@@ -842,7 +844,7 @@ export async function listInFlightSessions(): Promise<
   { sessionId: string; cwd: string }[]
 > {
   const rows = await invoke<{ sessionId: string; cwd: string }[]>(
-    "session_list_in_flight",
+    storeCommand("session_list_in_flight"),
   );
   return Array.isArray(rows) ? rows : [];
 }
@@ -866,13 +868,15 @@ let workspaceWrite: Promise<unknown> = Promise.resolve();
 export async function saveWorkspaceSnapshot(snapshot: unknown): Promise<void> {
   const run = workspaceWrite
     .catch(() => undefined)
-    .then(() => invoke("workspace_set_snapshot", { snapshot }));
+    .then(() => invoke(storeCommand("workspace_set_snapshot"), { snapshot }));
   workspaceWrite = run;
   await run;
 }
 
 export async function loadWorkspaceSnapshot(): Promise<unknown | null> {
-  const raw = await invoke<unknown | null>("workspace_get_snapshot");
+  const raw = await invoke<unknown | null>(
+    storeCommand("workspace_get_snapshot"),
+  );
   return raw ?? null;
 }
 

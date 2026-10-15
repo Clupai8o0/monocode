@@ -9,6 +9,8 @@ mod fork_stacks;
 mod fork_claims;
 mod fork_latex;
 mod fork_office;
+// Fork: named workspaces, one OS window each, with their own saved layout.
+mod fork_workspaces;
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -288,6 +290,7 @@ pub fn run() {
             reminders::init(app.handle());
             checkpoint::init(app.handle())?;
             menu::install(app.handle())?;
+            fork_workspaces::init(app.handle()); // Fork
             #[cfg(target_os = "windows")]
             tray::install(app.handle())?;
             #[cfg(target_os = "macos")]
@@ -643,6 +646,19 @@ pub fn run() {
             fork_claims::fork_claims_list,    // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
+            fork_workspaces::fork_workspace_list,           // Fork
+            fork_workspaces::fork_workspace_create,         // Fork
+            fork_workspaces::fork_workspace_open,           // Fork
+            fork_workspaces::fork_workspace_rename,         // Fork
+            fork_workspaces::fork_workspace_delete,         // Fork
+            fork_workspaces::fork_workspace_current,        // Fork
+            fork_workspaces::fork_workspace_save,           // Fork
+            fork_workspaces::fork_workspace_load,           // Fork
+            fork_workspaces::fork_workspace_set_in_flight,  // Fork
+            fork_workspaces::fork_workspace_list_in_flight, // Fork
+            fork_workspaces::fork_window_sessions_set,      // Fork
+            fork_workspaces::fork_claim_session,            // Fork
+            fork_workspaces::fork_workspace_chrome,         // Fork
         ])
         .build(context)
         .expect("error while building MonoCode");
@@ -667,6 +683,7 @@ pub fn run() {
                 #[cfg(debug_assertions)]
                 macos::prefer_bundle_dock_icon();
             }
+            fork_workspaces::reopen(handle); // Fork
             window::ensure_launch_window_visible(handle);
         }
         tauri::RunEvent::WindowEvent {
@@ -675,6 +692,7 @@ pub fn run() {
             ..
         } => {
             window::forget_quit_window(handle, &label);
+            fork_workspaces::window_destroyed(handle, &label); // Fork
             let other_window = window::workspace_windows(handle)
                 .iter()
                 .any(|window| window.label() != label);
