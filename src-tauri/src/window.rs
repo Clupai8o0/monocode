@@ -620,6 +620,8 @@ pub fn confirm_quit(app: AppHandle) {
     if let Some(host) = app.try_state::<crate::pty::PtyHost>() {
         host.kill_all();
     }
+    #[cfg(target_os = "macos")]
+    crate::fork_update::on_quit(); // Fork
     app.exit(0);
 }
 

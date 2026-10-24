@@ -12,6 +12,9 @@ mod fork_office;
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
 mod fork_location; // Fork
+// Fork: installs a staged personal build on quit, however MonoCode was opened.
+#[cfg(target_os = "macos")]
+mod fork_update;
 mod artifacts;
 mod automations;
 mod azure_devops;
@@ -714,6 +717,8 @@ pub fn run() {
             }
             fork_workspaces::reopen(handle); // Fork
             fork_location::start(handle); // Fork
+            #[cfg(target_os = "macos")]
+            fork_update::start(); // Fork
             window::ensure_launch_window_visible(handle);
         }
         tauri::RunEvent::WindowEvent {
@@ -747,6 +752,8 @@ pub fn run() {
             window::request_quit(handle);
         }
         tauri::RunEvent::Exit => {
+            #[cfg(target_os = "macos")]
+            fork_update::on_quit(); // Fork
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
         }

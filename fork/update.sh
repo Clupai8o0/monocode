@@ -15,6 +15,8 @@ STAGED="$STATE/MonoCode.app"
 LOG="$STATE/update.log"
 LOCK="$STATE/update.lock"
 BUILT_SHA="$STATE/built-sha"
+# Held while the staged app and built-sha change; the launcher swaps under it too.
+STAGE_LOCK="$STATE/stage.lock"
 BRANCH=mine
 UPSTREAM=upstream/main
 AGENT_MODEL=claude-sonnet-5-5
@@ -146,12 +148,33 @@ if [ "$new" != "$before" ]; then
 fi
 
 rm -rf "$STAGED.tmp"
-if ! { ditto "$app" "$STAGED.tmp" && rm -rf "$STAGED" && mv "$STAGED.tmp" "$STAGED"; }; then
+if ! ditto "$app" "$STAGED.tmp"; then
     log "could not stage the app (disk full?)"
     rm -rf "$STAGED.tmp"
     exit 1
 fi
-echo "$new" >"$BUILT_SHA"
+# shlock takes over a lock whose owner is gone.
+for _ in $(seq 150); do
+    shlock -f "$STAGE_LOCK" -p $$ && break
+    sleep 0.2
+done
+if [ "$(cat "$STAGE_LOCK" 2>/dev/null)" != "$$" ]; then
+    log "could not stage the app: the launcher held the stage lock for 30 s"
+    rm -rf "$STAGED.tmp"
+    exit 1
+fi
+if ! { rm -rf "$STAGED" && mv "$STAGED.tmp" "$STAGED"; }; then
+    log "could not stage the app (disk full?)"
+    rm -rf "$STAGED.tmp" "$STAGE_LOCK"
+    exit 1
+fi
+if ! { echo "$new" >"$BUILT_SHA.tmp" && mv "$BUILT_SHA.tmp" "$BUILT_SHA"; }; then
+    # An app without its SHA could pass for one already installed; drop it.
+    log "could not record the staged SHA (disk full?); nothing staged"
+    rm -rf "$STAGED" "$BUILT_SHA.tmp" "$STAGE_LOCK"
+    exit 1
+fi
+rm -f "$STAGE_LOCK"
 git push --quiet origin "$BRANCH" || log "push to origin failed (kept locally)"
 log "staged ${new:0:7}; loads on next open"
 if [ "$upstream_new" = 1 ]; then

@@ -4,9 +4,83 @@
 # so each open runs the newest build that passed its tests.
 # MonoCode has no CLI or URL hook for opening a folder, so dir's path goes on the
 # clipboard: Open folder (+ next to Projects) -> Cmd+Shift+G -> Cmd+V -> Enter.
+#
+# The installed app also calls this itself (src-tauri/src/fork_update.rs), so a Dock
+# open gets the same: `monocode --update` at launch, `monocode --after-quit PID` as it quits.
 repo=${0:A:h:h}
 state=$HOME/.local/state/monocode-fork
 app=/Applications/MonoCode.app
+
+log_line()
+{
+    print -r -- "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >>$state/update.log
+}
+
+# Swap in the staged build, if there is a newer one and MonoCode is closed.
+# update.sh stages under the same lock, so the app and built-sha always match here.
+swap_staged()
+{
+    local lock=$state/stage.lock
+    # shlock takes over a lock whose owner is gone.
+    for _ in {1..150}; do
+        shlock -f $lock -p $$ && break
+        sleep 0.2
+    done
+    if [[ "$(cat $lock 2>/dev/null)" != $$ ]]; then
+        log_line "install skipped: update.sh held the stage lock for 30 s"
+        return 1
+    fi
+    swap_locked
+    local rc=$?
+    rm -f $lock
+    return $rc
+}
+
+swap_locked()
+{
+    [[ -d $state/MonoCode.app ]] || return 0
+    pgrep -xq monocode && return 0
+    [[ "$(cat $state/built-sha 2>/dev/null)" != "$(cat $state/installed-sha 2>/dev/null)" ]] || return 0
+    # Move the old app aside first and put it back if the new one can't go in.
+    rm -rf $app.old
+    if [[ -e $app ]] && ! mv $app $app.old; then
+        log_line "install failed: could not move the current app aside"
+        echo "monocode: update failed to install, kept the current version" >&2
+        return 1
+    fi
+    if mv $state/MonoCode.app $app; then
+        rm -rf $app.old
+        if ! cp $state/built-sha $state/installed-sha; then
+            # Harmless: the staged copy is gone, so nothing is swapped twice.
+            log_line "installed $(cut -c1-7 $state/built-sha), but could not record it"
+            return 1
+        fi
+        log_line "installed $(cut -c1-7 $state/installed-sha)"
+        echo "MonoCode updated to $(cut -c1-7 $state/installed-sha)"
+    else
+        [[ -e $app.old ]] && mv $app.old $app
+        log_line "install failed: could not move the new app in"
+        echo "monocode: update failed to install, kept the current version" >&2
+        return 1
+    fi
+}
+
+case $1 in
+    --update)
+        nohup $repo/fork/update.sh >/dev/null 2>&1 &!
+        exit 0
+        ;;
+    --after-quit)
+        # Wait up to 60 s for the quitting app to be gone.
+        for _ in {1..300}; do
+            kill -0 $2 2>/dev/null || break
+            sleep 0.2
+        done
+        kill -0 $2 2>/dev/null && exit 0
+        swap_staged
+        exit
+        ;;
+esac
 
 dir=${1:-.}
 if [[ ! -d $dir ]]; then
@@ -15,22 +89,7 @@ if [[ ! -d $dir ]]; then
 fi
 dir=${dir:A}
 
-if [[ -d $state/MonoCode.app ]] && ! pgrep -xq monocode; then
-    if [[ "$(cat $state/built-sha 2>/dev/null)" != "$(cat $state/installed-sha 2>/dev/null)" ]]; then
-        # Move the old app aside first and put it back if the new one can't go in.
-        rm -rf $app.old
-        if [[ ! -e $app ]] || mv $app $app.old; then
-            if mv $state/MonoCode.app $app; then
-                rm -rf $app.old
-                cp $state/built-sha $state/installed-sha
-                echo "MonoCode updated to $(cut -c1-7 $state/installed-sha)"
-            else
-                [[ -e $app.old ]] && mv $app.old $app
-                echo "monocode: update failed to install, kept the current version" >&2
-            fi
-        fi
-    fi
-fi
+swap_staged
 
 print -n -- "$dir" | pbcopy
 open -a $app
