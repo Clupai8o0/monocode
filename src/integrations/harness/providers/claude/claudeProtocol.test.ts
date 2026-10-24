@@ -130,6 +130,7 @@ describe("buildClaudeSpawnArgs", () => {
       expect.arrayContaining(["--permission-mode", "acceptEdits"]),
     );
     expect(args).toEqual(expect.arrayContaining(["--session-id", "sess-1"]));
+    expect(args).toContain("--chrome");
     const settings = args[args.indexOf("--settings") + 1];
     expect(JSON.parse(settings).disableAllHooks).toBeUndefined();
   });
@@ -148,6 +149,7 @@ describe("buildClaudeSpawnArgs", () => {
     });
     expect(args).toContain("--no-session-persistence");
     expect(args).toContain("--strict-mcp-config");
+    expect(args).not.toContain("--chrome");
     expect(args).toEqual(expect.arrayContaining(["--max-turns", "1"]));
     const settings = args[args.indexOf("--settings") + 1];
     expect(JSON.parse(settings)).toMatchObject({ disableAllHooks: true });
