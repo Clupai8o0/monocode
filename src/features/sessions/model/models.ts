@@ -38,6 +38,23 @@ export type AgentModel = {
   contextWindow?: number;
 };
 
+/**
+ * dsh advertises `off`, `low`, `high` and `max` for `reasoning_effort`, and
+ * starts on `high`. Used until the live catalog lands, and if it never does.
+ */
+const DEEPSEEK_EFFORT: ModelSetting = {
+  id: "effort",
+  label: "Reasoning",
+  kind: "select",
+  value: "high",
+  options: [
+    { value: "off", label: "Off" },
+    { value: "low", label: "Low" },
+    { value: "high", label: "High" },
+    { value: "max", label: "Max" },
+  ],
+};
+
 export const MODELS: AgentModel[] = [
   {
     id: "claude:sonnet-5",
@@ -196,10 +213,25 @@ export const MODELS: AgentModel[] = [
     nativeId: "",
   },
   {
-    id: "deepseek:default",
+    id: "deepseek:deepseek-official/deepseek-v4-flash",
     harness: "deepseek",
-    name: "Configured model",
-    nativeId: "",
+    name: "DeepSeek V4 Flash",
+    nativeId: "deepseek-official/deepseek-v4-flash",
+    settings: [DEEPSEEK_EFFORT],
+  },
+  {
+    id: "deepseek:deepseek-official/deepseek-v4-pro",
+    harness: "deepseek",
+    name: "DeepSeek V4 Pro",
+    nativeId: "deepseek-official/deepseek-v4-pro",
+    settings: [DEEPSEEK_EFFORT],
+  },
+  {
+    id: "deepseek:deepseek-official/deepseek-flash",
+    harness: "deepseek",
+    name: "DeepSeek V4.1 Flash",
+    nativeId: "deepseek-official/deepseek-flash",
+    settings: [DEEPSEEK_EFFORT],
   },
   {
     id: "antigravity:gemini-3.8-flash-high",
@@ -225,7 +257,7 @@ export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
   omp: "omp:default",
   fx: "fx:zai/glm-5.2-fast",
   hermes: "hermes:default",
-  deepseek: "deepseek:default",
+  deepseek: "deepseek:deepseek-official/deepseek-v4-flash",
   antigravity: "antigravity:gemini-3.8-flash-high",
   devin: "devin:adaptive",
 };
