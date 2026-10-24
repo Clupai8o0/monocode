@@ -190,6 +190,11 @@ import {
 } from "../../fork/closeBadges/CloseBadges";
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
 import { HandoffCard } from "../../fork/handoff/HandoffCard"; // Fork
+import { ProjectAgentStatusProvider } from "../../fork/projectStatus/ProjectAgentStatus"; // Fork
+import {
+  ProjectSpaceMarks,
+  useProjectSpaceMarksLabel,
+} from "../../fork/projectStatus/ProjectSpaceMarks"; // Fork
 import { SessionCardPreview } from "../../features/sessions/ui/SessionCardPreview";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
@@ -2420,18 +2425,44 @@ function SidebarComponent({
     </div>
   );
 
+  // Fork: archives every listed session whose last reply said safe to close.
+  const closeAllSafeButton =
+    !remoteProject && (onArchiveSession || onArchiveSessions) ? (
+      <CloseAllSafeButton
+        candidates={listedSessions.filter(
+          (session) =>
+            !session.archived &&
+            !session.pinned &&
+            !session.draft &&
+            session.id !== activeListedSessionId &&
+            !listedBusySessionIds.has(session.id) &&
+            !listedApprovalSessionIds.has(session.id),
+        )}
+        onArchive={(ids) => {
+          if (ids.length > 1 && onArchiveSessions) {
+            onArchiveSessions(ids, true);
+          } else {
+            for (const id of ids) onArchiveSession?.(id, true);
+          }
+        }}
+      />
+    ) : null;
+
   // The inset list names its loose sessions like the groups above them, and
   // carries the filter the search row holds elsewhere.
   const sessionsFilterButton = (
-    <SessionsHeaderButton
-      label="Filter sessions"
-      active={filtersActive}
-      open={!!filterMenu}
-      hasPopup
-      onClick={onFilterButtonClick}
-    >
-      <ListFilter className="size-3" strokeWidth={1.75} />
-    </SessionsHeaderButton>
+    <>
+      <SessionsHeaderButton
+        label="Filter sessions"
+        active={filtersActive}
+        open={!!filterMenu}
+        hasPopup
+        onClick={onFilterButtonClick}
+      >
+        <ListFilter className="size-3" strokeWidth={1.75} />
+      </SessionsHeaderButton>
+      {closeAllSafeButton}
+    </>
   );
   // Stands in for the date labels when no loose session is listed, so the
   // filter stays reachable.
@@ -2653,26 +2684,7 @@ function SidebarComponent({
             >
               <ListFilter className="size-3" strokeWidth={1.75} />
             </SessionsHeaderButton>
-            {!remoteProject && (onArchiveSession || onArchiveSessions) ? (
-              <CloseAllSafeButton
-                candidates={listedSessions.filter(
-                  (session) =>
-                    !session.archived &&
-                    !session.pinned &&
-                    !session.draft &&
-                    session.id !== activeListedSessionId &&
-                    !listedBusySessionIds.has(session.id) &&
-                    !listedApprovalSessionIds.has(session.id),
-                )}
-                onArchive={(ids) => {
-                  if (ids.length > 1 && onArchiveSessions) {
-                    onArchiveSessions(ids, true);
-                  } else {
-                    for (const id of ids) onArchiveSession?.(id, true);
-                  }
-                }}
-              />
-            ) : null}
+            {closeAllSafeButton}
           </div>
         ) : null}
         {/* Fork: continue from the project's .claude/handoff.md */}
@@ -3139,13 +3151,16 @@ function SidebarComponent({
           </>
         ) : null}
         {inset && onSelectProject ? (
-          <ProjectSpacesBar
-            projects={spaceProjects}
-            cwd={cwd}
-            busyProjectPaths={busyProjectPaths}
-            onSelectProject={onSelectProject}
-            onProjectContextMenu={headerProjectMenu.open}
-          />
+          // Fork: spaces read their agents' needs-you / done state from here.
+          <ProjectAgentStatusProvider agents={liveAgents}>
+            <ProjectSpacesBar
+              projects={spaceProjects}
+              cwd={cwd}
+              busyProjectPaths={busyProjectPaths}
+              onSelectProject={onSelectProject}
+              onProjectContextMenu={headerProjectMenu.open}
+            />
+          </ProjectAgentStatusProvider>
         ) : null}
       </>
       {insetInboxMenu ? (
@@ -4123,12 +4138,14 @@ function ProjectSpaceButton({
   onContextMenu: (x: number, y: number, trigger: HTMLElement) => void;
 }) {
   const label = useProjectLabel(path);
+  const marks = useProjectSpaceMarksLabel(path); // Fork
+  const name = busy ? `${label}, working` : label;
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
-      aria-label={busy ? `${label}, working` : label}
+      aria-label={marks ? `${name}, ${marks}` : name}
       data-rail-tip={label}
       data-rail-tip-detail={shortcuts || undefined}
       data-tauri-drag-region="false"
@@ -4168,6 +4185,7 @@ function ProjectSpaceButton({
           className="absolute right-1 top-0.5 size-1.5 rounded-full bg-accent"
         />
       ) : null}
+      <ProjectSpaceMarks path={path} />
     </button>
   );
 }
@@ -5405,6 +5423,7 @@ export const SessionCard = memo(function SessionCard({
                   }`}
                 />
                 <span className="flex shrink-0 items-center gap-1">
+                  {closeBadge}
                   {linkedUpdateDot}
                   {workItemBadge}
                   {modeBadge}

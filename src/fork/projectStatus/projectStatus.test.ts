@@ -7,6 +7,7 @@ import {
   ProjectAgentStatusProvider,
   projectAgentStatus,
 } from "./ProjectAgentStatus";
+import { ProjectSpaceMarks } from "./ProjectSpaceMarks";
 
 function agent(cwd: string, state: "working" | "waiting" | "done"): LiveAgent {
   return {
@@ -93,5 +94,44 @@ describe("ProjectAgentBadge", () => {
     );
     expect(html).toContain('aria-label="2 agents need you"');
     expect(html).toMatch(/>2<\/span>/);
+  });
+});
+
+function marks(agents: LiveAgent[], path: string): string {
+  return renderToStaticMarkup(
+    createElement(
+      ProjectAgentStatusProvider,
+      { agents },
+      createElement(ProjectSpaceMarks, { path }),
+    ),
+  );
+}
+
+describe("ProjectSpaceMarks", () => {
+  it("shows nothing for a quiet project or one still working", () => {
+    expect(marks([], "/p/a")).toBe("");
+    expect(
+      marks([agent("/p/a", "working"), agent("/p/a", "done")], "/p/a"),
+    ).toBe("");
+  });
+
+  it("counts the agents waiting on you in the corner", () => {
+    const html = marks(
+      [
+        agent("/p/a", "waiting"),
+        agent("/p/a", "waiting"),
+        agent("/p/a", "done"),
+      ],
+      "/p/a",
+    );
+    expect(html).toContain('data-fork-space-status="waiting"');
+    expect(html).toContain('title="2 agents need you"');
+    expect(html).toMatch(/>2<\/span>/);
+  });
+
+  it("shows a done dot once every agent has finished", () => {
+    expect(marks([agent("/p/a", "done")], "/p/a")).toContain(
+      'data-fork-space-status="done"',
+    );
   });
 });

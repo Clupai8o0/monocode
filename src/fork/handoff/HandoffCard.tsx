@@ -10,7 +10,7 @@ import {
   watchHandoff,
 } from "./handoffStore";
 
-function useHandoff(cwd: string) {
+export function useHandoff(cwd: string) {
   useSyncExternalStore(subscribeHandoffs, handoffsVersion, handoffsVersion);
   useEffect(() => watchHandoff(cwd), [cwd]);
   return handoffFor(cwd);

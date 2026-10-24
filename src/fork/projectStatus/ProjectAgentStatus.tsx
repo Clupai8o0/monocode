@@ -45,13 +45,16 @@ export function ProjectAgentStatusProvider({
   );
 }
 
+export function useProjectAgentStatus(path: string): ProjectAgentStatus {
+  return projectAgentStatus(useContext(AgentsContext), path);
+}
+
 /**
  * Amber pulse with the count of agents waiting on you; a green tick when all
  * are done.
  */
 export function ProjectAgentBadge({ path }: { path: string }) {
-  const agents = useContext(AgentsContext);
-  const status = projectAgentStatus(agents, path);
+  const status = useProjectAgentStatus(path);
   if (status.waiting > 0) {
     const label =
       status.waiting === 1
