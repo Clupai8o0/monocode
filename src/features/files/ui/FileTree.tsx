@@ -71,6 +71,7 @@ import {
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { ClaimTag } from "../../../fork/claims/ClaimTag"; // Fork
+import { PaneHeader } from "../../../shared/ui/PaneHeader";
 
 const GIT_STATUS_COLOR: Record<string, string> = {
   modified: "text-amber-400",
@@ -81,6 +82,7 @@ const GIT_STATUS_COLOR: Record<string, string> = {
 
 type Props = {
   cwd: string;
+  compactHeader?: boolean;
   /** Display identity for the root when it differs from the physical folder. */
   rootLabel?: string;
   onOpenFile: OpenFileFn;
@@ -252,6 +254,7 @@ function explorerItems(
 // intact unless file-tree props, local state, or subscriptions actually change.
 export const FileTree = memo(function FileTree({
   cwd,
+  compactHeader = false,
   rootLabel,
   onOpenFile,
   onOpenTerminal,
@@ -1014,8 +1017,10 @@ export const FileTree = memo(function FileTree({
         onKeyDown={onKeyDown}
         onContextMenu={onBackgroundMenu}
       >
-        <div
-          className="flex h-9 shrink-0 items-center gap-px overflow-visible border-b border-stroke px-2"
+        <PaneHeader
+          compact={compactHeader}
+          role="toolbar"
+          aria-label="Explorer"
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1047,7 +1052,7 @@ export const FileTree = memo(function FileTree({
               <Search className="size-3.5" strokeWidth={1.75} />
             </HeaderIcon>
           ) : null}
-        </div>
+        </PaneHeader>
         <div className="flex h-8 shrink-0 items-center">
           <button
             type="button"

@@ -489,6 +489,7 @@ export function FileEditor({
                   metadataLabel="Properties"
                   cwd={cwd}
                   onOpenFile={onOpenFile}
+                  documentPath={path}
                 />
               </FilePreviewSearch>
             ) : table ? (
