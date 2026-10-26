@@ -82,8 +82,11 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 32] = [
+const APP_ACTIONS: [&str; 35] = [
     "models.list",
+    "projects.logo",
+    "projects.logo.set",
+    "projects.logo.clear",
     "sessions.list",
     "sessions.read",
     "sessions.send",
@@ -121,11 +124,21 @@ const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /o
 Usage: {exe} app ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
 A Mono works on several projects: add "project":"<path or name>" to the
-sessions.*, worktrees.* and folders.* actions to choose which one. It may be
+sessions.*, worktrees.*, folders.* and projects.logo* actions to choose which one. It may be
 left out when the Mono has a single project.
 
 Actions:
   models.list    {}  Available providers, models, settings and permission modes.
+  projects.logo  {}  Read the current project's saved logo path, or null.
+  projects.logo.set {"path":"assets/logo.svg","background":"transparent"}
+                  Apply an existing PNG, JPG, GIF, WebP or SVG image (up to 2 MB)
+                  inside this local project. Absolute or project-relative path.
+                  Use the project's real brand asset when asked to apply a logo.
+                  Optional background: transparent (default), light or dark;
+                  choose light for a black logo on a transparent image.
+                  Idle projects show it; running projects alternate with the
+                  working mascot. The same logo appears in project settings.
+  projects.logo.clear {}  Restore the project's default mascot.
   sessions.list  {}  Project sessions with IDs, busy status, hasDraft and archived.
   sessions.read  {"sessionId":"...","before":"<turnId>","limit":3,"maxChars":1200}
                   Read up to 3 recent user/assistant exchanges. Tools and
@@ -660,6 +673,9 @@ mod tests {
         for action in [
             "worktrees.list",
             "worktrees.create",
+            "projects.logo",
+            "projects.logo.set",
+            "projects.logo.clear",
             "artifacts.list",
             "artifacts.read",
             "artifacts.write",

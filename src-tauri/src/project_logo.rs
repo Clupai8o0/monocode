@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
@@ -79,23 +81,7 @@ fn remove_existing_logos(dir: &Path, project: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn save_project_logo_sync(
-    app: &AppHandle,
-    project: &str,
-    source_path: &str,
-) -> Result<String, String> {
-    let source = expand_home(source_path);
-    let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
-    if !meta.is_file() {
-        return Err("Not a file".into());
-    }
-    if meta.len() > MAX_LOGO_BYTES {
-        return Err(format!(
-            "Logo is too large (maximum {} MB).",
-            MAX_LOGO_BYTES / 1024 / 1024
-        ));
-    }
-
+fn logo_extension(source: &Path) -> Result<String, String> {
     let ext = source
         .extension()
         .and_then(|value| value.to_str())
@@ -104,14 +90,58 @@ fn save_project_logo_sync(
     if !ALLOWED_EXT.contains(&ext.as_str()) {
         return Err("Logo must be a PNG, JPG, GIF, WebP, or SVG image.".into());
     }
+    Ok(ext)
+}
+
+struct LogoSource {
+    file: File,
+    ext: String,
+}
+
+impl LogoSource {
+    // Metadata, the size limit and the actual bytes all come from one opened
+    // handle. No validated path is reopened, even if its ancestors are moved.
+    fn read_bytes(self) -> Result<Vec<u8>, String> {
+        let meta = self.file.metadata().map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            return Err("Not a file".into());
+        }
+        let too_large = || {
+            format!(
+                "Logo is too large (maximum {} MB).",
+                MAX_LOGO_BYTES / 1024 / 1024
+            )
+        };
+        if meta.len() > MAX_LOGO_BYTES {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        self.file
+            .take(MAX_LOGO_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > MAX_LOGO_BYTES {
+            return Err(too_large());
+        }
+        Ok(bytes)
+    }
+}
+
+fn save_project_logo_sync(
+    app: &AppHandle,
+    project: &str,
+    source: LogoSource,
+) -> Result<String, String> {
+    let ext = source.ext.clone();
+    let bytes = source.read_bytes()?;
 
     let dir = project_logos_dir(app)?;
     let stem = logo_stem(project);
     let dest = dir.join(format!("{stem}.{ext}"));
     let temp = dir.join(format!(".{stem}-upload"));
 
-    // Copy before removing the old logo so re-selecting the saved file still works.
-    std::fs::copy(&source, &temp).map_err(|e| format!("{}: {e}", temp.display()))?;
+    // Read before removing the old logo so re-selecting the saved file still works.
+    std::fs::write(&temp, bytes).map_err(|e| format!("{}: {e}", temp.display()))?;
     remove_existing_logos(&dir, project)?;
     std::fs::rename(&temp, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     Ok(dest.to_string_lossy().into_owned())
@@ -122,14 +152,105 @@ fn remove_project_logo_sync(app: &AppHandle, project: &str) -> Result<(), String
     remove_existing_logos(&dir, project)
 }
 
+// Each component is anchored to its already-opened parent and cannot be a
+// symlink. This also secures the project root against replacement after its
+// canonical path is resolved. The returned descriptor is the one we copy.
+#[cfg(unix)]
+fn open_logo_without_symlinks(root: &File, relative: &Path) -> Result<File, String> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Component;
+    let components: Vec<_> = relative.components().collect();
+    let mut directory = root.try_clone().map_err(|e| e.to_string())?;
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            return Err("Project logo path must stay inside this project".into());
+        };
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
+        let mut flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK;
+        if index + 1 < components.len() {
+            flags |= libc::O_DIRECTORY;
+        }
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+        if fd < 0 {
+            return Err(format!(
+                "Cannot open project logo: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        directory = unsafe { File::from_raw_fd(fd) };
+    }
+    Ok(directory)
+}
+
+fn project_logo_source(project_root: &str, source_path: &str) -> Result<LogoSource, String> {
+    #[cfg(unix)]
+    {
+        let root = expand_home(project_root)
+            .canonicalize()
+            .map_err(|e| format!("Project folder: {e}"))?;
+        let source = expand_home(source_path);
+        let source = if source.is_absolute() {
+            source
+        } else {
+            root.join(source)
+        };
+        let source = source.canonicalize().map_err(|e| format!("Logo: {e}"))?;
+        let relative = source
+            .strip_prefix(&root)
+            .map_err(|_| "Project logo must be a file inside this project")?;
+        let ext = logo_extension(&source)?;
+        let filesystem = File::open("/").map_err(|e| e.to_string())?;
+        let root = open_logo_without_symlinks(
+            &filesystem,
+            root.strip_prefix("/").map_err(|e| e.to_string())?,
+        )?;
+        if !root.metadata().map_err(|e| e.to_string())?.is_dir() {
+            return Err("Choose a local project folder first".into());
+        }
+        let file = open_logo_without_symlinks(&root, relative)?;
+        Ok(LogoSource { file, ext })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (project_root, source_path);
+        // Fail closed until a handle-relative no-reparse-point implementation
+        // is available. The manual file chooser remains available everywhere.
+        Err("Agent logo changes require macOS or Linux. Use the project logo picker on this platform.".into())
+    }
+}
+
+fn picked_logo_source(source_path: &str) -> Result<LogoSource, String> {
+    let path = expand_home(source_path);
+    let ext = logo_extension(&path)?;
+    let mut options = File::options();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A picker may return a FIFO (or link to one). Open without waiting
+        // for a writer, then let same-handle metadata reject non-regular files.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(LogoSource { file, ext })
+}
+
 #[tauri::command]
 pub async fn save_project_logo(
     app: AppHandle,
     project: String,
     source_path: String,
+    project_root: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        save_project_logo_sync(&app, &project, &source_path)
+        let source = match project_root {
+            Some(root) => project_logo_source(&root, &source_path)?,
+            None => picked_logo_source(&source_path)?,
+        };
+        save_project_logo_sync(&app, &project, source)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -168,6 +289,156 @@ pub async fn remove_project_logo(app: AppHandle, project: String) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn agent_logo_paths_stay_in_the_selected_project() {
+        let dir = std::env::temp_dir().join(format!("monocode-logo-test-{}", uuid::Uuid::new_v4()));
+        let root = dir.join("project");
+        let sibling = dir.join("project-other");
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        let logo = root.join("assets/logo.svg");
+        std::fs::write(&logo, "<svg/>").unwrap();
+        std::fs::write(sibling.join("logo.svg"), "<svg/>").unwrap();
+        let root_str = root.to_str().unwrap();
+        assert_eq!(
+            project_logo_source(root_str, "assets/logo.svg")
+                .unwrap()
+                .read_bytes()
+                .unwrap(),
+            b"<svg/>"
+        );
+        assert_eq!(
+            project_logo_source(root_str, logo.to_str().unwrap())
+                .unwrap()
+                .read_bytes()
+                .unwrap(),
+            b"<svg/>"
+        );
+        assert!(project_logo_source(root_str, "../project-other/logo.svg").is_err());
+        assert!(project_logo_source(root_str, "missing.svg").is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(sibling.join("logo.svg"), root.join("escaped.svg")).unwrap();
+            assert!(project_logo_source(root_str, "escaped.svg").is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn opened_agent_logo_survives_file_and_ancestor_symlink_swaps() {
+        for swap_ancestor in [false, true] {
+            let dir =
+                std::env::temp_dir().join(format!("monocode-logo-race-{}", uuid::Uuid::new_v4()));
+            let root = dir.join("project");
+            let assets = root.join("assets");
+            let outside = dir.join("outside");
+            std::fs::create_dir_all(&assets).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::write(assets.join("logo.svg"), b"original project image").unwrap();
+            std::fs::write(outside.join("logo.svg"), b"private outside file").unwrap();
+
+            // Exactly the object save_project_logo_sync receives. Replace a
+            // path after authorization/open but before metadata and copying.
+            let opened = project_logo_source(root.to_str().unwrap(), "assets/logo.svg").unwrap();
+            let anchored_root = File::open(&root).unwrap();
+            if swap_ancestor {
+                std::fs::rename(&assets, root.join("original-assets")).unwrap();
+                std::os::unix::fs::symlink(&outside, &assets).unwrap();
+            } else {
+                std::fs::rename(assets.join("logo.svg"), assets.join("original.svg")).unwrap();
+                std::os::unix::fs::symlink(outside.join("logo.svg"), assets.join("logo.svg"))
+                    .unwrap();
+            }
+            assert_eq!(opened.read_bytes().unwrap(), b"original project image");
+            // If the swap lands before the leaf has been opened, no-follow
+            // traversal rejects both the leaf and intermediate symlink cases.
+            assert!(
+                open_logo_without_symlinks(&anchored_root, Path::new("assets/logo.svg")).is_err()
+            );
+            assert!(project_logo_source(root.to_str().unwrap(), "assets/logo.svg").is_err());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn logo_bytes_are_bounded_and_require_a_regular_file() {
+        let dir =
+            std::env::temp_dir().join(format!("monocode-logo-limit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("large.svg");
+        File::create(&path)
+            .unwrap()
+            .set_len(MAX_LOGO_BYTES + 1)
+            .unwrap();
+        let source = LogoSource {
+            file: File::open(&path).unwrap(),
+            ext: "svg".into(),
+        };
+        assert!(source.read_bytes().unwrap_err().contains("too large"));
+        #[cfg(unix)]
+        {
+            let directory = LogoSource {
+                file: File::open(&dir).unwrap(),
+                ext: "svg".into(),
+            };
+            assert!(directory.read_bytes().unwrap_err().contains("Not a file"));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn picked_fifo_or_symlink_is_rejected_without_waiting_for_a_writer() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("monocode-logo-fifo-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("pipe.svg");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let linked = dir.join("linked.svg");
+        std::os::unix::fs::symlink(&fifo, &linked).unwrap();
+        for path in [&fifo, &linked] {
+            let path = path.to_string_lossy().into_owned();
+            let (sender, receiver) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let result = picked_logo_source(&path).and_then(LogoSource::read_bytes);
+                sender.send(result).unwrap();
+            });
+            let result = receiver.recv_timeout(Duration::from_secs(2));
+            let mut returned = result.is_ok();
+            if matches!(result, Err(mpsc::RecvTimeoutError::Timeout)) {
+                // Try to unblock the old implementation before failing. Both
+                // opening the recovery writer and waiting remain bounded.
+                let _writer = match std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(&fifo)
+                {
+                    Ok(writer) => Some(writer),
+                    Err(error) if error.raw_os_error() == Some(libc::ENXIO) => None,
+                    Err(error) => panic!("Cannot unblock FIFO regression: {error}"),
+                };
+                returned = receiver.recv_timeout(Duration::from_secs(2)).is_ok();
+            }
+            if returned || worker.is_finished() {
+                worker.join().unwrap();
+            }
+            if result.is_err() {
+                std::fs::remove_dir_all(&dir).unwrap();
+            }
+            assert!(result
+                .expect("opening a picked FIFO must not block")
+                .unwrap_err()
+                .contains("Not a file"));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn sanitize_project_key_replaces_unsafe_characters() {

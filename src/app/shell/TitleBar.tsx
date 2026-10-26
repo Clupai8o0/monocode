@@ -64,6 +64,7 @@ import {
 } from "../../features/workspace/model/paneDrop";
 import type { PaneEdge } from "../../features/workspace/model/layout";
 import { useForkTitle } from "../../fork/alerts/ForkTitle";
+import { NotificationsButton } from "../../fork/notifications/NotificationsButton";
 import {
   APP_VIEW_LABELS,
   type AppView,
@@ -1155,6 +1156,8 @@ function TitleBarComponent({
               </IconButton>
             </span>
           ) : null}
+          {/* Fork: app-wide activity stays reachable when the sidebar is closed. */}
+          <NotificationsButton />
           <DevModeIcon />
           {/* History sits at the rail's far edge and follows it as the
               sidebar resizes. */}
@@ -1211,6 +1214,11 @@ function TitleBarComponent({
           >
             <DashboardSquare className="size-3.5" strokeWidth={1.75} />
           </IconButton>
+        </div>
+      ) : null}
+      {!inset ? (
+        <div className="flex shrink-0 items-center px-1">
+          <NotificationsButton />
         </div>
       ) : null}
       {showProjectButton && onSelectProject ? (

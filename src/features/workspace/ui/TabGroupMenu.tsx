@@ -21,7 +21,13 @@ import { normalizeHex } from "../../../shared/lib/colorUtils";
 import { projectKey } from "../../../shared/lib/paths";
 import { clearProjectLogo, pickAndSetProjectLogo } from "../../projects/model/projectLogos";
 import { PROJECT_MASCOTS, projectMascot } from "../../projects/model/projectMascots";
-import { TAB_GROUP_COLORS } from "../model/tabGroups";
+import {
+  TAB_GROUP_COLORS,
+  loadTabGroupLogoBackgrounds,
+  notifyTabGroupLogosChanged,
+  saveTabGroupLogoBackground,
+  type ProjectLogoBackground,
+} from "../model/tabGroups";
 import { ColorPickerPopover, ColorSwatchRow } from "../../../shared/ui/ColorPickerPopover";
 import { Popover } from "../../../shared/ui/Popover";
 import { ProjectLogoIcon } from "../../projects/ui/ProjectLogoIcon";
@@ -148,6 +154,9 @@ export function TabGroupMenu({
   footer,
 }: Props) {
   const menuId = useId();
+  const [logoBackground, setLogoBackground] = useState(
+    () => loadTabGroupLogoBackgrounds()[groupId] ?? "transparent",
+  );
   const [submenu, setSubmenu] = useState<{
     item: TabGroupMenuExtraItem;
     anchor: HTMLButtonElement;
@@ -267,7 +276,7 @@ export function TabGroupMenu({
             <div className="min-w-0 flex-1">
               <p className="text-[11px] text-content/50">Project logo</p>
               <p className="truncate text-[12px] text-content/70">
-                {logoPath ? "Shown in tabs and composer" : "Optional — replaces folder icon"}
+                {logoPath ? "Shown in Projects, tabs and composer" : "Optional — replaces folder icon"}
               </p>
             </div>
             {logoPath ? (
@@ -285,6 +294,28 @@ export function TabGroupMenu({
               </button>
             ) : null}
           </div>
+        ) : null}
+
+        {logoProject && logoPath ? (
+          <label className="mb-2 flex items-center justify-between gap-2 px-0.5 text-[11px] text-content/60">
+            Logo background
+            <select
+              aria-label="Logo background"
+              value={logoBackground}
+              onChange={(event) => {
+                const value = event.target.value as ProjectLogoBackground;
+                saveTabGroupLogoBackground(projectKey(logoProject), value);
+                setLogoBackground(value);
+                notifyTabGroupLogosChanged();
+                onLogoChange();
+              }}
+              className="rounded-md border border-content/10 bg-background-base px-2 py-1 text-[11px] text-content outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              <option value="transparent">Transparent</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
         ) : null}
 
         <div className="mb-2">

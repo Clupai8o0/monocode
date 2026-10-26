@@ -28,6 +28,8 @@ const CUSTOM_COLOR_KEY = "monocode:tab-group:custom-colors";
 const LABEL_KEY = "monocode:tab-group:labels";
 const LABELS_CHANGED = "monocode:tab-group-labels-changed";
 const LOGO_KEY = "monocode:tab-group:logos";
+const LOGO_REVISION_KEY = "monocode:tab-group:logo-revision";
+const LOGO_BACKGROUND_KEY = "monocode:tab-group:logo-backgrounds";
 const MASCOT_KEY = "monocode:tab-group:mascots";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -72,6 +74,7 @@ const APPEARANCE_KEYS = [
   CUSTOM_COLOR_KEY,
   LABEL_KEY,
   LOGO_KEY,
+  LOGO_BACKGROUND_KEY,
   MASCOT_KEY,
 ] as const;
 
@@ -252,6 +255,22 @@ export function saveTabGroupLogo(project: string, path: string | null): void {
   writeRecord(LOGO_KEY, next);
 }
 
+export type ProjectLogoBackground = "transparent" | "light" | "dark";
+
+export function loadTabGroupLogoBackgrounds(): Record<string, string> {
+  return readRecord(LOGO_BACKGROUND_KEY);
+}
+
+export function saveTabGroupLogoBackground(
+  project: string,
+  background: ProjectLogoBackground,
+): void {
+  const next = loadTabGroupLogoBackgrounds();
+  if (background === "transparent") delete next[project];
+  else next[project] = background;
+  writeRecord(LOGO_BACKGROUND_KEY, next);
+}
+
 export function loadTabGroupMascots(): Record<string, string> {
   return readRecord(MASCOT_KEY);
 }
@@ -312,8 +331,44 @@ export function resolveTabGroupLogo(
 }
 
 export function notifyTabGroupLogosChanged(): void {
+  // Replacing an image can keep its path. A separate revision wakes other
+  // windows even when the logos record itself has not changed.
+  try {
+    localStorage.setItem(LOGO_REVISION_KEY, `${Date.now()}:${Math.random()}`);
+  } catch {
+    /* The current window can still show the updated image. */
+  }
   logoDisplayRevision += 1;
   window.dispatchEvent(new CustomEvent(TAB_GROUP_LOGOS_CHANGED));
+}
+
+const logoListeners = new Set<() => void>();
+function logoChanged(): void {
+  for (const listener of logoListeners) listener();
+}
+function logoStorageChanged(event: StorageEvent): void {
+  if (
+    event.key !== null && event.key !== LOGO_KEY &&
+    event.key !== LOGO_REVISION_KEY && event.key !== LOGO_BACKGROUND_KEY
+  ) return;
+  logoDisplayRevision += 1;
+  logoChanged();
+}
+
+/** One cross-window storage subscription for all project icons in a window. */
+export function subscribeTabGroupLogos(listener: () => void): () => void {
+  logoListeners.add(listener);
+  if (logoListeners.size === 1) {
+    window.addEventListener(TAB_GROUP_LOGOS_CHANGED, logoChanged);
+    window.addEventListener("storage", logoStorageChanged);
+  }
+  return () => {
+    logoListeners.delete(listener);
+    if (!logoListeners.size) {
+      window.removeEventListener(TAB_GROUP_LOGOS_CHANGED, logoChanged);
+      window.removeEventListener("storage", logoStorageChanged);
+    }
+  };
 }
 
 export function resolveTabGroupColor(

@@ -1,4 +1,6 @@
 import { isHarnessAvailable } from "../../../integrations/harness/core/availability";
+// Fork: agents use the same project logo storage as the manual picker.
+import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { looksLikeProject } from "../../projects/model/recents";
 import {
   mergeModelSettings,
@@ -170,6 +172,9 @@ export type AgentAppHost = {
 
 const FIELDS = new Map<string, readonly string[]>([
   ["models.list", []],
+  ["projects.logo", ["project"]],
+  ["projects.logo.set", ["path", "background", "project"]],
+  ["projects.logo.clear", ["project"]],
   ["sessions.list", ["project"]],
   ["sessions.read", ["sessionId", "before", "limit", "maxChars", "project"]],
   ["sessions.send", ["sessionId", "prompt", "project", "notifyOnComplete"]],
@@ -972,6 +977,17 @@ export async function handleAgentApp(
     };
   }
   switch (action) {
+    case "projects.logo":
+    case "projects.logo.set":
+    case "projects.logo.clear": {
+      const cwd = requireProject(source, input, host);
+      const path = action === "projects.logo.set"
+        ? requiredString(input.path, "path", 4096) : undefined;
+      const background = input.background;
+      if (background !== undefined && background !== "transparent" && background !== "light" && background !== "dark")
+        throw new Error("background must be transparent, light, or dark");
+      return agentProjectLogo(cwd, action, path, background);
+    }
     case "models.list":
       return {
         runtimeModes: RUNTIME_MODES.map((id) => ({

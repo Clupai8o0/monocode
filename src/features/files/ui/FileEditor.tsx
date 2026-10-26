@@ -104,6 +104,10 @@ import { NotebookView } from "../../../fork/notebook/NotebookView";
 import { isTexPath } from "../../../fork/latex/latexModel";
 import { LatexViewShell } from "../../../fork/latex/LatexViewShell";
 import { LatexPreview } from "../../../fork/latex/LatexPreview";
+// Fork: HTML designs render inside the editor's isolated preview.
+import { isHtmlPath } from "../../../fork/html/htmlModel";
+import { HtmlPreview } from "../../../fork/html/HtmlPreview";
+import { HtmlViewShell } from "../../../fork/html/HtmlViewShell";
 
 type EditorNavigationRequest = EditorNavigation & { token: number };
 
@@ -116,6 +120,8 @@ type Props = {
   path: string;
   cwd: string;
   active: boolean;
+  /** A visible preview keeps running while another pane owns keyboard focus. */
+  visible?: boolean;
   showDiff?: boolean;
   navigation?: EditorNavigationRequest | null;
   onDirtyChange: (path: string, dirty: boolean) => void;
@@ -136,6 +142,7 @@ export function FileEditor({
   path,
   cwd,
   active,
+  visible = active,
   showDiff = false,
   navigation,
   onDirtyChange,
@@ -158,23 +165,28 @@ export function FileEditor({
   const table = isDelimitedPath(path);
   const notebook = isNotebookPath(path);
   const latex = isTexPath(path);
-  const ViewShell = latex ? LatexViewShell : MarkdownViewShell;
+  const html = isHtmlPath(path);
+  const ViewShell = latex
+    ? LatexViewShell
+    : html
+      ? HtmlViewShell
+      : MarkdownViewShell;
   // Diff tabs open as source: the git gutter only renders in the editor.
   const [mode, setMode] = useMarkdownMode(
     showDiff ? `review:${path}` : path,
-    showDiff || latex ? "source" : loadFileViewMode(),
+    showDiff || latex ? "source" : html ? "preview" : loadFileViewMode(),
   );
   const sourceNavigationToken = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (
       !navigation ||
-      (!markdown && !svg && !table && !notebook && !latex) ||
+      (!markdown && !svg && !table && !notebook && !latex && !html) ||
       sourceNavigationToken.current === navigation.token
     )
       return;
     sourceNavigationToken.current = navigation.token;
     setMode("source");
-  }, [markdown, svg, table, notebook, latex, navigation, setMode]);
+  }, [markdown, svg, table, notebook, latex, html, navigation, setMode]);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveGeneration = useRef(0);
   const loadGeneration = useRef(0);
@@ -471,12 +483,13 @@ export function FileEditor({
           changes. Line breaks are normalized in this view.
         </p>
       )}
-      {markdown || svg || table || notebook || latex ? (
+      {markdown || svg || table || notebook || latex || html ? (
         <ViewShell
           mode={mode}
+          navigationToken={html ? navigation?.token : undefined}
           onModeChange={(next) => {
             setMode(next);
-            if (!showDiff) saveFileViewMode(next);
+            if (!showDiff && !html) saveFileViewMode(next);
           }}
           preview={
             markdown ? (
@@ -492,6 +505,14 @@ export function FileEditor({
                   documentPath={path}
                 />
               </FilePreviewSearch>
+            ) : html ? (
+              <HtmlPreview
+                source={draft}
+                title={basename(path)}
+                path={path}
+                cwd={cwd}
+                active={visible}
+              />
             ) : table ? (
               <CsvPreview path={path} source={draft} />
             ) : notebook ? (

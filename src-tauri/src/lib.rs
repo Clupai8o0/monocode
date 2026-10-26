@@ -10,6 +10,7 @@ mod fork_poll_cache; // Fork: share short-lived helper reads across windows.
 mod fork_claims;
 mod fork_latex;
 mod fork_office;
+mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
 mod fork_location; // Fork
@@ -287,13 +288,19 @@ pub fn run() {
                 .with_filter(window::is_workspace_window)
                 .build(),
         )
-        .register_uri_scheme_protocol(artifacts::HTML_SCHEME, |ctx, request| {
-            artifacts::serve_html(ctx.app_handle(), &request)
+        .register_asynchronous_uri_scheme_protocol(artifacts::HTML_SCHEME, |ctx, request, responder| {
+            // Fork: bounded off-thread reads keep image/video previews from blocking windows.
+            if request.uri().path().starts_with("/file-preview/") {
+                fork_html::serve_async(ctx.app_handle().clone(), request, responder);
+            } else {
+                responder.respond(artifacts::serve_html(ctx.app_handle(), &request));
+            }
         })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
+        .manage(fork_html::HtmlPreviews::default())
         .setup(|app| {
             harness::reap_orphaned_harness_processes();
             session_store::init(app.handle())?;
@@ -674,6 +681,8 @@ pub fn run() {
             fork_claims::fork_claims_list,    // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
+            fork_html::fork_html_preview_create, // Fork
+            fork_html::fork_html_preview_remove, // Fork
             fork_workspaces::fork_workspace_list,           // Fork
             fork_workspaces::fork_workspace_create,         // Fork
             fork_workspaces::fork_workspace_open,           // Fork
@@ -729,6 +738,7 @@ pub fn run() {
         } => {
             window::forget_quit_window(handle, &label);
             fork_workspaces::window_destroyed(handle, &label); // Fork
+            handle.state::<fork_html::HtmlPreviews>().remove_window(&label); // Fork
             let other_window = window::workspace_windows(handle)
                 .iter()
                 .any(|window| window.label() != label);

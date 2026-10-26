@@ -8,7 +8,8 @@ import {
   resolveTabGroupLogo,
   resolveTabGroupMascot,
 } from "../../workspace/model/tabGroups";
-import { ProjectLogoIcon } from "./ProjectLogoIcon";
+// Fork: a saved brand alternates with the working mascot while running.
+import { ProjectIdentityIcon } from "../../../fork/projectLogos/ProjectIdentityIcon";
 import { ProjectMascot } from "./ProjectMascot";
 
 /** The project's name as the rail and pickers show it, renames included. */
@@ -41,10 +42,14 @@ export function CurrentProjectIcon({
   const logoPath = resolveTabGroupLogo(key, groupLogos);
   if (logoPath)
     return (
-      <ProjectLogoIcon
-        path={logoPath}
-        className={`${className} shrink-0 rounded-[5px]`}
-        imageClassName={className}
+      <ProjectIdentityIcon
+        logoPath={logoPath}
+        project={seed}
+        color={resolveTabGroupColor(key, groupColors, groupCustomColors, seed)}
+        mascot={resolveTabGroupMascot(key, groupMascots)}
+        busy={busy}
+        className={className}
+        mascotClassName={mascotClassName}
       />
     );
   return (

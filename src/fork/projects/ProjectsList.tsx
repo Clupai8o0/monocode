@@ -12,7 +12,6 @@ import {
   Plus,
 } from "../../shared/ui/icons";
 import { HandoffTag } from "../handoff/HandoffCard";
-import { NotificationsButton } from "../notifications/NotificationsButton";
 import {
   projectRows,
   projectStatusLabel,
@@ -111,7 +110,6 @@ export function ProjectsList({
     >
       <div className="flex h-7 shrink-0 items-center gap-1 px-2 text-[12px] font-medium text-content/50">
         <span className="min-w-0 flex-1">Projects</span>
-        <NotificationsButton />
         {onOpenProject ? (
           <button
             type="button"

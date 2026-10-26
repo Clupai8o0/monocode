@@ -1,0 +1,31 @@
+/* Hold each identity for 2.7s with a 300ms crossfade. No layout or JS timers. */
+.project-identity[data-working]:not([data-logo-failed]) .project-identity-logo {
+  animation: project-identity-logo 6s ease-in-out infinite;
+}
+.project-identity[data-working]:not([data-logo-failed]) .project-identity-mascot {
+  animation: project-identity-mascot 6s ease-in-out infinite;
+}
+@keyframes project-identity-logo {
+  0%, 45%, 100% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+}
+@keyframes project-identity-mascot {
+  0%, 45%, 100% { opacity: 0; }
+  50%, 95% { opacity: 1; }
+}
+.project-identity[data-document-hidden] *,
+.project-identity[data-document-hidden] .mascot-active {
+  animation-play-state: paused !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-identity *,
+  .project-identity .mascot-active {
+    animation: none !important;
+  }
+  .project-identity:not([data-logo-failed]) .project-identity-mascot {
+    opacity: 0;
+  }
+  .project-identity .mascot-talk {
+    opacity: 0;
+  }
+}

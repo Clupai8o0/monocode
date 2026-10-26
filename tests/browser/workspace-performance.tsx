@@ -271,6 +271,10 @@ if (!nativeInvoke)
         const id = ++fixtureCallbackId; fixtureCallbacks.set(id, callback); return id;
       },
       invoke: fixtureInvoke,
+      convertFileSrc: (path: string) => {
+        if (projectsFixture && path.startsWith("/tests/browser/fixtures/")) { return path; }
+        return "about:blank";
+      },
     },
   });
 if (nativeInvoke) {
@@ -337,6 +341,10 @@ if (projectsFixture) {
   const { saveInsetLayout } = await import("../../src/features/settings/model/appearance");
   const { saveLiveAgentsEnabled } = await import("../../src/features/settings/model/settings");
   const { setCachedRateLimits } = await import("../../src/features/providers/model/rateLimitsCache");
+  const { saveTabGroupLogo } = await import("../../src/features/workspace/model/tabGroups");
+  // Illustrative brands for UI tests; no client assets are copied into this repo.
+  saveTabGroupLogo("/fixture/projects/morgue", "/tests/browser/fixtures/project-ghost.svg");
+  saveTabGroupLogo("/fixture/projects/panoptic", "/tests/browser/fixtures/project-rings.svg");
   for (const name of [...projectNames].reverse()) { rememberProject(`/fixture/projects/${name}`); }
   saveInsetLayout(true);
   saveLiveAgentsEnabled(true);

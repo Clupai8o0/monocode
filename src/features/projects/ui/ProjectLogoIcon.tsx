@@ -1,8 +1,8 @@
 import { Folder, type IconComponent } from "../../../shared/ui/icons";
 import { useEffect, useState } from "react";
-import { projectLogoSrc } from "../model/projectLogos";
+import { projectLogoBackground, projectLogoSrc } from "../model/projectLogos";
 import {
-  TAB_GROUP_LOGOS_CHANGED,
+  subscribeTabGroupLogos,
   tabGroupLogoDisplayRevision,
 } from "../../workspace/model/tabGroups";
 
@@ -12,6 +12,7 @@ type Props = {
   imageClassName?: string;
   fallback?: IconComponent;
   fallbackStrokeWidth?: number;
+  onError?: () => void;
 };
 
 export function ProjectLogoIcon({
@@ -20,13 +21,13 @@ export function ProjectLogoIcon({
   imageClassName,
   fallback: Fallback = Folder,
   fallbackStrokeWidth = 1.5,
+  onError,
 }: Props) {
   const [revision, setRevision] = useState(tabGroupLogoDisplayRevision);
 
   useEffect(() => {
     const refresh = () => setRevision(tabGroupLogoDisplayRevision());
-    window.addEventListener(TAB_GROUP_LOGOS_CHANGED, refresh);
-    return () => window.removeEventListener(TAB_GROUP_LOGOS_CHANGED, refresh);
+    return subscribeTabGroupLogos(refresh);
   }, []);
 
   const src = projectLogoSrc(path);
@@ -36,7 +37,9 @@ export function ProjectLogoIcon({
         key={`${path ?? ""}:${revision}`}
         src={src}
         alt=""
-        className={`rounded-sm object-cover ${className} ${imageClassName ?? ""}`}
+        style={{ backgroundColor: projectLogoBackground(path) }}
+        onError={onError}
+        className={`rounded-sm object-contain ${className} ${imageClassName ?? ""}`}
       />
     );
   }

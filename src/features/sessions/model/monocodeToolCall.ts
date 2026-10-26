@@ -8,6 +8,9 @@ export type MonoCodeToolCall = {
 
 const ACTION_LABELS: Record<string, string> = {
   "models.list": "List models",
+  "projects.logo": "Read project logo",
+  "projects.logo.set": "Set project logo",
+  "projects.logo.clear": "Clear project logo",
   "sessions.list": "List sessions",
   "sessions.read": "Read a session",
   "sessions.send": "Continue a session",

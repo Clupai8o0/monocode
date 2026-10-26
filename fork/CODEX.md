@@ -7,6 +7,7 @@ Codex uses MonoCode's composer and app controls; Claude-only terminal commands a
 | Effort | Select it in the composer model picker; each interactive turn now also receives the value MonoCode submits. |
 | Mentions and skills | Use `@` for file references and `/` for skills; both were already supported. |
 | Session communication | Enable `/operator` for project-scoped session listing, reading and follow-ups; recipients must be idle. |
+| Project logos | With `/operator` enabled, `monocode app projects.logo.set --json '{"path":"assets/logo.svg","background":"transparent"}'` applies an image inside this project; `projects.logo.clear` restores the mascot. |
 | Message cards | Received cross-session envelopes now render in Codex; explicit Codex senders use the Codex icon. |
 | Sent-message badges | Successful MCP `SendMessage` receipts count; native Codex child-agent messages do not count as messages to independent sessions. |
 | Artifact links | Existing `claude.ai` artifact-link chips now appear in Codex conversations too, without running Claude's status script. |

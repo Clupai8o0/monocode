@@ -5,6 +5,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { notificationMuteActions } from "../../notifications/ui/notificationMuteActions";
 import { TabGroupMenu } from "./TabGroupMenu";
 import { BellOff } from "../../../shared/ui/icons";
+import { loadTabGroupLogoBackgrounds, saveTabGroupLogo } from "../model/tabGroups";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -40,7 +46,7 @@ function hover(label: string) {
   );
 }
 
-function renderMenu(onExtraPick = vi.fn()) {
+function renderMenu(onExtraPick = vi.fn(), logoProject?: string) {
   act(() =>
     root.render(
       createElement(TabGroupMenu, {
@@ -75,11 +81,35 @@ function renderMenu(onExtraPick = vi.fn()) {
           },
         ],
         onExtraPick,
+        ...(logoProject ? {
+          groupId: logoProject,
+          logoProject,
+          logoPath: "/app/logos/brand.png",
+        } : {}),
       }),
     ),
   );
   return onExtraPick;
 }
+
+it("persists a readable logo backdrop through the existing project menu", () => {
+  const cwd = "/projects/panoptic";
+  saveTabGroupLogo(cwd, "/app/logos/brand.png");
+  renderMenu(vi.fn(), cwd);
+  const select = document.querySelector<HTMLSelectElement>('[aria-label="Logo background"]')!;
+  expect(select.value).toBe("transparent");
+  act(() => {
+    select.value = "light";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(loadTabGroupLogoBackgrounds()[cwd]).toBe("light");
+  expect(document.querySelector("img")?.style.backgroundColor).toBe("#ffffff");
+  act(() => {
+    select.value = "transparent";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(loadTabGroupLogoBackgrounds()[cwd]).toBeUndefined();
+});
 
 it("fully expands the context menu without an internal scroll region", () => {
   renderMenu();

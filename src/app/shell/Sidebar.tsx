@@ -2587,6 +2587,8 @@ function SidebarComponent({
           : " body-glass border-r border-stroke"
       }`}
     >
+      {/* Fork: keep the current project/worktree above global navigation and Projects. */}
+      {inset ? workspaceHeader : null}
       {/* Fork: projects stay visible while the selected project's sessions scroll. */}
       {inset ? navList : null}
       {inset && onSelectProject ? (
@@ -2604,7 +2606,7 @@ function SidebarComponent({
           switches projects. */}
       {railVisible || inset ? (
         <>
-          {workspaceHeader}
+          {inset ? null : workspaceHeader}
           {/* The inset sidebar has no tabs: the project tools live in the
               right panel. */}
           {inset ? null : (

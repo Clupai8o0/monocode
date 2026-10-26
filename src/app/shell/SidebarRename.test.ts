@@ -253,7 +253,7 @@ describe("inset Projects list", () => {
     expect(rows()).toEqual([paths[2], paths[1], paths[0]]);
     expect(projects.textContent).toContain("Projects");
     expect(projects.textContent).toContain("Running tests");
-    expect(projects.querySelector("[data-fork-notifications]")).not.toBeNull();
+    expect(projects.querySelector("[data-fork-notifications]")).toBeNull();
     expect(projects.querySelector('[aria-current="page"]')?.textContent).toContain("project");
     expect(projects.querySelector("svg")).not.toBeNull();
     expect(container.querySelector(".sidebar-session-scroll")?.contains(projects)).toBe(false);
@@ -268,7 +268,11 @@ describe("inset Projects list", () => {
   it("keeps the real project settings and worktree menu reachable", async () => {
     setupProjects();
     await act(async () => render());
-    act(() => container.querySelector<HTMLButtonElement>('[aria-label="project menu"]')!.click());
+    const projectMenu = container.querySelector<HTMLButtonElement>('[aria-label="project menu"]')!;
+    const projects = container.querySelector<HTMLElement>("[data-fork-projects]")!;
+    expect(projectMenu.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelectorAll('[aria-label="project menu"]')).toHaveLength(1);
+    act(() => projectMenu.click());
     expect(document.querySelector('[role="menu"][data-project-menu]')?.textContent).toContain("Switch worktree");
     pressKey(document.body, "Escape");
     act(() => container.querySelector<HTMLButtonElement>('[aria-label="Project settings for other"]')!.click());
