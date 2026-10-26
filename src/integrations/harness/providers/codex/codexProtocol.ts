@@ -23,6 +23,8 @@ import {
 import { formatShellIntent, inferShellIntent } from "../../core/shellIntent";
 import { streamTextDelta } from "../../core/streamText";
 import type { HarnessEvent } from "../../core/types";
+import { codexAppContext } from "../../../../fork/codex/appContext"; // Fork
+import { isPeerSendTool } from "../../../../fork/peerMessages/peerMessage"; // Fork
 
 /** Codex approval / sandbox settings for thread/start and turn/start. */
 export type CodexThreadConfig = {
@@ -141,6 +143,8 @@ export function buildTurnStartParams(input: {
   effort?: string;
   serviceTier?: string;
   intent?: TurnIntent;
+  /** Fork: desktop context only for interactive sessions, not helper prompts. */
+  monoCodeContext?: boolean;
 }): Record<string, unknown> {
   const runtimeConfig = runtimeModeToCodexConfig(
     input.runtimeMode,
@@ -173,9 +177,16 @@ export function buildTurnStartParams(input: {
         },
       }
     : undefined;
+  const turnInput = codexInput(input.prompt, input.attachments);
+  if (input.monoCodeContext && turnInput.length > 0) {
+    turnInput.unshift({
+      type: "text",
+      text: codexAppContext(input.effort, input.controlsAgents === true),
+    });
+  }
   return {
     threadId: input.threadId,
-    input: codexInput(input.prompt, input.attachments),
+    input: turnInput,
     approvalPolicy: config.approvalPolicy,
     approvalsReviewer: config.approvalsReviewer,
     sandboxPolicy: config.sandboxPolicy,
@@ -857,6 +868,10 @@ function mapToolItem(
       kind: "other",
       status,
       preview,
+      // Fork: preserve the MCP receipt so sent-message badges can read it.
+      ...(isPeerSendTool(tool) && item.result != null
+        ? { detail: JSON.stringify(item.result) }
+        : {}),
     };
   }
 

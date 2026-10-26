@@ -98,6 +98,7 @@ export function UsageProviderChip({
   onManageAccounts,
   onConsumeReset,
   onReconnect,
+  onOpen,
   presentation,
   variant = "footer",
 }: {
@@ -112,6 +113,8 @@ export function UsageProviderChip({
   onManageAccounts?: () => void;
   onConsumeReset?: (creditId?: string) => Promise<CodexRateLimitResetOutcome>;
   onReconnect?: () => Promise<void>;
+  /** Re-check stale account data when its usage details become visible. */
+  onOpen?: () => void;
   /** `composer` matches the quiet tool buttons under a Mono's composer. */
   variant?: UsageChipVariant;
 }) {
@@ -257,7 +260,10 @@ export function UsageProviderChip({
               ? "Loading usage…"
               : "Usage details")
         }
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (!open) onOpen?.();
+          setOpen((value) => !value);
+        }}
       >
         <HarnessIcon harness={iconHarness} className="size-3 shrink-0" />
         {loading ? (

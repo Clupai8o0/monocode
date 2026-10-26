@@ -113,7 +113,15 @@ async function outbound(
       await running;
     }
   }
-  return sent.find((m) => m.method === method)?.params.input;
+  const input = sent.find((m) => m.method === method)?.params.input;
+  // Fork: interactive turns include host context before the original inputs.
+  if (method === "turn/start") {
+    expect(input[0]).toMatchObject({
+      type: "text", text: expect.stringContaining("<monocode_context>"),
+    });
+    return input.slice(1);
+  }
+  return input;
 }
 
 describe("Codex attachment delivery", () => {

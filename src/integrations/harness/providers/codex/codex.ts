@@ -49,6 +49,7 @@ import {
 import { codexMcpConfirmation } from "./codexElicitation";
 import { snapshotRemainder } from "../../core/streamText";
 import { prepareCodexMonoContext } from "./codexStore";
+import { CodexPeerMessages } from "../../../../fork/codex/peerMessages"; // Fork
 import type {
   ApprovalDecision,
   CompactContextInput,
@@ -115,6 +116,7 @@ type Live = {
   emittedReasoningByItem: Map<string, string>;
   emittedGeneratedImages: Set<string>;
   emittedAsyncQuestions: Set<string>;
+  peerMessages: CodexPeerMessages; // Fork: injected messages versus user echoes.
   turnGeneration: number;
   notificationQueue: Promise<void> | null;
   /** Child thread id -> the agent tool row that spawned it. */
@@ -300,6 +302,7 @@ export async function steerCodexTurn(input: SteerTurnInput): Promise<void> {
   }
 
   try {
+    live.peerMessages.rememberInput(params.input); // Fork
     await live.rpc.request("turn/steer", params);
   } catch (error) {
     if (live.activeTurnId !== turnId)
@@ -346,6 +349,7 @@ export function respondCodexQuestion(
   }
   pending.sending = true;
   keepCodexQuestionOpen(sessionId, requestId);
+  live.peerMessages.rememberInput([{ type: "text", text }]); // Fork
   void live.rpc
     .request(
       "turn/steer",
@@ -781,6 +785,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       emittedReasoningByItem: new Map(),
       emittedGeneratedImages: new Set(),
       emittedAsyncQuestions: new Set(),
+      peerMessages: new CodexPeerMessages(), // Fork
       turnGeneration: 0,
       notificationQueue: null,
       subagentThreads: new Map(),
@@ -827,6 +832,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     effort,
     serviceTier,
     intent: input.intent,
+    monoCodeContext: true, // Fork: current effort and desktop affordances.
   });
 
   if (Array.isArray(params.input) && params.input.length === 0) {
@@ -837,6 +843,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.emittedReasoningByItem.clear();
   live.emittedGeneratedImages.clear();
   live.emittedAsyncQuestions.clear();
+  live.peerMessages.startTurn(params.input); // Fork
   live.turnUsage.turn = {};
   live.turnGeneration += 1;
 
@@ -871,6 +878,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   } finally {
     live.turnDone = null;
     live.turnFailed = null;
+    live.peerMessages.endTurn(); // Fork: retain no prompt envelopes while idle.
   }
 }
 
@@ -937,6 +945,8 @@ function handleNotification(
   // turn/completed (and turn/aborted) settle sendCodexTurn, which is what the
   // UI uses for busy / stop / "Working for".
   const mapped = mapCodexNotification(method, params);
+  const peer = live.peerMessages.receive(method, params); // Fork
+  if (peer) mapped.events.push(peer);
   if (mapped.diagnostic) {
     console.debug(
       `[monocode] codex ${live.threadId} ${method}`,

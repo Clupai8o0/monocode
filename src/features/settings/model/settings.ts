@@ -180,7 +180,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "mobile-access",
     section: "connections",
     label: "Your phones",
-    keywords: "mobile phone iphone qr pair code router device",
+    keywords: "mobile phone iphone qr pair code router device remote control codex claude",
   },
   {
     id: "remote-machines",

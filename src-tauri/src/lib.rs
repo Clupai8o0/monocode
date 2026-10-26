@@ -5,6 +5,7 @@ mod account_identity;
 mod fork_statusline;
 // Fork: the shared Docker stacks panel (vault stacks.py).
 mod fork_stacks;
+mod fork_poll_cache; // Fork: share short-lived helper reads across windows.
 // Fork: who is editing which file (vault claims.py), for file tab and Explorer tags.
 mod fork_claims;
 mod fork_latex;

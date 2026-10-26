@@ -4,6 +4,8 @@ const child = vi.hoisted(() => ({
   live: 0,
   maxLive: 0,
   spawned: [] as string[],
+  ids: [] as string[],
+  killed: [] as string[],
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -17,7 +19,7 @@ vi.mock("../../../integrations/harness/core/child", () => ({
     version: "devin 3000.6.7 (260a97c8)",
   }),
   spawnChild: async (
-    _id: string,
+    id: string,
     _path: string,
     _args: string[],
     _cwd: string,
@@ -26,12 +28,15 @@ vi.mock("../../../integrations/harness/core/child", () => ({
     child.live += 1;
     child.maxLive = Math.max(child.maxLive, child.live);
     child.spawned.push(account.id);
+    child.ids.push(id);
   },
   watchChild: () => undefined,
   unwatchChild: () => {
     child.live = Math.max(0, child.live - 1);
   },
-  killChild: async () => undefined,
+  killChild: async (id: string) => {
+    child.killed.push(id);
+  },
 }));
 vi.mock("../../../integrations/harness/core/jsonRpc", () => ({
   JsonRpcClient: class {
@@ -99,6 +104,8 @@ describe("fetchCodexRateLimits", () => {
     child.live = 0;
     child.maxLive = 0;
     child.spawned = [];
+    child.ids = [];
+    child.killed = [];
   });
 
   it("runs usage probes for different accounts one at a time", async () => {
@@ -117,5 +124,23 @@ describe("fetchCodexRateLimits", () => {
     expect(results.map((result) => result.session?.usedPercent)).toEqual([
       10, 10, 10,
     ]);
+  });
+
+  it("isolates concurrent probes from separate webviews", async () => {
+    // Each webview evaluates its own module/queue, but the native child
+    // registry is shared. Simulate that by loading two independent modules.
+    vi.resetModules();
+    const first = await import("./rateLimitsFetch");
+    vi.resetModules();
+    const second = await import("./rateLimitsFetch");
+    const results = await Promise.all([
+      first.fetchCodexRateLimits("default"),
+      second.fetchCodexRateLimits("default"),
+    ]);
+    expect(results.every((result) => result.status === "ok")).toBe(true);
+    expect(child.maxLive).toBe(2);
+    expect(new Set(child.ids).size).toBe(2);
+    // Cleanup for either window addresses only its own child.
+    expect(child.killed.sort()).toEqual([...child.ids].sort());
   });
 });

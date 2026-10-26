@@ -76,21 +76,24 @@ export type SessionStatus = {
   /** The script's raw output, drawn as ANSI when it is not data. */
   line: string | null;
   links: string[];
-  limits: ProviderRateLimits;
+  limits?: ProviderRateLimits;
 };
 
 /**
  * Fork feature: runs the person's own Claude Code status script for a
- * session and gathers what the composer shows around it. Null for other
- * harnesses.
+ * session and gathers links for every harness. Other providers never run
+ * Claude's status script or inherit its account/compaction metadata.
  */
 export function useSessionStatus(
   session: Session,
   visible: boolean,
 ): SessionStatus | null {
   const claude = session.harness === "claude";
+  const provider = ["codex", "opencode", "devin"].includes(session.harness)
+    ? (session.harness as "codex" | "opencode" | "devin")
+    : "claude";
   const limits = useCachedRateLimits(
-    "claude",
+    provider,
     session.providerAccountId ?? "default",
   );
   const [line, setLine] = useState<string | null>(null);
@@ -155,8 +158,13 @@ export function useSessionStatus(
   const links = useMemo(() => (linkKey ? linkKey.split("\n") : []), [linkKey]);
 
   return useMemo(
-    () => (claude ? { data, line, links, limits } : null),
-    [claude, data, line, links, limits],
+    () => ({
+      data: claude ? data : null,
+      line: claude ? line : null,
+      links,
+      ...(session.harness === provider ? { limits } : {}),
+    }),
+    [claude, data, line, links, limits, session.harness, provider],
   );
 }
 

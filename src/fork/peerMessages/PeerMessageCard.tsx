@@ -16,7 +16,7 @@ export function PeerMessageCard({
   onOpen,
 }: {
   message: PeerMessage;
-  /** Agent the sender runs on; Claude Code peers are always "claude". */
+  /** Agent the sender runs on, when the envelope identifies it. */
   harness?: HarnessId;
   /** Arrival time, epoch ms. */
   at?: number;

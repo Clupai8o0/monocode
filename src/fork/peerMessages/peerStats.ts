@@ -1,7 +1,7 @@
 import { readSession, type SessionRecord } from "../sessionRead";
 import type { Block } from "../../features/sessions/model/session";
 import { isMonoSession } from "../../features/monos/model/mono";
-import { parsePeerMessage } from "./peerMessage";
+import { isPeerSendTool, parsePeerMessage } from "./peerMessage";
 import { isPeerBlock } from "./peerTranscript";
 
 /**
@@ -34,7 +34,10 @@ export function isUrgentPeer(body: string): boolean {
 
 function recipient(block: Pick<Block, "tool">): string | null {
   const tool = block.tool;
-  if (!tool || (tool.kind !== "SendMessage" && tool.title !== "SendMessage")) {
+  if (
+    !tool ||
+    (tool.kind !== "SendMessage" && !isPeerSendTool(tool.title ?? ""))
+  ) {
     return null;
   }
   if (tool.status && tool.status !== "completed") {
@@ -42,11 +45,25 @@ function recipient(block: Pick<Block, "tool">): string | null {
   }
   let name = "";
   try {
-    const result = JSON.parse(tool.detail ?? "") as {
+    let result = JSON.parse(tool.detail ?? "") as {
       success?: boolean;
       pin?: { name?: unknown; id?: unknown };
+      isError?: boolean;
+      structuredContent?: unknown;
+      content?: Array<{ type?: string; text?: string }>;
     };
-    if (result.success === false) {
+    if (result.isError === true) return null;
+    // Codex keeps the MCP envelope; Claude's native tool stores its receipt.
+    if (
+      result.structuredContent &&
+      typeof result.structuredContent === "object"
+    ) {
+      result = result.structuredContent as typeof result;
+    } else if (Array.isArray(result.content)) {
+      const text = result.content.find((part) => part.type === "text")?.text;
+      if (text) result = JSON.parse(text) as typeof result;
+    }
+    if (result.success === false || result.isError === true) {
       return null;
     }
     name = String(result.pin?.name ?? result.pin?.id ?? "");

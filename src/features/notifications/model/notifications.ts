@@ -7,6 +7,7 @@ import {
 } from "./notificationPreferences";
 import { monoReplyText } from "../../monos/model/monoReaction";
 import { knownNotificationProject } from "./notificationProjects";
+import { recordSessionNotification } from "../../../fork/notifications/notificationStore"; // Fork: local notification center.
 
 const KEY = "monocode.notifications";
 
@@ -278,6 +279,8 @@ async function announceSession(
     category: finished ? "agentFinished" : "agentInput",
     occurredAt,
   };
+  // Fork: retain actual events even when OS banners or sounds are disabled.
+  recordSessionNotification(session, event, notificationText(session, event), project.id, occurredAt);
   const sent = await notifyProjectSession(
     session,
     event,

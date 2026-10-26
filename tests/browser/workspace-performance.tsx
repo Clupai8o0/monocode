@@ -13,8 +13,14 @@ import "../../src/styles/index.css";
 // isolated so this benchmark never launches agents or touches saved sessions.
 const commands = new Set<string>();
 const params = new URLSearchParams(location.search);
-const nativeRoot = params.get("nativeRoot");
-const projectRoot = nativeRoot ?? "/fixture/project";
+const projectsFixture = params.has("projects");
+const nativeRoot = projectsFixture ? null : params.get("nativeRoot");
+const projectRoot = nativeRoot ?? (projectsFixture ? "/fixture/projects/monocode" : "/fixture/project");
+const projectNames = ["monocode", "morgue", "panoptic", "hoddle", "clupai-monorepo", "samridhlimbu", "ontrack", "tempo", "recall", "nomnom", "kairos", "ripple", "jobbird", "noop", "VisaTrack", "lock-in"];
+const fixtureCallbacks = new Map<number, (event: unknown) => void>();
+const fixtureListeners = new Map<number, { event: string; handler: number }>();
+let fixtureCallbackId = 0;
+let fixtureListenerId = 0;
 const worktreeRoot = nativeRoot ? `${nativeRoot}-wt` : "/fixture/worktrees";
 const nativeInternals = (
   window as unknown as {
@@ -130,6 +136,41 @@ const fixtureInvoke = async (
   args: Record<string, unknown> = {},
 ) => {
   commands.add(command);
+  if (projectsFixture) {
+    if (command === "plugin:event|listen") {
+      const id = ++fixtureListenerId;
+      fixtureListeners.set(id, { event: String(args.event), handler: Number(args.handler) });
+      return id;
+    }
+    if (command === "plugin:event|unlisten") {
+      const id = Number(args.eventId);
+      const entry = fixtureListeners.get(id);
+      if (entry) { fixtureCallbacks.delete(entry.handler); }
+      fixtureListeners.delete(id); return;
+    }
+    if (command === "plugin:event|emit" || command === "plugin:event|emit_to") {
+      for (const [id, entry] of fixtureListeners) {
+        if (entry.event === args.event) { fixtureCallbacks.get(entry.handler)?.({ event: args.event, id, payload: args.payload }); }
+      }
+      return;
+    }
+    if (command === "notification_permission") { return "unsupported"; }
+    if (["show_notification", "plugin:window|unminimize", "plugin:window|set_focus"].includes(command)) { return; }
+    if (command === "harness_resolve_claude" || command === "harness_resolve_codex") {
+      return { path: `/fixture/bin/${command.endsWith("codex") ? "codex" : "claude"}` };
+    }
+    if (command === "session_list_by_project") {
+      return sessions.filter(session => session.cwd === args.cwd).map(session => ({ ...session, createdAt: Date.now() - 3_600_000, updatedAt: Date.now() }));
+    }
+    if (command === "session_get") { return sessions.find(session => session.id === args.sessionId) ?? null; }
+    if (command === "session_list_in_flight") { return []; }
+    if (command === "git_worktrees") {
+      return {
+        defaultRoot: `${args.cwd}-worktrees`,
+        worktrees: [{ path: args.cwd, branch: "mine", head: "fixture", isMain: true, locked: false, prunable: false, missing: false, dirty: false, unpushed: 0, sessionIds: [] }],
+      };
+    }
+  }
   if (
     nativeInvoke &&
     (command.startsWith("plugin:event|") ||
@@ -225,7 +266,10 @@ if (!nativeInvoke)
         currentWindow: { label: "main" },
         currentWebview: { label: "main" },
       },
-      transformCallback: () => 0,
+      transformCallback: (callback: (event: unknown) => void) => {
+        if (!projectsFixture) { return 0; }
+        const id = ++fixtureCallbackId; fixtureCallbacks.set(id, callback); return id;
+      },
       invoke: fixtureInvoke,
     },
   });
@@ -249,7 +293,24 @@ localStorage.setItem("monocode.pacedReveal", "0");
 localStorage.setItem("monocode.diffViewer", "unified");
 localStorage.setItem("monocode.measureNavigation", "1");
 localStorage.setItem("monocode.measureStreaming", "1");
-const sessions = Array.from({ length: 6 }, (_, index) => {
+const sessions = Array.from({ length: projectsFixture ? 64 : 6 }, (_, index) => {
+  if (projectsFixture) {
+    const project = Math.floor(index / 4);
+    const slot = index % 4;
+    const waiting = slot === 1 && project % 4 === 0;
+    return {
+      ...newSession(index % 3 === 1 ? "claude" : "codex", `/fixture/projects/${projectNames[project]}`),
+      id: `workspace-session-${index}`,
+      title: ["Review the sidebar interactions", "Choose the next approach", "Check the keyboard shortcuts", "Prepare the handoff"][slot],
+      busy: (project < 9 && slot === 0) || (project < 4 && slot === 2) || waiting,
+      branch: "mine",
+      blocks: [
+        { id: `${index}-u`, role: "user" as const, text: "Review the sample interface and check the result. This is fixture data; do not run an agent.", startedAt: Date.now() - (index + 1) * 60_000 },
+        { id: `${index}-a`, role: "assistant" as const, text: "This preview uses the real MonoCode app and sidebar. All 16 projects, 64 sessions, and usage values are sample data.\n\nThe fixture controls start and finish local sample runs so you can check ordering, selection, and status badges." },
+      ],
+      pendingQuestion: waiting ? { requestId: index, title: "Choose the next approach", questions: [{ id: "direction", prompt: "Which sample should I check next?", multiSelect: false, allowCustom: false, options: [{ id: "keyboard", label: "Keyboard navigation" }, { id: "layout", label: "Layout spacing" }] }] } : undefined,
+    };
+  }
   const blocks: Block[] = Array.from({ length: 100 }, (_, turn) => [
     {
       id: `${index}-u${turn}`,
@@ -270,7 +331,19 @@ const sessions = Array.from({ length: 6 }, (_, index) => {
     worktreeCwd: `${worktreeRoot}/${index}`,
   };
 });
-const tabs = sessions.map((session) => newTab(session.id));
+const tabs = (projectsFixture ? sessions.slice(0, 3) : sessions).map((session) => newTab(session.id));
+if (projectsFixture) {
+  const { rememberProject } = await import("../../src/features/projects/model/recents");
+  const { saveInsetLayout } = await import("../../src/features/settings/model/appearance");
+  const { saveLiveAgentsEnabled } = await import("../../src/features/settings/model/settings");
+  const { setCachedRateLimits } = await import("../../src/features/providers/model/rateLimitsCache");
+  for (const name of [...projectNames].reverse()) { rememberProject(`/fixture/projects/${name}`); }
+  saveInsetLayout(true);
+  saveLiveAgentsEnabled(true);
+  for (const provider of ["claude", "codex"] as const) {
+    setCachedRateLimits(provider, "default", { provider, status: "ok", error: null, updatedAt: Date.now(), monthly: null, resetCredits: null, session: { usedPercent: provider === "codex" ? 14 : 32, windowMinutes: 300, resetsAt: Date.now() + 7_860_000 }, weekly: { usedPercent: provider === "codex" ? 27 : 59, windowMinutes: 10_080, resetsAt: Date.now() + 473_000_000 } });
+  }
+}
 const commits: { duration: number; at: number }[] = [];
 Object.assign(window, {
   workspaceCommits: commits,
@@ -470,6 +543,31 @@ Object.assign(window, {
   captureReaderAnchor,
   readerAnchorTop,
 });
+if (projectsFixture) {
+  const { announceSessionFinished } = await import("../../src/features/notifications/model/notifications");
+  const controls = document.createElement("div");
+  controls.style.cssText = "position:fixed;top:3px;right:10px;z-index:1000;display:flex;align-items:center;gap:8px;font:11px system-ui;color:#a9b5c4;background:#20262e;padding:4px 8px;border-radius:5px";
+  const label = document.createElement("span");
+  label.textContent = "Sample data · 16 projects / 64 sessions";
+  controls.append(label);
+  for (const [title, busy] of [["Start lock-in run", true], ["Mark sample runs ready", false]] as const) {
+    const button = document.createElement("button");
+    button.textContent = title;
+    button.style.cssText = "padding:3px 6px;border:1px solid #ffffff20;border-radius:4px;color:#b9d4ed;background:#ffffff08";
+    button.onclick = () => {
+      if (!store) { label.textContent = "Open and close a new tab once to activate fixture controls"; return; }
+      const finishing = busy ? [] : store.snapshot().filter(session => session.busy && [2, 6, 10, 14, 60].some(index => session.id === `workspace-session-${index}`));
+      store.update(current => (busy && !current.some(session => session.id === "workspace-session-60") ? [...current, sessions[60]] : current).map(session => {
+        const targeted = busy ? session.id === "workspace-session-60" : [2, 6, 10, 14, 60].some(index => session.id === `workspace-session-${index}`);
+        return targeted ? { ...session, busy, blocks: busy ? [...session.blocks, { id: `fixture-run-${Date.now()}`, role: "user", text: "Sample run started from the fixture controls.", startedAt: Date.now() }] : session.blocks } : session;
+      }));
+      for (const session of finishing) { void announceSessionFinished({ ...session, busy: false }, false); }
+      label.textContent = busy ? "Sample run started · lock-in" : "Sample runs ready · no agents launched";
+    };
+    controls.append(button);
+  }
+  document.body.append(controls);
+}
 if (nativeInvoke) {
   // Native automation can finish a run before inspecting its accessibility
   // tree. Inspecting a continuously changing tree can itself stall the test.

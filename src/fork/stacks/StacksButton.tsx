@@ -39,6 +39,8 @@ let current: Store = {
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let inFlight: Promise<void> | null = null;
+let inFlightForced = false;
+let queuedForced: Promise<void> | null = null;
 
 function set(next: Partial<Store>) {
   current = { ...current, ...next };
@@ -47,12 +49,22 @@ function set(next: Partial<Store>) {
   }
 }
 
-export function refreshStacks(): Promise<void> {
+export function refreshStacks(force = false): Promise<void> {
   if (inFlight) {
+    if (force && !inFlightForced) {
+      // A cached poll cannot satisfy an explicit Refresh. Coalesce repeated
+      // clicks into one fresh read after it settles, including after failure.
+      queuedForced ??= inFlight.then(() => {
+        queuedForced = null;
+        return refreshStacks(true);
+      });
+      return queuedForced;
+    }
     return inFlight;
   }
+  inFlightForced = force;
   set({ loading: true });
-  inFlight = invoke<unknown>("fork_stacks_list")
+  inFlight = invoke<unknown>("fork_stacks_list", { force })
     .then((value) => {
       if (value === null) {
         set({ missing: true, snapshot: null, error: null });
@@ -68,6 +80,7 @@ export function refreshStacks(): Promise<void> {
     .catch((e: unknown) => set({ error: String(e) }))
     .finally(() => {
       inFlight = null;
+      inFlightForced = false;
       set({ loading: false });
     });
   return inFlight;
@@ -192,7 +205,7 @@ function StacksPanel({
           className="ml-auto rounded p-0.5 text-content/45 hover:bg-content/10 hover:text-content"
           title="Refresh"
           aria-label="Refresh stacks"
-          onClick={() => void refreshStacks()}
+          onClick={() => void refreshStacks(true)}
         >
           {loading ? (
             <LoaderCircle className="size-3.5 animate-spin" aria-hidden />

@@ -154,8 +154,9 @@ export function MobileSettings() {
             </span>
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-content/45">
-            Check on projects and conversations from the MonoCode mobile
-            app. Your phone connects straight to this desktop.
+            Follow and reply to Codex and Claude Code sessions from the
+            MonoCode mobile app. Your phone connects straight to this desktop;
+            keep MonoCode open and the Mac awake.
           </p>
           <p className="mt-1 text-[12px] leading-relaxed text-content/45">
             The iPhone app currently requires a TestFlight invitation.

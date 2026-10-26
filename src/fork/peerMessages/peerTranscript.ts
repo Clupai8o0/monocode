@@ -69,6 +69,7 @@ export function peerInterjection(
       "Session",
     ...(from ? { from } : {}),
     ...(mode ? { mode } : {}),
+    ...(parsed?.harness ? { harness: parsed.harness } : {}),
     at: now,
     body: body.trim(),
   };

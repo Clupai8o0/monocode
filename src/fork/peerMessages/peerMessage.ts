@@ -11,6 +11,8 @@ export type PeerMessage = {
   from?: string;
   /** Sender's permission mode, e.g. "bypass". */
   mode?: string;
+  /** Explicit sender provider; receiving a message in Codex doesn't imply this. */
+  harness?: "claude" | "codex";
   /** When MonoCode received it, epoch ms (MonoCode's own `at` attribute). */
   at?: number;
   body: string;
@@ -19,6 +21,11 @@ export type PeerMessage = {
 const TAG =
   /<cross-session-message\b([^>]*)>([\s\S]*?)<\/cross-session-message>/;
 const ATTR = /([a-z-]+)="([^"]*)"/g;
+
+/** Claude's native or MCP-exported tool; Codex send_message is tree-local. */
+export function isPeerSendTool(name: string): boolean {
+  return /(?:^|:|__)SendMessage$/.test(name);
+}
 
 function attributes(source: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -43,6 +50,9 @@ export function parsePeerMessage(text: string): PeerMessage | null {
     name,
     ...(from ? { from } : {}),
     ...(attrs["from-mode"] ? { mode: attrs["from-mode"] } : {}),
+    ...(attrs["from-harness"] === "claude" || attrs["from-harness"] === "codex"
+      ? { harness: attrs["from-harness"] }
+      : {}),
     ...(Number.isFinite(at) && at > 0 ? { at } : {}),
     body: unescapeText(body),
   };
@@ -57,6 +67,7 @@ export function peerMessageText(message: PeerMessage): string {
     message.from ? `from="${escapeAttr(message.from)}"` : "",
     `from-name="${escapeAttr(message.name)}"`,
     message.mode ? `from-mode="${escapeAttr(message.mode)}"` : "",
+    message.harness ? `from-harness="${message.harness}"` : "",
     message.at ? `at="${message.at}"` : "",
   ].filter(Boolean);
   return `<cross-session-message ${attrs.join(" ")}>\n${escapeText(message.body)}\n</cross-session-message>`;

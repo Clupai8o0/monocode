@@ -26,6 +26,8 @@ import {
   resetHarnessLoginState,
   supportsHarnessLogin,
 } from "./auth";
+import { getCachedRateLimits, setCachedRateLimits } from "../../../features/providers/model/rateLimitsCache";
+import { idleRateLimits } from "../../../features/providers/model/rateLimits";
 
 beforeEach(() => {
   resetHarnessLoginState();
@@ -70,6 +72,9 @@ describe("harness login", () => {
   });
 
   it("launches Claude's official login command and waits for success", async () => {
+    setCachedRateLimits("claude", "default", {
+      ...idleRateLimits("claude"), status: "ok", updatedAt: Date.now(),
+    });
     const login = loginHarness("claude");
     await vi.waitFor(() => expect(child.watchChild).toHaveBeenCalledOnce());
     expect(child.spawnChild).toHaveBeenCalledWith(
@@ -85,6 +90,7 @@ describe("harness login", () => {
       ((code: number | null) => void) | undefined;
     onExit?.(0);
     await expect(login).resolves.toBeUndefined();
+    expect(getCachedRateLimits("claude").status).toBe("idle");
   });
 
   it("isolates a named Codex account during sign-in", async () => {

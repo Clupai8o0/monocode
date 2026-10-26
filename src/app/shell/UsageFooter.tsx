@@ -12,10 +12,13 @@ import { consumeCodexRateLimitResetCredit } from "../../features/providers/model
 import {
   errorRateLimits,
   unavailableRateLimits,
+  RATE_LIMIT_MIN_REFETCH_MS,
+  RATE_LIMIT_POLL_MS,
   type RateLimitProvider,
 } from "../../features/providers/model/rateLimits";
 import {
   getCachedRateLimits,
+  clearCachedRateLimits,
   loadRateLimits,
   setCachedRateLimits,
   useCachedRateLimits,
@@ -45,6 +48,7 @@ import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
+import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
 import {
   ProviderSignInPanel,
   type ProviderSignInState,
@@ -106,10 +110,11 @@ export function UsageFooter({
   /** Receives the slot beside the terminal button for the pressure chip. */
   pressureSlot?: (element: HTMLSpanElement | null) => void;
 }) {
+  const footerProviders = useFooterProviders(providers, project); // Fork
   const opencode = useCachedRateLimits("opencode");
   const showUsage =
-    providers.some((provider) => provider !== "opencode") ||
-    (providers.includes("opencode") && opencode.status !== "unavailable");
+    footerProviders.some((provider) => provider !== "opencode") ||
+    (footerProviders.includes("opencode") && opencode.status !== "unavailable");
   const showTerminals = terminals.length > 0;
   const showTerminalButton = Boolean(
     onNewTerminal || onToggleProjectTerminal,
@@ -141,7 +146,7 @@ export function UsageFooter({
       }`}
     >
       <UsageChips
-        providers={providers}
+        providers={footerProviders}
         session={session}
         project={project}
         onSelectAccount={onSelectAccount}
@@ -157,6 +162,15 @@ export function UsageFooter({
           ) : null
         }
       />
+      {/* Fork: companion balances must not hide another agent's sign-in. */}
+      {showUsage && session && session.harness !== "pi" &&
+      !footerProviders.some((provider) => provider === session.harness) ? (
+        <SessionChip
+          key={session.id ?? session.harness}
+          session={session}
+          inset={inset}
+        />
+      ) : null}
       {/* Fork: the Stacks button always shows, so the right-hand group does too. */}
       {showTerminals || showTerminalButton || pressureSlot || FORK_STACKS ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -278,15 +292,29 @@ export function UsageChips({
     [],
   );
 
-  // New accounts load once. Returning from Settings or focusing the window
-  // reads the shared snapshot without starting another provider request.
+  // Fork: keep visible plan balances current. Opening/focusing checks after
+  // five minutes; the shared account cache deduplicates all mounted chips.
   useEffect(() => {
-    if (wantClaude && claudeAccountAvailable)
-      void loadRateLimits("claude", claudeAccountId);
-    if (wantCodex && codexAccountAvailable)
-      void loadRateLimits("codex", codexAccountId);
-    if (wantOpencode) void loadRateLimits("opencode");
-    if (wantDevin) void loadRateLimits("devin");
+    if (!wantClaude && !wantCodex && !wantOpencode && !wantDevin) return;
+    const refreshStale = (maxAge = RATE_LIMIT_POLL_MS) => {
+      if (document.visibilityState !== "visible") return;
+      if (wantClaude && claudeAccountAvailable)
+        void loadRateLimits("claude", claudeAccountId, false, maxAge);
+      if (wantCodex && codexAccountAvailable)
+        void loadRateLimits("codex", codexAccountId, false, maxAge);
+      if (wantOpencode) void loadRateLimits("opencode", "default", false, maxAge);
+      if (wantDevin) void loadRateLimits("devin", "default", false, maxAge);
+    };
+    refreshStale();
+    const timer = window.setInterval(refreshStale, RATE_LIMIT_POLL_MS);
+    const onWake = () => refreshStale(RATE_LIMIT_MIN_REFETCH_MS);
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
+    };
   }, [
     claudeAccountAvailable,
     claudeAccountId,
@@ -343,6 +371,9 @@ export function UsageChips({
             creditId,
             codexAccountId,
           );
+          // Fork: invalidate older reads in every window before fetching the
+          // post-reset quota. A pre-reset probe must not restore spent usage.
+          clearCachedRateLimits("codex", codexAccountId);
           await loadRateLimits("codex", codexAccountId, true);
         } catch (error) {
           const message =
@@ -420,6 +451,13 @@ export function UsageChips({
     [claudeAccountId, reconnectProvider],
   );
 
+  const openUsage = useCallback((provider: RateLimitProvider, accountId: string, available = true) => {
+    setNow(Date.now());
+    if (available) {
+      void loadRateLimits(provider, accountId, false, RATE_LIMIT_MIN_REFETCH_MS);
+    }
+  }, []);
+
   const reconnectCodex = useCallback(
     () => reconnectProvider("codex", codexAccountId),
     [codexAccountId, reconnectProvider],
@@ -496,6 +534,7 @@ export function UsageChips({
           variant={variant}
           {...claudeAccountProps}
           onReconnect={reconnectClaude}
+          onOpen={() => openUsage("claude", claudeAccountId, claudeAccountAvailable)}
         />
       ) : null}
       {wantCodex ? (
@@ -507,6 +546,7 @@ export function UsageChips({
           {...codexAccountProps}
           onConsumeReset={consumeCodexReset}
           onReconnect={reconnectCodex}
+          onOpen={() => openUsage("codex", codexAccountId, codexAccountAvailable)}
         />
       ) : null}
       {showOpencodeChip ? (
@@ -515,6 +555,7 @@ export function UsageChips({
           now={now}
           project={project}
           variant={variant}
+          onOpen={() => openUsage("opencode", "default")}
         />
       ) : null}
       {wantDevin ? (
@@ -525,6 +566,7 @@ export function UsageChips({
           project={project}
           variant={variant}
           onReconnect={reconnectDevin}
+          onOpen={() => openUsage("devin", "default")}
         />
       ) : null}
       <button

@@ -228,6 +228,89 @@ describe("project swipe navigation", () => {
   );
 });
 
+describe("inset Projects list", () => {
+  function setupProjects() {
+    const paths = ["/workspace/project", "/workspace/other", "/workspace/newest"];
+    saveProjectRailOrder(paths);
+    props = {
+      ...props, inset: true, projectRailOpen: false,
+      recents: paths.map((path) => ({ path, openedAt: 1 })),
+      onSelectProject: vi.fn(), onOpenProject: vi.fn(), onOpenSettings: vi.fn(),
+      liveAgents: [
+        { id: "old-run", cwd: paths[1], title: "Old run", harness: "codex", activity: "Reading source", startedAt: 100, done: false, needsApproval: false },
+        { id: "new-run", cwd: paths[2], title: "New run", harness: "claude", activity: "Running tests", startedAt: 200, done: false, needsApproval: false },
+      ],
+    };
+    return paths;
+  }
+  function rows() {
+    return [...container.querySelectorAll<HTMLElement>("[data-fork-projects] [data-project-path]")].map((row) => row.dataset.projectPath);
+  }
+  it("places native named projects above the real sessions with separate scrolling", async () => {
+    const paths = setupProjects();
+    await act(async () => render());
+    const projects = container.querySelector<HTMLElement>("[data-fork-projects]")!;
+    expect(rows()).toEqual([paths[2], paths[1], paths[0]]);
+    expect(projects.textContent).toContain("Projects");
+    expect(projects.textContent).toContain("Running tests");
+    expect(projects.querySelector("[data-fork-notifications]")).not.toBeNull();
+    expect(projects.querySelector('[aria-current="page"]')?.textContent).toContain("project");
+    expect(projects.querySelector("svg")).not.toBeNull();
+    expect(container.querySelector(".sidebar-session-scroll")?.contains(projects)).toBe(false);
+    expect(card()).not.toBeNull();
+    expect(container.querySelector("[data-fork-handoff-card]")).toBeNull();
+    expect(container.querySelector('[role="tablist"][aria-label="Projects"]')).toBeNull();
+    act(() => projects.querySelector<HTMLButtonElement>('[data-project-path="/workspace/other"] > button')!.click());
+    expect(props.onSelectProject).toHaveBeenCalledWith(paths[1]);
+    act(() => projects.querySelector<HTMLButtonElement>('[aria-label="Open project"]')!.click());
+    expect(props.onOpenProject).toHaveBeenCalledOnce();
+  });
+  it("keeps the real project settings and worktree menu reachable", async () => {
+    setupProjects();
+    await act(async () => render());
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="project menu"]')!.click());
+    expect(document.querySelector('[role="menu"][data-project-menu]')?.textContent).toContain("Switch worktree");
+    pressKey(document.body, "Escape");
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Project settings for other"]')!.click());
+    expect(document.querySelector('[aria-label="Group name"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("Background image");
+  });
+  it("holds click targets still during interaction and releases latest run order afterwards", async () => {
+    const paths = setupProjects();
+    await act(async () => render());
+    const projects = container.querySelector<HTMLElement>("[data-fork-projects]")!;
+    act(() => projects.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+    props = { ...props, liveAgents: props.liveAgents!.map((agent) => agent.id === "old-run" ? { ...agent, startedAt: 300 } : agent) };
+    await act(async () => render());
+    expect(rows()).toEqual([paths[2], paths[1], paths[0]]);
+    act(() => projects.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse", relatedTarget: document.body })));
+    expect(rows()).toEqual([paths[1], paths[2], paths[0]]);
+    expect(projects.querySelector('[aria-current="page"]')?.textContent).toContain("project");
+  });
+  it("does not add the inset Projects section to the classic sidebar", async () => {
+    setupProjects(); props.inset = false;
+    await act(async () => render());
+    expect(container.querySelector("[data-fork-projects]")).toBeNull();
+    expect(card()).not.toBeNull();
+  });
+  it("reserves session space by replacing the duplicate live-agent footer only when Projects is shown", async () => {
+    setupProjects();
+    await act(async () => render());
+    expect(container.querySelector("[data-fork-projects]")).not.toBeNull();
+    expect(container.querySelector('[data-live-agents-preview="full"]')).toBeNull();
+    expect(card()).not.toBeNull();
+
+    props = { ...props, onSelectProject: undefined };
+    await act(async () => render());
+    expect(container.querySelector("[data-fork-projects]")).toBeNull();
+    expect(container.querySelector('[data-live-agents-preview="full"]')).not.toBeNull();
+
+    props = { ...props, inset: false, onSelectProject: vi.fn() };
+    await act(async () => render());
+    expect(container.querySelector('[data-live-agents-preview="full"]')).not.toBeNull();
+  });
+});
+
 describe("inset session previews", () => {
   function hover(target = card()) {
     act(() =>

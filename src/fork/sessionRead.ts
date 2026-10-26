@@ -15,11 +15,36 @@ export type SessionRecord = {
 
 /** How long a finished read is reused by a badge asking a moment later. */
 const KEEP_MS = 10_000;
+/** A sidebar can visit hundreds of sessions; don't retain all their blocks. */
+const MAX_COMPLETED_READS = 32;
 
-const reads = new Map<
-  string,
-  { updatedAt: number; done: number | null; promise: Promise<SessionRecord> }
->();
+type Read = {
+  updatedAt: number;
+  done: number | null;
+  promise: Promise<SessionRecord>;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+const reads = new Map<string, Read>();
+
+function remove(sessionId: string, entry: Read): void {
+  if (entry.timer !== undefined) {
+    clearTimeout(entry.timer);
+  }
+  if (reads.get(sessionId) === entry) {
+    reads.delete(sessionId);
+  }
+}
+
+function trim(): void {
+  const completed = [...reads].filter(([, entry]) => entry.done !== null);
+  for (const [sessionId, entry] of completed.slice(
+    0,
+    Math.max(0, completed.length - MAX_COMPLETED_READS),
+  )) {
+    remove(sessionId, entry);
+  }
+}
 
 export function readSession(
   sessionId: string,
@@ -33,21 +58,29 @@ export function readSession(
   ) {
     return hit.promise;
   }
-  const entry = {
+  if (hit) {
+    remove(sessionId, hit);
+  }
+  const entry: Read = {
     updatedAt,
-    done: null as number | null,
+    done: null,
     promise: invoke<SessionRecord>("session_get", { sessionId }),
   };
   reads.set(sessionId, entry);
   entry.promise.then(
     () => {
+      if (reads.get(sessionId) !== entry) {
+        return;
+      }
       entry.done = Date.now();
+      // Expire without waiting for another read: resolved promises retain the
+      // complete transcript even when all its sidebar badges have unmounted.
+      entry.timer = setTimeout(() => remove(sessionId, entry), KEEP_MS);
+      trim();
     },
     () => {
       // A failed read is not reused: the next ask tries again.
-      if (reads.get(sessionId) === entry) {
-        reads.delete(sessionId);
-      }
+      remove(sessionId, entry);
     },
   );
   return entry.promise;

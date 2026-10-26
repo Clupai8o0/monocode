@@ -125,7 +125,6 @@ export function errorRateLimits(
       ...previous,
       error,
       status: "error",
-      updatedAt: Date.now(),
     };
   }
   return {
@@ -134,7 +133,7 @@ export function errorRateLimits(
     weekly: null,
     monthly: null,
     resetCredits: null,
-    updatedAt: Date.now(),
+    updatedAt: 0,
     error,
     status: "error",
   };

@@ -29,6 +29,7 @@ export function PeerMessageBlock({
     <div className={embedded ? "py-2" : "px-4 py-2"}>
       <PeerMessageCard
         message={message}
+        harness={message.harness}
         at={message.at}
         urgent={isUrgentPeer(message.body)}
         onOpen={

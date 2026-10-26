@@ -7,12 +7,13 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, LazyLock};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use crate::dirs_home;
+use crate::fork_poll_cache::PollCache;
 use crate::fork_statusline::{exited_by, kill_group};
 
 const SCRIPT: &str = "Documents/Obsidian/brain/30-resources/_meta/claude-shared/hooks/stacks.py";
@@ -20,21 +21,29 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 // stacks.py waits up to 300 s for the stack's lock, then compose stop can take 300 s more.
 const STOP_TIMEOUT: Duration = Duration::from_secs(660);
 const MAX_OUTPUT: u64 = 256 * 1024;
+const LIST_KEY: &str = "stacks";
+static LIST_CACHE: LazyLock<PollCache<Option<Value>>> =
+    LazyLock::new(|| PollCache::new(Duration::from_secs(30)));
 
 /// What `stacks.py list --json` printed, or `None` when the script isn't there.
 #[tauri::command]
-pub async fn fork_stacks_list() -> Result<Option<Value>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let Some(script) = script() else {
-            return Ok(None);
-        };
-        let (ok, out) = run(&script, &["list", "--json"], LIST_TIMEOUT)?;
-        if !ok {
-            return Err(last_line(&out).unwrap_or_else(|| "stacks.py list failed".into()));
+pub async fn fork_stacks_list(force: Option<bool>) -> Result<Option<Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if force == Some(true) {
+            LIST_CACHE.invalidate(LIST_KEY);
         }
-        serde_json::from_slice(&out)
-            .map(Some)
-            .map_err(|e| format!("stacks.py list printed bad JSON: {e}"))
+        LIST_CACHE.get_or_load(LIST_KEY, || {
+            let Some(script) = script() else {
+                return Ok(None);
+            };
+            let (ok, out) = run(&script, &["list", "--json"], LIST_TIMEOUT)?;
+            if !ok {
+                return Err(last_line(&out).unwrap_or_else(|| "stacks.py list failed".into()));
+            }
+            serde_json::from_slice(&out)
+                .map(Some)
+                .map_err(|e| format!("stacks.py list printed bad JSON: {e}"))
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -48,12 +57,20 @@ pub async fn fork_stacks_stop(name: String) -> Result<String, String> {
     }
     tauri::async_runtime::spawn_blocking(move || {
         let script = script().ok_or("stacks.py not found")?;
-        let (ok, out) = run(&script, &["stop", &name, "from MonoCode"], STOP_TIMEOUT)?;
+        let result = run(&script, &["stop", &name, "from MonoCode"], STOP_TIMEOUT);
+        // Even a failed stop may have changed the stack. The next list must
+        // bypass both a completed cache entry and an older in-flight read.
+        LIST_CACHE.invalidate(LIST_KEY);
+        let (ok, out) = result?;
         let line = last_line(&out).unwrap_or_default();
         if ok {
             Ok(line)
         } else {
-            Err(if line.is_empty() { "stop failed".into() } else { line })
+            Err(if line.is_empty() {
+                "stop failed".into()
+            } else {
+                line
+            })
         }
     })
     .await

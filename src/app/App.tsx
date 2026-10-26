@@ -2390,7 +2390,9 @@ function Workspace({
 
   const liveAgentRows = useMemo(
     () =>
-      liveAgentsEnabled
+      // Fork: Projects needs run timestamps even when the optional working
+      // agents preview is disabled. The classic layout keeps its preference.
+      (liveAgentsEnabled || insetLayout)
         ? liveAgentsFromSessions(
             promptableSessions,
             unseenFinishedIds,
@@ -2401,7 +2403,7 @@ function Workspace({
             ),
           )
         : [],
-    [liveAgentsEnabled, promptableSessions, unseenFinishedIds, monosSnap],
+    [liveAgentsEnabled, insetLayout, promptableSessions, unseenFinishedIds, monosSnap],
   );
   // Rebuilt for every streamed batch; identity only moves when a row does.
   const liveAgents = useStableValue(liveAgentRows);

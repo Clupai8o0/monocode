@@ -4,6 +4,7 @@ import { supportsAccountProfiles } from "../../../features/providers/model/provi
 import { HARNESS_TITLE, type HarnessId } from "../../../features/sessions/model/session";
 import * as child from "./child";
 import { harnessLoginArgs } from "./authSupport";
+import { clearCachedRateLimits } from "../../../features/providers/model/rateLimitsCache"; // Fork
 
 export {
   harnessLoginArgs,
@@ -58,9 +59,16 @@ export function loginHarness(
   const current = inflight.get(key);
   if (current) return current;
 
-  const run = runHarnessLogin(harness, accountId).finally(() => {
-    if (inflight.get(key) === run) inflight.delete(key);
-  });
+  const run = runHarnessLogin(harness, accountId)
+    .then(() => {
+      // Fork: the same profile id may now name another signed-in account.
+      if (harness === "claude" || harness === "codex" || harness === "devin") {
+        clearCachedRateLimits(harness, accountId ?? "default");
+      }
+    })
+    .finally(() => {
+      if (inflight.get(key) === run) inflight.delete(key);
+    });
   inflight.set(key, run);
   return run;
 }

@@ -244,9 +244,9 @@ export async function consumeCodexRateLimitResetCredit(
   throw new Error("Codex returned an unknown reset result");
 }
 
-// Every probe reuses USAGE_CHILD_ID and kills whatever holds it first, so
-// probes for different accounts (footer, Settings, account picker) must not
-// overlap or they terminate each other.
+// Serialize account reads/resets within this window. Each operation also
+// gets its own child id: other windows have separate JS queues but share the
+// native child registry, so a fixed id would let their cleanup kill ours.
 let codexUsageQueue: Promise<unknown> = Promise.resolve();
 
 function requestCodexAccount<T>(
@@ -270,8 +270,9 @@ async function runCodexAccountRequest<T>(
   params: unknown,
   accountId: string,
 ): Promise<T> {
+  const childId = `${USAGE_CHILD_ID}-${crypto.randomUUID()}`;
   const rpc = new JsonRpcClient(
-    USAGE_CHILD_ID,
+    childId,
     {
       onRequest: (id) => {
         void rpc.respond(id, {}).catch(() => undefined);
@@ -282,21 +283,19 @@ async function runCodexAccountRequest<T>(
 
   const stop = async () => {
     rpc.close();
-    unwatchChild(USAGE_CHILD_ID);
-    await killChild(USAGE_CHILD_ID).catch(() => undefined);
+    unwatchChild(childId);
+    await killChild(childId).catch(() => undefined);
   };
 
-  await killChild(USAGE_CHILD_ID).catch(() => undefined);
-
   watchChild(
-    USAGE_CHILD_ID,
+    childId,
     (line) => rpc.pushLine(line),
     () => rpc.close(new Error("Codex usage probe exited")),
   );
 
   try {
     await spawnChild(
-      USAGE_CHILD_ID,
+      childId,
       path,
       ["app-server"],
       cwd,

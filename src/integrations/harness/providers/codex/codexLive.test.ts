@@ -120,6 +120,8 @@ async function startTurn(
     controlsAgents?: boolean;
     ephemeral?: boolean;
     codexStore?: "mono";
+    modelSettings?: Record<string, string>;
+    text?: string;
   } = {},
 ) {
   const events: HarnessEvent[] = [];
@@ -135,14 +137,14 @@ async function startTurn(
     sessionId,
     cwd: "/repo",
     model: "codex:gpt-5.4",
-    modelSettings: {},
+    modelSettings: options.modelSettings ?? {},
     providerAccountId: options.providerAccountId,
     runtimeMode: options.runtimeMode ?? "supervised",
     controlsAgents: options.controlsAgents,
     ephemeral: options.ephemeral,
     codexStore: options.codexStore,
     intent: options.intent,
-    text: "summarize the changelog",
+    text: options.text ?? "summarize the changelog",
     attachments: [],
     onAccepted: options.onAccepted,
     onEvent: (event) => events.push(event),
@@ -200,6 +202,32 @@ describe("codex live turn sequence", () => {
 
     await waitFor(() => onAccepted.mock.calls.length === 1, "turn acceptance");
     expect(onAccepted).toHaveBeenCalledOnce();
+    notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
+    await turn;
+  });
+
+  it("sends the selected effort and matching MonoCode context to the live provider", async () => {
+    const { turn } = await startTurn("codex-live", {
+      modelSettings: { reasoningEffort: "high" },
+    });
+    const params = parse().find((message) => message.method === "turn/start")!
+      .params as { effort: string; input: Array<{ text: string }> };
+    expect(params.effort).toBe("high");
+    expect(params.input[0].text).toContain('reasoning effort "high" for this turn');
+    expect(params.input[1].text).toBe("summarize the changelog");
+    notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
+    await turn;
+  });
+
+  it("does not turn quoted user envelopes into unread peer messages", async () => {
+    const text = 'What does <cross-session-message from-name="example">hello</cross-session-message> mean?';
+    const { events, turn } = await startTurn("codex-live", { text });
+    notify("item/completed", { threadId: "thr_1", item: { id: "echo", type: "userMessage", content: [{ type: "text", text }] } });
+    expect(events.filter((event) => event.type === "interjection")).toHaveLength(0);
+    const item = { id: "received", type: "userMessage", content: [{ type: "text", text: '<cross-session-message from-name="reviewer">Review complete</cross-session-message>' }] };
+    notify("item/completed", { threadId: "thr_1", item });
+    notify("item/completed", { threadId: "thr_1", item });
+    expect(events.filter((event) => event.type === "interjection")).toHaveLength(1);
     notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
     await turn;
   });

@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Four interactive MonoCode sidebar layouts with 16 projects and 64 sample sessions.">
+  <title>MonoCode — project sidebar studies</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e5e5e5; background: #101010; font-synthesis: none; --shell: #181818; --panel: #101010; --raised: #242424; --line: #ffffff0e; --muted: #999; --blue: #69adf4; --amber: #e7bc72; --green: #8cc8aa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px 28px 88px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; color: inherit; border: 0; background: transparent; }
+    button, select { transition: background-color 140ms ease-out, color 140ms ease-out; }
+    button:hover { background: #ffffff0b; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .35; cursor: default; transform: none; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    input, textarea { color: inherit; }
+    select { color: #c1c9d3; background: #1b222b; border: 1px solid #ffffff12; border-radius: 6px; padding: 6px 10px; }
+    .study-head { max-width: 1440px; margin: 0 auto 18px; display: flex; align-items: center; gap: 24px; justify-content: space-between; }
+    .study-label { font-size: 11px; color: #91a0b2; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+    h1 { font-size: 21px; letter-spacing: -.5px; margin: 0; font-weight: 600; }
+    .study-copy { margin: 7px 0 0; color: #9ba7b4; font-size: 13px; line-height: 1.5; }
+    .study-copy strong { color: #d0d8e2; font-weight: 500; }
+    .study-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px; font-size: 12px; }
+    .study-controls label { display: flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--muted); }
+    .study-controls .simulate-run { padding: 6px 9px; border: 1px solid #ffffff16; border-radius: 6px; color: #aab8c8; font-size: 11px; }
+    .demo-label { color: #8c99a8; font-size: 11px; padding-left: 12px; border-left: 1px solid #ffffff18; white-space: nowrap; }
+    #stage { max-width: 1440px; margin: auto; }
+    .app { height: max(550px, calc(100dvh - 244px)); max-height: 950px; border: 1px solid #444; border-radius: 15px; background: var(--shell); overflow: hidden; isolation: isolate; display: grid; grid-template-rows: 42px minmax(0, 1fr) 38px; }
+    .app.laptop { max-width: 1080px; margin: auto; }
+    .titlebar { display: flex; align-items: center; gap: 8px; padding: 0 14px; color: #8a95a2; font-size: 12px; }
+    .traffic { display: flex; gap: 7px; width: 66px; flex: 0 0 66px; }
+    .traffic i { width: 11px; height: 11px; border-radius: 50%; background: #ff655e; }
+    .traffic i:nth-child(2) { background: #efbd4f; } .traffic i:nth-child(3) { background: #58c65e; }
+    .toolbar-glyph { width: 24px; display: grid; place-items: center; font-size: 17px; }
+    .tab { display: flex; align-items: center; gap: 8px; background: #ffffff05; padding: 8px 12px; border-radius: 7px; max-width: 310px; color: #bcc5cf; margin-left: 12px; overflow: hidden; }
+    .tab span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .tab .close { margin-left: 18px; opacity: .45; }
+    .title-caption { margin-left: auto; font-size: 11px; color: #768391; }
+    .body { display: grid; grid-template-columns: 308px minmax(0,1fr); min-height: 0; padding: 0 8px 0 0; }
+    .tree .body { grid-template-columns: 324px minmax(0,1fr); }
+    .activity .body { grid-template-columns: 336px minmax(0,1fr); }
+    .sidebar { min-height: 0; min-width: 0; display: flex; flex-direction: column; padding: 0 8px; }
+    .side-title { display: flex; gap: 9px; align-items: center; padding: 9px 8px 14px; font-size: 15px; font-weight: 600; }
+    .side-title .subtle { margin-left: auto; font-size: 11px; font-weight: 400; }
+    .mascot { width: 18px; height: 18px; flex: 0 0 18px; display: inline-block; }
+    .mascot-bg { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; border-radius: 6px; background: #ffffff07; }
+    .search { display: flex; align-items: center; gap: 8px; margin: 0 6px 10px; padding: 8px 9px; background: #ffffff03; border: 1px solid #ffffff0e; border-radius: 7px; color: #788694; }
+    .search input { min-width: 0; width: 100%; background: transparent; border: 0; padding: 0; outline: none; font-size: 12px; }
+    .search:focus-within { border-color: #69adf47a; }
+    input::placeholder, textarea::placeholder { color: #788694; }
+    .search kbd { color: #667381; font: inherit; font-size: 11px; white-space: nowrap; }
+    .summary { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; padding: 0 6px 12px; }
+    .summary button { background: #ffffff03; border-radius: 6px; padding: 7px 5px; font-size: 11px; text-align: left; color: var(--muted); white-space: nowrap; }
+    .summary button.selected { background: #ffffff0c; }
+    .summary strong { font-size: 13px; font-weight: 600; margin-right: 3px; }
+    .waiting { color: var(--amber)!important; } .working { color: var(--blue)!important; } .ready { color: var(--green)!important; } .idle { color: #82909e!important; }
+    .section-heading { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 9px; color: var(--muted); font-size: 11px; font-weight: 500; }
+    .section-heading strong { color: #c6cfd9; font-weight: 500; }
+    .section-heading .clear { padding: 0; color: var(--blue); font-size: 11px; }
+    .scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff19 transparent; min-height: 0; overscroll-behavior: contain; }
+    .project-list { flex: 1; min-height: 120px; }
+    .watchlist .body { grid-template-columns: 260px minmax(0,1fr); }
+    .watchlist .search { height: 32px; flex-shrink: 0; margin: 0 0 20px; padding: 6px 8px; background: transparent; border-color: #ffffff12; color: #999; }
+    .watchlist .search input::placeholder { color: #999; }
+    .native-projects { display: flex; flex-direction: column; min-height: 0; max-height: min(45%,304px); flex-shrink: 0; padding-bottom: 8px; }
+    .native-projects-head { display: flex; align-items: center; gap: 4px; height: 28px; flex-shrink: 0; padding: 0 8px; color: #ffffff80; font-size: 12px; font-weight: 500; }
+    .native-projects-head > span { flex: 1; }
+    .native-icon-button { position: relative; display: grid; width: 28px; height: 28px; flex-shrink: 0; place-items: center; padding: 0; border-radius: 6px; color: #ffffff73; }
+    .native-icon-button svg { width: 14px; height: 14px; }
+    .notification-count { position: absolute; top: -2px; right: -2px; min-width: 14px; padding: 0 2px; border-radius: 4px; font-size: 9px; line-height: 14px; font-weight: 600; color: #493600; background: #fbbf24; }
+    .watchlist .project-list { flex: 1; min-height: 0; }
+    .native-project-item { display: flex; align-items: center; height: 32px; border-radius: 6px; }
+    .native-project-item:hover { background: #ffffff0d; }
+    .native-project-item.active { background: #ffffff1a; }
+    .watchlist .project-row { align-items: center; gap: 8px; height: 32px; padding: 0 8px; margin: 0; flex: 1; min-width: 0; border-radius: 6px; }
+    .watchlist .project-row.active { background: transparent; }
+    .watchlist .project-row.active::before { display: none; }
+    .watchlist .project-row .mascot-bg { width: 20px; height: 20px; flex-basis: 20px; background: transparent; }
+    .watchlist .project-row .mascot { width: 14px; height: 14px; flex-basis: 14px; }
+    .watchlist .row-title { font-weight: 400; color: #ffffffcc; line-height: 16px; }
+    .watchlist .active .row-title { font-weight: 500; color: #e5e5e5; }
+    .watchlist .project-detail { display: block; padding-top: 0; line-height: 12px; color: #ffffff73; }
+    .native-project-item > .native-icon-button { width: 24px; height: 24px; margin-right: 4px; opacity: 0; }
+    .native-project-item:hover > .native-icon-button, .native-project-item:focus-within > .native-icon-button { opacity: 1; }
+    .watchlist .counts { gap: 5px; padding: 0; }
+    .watchlist .selected-project { border: 0; margin: 0; padding: 0; min-height: 0; }
+    .native-workspace-head { display: flex; align-items: center; gap: 8px; height: 39px; flex-shrink: 0; padding: 0 4px; }
+    .native-workspace-head .mascot { width: 16px; height: 16px; flex-basis: 16px; }
+    .native-workspace-head .project-menu-trigger { flex: 1; color: #e5e5e5; font-size: 13px; font-weight: 600; }
+    .native-workspace-head .project-menu-trigger .branch { color: #ffffff73; font-size: 12px; }
+    .watchlist .section-heading { height: 28px; flex-shrink: 0; padding: 0 8px; font-size: 12px; color: #ffffff80; }
+    .watchlist .session-list { flex: 1; padding: 0; }
+    .watchlist .session-row { height: 32px; align-items: center; padding: 0 8px; margin: 0; }
+    .watchlist .session-title { color: #ffffffcc; font-size: 12px; }
+    .watchlist .session-meta { display: none; }
+    .watchlist .session-time { color: #ffffff59; }
+    .watchlist .app-footer { padding-left: 270px; }
+    .watchlist .usage-lines { flex-direction: row; align-items: center; gap: 7px; }
+    .watchlist .usage-line + .usage-line::before { content: "·"; color: #ffffff40; margin-right: 1px; }
+    .watchlist .usage-window, .watchlist .usage-reset, .watchlist .composer-meta, .watchlist .conversation-top, .watchlist .response-label, .watchlist .effort-note { color: #999; }
+    .watchlist .user-message, .watchlist .response, .watchlist .model-chip, .watchlist .peer-note, .watchlist .tab { color: #c8c8c8; }
+    .watchlist .response h2, .watchlist .peer-note strong { color: #e5e5e5; }
+    .watchlist .titlebar, .watchlist .title-caption, .watchlist .message-time { color: #888; }
+    .project-row { display: flex; align-items: flex-start; gap: 9px; width: 100%; border-radius: 7px; padding: 9px 9px; text-align: left; margin-bottom: 2px; position: relative; }
+    .project-row.active { background: #ffffff0b; }
+    .project-row.active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; background: var(--blue); border-radius: 2px; }
+    .project-copy { flex: 1; min-width: 0; }
+    .row-title { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; min-width: 0; }
+    .row-title .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-detail { color: #8794a2; font-size: 10px; padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .counts { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 18px; padding-top: 1px; }
+    .count { display: inline-flex; align-items: center; gap: 3px; }
+    .dot { width: 5px; height: 5px; display: inline-block; background: currentColor; border-radius: 50%; flex-shrink: 0; }
+    .project-row .small-note { margin-left: auto; font-size: 10px; font-weight: 400; color: #768390; }
+    .selected-project { border-top: 1px solid #ffffff0b; margin-top: 8px; padding-top: 6px; flex: 1; min-height: 135px; display: flex; flex-direction: column; }
+    .session-list { padding: 0 2px 6px; }
+    .session-row { display: flex; gap: 8px; width: 100%; padding: 9px 8px; border-radius: 6px; text-align: left; min-width: 0; margin-bottom: 2px; }
+    .session-row.active { background: #ffffff0a; }
+    .session-main { min-width: 0; flex: 1; }
+    .session-title { color: #bdc7d2; font-size: 11px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; display: block; }
+    .session-meta { margin-top: 5px; display: flex; align-items: center; gap: 6px; font-size: 10px; color: #7e8c9b; }
+    .session-meta .project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+    .session-time { font-size: 10px; color: #7b8897; margin-left: auto; flex-shrink: 0; }
+    .provider { display: inline-grid; place-items: center; width: 15px; height: 15px; flex: 0 0 15px; font-size: 12px; font-weight: 600; line-height: 1; color: #b6a0e2; margin-top: 1px; }
+    .provider.claude { color: #ce9c83; font-size: 18px; }
+    .provider img { display: block; width: 19px; height: 19px; max-width: none; }
+    .state-symbol { font-size: 10px; font-weight: 600; }
+    .tiny-progress { display: inline-flex; gap: 2px; margin-left: auto; }
+    .tiny-progress i { display: block; width: 7px; height: 3px; border-radius: 1px; background: #ffffff15; }
+    .tiny-progress i.done { background: #6395be; }
+    .tree-project { margin-bottom: 4px; }
+    .tree-project .project-row { padding-top: 10px; padding-bottom: 10px; }
+    .tree-project .project-detail { display: none; }
+    .chevron { color: #7d8a99; font-size: 12px; width: 8px; padding-top: 2px; }
+    .tree-sessions { margin: 0 0 8px 21px; border-left: 1px solid #ffffff0e; padding-left: 6px; }
+    .tree-sessions .session-row { padding: 8px 7px; }
+    .tree-sessions .session-title { font-size: 11px; }
+    .project-chip-list { display: flex; gap: 5px; overflow: auto; scrollbar-width: thin; padding: 0 6px 12px; flex: 0 0 auto; }
+    .project-chip { display: flex; align-items: center; gap: 5px; padding: 5px 7px; font-size: 10px; white-space: nowrap; border: 1px solid #ffffff0c; border-radius: 5px; color: #99a7b5; }
+    .project-chip.active { background: #ffffff0b; color: #d4dde8; }
+    .project-chip .mascot { width: 12px; height: 12px; flex-basis: 12px; }
+    .activity-list { flex: 1; }
+    .activity-group { padding-bottom: 10px; }
+    .activity-group .section-heading { position: sticky; top: 0; background: var(--shell); z-index: 1; }
+    .activity-group .session-row { padding-top: 10px; padding-bottom: 10px; }
+    .side-footer { display: flex; padding: 9px 8px 7px; justify-content: space-between; gap: 8px; font-size: 10px; color: #758391; border-top: 1px solid #ffffff08; flex-shrink: 0; }
+    .side-footer button { padding: 0; color: #8c9bac; font-size: 10px; }
+    .project-menu-trigger { display: inline-flex; align-items: center; gap: 6px; border-radius: 5px; padding: 3px 4px; margin: -3px -4px; color: #c6cfd9; font-weight: 500; min-width: 0; }
+    .project-menu-trigger .branch { color: #738494; font-weight: 400; font-size: 10px; max-width: 95px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-title .project-menu-trigger { font-size: 11px; margin-left: auto; color: #9daaba; }
+    .baseline .side-title .project-menu-trigger { font-size: 15px; margin-left: 0; }
+    .baseline .side-title { padding-bottom: 16px; }
+    .handoff { margin: 0 6px 12px; border: 1px solid #ffffff0b; padding: 12px; border-radius: 9px; font-size: 11px; line-height: 1.5; color: #8995a3; }
+    .handoff strong { color: #c8d2dd; display: block; margin-bottom: 5px; font-size: 12px; }
+    .handoff button { color: var(--blue); padding: 3px 6px; border-radius: 4px; background: #69adf414; margin-top: 8px; }
+    .baseline .session-list { flex: 1; }
+    .baseline .session-row { padding-top: 10px; padding-bottom: 10px; }
+    .working-preview { margin: 6px; border-radius: 9px; background: #ffffff04; padding: 3px 3px 6px; }
+    .working-preview .session-row { padding: 8px; }
+    .spaces { height: 34px; display: flex; align-items: center; gap: 5px; flex: 0 0 auto; padding: 1px 5px 2px; }
+    .space { flex: 1; height: 27px; border-radius: 7px; position: relative; display: grid; place-items: center; }
+    .space.active { background: #ffffff0c; }
+    .space .dot { position: absolute; bottom: 3px; right: 7px; width: 5px; height: 5px; color: var(--blue); }
+    .space-arrow { color: #929eab; font-size: 20px; padding: 0 2px; }
+    .conversation { min-height: 0; min-width: 0; border: 1px solid #ffffff08; background: var(--panel); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+    .conversation-top { display: flex; gap: 8px; align-items: center; padding: 14px 24px; border-bottom: 1px solid var(--line); font-size: 11px; color: #8592a0; }
+    .conversation-top .session-state { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 10px; }
+    .conversation-content { padding: 28px clamp(22px,4vw,62px) 18px; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: thin; scrollbar-color: #ffffff15 transparent; }
+    .user-message { background: #ffffff06; border: 1px solid #ffffff05; padding: 14px 18px; border-radius: 12px; color: #bac5d0; font-size: 12px; line-height: 1.65; max-width: 680px; margin-left: auto; }
+    .message-time { text-align: right; margin: 7px 3px 24px; font-size: 10px; color: #606e7c; }
+    .response-label { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #97a5b5; margin-bottom: 14px; }
+    .response { font-size: 12px; line-height: 1.7; color: #b5c1cc; }
+    .response h2 { margin: 0 0 9px; font-weight: 600; font-size: 16px; color: #d5dfe9; letter-spacing: -.2px; }
+    .response p { margin: 0 0 15px; max-width: 68ch; }
+    .steps { padding: 0; margin: 16px 0 20px; list-style: none; max-width: 660px; border-top: 1px solid #ffffff09; }
+    .steps li { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-bottom: 1px solid #ffffff09; font-size: 12px; }
+    .steps li .step-index { display: grid; place-items: center; border: 1px solid #ffffff14; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; color: #71808e; }
+    .steps li.complete .step-index { border: 0; background: #8cc8aa12; color: var(--green); }
+    .steps li.current .step-index { border-color: #69adf450; color: var(--blue); }
+    .steps li .step-state { margin-left: auto; font-size: 10px; color: #758493; white-space: nowrap; }
+    .peer-note { display: flex; gap: 10px; padding: 12px; border: 1px solid #ffffff0b; border-radius: 8px; max-width: 660px; color: #93a2b1; font-size: 11px; line-height: 1.6; }
+    .peer-note strong { color: #bac6d4; font-weight: 500; }
+    .peer-note small { color: #6e7d8d; font-size: 10px; }
+    .peer-note .provider { margin-top: 2px; }
+    .effort-note { color: #7f8f9f; font-size: 10px; margin-top: 15px; }
+    .composer-area { padding: 0 clamp(20px,4vw,54px) 12px; flex-shrink: 0; }
+    .composer { background: #ffffff04; border: 1px solid #ffffff0c; border-radius: 12px; padding: 12px; }
+    .composer textarea { display: block; width: 100%; background: transparent; border: 0; resize: none; min-height: 48px; font-size: 12px; line-height: 1.5; outline: none; }
+    .composer:focus-within { border-color: #69adf440; }
+    .composer-controls { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+    .model-chip { background: #ffffff06; border-radius: 6px; padding: 6px 8px; color: #b9c5d2; display: flex; align-items: center; gap: 5px; }
+    .model-chip .effort { color: #7f8b99; }
+    .send { margin-left: auto; background: #69adf421; border-radius: 6px; padding: 5px 10px; color: var(--blue); font-size: 16px; }
+    .composer-meta { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; padding: 9px 4px 0; color: #657686; }
+    .app-footer { display: flex; align-items: center; padding: 0 14px 0 320px; gap: 8px; font-size: 10px; color: #7b8998; }
+    .app-footer .footer-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+    .usage-chip { display: flex; align-items: center; gap: 7px; padding: 3px 7px; border-radius: 6px; text-align: left; flex-shrink: 0; }
+    .usage-lines { display: flex; flex-direction: column; gap: 3px; font-size: 9px; font-variant-numeric: tabular-nums; line-height: 1; }
+    .usage-line { display: flex; align-items: center; gap: 5px; }
+    .usage-window { width: 13px; color: #7e8d9d; }
+    .usage-meter { display: inline-block; width: 33px; height: 3px; background: #ffffff16; border-radius: 3px; overflow: hidden; }
+    .usage-meter i { display: block; height: 100%; background: #8f9aaa; border-radius: inherit; }
+    .usage-chip.codex .usage-meter i { background: #719aca; }
+    .usage-reset { color: #8391a0; min-width: 38px; }
+    .demo-popover { position: fixed; z-index: 20; width: 274px; padding: 6px; background: #242424; border: 1px solid #ffffff16; border-radius: 9px; box-shadow: 0 10px 32px #08080870; font-size: 12px; color: #d5d5d5; isolation: isolate; }
+    .notifications-popover { width: min(368px,calc(100vw - 20px)); max-height: 460px; display: flex; flex-direction: column; padding: 8px; }
+    .notifications-popover .popover-head { flex-shrink: 0; padding: 4px 4px 8px; font-size: 12px; font-weight: 600; }
+    .notification-unread { color: #ffffff66; font-size: 11px; font-weight: 400; }
+    .mark-all { margin-left: auto; padding: 2px 4px; border-radius: 4px; font-size: 11px; color: #ffffff8c; font-weight: 400; }
+    .notification-filters { display: flex; gap: 4px; padding: 0 4px 8px; flex-shrink: 0; }
+    .notification-filters button { padding: 4px 8px; border-radius: 4px; color: #ffffff73; font-size: 11px; }
+    .notification-filters button.selected { color: #e5e5e5; background: #ffffff1a; }
+    .notification-list { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+    .notification-item { display: flex; align-items: flex-start; border-radius: 6px; }
+    .notification-item:hover { background: #ffffff0d; }
+    .notification-row { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; padding: 10px 8px; text-align: left; border-radius: 6px; }
+    .notification-meta { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 10px; color: #ffffff66; }
+    .notification-meta .time { margin-left: auto; font-variant-numeric: tabular-nums; color: #ffffff59; }
+    .notification-row strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #ffffffd9; font-weight: 500; }
+    .notification-row p { margin: 0; font-size: 11px; line-height: 1.625; color: #ffffff80; }
+    .mark-one { margin: 8px 4px 0 0; padding: 4px; border-radius: 4px; color: #ffffff4d; }
+    .notification-foot { flex-shrink: 0; margin: 8px 0 0; border-top: 1px solid #ffffff0d; padding: 8px 4px 0; color: #ffffff4d; font-size: 10px; }
+    .popover-head { display: flex; align-items: center; gap: 7px; padding: 6px 7px 9px; font-weight: 500; }
+    .popover-head .close-popover { margin-left: auto; color: #8594a4; font-size: 16px; padding: 0 4px; border-radius: 4px; }
+    .menu-row { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 9px; border-radius: 5px; font-size: 11px; }
+    .menu-row .menu-detail { margin-left: auto; color: #8393a5; font-size: 10px; }
+    .menu-row .mascot { width: 14px; height: 14px; flex-basis: 14px; }
+    .menu-separator { height: 1px; background: #ffffff0b; margin: 5px 4px; }
+    .popover-note { color: #8a99aa; font-size: 10px; line-height: 1.5; margin: 5px 8px 7px; }
+    .popover-scroll { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff20 transparent; }
+    .demo-popover .search { margin: 0 5px 6px; }
+    .setting-field { display: flex; flex-direction: column; gap: 6px; padding: 7px 8px; color: #aab7c6; font-size: 11px; }
+    .setting-field input, .setting-field select { background: #1c242e; border: 1px solid #ffffff16; border-radius: 5px; padding: 7px 8px; color: #c9d5e2; width: 100%; }
+    .save-demo { background: #69adf420; color: #83b8ef; width: calc(100% - 16px); margin: 9px 8px 6px; padding: 8px; border-radius: 5px; font-size: 11px; }
+    .usage-detail { margin: 0 8px 12px; padding: 10px 0; border-top: 1px solid #ffffff0c; }
+    .usage-detail-head { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; }
+    .usage-detail .usage-meter { display: block; width: 100%; height: 4px; margin-bottom: 7px; }
+    .usage-detail small { font-size: 10px; color: #8798aa; }
+    .sample-feedback { margin-top: 10px; color: var(--green); font-size: 11px; }
+    .sample-feedback:empty { display: none; }
+    .empty { color: #8392a2; font-size: 12px; line-height: 1.6; padding: 20px 10px; }
+    .dense .project-row { padding-top: 6px; padding-bottom: 6px; }
+    .watchlist.dense .project-row { padding-top: 0; padding-bottom: 0; }
+    .dense .project-detail { display: none; }
+    .watchlist.dense .project-detail { display: block; }
+    .dense .session-row { padding-top: 6px; padding-bottom: 6px; }
+    .dense .session-meta { margin-top: 3px; }
+    .study-foot { max-width: 1440px; margin: 10px auto 0; display: flex; justify-content: space-between; gap: 18px; color: #748393; font-size: 11px; line-height: 1.5; }
+    .study-foot strong { color: #a6b3c2; font-weight: 500; }
+    .proto-picker { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; background: rgba(10, 10, 10, 0.82); -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset, 0 8px 24px rgba(0, 0, 0, 0.24), 0 2px 6px rgba(0, 0, 0, 0.12); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; line-height: 1; -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+    .proto-picker-highlight { position: absolute; top: 4px; left: 0; height: 28px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); will-change: transform; }
+    .proto-picker[data-ready] .proto-picker-highlight { transition: transform 250ms cubic-bezier(0.23, 1, 0.32, 1), width 250ms cubic-bezier(0.23, 1, 0.32, 1); }
+    .proto-picker-item { position: relative; display: flex; align-items: center; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, 0.55); font: inherit; cursor: pointer; transition: color 150ms ease-out; }
+    .proto-picker-item:hover { color: rgba(255, 255, 255, 0.85); }
+    .proto-picker-item:active { transform: scale(0.97); }
+    .proto-picker-item:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.4); outline-offset: 2px; }
+    .proto-picker-item[data-active] { color: #fff; }
+    .proto-picker-divider { width: 1px; height: 16px; margin: 0 4px; background: rgba(255, 255, 255, 0.12); }
+    .proto-picker-replay { padding: 0 10px; font-size: 14px; }
+    .proto-picker[data-position="top"] { bottom: auto; top: 24px; }
+    @media (prefers-reduced-motion: reduce) { .proto-picker[data-ready] .proto-picker-highlight { transition: none; } button, select { transition: none; } }
+    @media (max-width: 900px) { body { padding: 18px 12px 88px; } .study-head { align-items: flex-start; gap: 12px; } .study-controls { max-width: 240px; } .demo-label { border: 0; } .body, .tree .body, .activity .body { grid-template-columns: 280px minmax(0,1fr); } .conversation-content { padding: 22px; } .app-footer { padding-left: 292px; } .app-footer .footer-right { gap: 8px; } .title-caption { display: none; } .steps li .step-state { display: none; } .composer-controls { flex-wrap: wrap; } }
+    @media (max-width: 640px) { body { padding: 14px 10px 88px; } .study-head { display: block; } .study-controls { max-width: none; justify-content: flex-start; margin-top: 12px; gap: 8px; } h1 { font-size: 19px; } .app { min-width: 580px; } #stage { overflow-x: auto; } .study-foot { display: block; } .study-foot span { display: block; margin: 5px 0; } }
+  </style>
+</head>
+<body>
+  <header class="study-head">
+    <div>
+      <div class="study-label">MonoCode / sidebar studies</div>
+      <h1 id="study-title">Projects</h1>
+      <p class="study-copy" id="study-copy"></p>
+    </div>
+    <div class="study-controls">
+      <label>Window <select id="size"><option value="wide">Wide</option><option value="laptop">Laptop</option></select></label>
+      <label>Rows <select id="density"><option value="comfortable">Comfortable</option><option value="dense">Compact</option></select></label>
+      <button class="simulate-run" id="simulate-run">Simulate a new run</button>
+      <span class="demo-label">16 projects · 64 sessions<br>Illustrative data, not live</span>
+    </div>
+  </header>
+  <div id="stage"></div>
+  <div class="study-foot"><span id="tradeoff"></span><span>Try search, project menus, notifications, and sessions. <strong>1–4</strong> switches layouts.</span></div>
+  <nav class="proto-picker" aria-label="Prototype variants">
+    <span class="proto-picker-highlight" aria-hidden="true"></span>
+    <button class="proto-picker-item" data-active aria-current="true">Projects</button>
+    <button class="proto-picker-item">Project tree</button>
+    <button class="proto-picker-item">Activity first</button>
+    <button class="proto-picker-item">Previous layout</button>
+  </nav>
+  <script>
+    // Fixed, invented scenarios: no files, local accounts, or live sessions are read.
+    // The app's provider assets are embedded so the gallery works offline.
+    const providerIcons = {"codex":"data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjkiIGhlaWdodD0iMjkiIHZpZXdCb3g9Ii00IC00IDM3IDM3IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8Y2lyY2xlIGN4PSIxNCIgY3k9IjE1IiByPSI5IiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTAuMDk1OCAxLjUxNjQ5QzExLjE3OTYgMS4wNzA1NyAxMi4zNTk2IDAuOTA5NDU5IDEzLjUyMzMgMS4wNDg1QzE1LjAyMzMgMS4yMjA5OSAxNi4zNTk4IDEuODU4NDggMTcuNTMyOCAyLjk2MDk2QzE3LjU0NzggMi45NzU5NiAxNy41Njg4IDIuOTg2NDUgMTcuNTg4MyAyLjk5MjQ1QzE3LjYwOTUgMi45OTc2NyAxNy42MzE2IDIuOTk3NjcgMTcuNjUyOCAyLjk5MjQ1QzE5LjE3NzggMi41OTg2NSAyMC43OTIgMi43NDQzOSAyMi4yMjE4IDMuNDA0OTVMMjIuMjkyMyAzLjQzNzk0TDIyLjQ2NjMgMy41MjM0NEMyMy45NjMgNC4yODE5OSAyNS4xMzA0IDUuNTYxOTIgMjUuNzQ4MyA3LjEyMTg2QzI2LjA2MTkgNy44ODY4NCAyNi4yMTc4IDguNjgzMzMgMjYuMjIwOCA5LjUxNDMxQzI2LjI0MzQgMTAuMTMyMyAyNi4xNzU3IDEwLjc1MDMgMjYuMDE5OSAxMS4zNDg4QzI2LjAxMjIgMTEuMzc5IDI2LjAxMjMgMTEuNDEwNiAyNi4wMjAxIDExLjQ0MDhDMjYuMDI4IDExLjQ3MSAyNi4wNDM0IDExLjQ5ODcgMjYuMDY0OCAxMS41MjEzQzI2Ljk1NTkgMTIuNDMxNyAyNy41NDY5IDEzLjUxNjIgMjcuODM5NCAxNC43NzYyQzI4LjI3MjkgMTYuOTEzNiAyNy44Mjg5IDE4Ljg0MTEgMjYuNTA4OSAyMC41NTcxTDI2LjMwNDkgMjAuODA2MUMyNS40MzA2IDIxLjgwNjggMjQuMjgzMSAyMi41MzA0IDIzLjAwMzMgMjIuODg4QzIyLjk3NTYgMjIuODk2MSAyMi45NTAxIDIyLjkxMDcgMjIuOTI5IDIyLjkzMDVDMjIuOTA3OSAyMi45NTAzIDIyLjg5MTcgMjIuOTc0OCAyMi44ODE4IDIzLjAwMkMyMi41OTUzIDIzLjgyODUgMjIuMzA3MyAyNC41MzY1IDIxLjc3MTggMjUuMjQzQzIwLjQyMTggMjcuMDIzNCAxOC40Mzg4IDI4LjAxMTkgMTYuMjA1MyAyNy45OTk5QzE0LjQyNDggMjcuOTkwOSAxMi44NDY4IDI3LjMzOTkgMTEuNDY5OCAyNi4wNDY5QzExLjQ0OTEgMjYuMDI3NSAxMS40MjM2IDI2LjAxNCAxMS4zOTU5IDI2LjAwNzdDMTEuMzY4MiAyNi4wMDE0IDExLjMzOTQgMjYuMDAyNSAxMS4zMTIzIDI2LjAxMDlDMTAuNzMwMyAyNi4xOTg0IDEwLjE0MjMgMjYuMjI1NCA5LjUwNjI3IDI2LjIxNzlDOC40OTMyNiAyNi4yMDk4IDcuNDk1NDYgMjUuOTcwNyA2LjU4ODc1IDI1LjUxOUM1LjYzODk5IDI1LjA0ODMgNC44MTIwOSAyNC4zNjI3IDQuMTczNzQgMjMuNTE2NUMzLjk0NTc0IDIzLjIxMzUgMy43MTkyNCAyMi45Mjg1IDMuNTUyNzQgMjIuNTkxQzMuMzI1NDMgMjIuMTI3OSAzLjEzOTcgMjEuNjQ1NSAyLjk5NzczIDIxLjE0OTVDMi42OTgwMyAyMC4wMjEgMi42OTA4MSAxOC44MzQ3IDIuOTc2NzMgMTcuNzAyNkMyLjk4NjE0IDE3LjY3NTcgMi45ODkyMiAxNy42NDY5IDIuOTg1NzMgMTcuNjE4NkMyLjk4MDYgMTcuNTkwOCAyLjk2NjM1IDE3LjU2NTUgMi45NDUyMyAxNy41NDY2QzIuMjUyMzMgMTYuODQ1MyAxLjcyMjc0IDE1Ljk5OTcgMS4zOTQyMyAxNS4wNzAyQzEuMTc1NzUgMTQuNDk3NiAxLjA0ODcgMTMuODk0MyAxLjAxNzcyIDEzLjI4MjJDMC45NjMyMyAxMi40NzYxIDEuMDM0NTggMTEuNjY2NCAxLjIyOTIyIDEwLjg4MjNDMS43MzQ3MyA5LjIxNDMxIDIuNzAyMjMgNy45MDQ4NCA0LjEyODc0IDYuOTU1MzZDNC40NDY3NCA2Ljc0Mzg3IDQuNzQ4MjQgNi41Nzg4NyA1LjAzMDI0IDYuNDYwMzhDNS4zNTI3NSA2LjMyNjg4IDUuNjc1MjUgNi4yMTQzOCA1Ljk5OTI1IDYuMTE5ODhDNi4wMjI0IDYuMTEyNyA2LjA0MzQyIDYuMDk5OTEgNi4wNjA0MyA2LjA4MjYzQzYuMDc3NDUgNi4wNjUzNiA2LjA4OTkyIDYuMDQ0MTUgNi4wOTY3NSA2LjAyMDg5QzYuMzQyNzcgNS4xMzc0NyA2Ljc2NTg0IDQuMzEzMjkgNy4zNDAyNiAzLjU5ODQ0QzguMDY0MzYgMi42Nzg5NyA5LjAxMzQ1IDEuOTYxODggMTAuMDk1OCAxLjUxNjQ5Wk0xNS4zMTg4IDE3LjM2MzZDMTUuMDc1IDE3LjM3NzMgMTQuODQ1NyAxNy40ODM4IDE0LjY3OCAxNy42NjEyQzE0LjUxMDMgMTcuODM4NiAxNC40MTY4IDE4LjA3MzUgMTQuNDE2OCAxOC4zMTc2QzE0LjQxNjggMTguNTYxOCAxNC41MTAzIDE4Ljc5NjYgMTQuNjc4IDE4Ljk3NEMxNC44NDU3IDE5LjE1MTQgMTUuMDc1IDE5LjI1NzkgMTUuMzE4OCAxOS4yNzE2SDIwLjc3MjhDMjAuOTAyNiAxOS4yNzg5IDIxLjAzMjUgMTkuMjU5NiAyMS4xNTQ2IDE5LjIxNDlDMjEuMjc2NyAxOS4xNzAzIDIxLjM4ODMgMTkuMTAxMiAyMS40ODI4IDE5LjAxMTlDMjEuNTc3MiAxOC45MjI2IDIxLjY1MjUgMTguODE1IDIxLjcwMzkgMTguNjk1NkMyMS43NTUzIDE4LjU3NjIgMjEuNzgxOCAxOC40NDc2IDIxLjc4MTggMTguMzE3NkMyMS43ODE4IDE4LjE4NzYgMjEuNzU1MyAxOC4wNTkgMjEuNzAzOSAxNy45Mzk2QzIxLjY1MjUgMTcuODIwMyAyMS41NzcyIDE3LjcxMjYgMjEuNDgyOCAxNy42MjMzQzIxLjM4ODMgMTcuNTM0IDIxLjI3NjcgMTcuNDY0OSAyMS4xNTQ2IDE3LjQyMDNDMjEuMDMyNSAxNy4zNzU2IDIwLjkwMjYgMTcuMzU2NCAyMC43NzI4IDE3LjM2MzZIMTUuMzE4OFpNOS4xOTI3NiAxMC4zNDUzQzkuMDYyOTYgMTAuMTMzOSA4Ljg1NiA5Ljk4MTIzIDguNjE1NjcgOS45MTk2NUM4LjM3NTM0IDkuODU4MDYgOC4xMjA0OCA5Ljg5MjM3IDcuOTA0OTkgMTAuMDE1M0M3LjY4OTUgMTAuMTM4MiA3LjUzMDI4IDEwLjM0MDIgNy40NjEgMTAuNTc4NEM3LjM5MTcyIDEwLjgxNjYgNy40MTc4MSAxMS4wNzI0IDcuNTMzNzYgMTEuMjkxOEw5LjQ0MTc3IDE0LjYyNzdMNy41NDI3NiAxNy44MzE2QzcuNDc4ODQgMTcuOTM5NSA3LjQzNjc4IDE4LjA1ODggNy40MTkgMTguMTgyOUM3LjQwMTIyIDE4LjMwNyA3LjQwODA1IDE4LjQzMzQgNy40MzkxMSAxOC41NTQ5QzcuNDcwMTcgMTguNjc2MyA3LjUyNDg1IDE4Ljc5MDUgNy42MDAwMyAxOC44OTA4QzcuNjc1MjEgMTguOTkxMSA3Ljc2OTQxIDE5LjA3NTcgNy44NzcyNiAxOS4xMzk2QzcuOTg1MTEgMTkuMjAzNSA4LjEwNDQ5IDE5LjI0NTYgOC4yMjg1OSAxOS4yNjMzQzguMzUyNjkgMTkuMjgxMSA4LjQ3OTA4IDE5LjI3NDMgOC42MDA1NCAxOS4yNDMyQzguNzIyIDE5LjIxMjIgOC44MzYxNSAxOS4xNTc1IDguOTM2NDggMTkuMDgyM0M5LjAzNjgxIDE5LjAwNzEgOS4xMjEzNCAxOC45MTI5IDkuMTg1MjYgMTguODA1MUwxMS4zNjYzIDE1LjEyMjdDMTEuNDUyMyAxNC45Nzc2IDExLjQ5ODMgMTQuODEyMyAxMS40OTk2IDE0LjY0MzdDMTEuNTAwOSAxNC40NzUxIDExLjQ1NzUgMTQuMzA5MSAxMS4zNzM4IDE0LjE2MjdMOS4xOTI3NiAxMC4zNDUzWiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzI0ODBfMTAxKSIvPgo8ZGVmcz4KPGxpbmVhckdyYWRpZW50IGlkPSJwYWludDBfbGluZWFyXzI0ODBfMTAxIiB4MT0iMTQuNDk5OCIgeTE9IjEuMDAwNSIgeDI9IjE0LjQ5OTgiIHkyPSIyNy45OTk5IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CjxzdG9wIHN0b3AtY29sb3I9IiNCMUE3RkYiLz4KPHN0b3Agb2Zmc2V0PSIwLjUiIHN0b3AtY29sb3I9IiM3QTlERkYiLz4KPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMzk0MUZGIi8+CjwvbGluZWFyR3JhZGllbnQ+CjwvZGVmcz4KPC9zdmc+Cg==","claude":"data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjkiIGhlaWdodD0iMjkiIHZpZXdCb3g9Ii00IC00IDM3IDM3IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8ZyBjbGlwLXBhdGg9InVybCgjY2xpcDBfMjQ4MF85MikiPgo8cGF0aCBkPSJNNS42ODQgMTkuMjg1TDExLjM5NyAxNi4wOTVMMTEuNDg0IDE1LjgwNUwxMS4zOTcgMTUuNjZIMTEuMTA3TDEwLjE1IDE1LjYwMkw2LjkwMiAxNS41MTVMNC4wNiAxNS4zN0wxLjMwNSAxNS4yMjVMMC42MDkgMTUuMDhMMCAxNC4yMUwwLjA1OCAxMy43NzVMMC42MzggMTMuMzk4TDEuNDc5IDEzLjQ1NkwzLjMwNiAxMy42MDFMNi4wNjEgMTMuNzc1TDguMDYyIDEzLjg5MUwxMS4wMiAxNC4yMzlIMTEuNDg0TDExLjU0MiAxNC4wMzZMMTEuMzk3IDEzLjkyTDExLjI4MSAxMy44MDRMOC40MSAxMS44OUw1LjMzNiA5Ljg2TDMuNzEyIDguNjcxTDIuODQyIDguMDkxTDIuNDA3IDcuNTExTDIuMjMzIDYuMjkzTDMuMDE2IDUuNDIzTDQuMDg5IDUuNTFMNC4zNSA1LjU2OEw1LjQyMyA2LjQwOUw3Ljc0MyA4LjE3OEwxMC43MyAxMC40NEwxMS4xNjUgMTAuNzg4TDExLjMzOSAxMC42NzJMMTEuMzY4IDEwLjU4NUwxMS4xNjUgMTAuMjY2TDkuNTcgNy4yNUw3LjgzIDQuMjM0TDcuMDQ3IDIuOTg3TDYuODQ0IDIuMjMzQzYuNzU3IDEuOTQzIDYuNzI4IDEuNjUzIDYuNzI4IDEuMzYzTDcuNTk4IDAuMTQ1TDguMTIgMEw5LjMzOCAwLjE3NEw5LjgwMiAwLjU4TDEwLjU1NiAyLjMyTDExLjc0NSA1LjAxN0wxMy42MyA4LjY3MUwxNC4yMSA5Ljc3M0wxNC41IDEwLjc1OUwxNC41ODcgMTEuMDQ5SDE0Ljc5VjEwLjkwNEwxNC45MzUgOC44MTZMMTUuMjI1IDYuMjkzTDE1LjUxNSAzLjA0NUwxNS42MDIgMi4xMTdMMTYuMDY2IDEuMDE1TDE2LjkzNiAwLjQzNUwxNy42OSAwLjc1NEwxOC4yNyAxLjU5NUwxOC4xODMgMi4xMTdMMTcuODY0IDQuMzVMMTcuMTEgNy44NTlMMTYuNjc1IDEwLjIzN0gxNi45MzZMMTcuMjI2IDkuOTE4TDE4LjQxNSA4LjM1MkwyMC40MTYgNS44NThMMjEuMjg2IDQuODQzTDIyLjMzIDMuNzdMMjIuOTk3IDMuMjQ4SDI0LjI0NEwyNS4xNDMgNC42MTFMMjQuNzM3IDYuMDMyTDIzLjQ2MSA3LjY1NkwyMi4zODggOS4wMTlMMjAuODUxIDExLjA3OEwxOS45MjMgMTIuNzMxTDIwLjAxIDEyLjg0N0gyMC4yMTNMMjMuNjkzIDEyLjA5M0wyNS41NDkgMTEuNzc0TDI3Ljc1MyAxMS4zOTdMMjguNzY4IDExLjg2MUwyOC44ODQgMTIuMzI1TDI4LjQ3OCAxMy4zMTFMMjYuMSAxMy44OTFMMjMuMzE2IDE0LjQ3MUwxOS4xNjkgMTUuNDI4TDE5LjExMSAxNS40NTdMMTkuMTY5IDE1LjU0NEwyMS4wMjUgMTUuNzE4TDIxLjgzNyAxNS43NzZIMjMuODA5TDI3LjQ2MyAxNi4wNjZMMjguNDIgMTYuNjQ2TDI4Ljk3MSAxNy40MjlMMjguODg0IDE4LjAwOUwyNy40MDUgMTguNzYzTDI1LjQzMyAxOC4yOTlMMjAuNzkzIDE3LjE5N0wxOS4yMjcgMTYuODJIMTguOTk1VjE2LjkzNkwyMC4zMjkgMTguMjQxTDIyLjczNiAyMC40MTZMMjUuODEgMjMuMjI5TDI1Ljk1NSAyMy45MjVMMjUuNTc4IDI0LjUwNUwyNS4xNzIgMjQuNDQ3TDIyLjUwNCAyMi40MTdMMjEuNDYgMjEuNTQ3TDE5LjE0IDE5LjU3NUgxOC45OTVWMTkuNzc4TDE5LjUxNyAyMC41NjFMMjIuMzU5IDI0LjgyNEwyMi41MDQgMjYuMTI5TDIyLjMwMSAyNi41MzVMMjEuNTQ3IDI2LjgyNUwyMC43NjQgMjYuNjUxTDE5LjA4MiAyNC4zMzFMMTcuMzQyIDIxLjcyMUwxNS45NzkgMTkuMzQzTDE1LjgzNCAxOS40NTlMMTQuOTkzIDI4LjIxN0wxNC42MTYgMjguNjUyTDEzLjc0NiAyOUwxMy4wMjEgMjguNDJMMTIuNjE1IDI3LjU1TDEzLjAyMSAyNS43NTJMMTMuNDg1IDIzLjQzMkwxMy44NjIgMjEuNTc2TDE0LjIxIDE5LjI4NUwxNC40MTMgMTguNTMxVjE4LjQ3M0gxNC4yMUwxMi40NyAyMC44OEw5Ljg2IDI0LjQ0N0w3Ljc3MiAyNi42NTFMNy4yNzkgMjYuODU0TDYuNDA5IDI2LjQxOUw2LjQ5NiAyNS42MDdMNi45NiAyNC45NEw5Ljg2IDIxLjIyOEwxMS42IDE4LjkzN0wxMi43NiAxNy42MDNMMTIuNzMxIDE3LjQ1OEgxMi42NDRMNC45ODggMjIuNDQ2TDMuNjI1IDIyLjYyTDMuMDQ1IDIyLjA0TDMuMTAzIDIxLjE3TDMuMzkzIDIwLjg4TDUuNzEzIDE5LjI4NUg1LjY4NFoiIGZpbGw9IiNEOTc3NTciLz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF8yNDgwXzkyIj4KPHJlY3Qgd2lkdGg9IjI5IiBoZWlnaHQ9IjI5IiBmaWxsPSJ3aGl0ZSIvPgo8L2NsaXBQYXRoPgo8L2RlZnM+Cjwvc3ZnPgo="};
+    const projectSeeds = [
+      ["monocode", "#69adf4", "Improve project visibility", "Keep workspace windows light", "Codex session communication", "Review keyboard navigation"],
+      ["morgue", "#b793d2", "Cut the product walkthrough", "Review the opening sequence", "Tune caption timing", "Export launch stills"],
+      ["panoptic", "#d084ac", "Review table interactions", "Check empty states", "Polish export controls", "Tidy the component tests"],
+      ["hoddle", "#6597c6", "Improve the onboarding flow", "Review account settings", "Test the mobile navigation", "Update product copy"],
+      ["clupai-monorepo", "#65aaa2", "Share workspace preferences", "Check package boundaries", "Refresh the landing page", "Clean up build warnings"],
+      ["samridhlimbu", "#bd8266", "Refine the portfolio header", "Review case study layout", "Test contact form states", "Compress project images"],
+      ["ontrack", "#a9af70", "Plan the weekly dashboard", "Fix timeline keyboard focus", "Review summary cards", "Check date formatting"],
+      ["tempo", "#ad8e68", "Build timer shortcuts", "Review session history", "Tune notification timing", "Test offline recovery"],
+      ["recall", "#9a92ca", "Improve search ranking", "Check note import progress", "Review duplicate handling", "Tidy collection settings"],
+      ["nomnom", "#c38e76", "Refine the recipe editor", "Review shopping list groups", "Check serving controls", "Test ingredient search"],
+      ["kairos", "#6ca6b8", "Polish calendar navigation", "Check event overlap rules", "Review time zone labels", "Test keyboard shortcuts"],
+      ["ripple", "#7a9ec4", "Review the activity feed", "Tune unread indicators", "Check preference syncing", "Clean up empty views"],
+      ["jobbird", "#b2a16f", "Improve application tracking", "Review company filters", "Check saved search states", "Test notes autosave"],
+      ["noop", "#84a88e", "Simplify the command menu", "Review plugin settings", "Check shortcut conflicts", "Update the help screen"],
+      ["VisaTrack", "#aa89b4", "Review the document list", "Test upload error states", "Check reminder wording", "Polish the checklist"],
+      ["lock-in", "#959fb4", "Tune focus session controls", "Review break reminders", "Check daily summaries", "Test pause and resume"]
+    ];
+    const statePatterns = [
+      ["working", "working", "waiting", "ready"], ["working", "waiting", "ready", "idle"],
+      ["waiting", "working", "ready", "ready"], ["working", "ready", "idle", "idle"],
+      ["working", "working", "ready", "idle"], ["ready", "ready", "idle", "idle"],
+      ["waiting", "working", "ready", "idle"], ["working", "idle", "ready", "idle"],
+      ["working", "waiting", "ready", "idle"], ["ready", "idle", "ready", "idle"],
+      ["working", "ready", "idle", "idle"], ["ready", "idle", "idle", "idle"],
+      ["waiting", "ready", "idle", "idle"], ["ready", "idle", "idle", "idle"],
+      ["idle", "ready", "idle", "idle"], ["ready", "idle", "idle", "idle"]
+    ];
+    const states = { working: { label: "Working", symbol: "↳" }, waiting: { label: "Needs you", symbol: "!" }, ready: { label: "Ready", symbol: "✓" }, idle: { label: "Idle", symbol: "·" } };
+    const workDescriptions = ["Running focused checks", "Reading the existing flow", "Checking edge cases", "Preparing the next change"];
+    const waitDescriptions = ["Choose between two approaches", "Review the proposed change", "Needs a decision to continue", "Confirm the next priority"];
+    const projects = projectSeeds.map((seed, p) => ({
+      id: p, name: seed[0], color: seed[1], sessions: seed.slice(2).map((title, i) => ({
+        id: `${p}-${i}`, project: p, title, state: statePatterns[p][i], provider: (p + i) % 3 === 1 ? "claude" : "codex",
+        elapsed: ["2m", "8m", "14m", "26m", "43m", "1h 12m", "2h 6m"][(p * 3 + i) % 7],
+        done: statePatterns[p][i] === "ready" ? 4 : statePatterns[p][i] === "idle" ? 0 : 1 + (p + i) % 3,
+        runStarted: statePatterns[p][i] === "working" ? 1760000000000 - (p * 4 + i) * 60000 : null,
+        detail: statePatterns[p][i] === "working" ? workDescriptions[(p + i) % 4] : statePatterns[p][i] === "waiting" ? waitDescriptions[(p + i) % 4] : statePatterns[p][i] === "ready" ? "Checks passed · ready to review" : "Saved for later"
+      }))
+    }));
+    const sessions = projects.flatMap(p => p.sessions);
+    const originalProjects = JSON.parse(JSON.stringify(projects));
+    const mascots = [
+      ["..#..#..", ".######.", "##.##.##", "########", ".######.", ".#.##.#.", "#.#..#.#", "........"],
+      ["..####..", ".######.", "##.##.##", "########", "########", "########", "########", "#.##.##."],
+      ["...#....", ".######.", ".#.##.#.", ".######.", ".#....#.", ".######.", "..#..#..", "........"],
+      [".#....#.", ".##..##.", "########", "#.####.#", "########", "###..###", ".######.", "..#..#.."]
+    ];
+    const directions = [
+      { name: "Projects", className: "watchlist", copy: "<strong>Selected direction.</strong> Running projects first, newest run at the top; project controls stay beside the session list.", tradeoff: "<strong>Order changes when a run starts.</strong> Selection stays put; rows hold still while you point at or use the list." },
+      { name: "Project tree", className: "tree", copy: "Keep each project and its sessions together; expand the work you want to follow.", tradeoff: "<strong>Best for moving between related sessions.</strong> Open branches take space; collapse quiet projects." },
+      { name: "Activity first", className: "activity", copy: "Put every decision and active task in one feed, with project names on each row.", tradeoff: "<strong>Best for watching many agents.</strong> Work is grouped by status, so project structure is less prominent." },
+      { name: "Previous layout", className: "baseline", copy: "Reference before this change: the selected project gets the sidebar, with five project icons at the bottom.", tradeoff: "<strong>The previous tradeoff.</strong> Other projects are hidden behind icons and paging." }
+    ];
+    let selectedProject = 0;
+    let selectedSession = "0-0";
+    let query = "";
+    let filter = "all";
+    let activityProject = null;
+    let expanded = new Set([0, 1, 2]);
+    let carousel = 0;
+    let compact = false;
+    let laptop = false;
+    let popover = null;
+    let menuQuery = "";
+    let demoSound = "Silent";
+    let notificationFilter = "all";
+    const readNotifications = new Set();
+    const worktrees = new Map(projects.map(p => [p.id, p.id === 0 ? "mine" : "main"]));
+    const usageSamples = {
+      claude: { label: "Claude", short: 68, week: 41, shortReset: "2h 11m", weekReset: "3d 8h" },
+      codex: { label: "Codex", short: 86, week: 73, shortReset: "3h 42m", weekReset: "5d 20h" }
+    };
+    let projectOrder = projects.map(p => p.id);
+    let pointerInProjects = false;
+    const drafts = new Map();
+    const feedback = new Map();
+    const escape = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    const count = (items, state) => items.filter(s => s.state === state).length;
+
+    function orderedProjects()
+    {
+      const focusedRow = document.activeElement?.closest(".watchlist .project-list");
+      if (!pointerInProjects && !focusedRow) {
+        const latest = project => Math.max(0, ...project.sessions.filter(s => s.state === "working").map(s => s.runStarted || 0));
+        projectOrder = [...projects].sort((a, b) => latest(b) - latest(a) || a.id - b.id).map(p => p.id);
+      }
+      return projectOrder.map(id => projects[id]);
+    }
+
+    function mascot(project, background = false)
+    {
+      const path = mascots[project.id % mascots.length].flatMap((row, y) => [...row].flatMap((cell, x) => cell === "#" ? [`M${x} ${y}h1v1h-1z`] : [])).join("");
+      const svg = `<svg class="mascot" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true" style="color:${project.color}"><path fill="currentColor" d="${path}"/></svg>`;
+      return background ? `<span class="mascot-bg">${svg}</span>` : svg;
+    }
+
+    function provider(session)
+    {
+      const label = session.provider === "codex" ? "Codex" : "Claude Code";
+      return `<span class="provider ${session.provider}" title="${label}"><img src="${providerIcons[session.provider]}" alt="${label}" width="19" height="19"></span>`;
+    }
+
+    function projectMenuTrigger(project, branch = false)
+    {
+      return `<button class="project-menu-trigger" data-action="project-menu" data-project="${project.id}" aria-haspopup="dialog" aria-expanded="${popover?.kind === "project-menu" && popover.project === project.id}" aria-label="${escape(project.name)} project menu">${escape(project.name)}${branch ? `<span class="branch">${escape(worktrees.get(project.id))}</span>` : ""}<span aria-hidden="true">⌄</span></button>`;
+    }
+
+    function icon(name)
+    {
+      const paths = {
+        bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+        plus: '<path d="M12 5v14M5 12h14"/>',
+        more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+        search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
+        filter: '<path d="M4 6h16M7 12h10M10 18h4"/>'
+      };
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+    }
+
+    function notificationRows()
+    {
+      return sessions.filter(session => session.state === "waiting" || session.state === "ready").slice(0, 12);
+    }
+
+    function notificationButton()
+    {
+      const unread = notificationRows().filter(session => !readNotifications.has(session.id)).length;
+      return `<button class="native-icon-button" data-action="notifications" aria-haspopup="dialog" aria-expanded="${popover?.kind === "notifications"}" aria-label="Notifications${unread ? `, ${unread} unread` : ""}">${icon("bell")}${unread ? `<span class="notification-count" aria-hidden="true">${unread}</span>` : ""}</button>`;
+    }
+
+    function usageChip(id)
+    {
+      const sample = usageSamples[id];
+      return `<button class="usage-chip ${id}" data-action="usage" data-provider="${id}" aria-haspopup="dialog" aria-label="${sample.label} usage details, illustrative data" title="${sample.label} sample usage: ${sample.short}% short-window remaining, ${sample.week}% weekly remaining">${provider({ provider: id })}<span class="usage-lines">${[["5h", sample.short, sample.shortReset], ["wk", sample.week, sample.weekReset]].map(([label, remaining, reset]) => `<span class="usage-line"><span class="usage-window">${label}</span><span class="usage-meter"><i style="width:${remaining}%"></i></span><span class="usage-reset">${reset}</span></span>`).join("")}</span></button>`;
+    }
+
+    function popoverContent()
+    {
+      if (!popover) { return ""; }
+      const project = projects[popover.project ?? selectedProject];
+      let title = project.name;
+      let content = "";
+      if (popover.kind === "project-menu") {
+        content = `<button class="menu-row" data-action="worktrees">⑂ <span>Switch worktree</span><span class="menu-detail">${escape(worktrees.get(project.id))} ›</span></button><button class="menu-row" data-action="switch-project">▱ <span>Switch project</span><span class="menu-detail">›</span></button><div class="menu-separator"></div><button class="menu-row" data-action="project-settings">⚙ <span>Project settings</span></button><div class="menu-separator"></div><button class="menu-row" data-action="settings">⚙ <span>Settings</span><span class="menu-detail">⌘,</span></button>`;
+      } else if (popover.kind === "worktrees") {
+        title = "Switch worktree";
+        content = ["mine", "main", "feature/sidebar-watchlist", "fix/background-polling"].map(branch => `<button class="menu-row" data-action="choose-worktree" data-branch="${branch}"><span>${worktrees.get(project.id) === branch ? "✓" : "⑂"}</span><span>${branch}</span></button>`).join("") + `<p class="popover-note">Demo branches only. Switching changes this preview’s branch label.</p>`;
+      } else if (popover.kind === "switch-project") {
+        title = "Switch project";
+        const found = projects.filter(p => p.name.toLowerCase().includes(menuQuery.toLowerCase()));
+        content = `<label class="search"><span aria-hidden="true">⌕</span><input id="menu-project-search" aria-label="Find a project in the menu" value="${escape(menuQuery)}" placeholder="Find a project…"></label><div class="popover-scroll">${found.map(p => `<button class="menu-row" data-action="choose-project" data-project="${p.id}">${mascot(p)}<span>${escape(p.name)}</span><span class="menu-detail">${p.id === selectedProject ? "✓" : ""}</span></button>`).join("") || `<p class="popover-note">No matching projects.</p>`}</div>`;
+      } else if (popover.kind === "project-settings") {
+        title = "Project settings";
+        content = `<label class="setting-field">Display name<input id="demo-project-name" value="${escape(project.name)}" maxlength="40"></label><label class="setting-field">Project color<select id="demo-project-color">${[[project.color, "Current color"], ["#69adf4", "Blue"], ["#b793d2", "Violet"], ["#65aaa2", "Teal"], ["#d084ac", "Rose"]].map(([color, label]) => `<option value="${color}" >${label}</option>`).join("")}</select></label><button class="save-demo" data-action="save-project-settings">Apply to this demo</button><p class="popover-note">Preview only. Your project files and MonoCode settings stay unchanged.</p>`;
+      } else if (popover.kind === "settings") {
+        title = "Settings";
+        content = `<label class="setting-field">Sidebar density<select id="demo-density"><option value="comfortable" ${compact ? "" : "selected"}>Comfortable</option><option value="dense" ${compact ? "selected" : ""}>Compact</option></select></label><label class="setting-field">Notification sound<select id="demo-sound"><option ${demoSound === "Silent" ? "selected" : ""}>Silent</option><option ${demoSound === "Sound on" ? "selected" : ""}>Sound on</option></select></label><button class="save-demo" data-action="save-settings">Apply to this demo</button><p class="popover-note">Preview only. These controls affect this page until reload; no sound plays.</p>`;
+      } else if (popover.kind === "usage") {
+        const sample = usageSamples[popover.provider];
+        title = `${sample.label} usage`;
+        content = `<p class="popover-note">Illustrative values · not connected to your account.</p>${[["5-hour window", sample.short, sample.shortReset], ["Weekly window", sample.week, sample.weekReset]].map(([label, remaining, reset]) => `<div class="usage-detail"><div class="usage-detail-head"><span>${label}</span><strong>${remaining}% remaining</strong></div><span class="usage-meter"><i style="width:${remaining}%"></i></span><small>Resets in ${reset}</small></div>`).join("")}`;
+      } else if (popover.kind === "session-filter") {
+        title = "Filter sessions";
+        content = ["all", "working", "waiting", "ready", "idle"].map(state => `<button class="menu-row" data-action="filter" data-filter="${state}"><span>${filter === state ? "✓" : ""}</span><span>${state === "all" ? "All sessions" : states[state].label}</span></button>`).join("");
+      } else if (popover.kind === "notifications") {
+        const rows = notificationRows();
+        const unread = rows.filter(session => !readNotifications.has(session.id)).length;
+        const shown = rows.filter(session => notificationFilter === "all" || (notificationFilter === "finished" ? session.state === "ready" : session.state === "waiting"));
+        return `<section class="demo-popover notifications-popover" role="dialog" aria-label="Notifications" style="left:${popover.x}px;top:${popover.y}px"><header class="popover-head"><span>Notifications</span><span class="notification-unread">${unread} unread</span>${unread ? '<button class="mark-all" data-action="read-all">✓✓ Mark all read</button>' : ""}</header><div class="notification-filters" role="group" aria-label="Filter notifications">${[["all", "All"], ["decisions", "Decisions"], ["finished", "Finished"]].map(([value, label]) => `<button data-action="notification-filter" data-filter="${value}" aria-pressed="${notificationFilter === value}" class="${notificationFilter === value ? "selected" : ""}">${label}</button>`).join("")}</div><div class="notification-list">${shown.map((session, index) => `<div class="notification-item"><button class="notification-row" data-action="open-notification" data-session="${session.id}" title="Open ${escape(session.title)}"><span class="notification-meta">${readNotifications.has(session.id) ? "" : '<span class="dot working" aria-label="Unread"></span>'}<span class="${session.state === "ready" ? "ready" : "waiting"}">${session.state === "ready" ? "Finished" : index % 2 ? "Approval" : "Question"}</span><span>${escape(projects[session.project].name)}</span><span class="time">${["14:42", "14:39", "14:35", "14:28"][index % 4]}</span></span><strong>${escape(session.title)}</strong><p>${escape(session.detail)}</p></button>${readNotifications.has(session.id) ? "" : `<button class="mark-one" data-action="read-notification" data-session="${session.id}" aria-label="Mark ${escape(session.title)} read" title="Mark read">✓</button>`}</div>`).join("") || '<p class="popover-note">No notifications in this view.</p>'}</div><p class="notification-foot">Recent activity · decisions remain in their session</p></section>`;
+      }
+      return `<section class="demo-popover" role="dialog" aria-label="${escape(title)}" style="left:${popover.x}px;top:${popover.y}px"><div class="popover-head">${popover.kind === "usage" ? provider({ provider: popover.provider }) : ""}<span>${escape(title)}</span><button class="close-popover" data-action="close-popover" aria-label="Close menu">×</button></div>${content}</section>`;
+    }
+
+    function positionPopover()
+    {
+      const element = stage.querySelector(".demo-popover");
+      if (!element || !popover) { return; }
+      const rect = element.getBoundingClientRect();
+      element.style.left = Math.max(10, Math.min(popover.x, window.innerWidth - rect.width - 10)) + "px";
+      element.style.top = Math.max(10, Math.min(popover.y, window.innerHeight - rect.height - 64)) + "px";
+    }
+
+    function matching(items)
+    {
+      return items.filter(s => (filter === "all" || s.state === filter) && (!query || `${projects[s.project].name} ${s.title} ${s.detail}`.toLowerCase().includes(query.toLowerCase())));
+    }
+
+    function counts(project)
+    {
+      return `<span class="counts">${(current === 0 ? ["working", "waiting", "ready"] : ["waiting", "working", "ready"]).map(state => {
+        const n = count(project.sessions, state);
+        const symbol = current === 0 && state !== "working" ? `<span aria-hidden="true">${state === "waiting" ? "ⓘ" : "✓"}</span>` : '<span class="dot"></span>';
+        return n ? `<span class="count ${state}" title="${n} ${states[state].label.toLowerCase()}">${symbol}${n}</span>` : "";
+      }).join("")}</span>`;
+    }
+
+    function projectRow(project, tree = false)
+    {
+      const live = [...project.sessions].filter(s => s.state === "working").sort((a, b) => (b.runStarted || 0) - (a.runStarted || 0))[0] || project.sessions.find(s => s.state === "waiting") || project.sessions.find(s => s.state === "ready") || project.sessions[0];
+      return `<button class="project-row ${project.id === selectedProject ? "active" : ""}" data-action="${tree ? "expand" : "project"}" data-project="${project.id}" ${tree ? `aria-expanded="${expanded.has(project.id)}"` : `aria-pressed="${project.id === selectedProject}"`} aria-label="${escape(project.name)}, ${count(project.sessions, "working")} working, ${count(project.sessions, "waiting")} need you, ${count(project.sessions, "ready")} ready">
+        ${tree ? `<span class="chevron">${expanded.has(project.id) ? "⌄" : "›"}</span>` : ""}${mascot(project, true)}
+        <span class="project-copy"><span class="row-title"><span class="name">${escape(project.name)}</span></span><span class="project-detail">${escape(live.detail)}</span></span>${counts(project)}
+      </button>`;
+    }
+
+    function nativeProjectRow(project)
+    {
+      return `<div class="native-project-item ${project.id === selectedProject ? "active" : ""}">${projectRow(project)}<button class="native-icon-button" data-action="row-settings" data-project="${project.id}" aria-label="Project settings for ${escape(project.name)}" aria-haspopup="dialog">${icon("more")}</button></div>`;
+    }
+
+    function sessionRow(session, showProject = false)
+    {
+      const state = states[session.state];
+      return `<button class="session-row ${session.id === selectedSession ? "active" : ""}" data-action="session" data-session="${session.id}" aria-pressed="${session.id === selectedSession}" title="${escape(session.title)} — ${state.label}">
+        ${provider(session)}<span class="session-main"><span class="session-title">${escape(session.title)}</span><span class="session-meta"><span class="state-symbol ${session.state}">${state.symbol}</span>${showProject ? `<span class="project-name">${escape(projects[session.project].name)}</span><span>·</span>` : ""}<span class="${session.state}">${state.label}</span>${session.state === "working" ? `<span class="tiny-progress" title="${session.done} of 4 checklist steps complete">${[0, 1, 2, 3].map(i => `<i class="${i < session.done ? "done" : ""}"></i>`).join("")}</span>` : ""}</span></span><span class="session-time">${session.elapsed}</span>
+      </button>`;
+    }
+
+    function search(placeholder = "Find projects or sessions…")
+    {
+      return `<label class="search"><span aria-hidden="true">⌕</span><input id="project-search" type="search" value="${escape(query)}" placeholder="${placeholder}" aria-label="Find projects or sessions"><kbd>⌘K</kbd></label>`;
+    }
+
+    function summary()
+    {
+      return `<div class="summary" aria-label="Filter by status">${["waiting", "working", "ready"].map(state => `<button data-action="filter" data-filter="${state}" class="${filter === state ? "selected" : ""}" aria-pressed="${filter === state}"><strong class="${state}">${count(sessions, state)}</strong> ${states[state].label}</button>`).join("")}</div>`;
+    }
+
+    function heading(label, detail = "")
+    {
+      return `<div class="section-heading"><span>${label}</span>${filter !== "all" ? `<button class="clear" data-action="clear-filter">Show all</button>` : `<span>${detail}</span>`}</div>`;
+    }
+
+    function noResults()
+    {
+      return `<div class="empty">No matching sessions.<br>Try another search or status.</div>`;
+    }
+
+    function sidebar(i)
+    {
+      const project = projects[selectedProject];
+      const shownProjects = (i === 0 ? orderedProjects() : projects).filter(p => matching(p.sessions).length);
+      const selected = matching(project.sessions);
+      const top = `<div class="side-title">${mascot(project, true)}<span>${i === 2 ? "Activity" : "Projects"}</span>${i === 0 ? '<span class="subtle">16</span>' : projectMenuTrigger(project)}</div>${search()}${summary()}`;
+      const foot = `<div class="side-footer"><button data-action="settings" aria-haspopup="dialog">⚙ Settings <span class="subtle">⌘,</span></button><span>16 projects</span><button data-action="reset">Reset demo</button></div>`;
+      if (i === 0) {
+        return `${search("Search")}<section class="native-projects" aria-label="Projects"><div class="native-projects-head"><span>Projects</span>${notificationButton()}<button class="native-icon-button" data-action="open-project" aria-label="Open project" aria-haspopup="dialog">${icon("plus")}</button></div><div class="project-list scroll" data-scroll="projects">${shownProjects.map(p => nativeProjectRow(p)).join("") || noResults()}</div></section><section class="selected-project"><div class="native-workspace-head">${mascot(project)}${projectMenuTrigger(project, true)}<button class="native-icon-button" data-action="focus-search" aria-label="Search project">${icon("search")}</button></div><div class="section-heading"><span>Today</span><button class="native-icon-button" data-action="session-filter" aria-label="Filter sessions" aria-haspopup="dialog">${icon("filter")}</button></div><div class="session-list scroll" data-scroll="sessions">${selected.map(s => sessionRow(s)).join("") || noResults()}</div></section>`;
+      }
+      if (i === 1) {
+        return `${top}${heading("Projects and sessions", "Click to expand")}<div class="project-list scroll" data-scroll="projects">${shownProjects.map(p => `<section class="tree-project">${projectRow(p, true)}${expanded.has(p.id) ? `<div class="tree-sessions">${matching(p.sessions).map(s => sessionRow(s)).join("")}</div>` : ""}</section>`).join("") || noResults()}</div>${foot}`;
+      }
+      if (i === 2) {
+        const filtered = matching(sessions).filter(s => activityProject === null || s.project === activityProject);
+        return `${top}<div class="project-chip-list" aria-label="Filter activity by project"><button class="project-chip ${activityProject === null ? "active" : ""}" data-action="activity-project" data-project="all" aria-pressed="${activityProject === null}">All projects</button>${projects.map(p => `<button class="project-chip ${activityProject === p.id ? "active" : ""}" data-action="activity-project" data-project="${p.id}" aria-pressed="${activityProject === p.id}">${mascot(p)}${escape(p.name)}</button>`).join("")}</div><div class="activity-list scroll" data-scroll="activity">${["waiting", "working", "ready", "idle"].map(state => {
+          const group = filtered.filter(s => s.state === state);
+          return group.length ? `<section class="activity-group"><div class="section-heading"><span class="${state}">${states[state].label}</span><span>${group.length}</span></div>${group.map(s => sessionRow(s, true)).join("")}</section>` : "";
+        }).join("") || noResults()}</div>${foot}`;
+      }
+      const visible = projects.slice(carousel, carousel + 5);
+      return `<div class="side-title">${mascot(project, true)}${projectMenuTrigger(project)}</div><div class="handoff"><strong><span class="working">↪</span> Handoff <span class="subtle">18m ago</span></strong>Next session: review the current changes and continue the remaining checks.<br><button data-action="handoff">Continue</button></div>${search("Search sessions…")}${heading("Today", `${project.sessions.length} sessions`)}<div class="session-list scroll" data-scroll="sessions">${selected.map(s => sessionRow(s)).join("") || noResults()}</div><div class="working-preview">${heading(`<span class="working">●</span> Working`, `${count(sessions, "working")}`)}${sessions.filter(s => s.state === "working").slice(0, 2).map(s => sessionRow(s, true)).join("")}</div><div class="spaces" aria-label="Projects"><button class="space-arrow" data-action="page" data-direction="-1" aria-label="Previous projects" ${carousel === 0 ? "disabled" : ""}>‹</button>${visible.map(p => `<button class="space ${p.id === selectedProject ? "active" : ""}" data-action="project" data-project="${p.id}" title="${escape(p.name)}" aria-label="${escape(p.name)}">${mascot(p)}${count(p.sessions, "working") ? '<span class="dot"></span>' : ""}</button>`).join("")}<button class="space-arrow" data-action="page" data-direction="1" aria-label="More projects" ${carousel === 11 ? "disabled" : ""}>›</button></div>`;
+    }
+
+    function conversation()
+    {
+      const session = sessions.find(s => s.id === selectedSession);
+      const project = projects[session.project];
+      const state = states[session.state];
+      const model = session.provider === "codex" ? "GPT-6-Astra" : "Claude Opus";
+      const stepNames = ["Read the current implementation", "Make the focused change", "Run the relevant checks", "Review and write the handoff"];
+      const statusText = session.state === "waiting" ? "I’ve reached a decision that needs your input." : session.state === "ready" ? "The changes are ready for your review." : session.state === "idle" ? "This session is saved for later." : "I’m working through the next checklist step.";
+      return `<header class="conversation-top">${mascot(project)}<span>${escape(project.name)}</span><span>/</span><span>${escape(session.title)}</span><span class="session-state ${session.state}"><span class="dot"></span>${state.label}</span></header>
+        <div class="conversation-content" data-scroll="conversation">
+          <div class="user-message">${escape(session.title)}. Follow the existing project patterns, check the result, and leave a short handoff when you’re done.</div><div class="message-time">Today, 14:32 · sample conversation</div>
+          <div class="response-label">${provider(session)}<span>${model}</span><span>·</span><span>High effort</span></div>
+          <article class="response"><h2>${statusText}</h2><p>${escape(session.detail)}. This sample shows how the sidebar keeps this session’s state visible while you work elsewhere.</p>
+          <ul class="steps" aria-label="Sample task checklist">${stepNames.map((step, i) => `<li class="${i < session.done ? "complete" : i === session.done && session.state === "working" ? "current" : ""}"><span class="step-index">${i < session.done ? "✓" : i + 1}</span><span>${step}</span><span class="step-state">${i < session.done ? "Complete" : i === session.done && session.state === "working" ? "In progress" : "Pending"}</span></li>`).join("")}</ul>
+          <div class="peer-note">${provider({ provider: "claude" })}<div><strong>review-session → ${escape(project.name)}</strong> <small>· 3m ago</small><br>I’ve finished my review of the shared component. The notes are in the handoff; the next session can continue from there.</div></div>
+          <div class="effort-note">Sample communication card · ${session.done} of 4 checklist steps complete</div></article>
+        </div>
+        <div class="composer-area"><div class="composer"><textarea id="composer" aria-label="Sample message" placeholder="Ask, build, / for commands, @ for references…">${escape(drafts.get(session.id) || "")}</textarea><div class="composer-controls"><span class="model-chip">${provider(session)}${model} <span class="effort">High</span>⌄</span><span class="model-chip">♢ Full access</span><button class="send" data-action="send" aria-label="Preview sending a sample message">↑</button></div></div><div class="composer-meta"><span>▱ Current checkout &nbsp; ⑂ ${escape(worktrees.get(session.project))}</span><span>64K · 25% ◯</span></div><div class="sample-feedback" role="status">${escape(feedback.get(session.id) || "")}</div></div>`;
+    }
+
+    function render(i)
+    {
+      const selected = sessions.find(s => s.id === selectedSession);
+      const direction = directions[i];
+      document.getElementById("study-title").textContent = direction.name;
+      document.getElementById("study-copy").innerHTML = direction.copy;
+      document.getElementById("tradeoff").innerHTML = direction.tradeoff;
+      return `<main class="app ${direction.className} ${compact ? "dense" : ""} ${laptop ? "laptop" : ""}" aria-label="MonoCode ${direction.name} prototype"><div class="titlebar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><span class="toolbar-glyph" aria-hidden="true">◧</span><span class="toolbar-glyph" aria-hidden="true">‹</span><span class="toolbar-glyph" aria-hidden="true">›</span><div class="tab">${provider(selected)}<span>${escape(selected.title)}</span><span class="close" aria-hidden="true">×</span></div><span class="toolbar-glyph" aria-hidden="true">+</span><span class="title-caption">Personal workspace — MonoCode</span></div><div class="body"><aside class="sidebar" aria-label="Projects and sessions">${sidebar(i)}</aside><section class="conversation" aria-label="Selected session">${conversation()}</section></div><footer class="app-footer">${usageChip("claude")}${usageChip("codex")}<span class="footer-right"><span>♧ ${demoSound}</span><span>▣ Workspaces · 3</span><span>▥ Stacks · 1 up</span></span></footer></main>${popoverContent()}`;
+    }
+
+    const variants = [() => render(0), () => render(1), () => render(2), () => render(3)];
+    const stage = document.getElementById("stage");
+    const picker = document.querySelector(".proto-picker");
+    const highlight = picker.querySelector(".proto-picker-highlight");
+    const items = [...picker.querySelectorAll(".proto-picker-item:not(.proto-picker-replay)")];
+    const replay = picker.querySelector(".proto-picker-replay");
+    let current = 0;
+
+    function moveHighlight()
+    {
+      const el = items[current];
+      highlight.style.width = el.offsetWidth + "px";
+      highlight.style.transform = `translateX(${el.offsetLeft}px)`;
+    }
+
+    function mount(i)
+    {
+      stage.innerHTML = "";
+      requestAnimationFrame(() => { stage.innerHTML = variants[i](); positionPopover(); });
+    }
+
+    function setActive(i)
+    {
+      if (i < 0 || i >= variants.length) { return; }
+      popover = null;
+      current = i;
+      items.forEach((el, j) => {
+        el.toggleAttribute("data-active", j === i);
+        if (j === i) { el.setAttribute("aria-current", "true"); } else { el.removeAttribute("aria-current"); }
+      });
+      moveHighlight();
+      const url = new URL(location);
+      url.searchParams.set("v", i + 1);
+      history.replaceState(null, "", url);
+      mount(i);
+    }
+
+    function update(keepSearch = false)
+    {
+      const positions = new Map([...stage.querySelectorAll("[data-scroll]")].map(el => [el.dataset.scroll, el.scrollTop]));
+      const searchPosition = stage.querySelector("#project-search")?.selectionStart;
+      const focusedProject = document.activeElement?.closest(".watchlist .project-list .project-row")?.dataset.project;
+      stage.innerHTML = variants[current]();
+      positionPopover();
+      stage.querySelectorAll("[data-scroll]").forEach(el => { el.scrollTop = positions.get(el.dataset.scroll) || 0; });
+      if (focusedProject !== undefined && !popover) { stage.querySelector(`.project-row[data-project="${focusedProject}"]`)?.focus({ preventScroll: true }); }
+      if (keepSearch) {
+        const input = stage.querySelector("#project-search");
+        input.focus();
+        if (typeof searchPosition === "number") { input.setSelectionRange(searchPosition, searchPosition); }
+      }
+    }
+
+    items.forEach((el, i) => el.addEventListener("click", () => setActive(i)));
+    replay?.addEventListener("click", () => mount(current));
+    window.addEventListener("resize", () => { moveHighlight(); positionPopover(); });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && popover) { popover = null; update(); stage.querySelector('[data-action="project-menu"]')?.focus(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        const rect = stage.querySelector(".sidebar").getBoundingClientRect();
+        popover = { kind: "settings", project: selectedProject, x: rect.left + 8, y: rect.top + 40 }; update(); return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); stage.querySelector("#project-search")?.focus(); return; }
+      if (popover) { return; }
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) { return; }
+      if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+      const num = parseInt(e.key, 10);
+      if (num >= 1 && num <= variants.length) { setActive(num - 1); }
+      else if (e.key === "ArrowRight") { setActive((current + 1) % variants.length); }
+      else if (e.key === "ArrowLeft") { setActive((current - 1 + variants.length) % variants.length); }
+      else if (e.key === "r" || e.key === "R") { mount(current); }
+    });
+    stage.addEventListener("input", e => {
+      if (e.target.id === "project-search") { query = e.target.value; update(true); }
+      if (e.target.id === "menu-project-search") {
+        menuQuery = e.target.value;
+        const caret = e.target.selectionStart;
+        update();
+        const input = stage.querySelector("#menu-project-search");
+        input.focus(); input.setSelectionRange(caret, caret);
+      }
+      if (e.target.id === "composer") { drafts.set(selectedSession, e.target.value); }
+    });
+    stage.addEventListener("click", e => {
+      const button = e.target.closest("button[data-action]");
+      if (!button) { return; }
+      const action = button.dataset.action;
+      if (action === "focus-search") { stage.querySelector("#project-search")?.focus(); return; }
+      if (["project-menu", "settings", "usage", "notifications", "open-project", "row-settings", "session-filter"].includes(action)) {
+        const rect = button.getBoundingClientRect();
+        const kind = action === "open-project" ? "switch-project" : action === "row-settings" ? "project-settings" : action;
+        popover = { kind, project: Number(button.dataset.project ?? selectedProject), provider: button.dataset.provider, x: rect.left, y: rect.bottom + 6 };
+        menuQuery = "";
+      } else if (action === "notification-filter") {
+        notificationFilter = button.dataset.filter;
+      } else if (action === "read-all") {
+        notificationRows().forEach(session => readNotifications.add(session.id));
+      } else if (action === "read-notification") {
+        readNotifications.add(button.dataset.session);
+      } else if (action === "open-notification") {
+        selectedSession = button.dataset.session;
+        selectedProject = sessions.find(session => session.id === selectedSession).project;
+        readNotifications.add(selectedSession);
+        popover = null;
+      } else if (["worktrees", "switch-project", "project-settings"].includes(action)) {
+        popover.kind = action;
+      } else if (action === "choose-worktree") {
+        worktrees.set(popover.project, button.dataset.branch); popover = null;
+      } else if (action === "close-popover") {
+        popover = null;
+      } else if (action === "save-project-settings") {
+        const input = stage.querySelector("#demo-project-name");
+        const name = input.value.trim();
+        if (!name) { input.focus(); return; }
+        projects[popover.project].name = name;
+        projects[popover.project].color = stage.querySelector("#demo-project-color").value;
+        popover = null;
+      } else if (action === "save-settings") {
+        compact = stage.querySelector("#demo-density").value === "dense";
+        demoSound = stage.querySelector("#demo-sound").value;
+        document.getElementById("density").value = compact ? "dense" : "comfortable";
+        popover = null;
+      } else if (action === "project" || action === "expand" || action === "choose-project") {
+        selectedProject = Number(button.dataset.project);
+        selectedSession = (matching(projects[selectedProject].sessions)[0] || projects[selectedProject].sessions[0]).id;
+        if (action === "choose-project") { popover = null; query = ""; filter = "all"; carousel = Math.min(11, selectedProject); }
+        if (action === "expand") {
+          if (expanded.has(selectedProject)) { expanded.delete(selectedProject); } else { expanded.add(selectedProject); }
+        }
+      } else if (action === "session") {
+        selectedSession = button.dataset.session;
+        selectedProject = sessions.find(s => s.id === selectedSession).project;
+      } else if (action === "filter") {
+        filter = filter === button.dataset.filter ? "all" : button.dataset.filter;
+        if (popover?.kind === "session-filter") { popover = null; }
+      } else if (action === "clear-filter") {
+        filter = "all";
+      } else if (action === "activity-project") {
+        activityProject = button.dataset.project === "all" ? null : Number(button.dataset.project);
+      } else if (action === "page") {
+        carousel = Math.min(11, Math.max(0, carousel + Number(button.dataset.direction)));
+      } else if (action === "handoff") {
+        drafts.set(selectedSession, "Read .claude/handoff.md and continue from where it left off.");
+        feedback.set(selectedSession, "Sample handoff loaded into the composer. Nothing has been sent.");
+      } else if (action === "send") {
+        const draft = drafts.get(selectedSession)?.trim();
+        feedback.set(selectedSession, draft ? "Message previewed locally. This design does not send messages to an agent." : "Write a sample message first.");
+      } else if (action === "reset") {
+        selectedProject = 0; selectedSession = "0-0"; query = ""; filter = "all"; activityProject = null; expanded = new Set([0, 1, 2]); carousel = 0; drafts.clear(); feedback.clear();
+        popover = null; menuQuery = ""; demoSound = "Silent";
+        notificationFilter = "all"; readNotifications.clear();
+        projects.forEach((project, index) => {
+          project.name = originalProjects[index].name; project.color = originalProjects[index].color;
+          project.sessions.forEach((session, sessionIndex) => { Object.assign(session, originalProjects[index].sessions[sessionIndex]); });
+          worktrees.set(project.id, project.id === 0 ? "mine" : "main");
+        });
+      }
+      update();
+      if (["project-menu", "settings", "usage", "worktrees", "switch-project", "project-settings", "open-project", "row-settings", "session-filter"].includes(action)) {
+        (stage.querySelector('.demo-popover input, .demo-popover .menu-row, .demo-popover select') || stage.querySelector('.demo-popover .close-popover'))?.focus();
+      }
+    });
+    document.addEventListener("click", e => {
+      if (popover && !e.target.closest('.demo-popover, [data-action="project-menu"], [data-action="settings"], [data-action="usage"], [data-action="notifications"], [data-action="open-project"], [data-action="row-settings"], [data-action="session-filter"]')) {
+        popover = null; update();
+      }
+    });
+    stage.addEventListener("pointerover", e => {
+      const list = e.target.closest(".watchlist .project-list");
+      if (list && !list.contains(e.relatedTarget)) { pointerInProjects = true; }
+    });
+    stage.addEventListener("pointerout", e => {
+      const list = e.target.closest(".watchlist .project-list");
+      if (list && !list.contains(e.relatedTarget)) {
+        pointerInProjects = false;
+        const before = projectOrder.join(",");
+        orderedProjects();
+        if (projectOrder.join(",") !== before) { update(); }
+      }
+    });
+    stage.addEventListener("focusout", e => {
+      if (e.target.closest(".watchlist .project-list") && !e.relatedTarget?.closest(".watchlist .project-list")) {
+        queueMicrotask(() => {
+          const before = projectOrder.join(","); orderedProjects();
+          if (projectOrder.join(",") !== before) { update(); }
+        });
+      }
+    });
+    document.getElementById("simulate-run").addEventListener("click", () => {
+      const project = [...projects].reverse().find(p => !p.sessions.some(s => s.state === "working")) || projects[15];
+      Object.assign(project.sessions[0], { state: "working", runStarted: Date.now(), elapsed: "now", done: 0, detail: "New run · reading the existing flow" });
+      update();
+    });
+    document.getElementById("density").addEventListener("change", e => { compact = e.target.value === "dense"; update(); });
+    document.getElementById("size").addEventListener("change", e => { laptop = e.target.value === "laptop"; update(); });
+    const initial = (parseInt(new URLSearchParams(location.search).get("v"), 10) || 1) - 1;
+    setActive(initial >= 0 && initial < variants.length ? initial : 0);
+    requestAnimationFrame(() => requestAnimationFrame(() => picker.setAttribute("data-ready", "")));
+  </script>
+</body>
+</html>
