@@ -24,7 +24,7 @@ test("keeps projects and Settings reachable when opting in without projects", as
     sidebar.getByText("No project folder", { exact: true }),
   ).toBeVisible();
   await expect(
-    sidebar.getByRole("button", { name: "Open project", exact: true }),
+    sidebar.locator("[data-fork-projects]").getByRole("button", { name: "Open project", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("new-layout-no-projects.png"),
@@ -76,13 +76,14 @@ test("opens the first project from a collapsed projectless sidebar", async ({
     };
   });
   await sidebar
+    .locator("[data-fork-projects]")
     .getByRole("button", { name: "Open project", exact: true })
     .click();
   await expect(
     sidebar.getByText("No project folder", { exact: true }),
   ).toHaveCount(0);
   await expect(
-    sidebar.getByRole("button", { name: "first-project menu", exact: true }),
+    sidebar.locator('[data-project-path="/fixture/first-project"] [aria-current="page"]'),
   ).toBeVisible();
   await expect(page.locator(".inset-shell")).toBeVisible();
 });

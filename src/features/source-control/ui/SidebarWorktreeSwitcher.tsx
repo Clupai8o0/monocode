@@ -66,10 +66,15 @@ export function SidebarWorktreeSwitcher({
   pending = false,
   switchError,
   project,
+  toolbar = false,
+  onManageWorktrees,
   worktrees: worktreesEnabled = true,
 }: {
   cwd: string;
   project?: WorktreeSwitcherProject;
+  /** Compact trigger for the window's upper-left toolbar. */
+  toolbar?: boolean;
+  onManageWorktrees?: () => void;
   /** Off for projects without local Git, such as remote ones: the project
    * menu then has no worktree submenu. */
   worktrees?: boolean;
@@ -485,12 +490,12 @@ export function SidebarWorktreeSwitcher({
           ref={anchor}
           type="button"
           data-tauri-drag-region="false"
-          aria-label="Switch working copy"
+          aria-label={toolbar ? "Worktrees" : "Switch working copy"}
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-busy={pending || creating}
           disabled={creating}
-          title={worktreeTitle}
+          title={toolbar ? `Worktrees · ${worktreeTitle}` : worktreeTitle}
           onClick={() => {
             if (open) closePicker();
             else openPicker();
@@ -500,11 +505,15 @@ export function SidebarWorktreeSwitcher({
             event.preventDefault();
             openPicker();
           }}
-          className="-ml-1.5 flex h-6.5 min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-sm font-medium leading-tight hover:bg-content/8 aria-expanded:bg-content/8"
+          className={toolbar
+            ? "grid size-7 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content aria-expanded:bg-content/8 aria-expanded:text-content focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            : "-ml-1.5 flex h-6.5 min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-sm font-medium leading-tight hover:bg-content/8 aria-expanded:bg-content/8"}
         >
-          <span className="min-w-0 truncate">{title}</span>
+          {!toolbar ? <span className="min-w-0 truncate">{title}</span> : null}
           {busyIcon ?? (
-            <ChevronsUpDown className="size-3.5 shrink-0 text-content/45" />
+            toolbar
+              ? <FolderTree className="size-3.5" strokeWidth={1.75} />
+              : <ChevronsUpDown className="size-3.5 shrink-0 text-content/45" />
           )}
         </button>
       )}
@@ -646,6 +655,22 @@ export function SidebarWorktreeSwitcher({
                 <span className="min-w-0 truncate">
                   Create worktree {createName}
                 </span>
+              </button>
+            </div>
+          ) : null}
+          {onManageWorktrees ? (
+            <div className="shrink-0 border-t border-stroke p-1.5">
+              <button
+                type="button"
+                disabled={creating}
+                onClick={() => {
+                  closePicker();
+                  onManageWorktrees();
+                }}
+                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] text-content/70 hover:bg-content/8 hover:text-content disabled:opacity-40"
+              >
+                <Settings className="size-3.5" strokeWidth={1.75} />
+                Manage worktrees
               </button>
             </div>
           ) : null}

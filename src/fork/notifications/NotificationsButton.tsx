@@ -61,6 +61,7 @@ export function NotificationsButton() {
       <button
         ref={anchor}
         type="button"
+        data-tauri-drag-region="false"
         data-fork-notifications=""
         aria-label={label}
         title={label}

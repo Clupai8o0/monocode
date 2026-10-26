@@ -140,6 +140,27 @@ it("shows a switch failure in the reopened picker", async () => {
   expect(trigger().textContent).toBe("Workspace");
 });
 
+it("opens the toolbar worktree picker directly and routes management after dismissal", async () => {
+  const manage = vi.fn();
+  await act(async () => root.render(createElement(SidebarWorktreeSwitcher, {
+    cwd: "/picker",
+    toolbar: true,
+    onSelect: select,
+    onManageWorktrees: manage,
+  })));
+  const toolbarTrigger = container.querySelector<HTMLButtonElement>('[aria-label="Worktrees"]')!;
+  expect(toolbarTrigger.title).toBe("Worktrees · main");
+  await press("ArrowDown", toolbarTrigger);
+  expect(document.querySelector('[role="dialog"][aria-label="Working copies"]')).not.toBeNull();
+  await act(async () => option("feature-b").click());
+  expect(select).toHaveBeenLastCalledWith({ path: "/picker-b", branch: "feature-b" });
+  await act(async () => toolbarTrigger.click());
+  const manageButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "Manage worktrees")!;
+  await act(async () => manageButton.click());
+  expect(manage).toHaveBeenCalledOnce();
+  expect(document.querySelector('[role="dialog"][aria-label="Working copies"]')).toBeNull();
+});
+
 it("requests fallback from a deleted worktree once and does not retry while pending or failed", async () => {
   setWorktreeFocus("/picker", { path: "/deleted", branch: "gone" });
   await render();

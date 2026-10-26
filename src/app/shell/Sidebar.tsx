@@ -4,14 +4,7 @@ import {
   inWorktreeFocus,
   useWorktreeFocus,
 } from "../../features/source-control/model/worktreeFocus";
-import {
-  SidebarWorktreeSwitcher,
-  type ProjectMenuFlyout,
-} from "../../features/source-control/ui/SidebarWorktreeSwitcher";
-import {
-  CurrentProjectIcon,
-  useProjectLabel,
-} from "../../features/projects/ui/CurrentProjectIcon";
+import { SidebarWorktreeSwitcher } from "../../features/source-control/ui/SidebarWorktreeSwitcher";
 import { OrchestrationSidebarAgents } from "../../features/orchestration/ui/OrchestrationSidebarAgents";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -194,11 +187,7 @@ import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
 import { DevModeSlot, IconButton, TabVisitNav } from "./TitleBar";
 import { ProjectSearch } from "../../features/projects/ui/ProjectSearch";
 import { Popover } from "../../shared/ui/Popover";
-import {
-  pickerProjects,
-  ProjectPickerPopover,
-  SearchableProjectPicker,
-} from "../../features/projects/ui/SearchableProjectPicker";
+import { SearchableProjectPicker } from "../../features/projects/ui/SearchableProjectPicker";
 import { useRailTooltip } from "./RailTooltip";
 import { useProjectMenu } from "./useProjectMenu";
 import { SessionFiltersMenu } from "../../features/sessions/ui/SessionFiltersMenu";
@@ -385,8 +374,8 @@ type Props = {
   titleBarAbove?: boolean;
   /**
    * The inset layout sets the sidebar on the window's outer glass, beside its
-   * card. Its header menu switches projects, so the rail only shows to carry
-   * the settings navigation.
+   * card. Its Projects list switches projects, so the rail only shows to
+   * carry the settings navigation.
    */
   inset?: boolean;
   /**
@@ -2113,7 +2102,6 @@ function SidebarComponent({
     );
   });
 
-  const projectLabel = useProjectLabel(cwd);
   const [insetInboxMenu, setInsetInboxMenu] = useState<{
     x: number;
     y: number;
@@ -2129,47 +2117,6 @@ function SidebarComponent({
     // Only the inset layout uses this menu, and it has no project rail.
     railOptions: false,
   });
-  // The inset layout names the project here, with its settings and the
-  // project and worktree pickers in a menu below it.
-  const headerProject = inset
-    ? {
-        name: projectLabel,
-        icon: (
-          <CurrentProjectIcon
-            cwd={cwd}
-            busy={projectPathBusy(busyProjectPaths, cwd)}
-            mascotClassName="size-2.5"
-          />
-        ),
-        onOpenSettings,
-        settingsShortcut: `${MOD},`,
-        keepOpen: headerProjectMenu.isActive,
-        // The right-click project menu, as a flyout level with its row.
-        onOpenProjectSettings: (row: HTMLElement) => {
-          const rect = row.getBoundingClientRect();
-          headerProjectMenu.open(cwd, rect.right, rect.top - 8, row);
-        },
-        onContextMenu: (x: number, y: number, trigger: HTMLElement) =>
-          headerProjectMenu.open(cwd, x, y, trigger),
-        onCloseProjectSettings: headerProjectMenu.close,
-        projectSettingsOpen: headerProjectMenu.isOpen,
-        renderProjectPicker: onSelectProject
-          ? ({ anchor, layer, attributes, onClose }: ProjectMenuFlyout) => (
-              <ProjectPickerPopover
-                anchor={anchor}
-                flyout={{ layer, attributes }}
-                projects={pickerProjects(recents, cwd)}
-                currentProject={cwd}
-                onDismiss={onClose}
-                onSelectProject={onSelectProject}
-                onOpenProject={onOpenProject}
-                onProjectContextMenu={headerProjectMenu.open}
-                projectMenuActive={headerProjectMenu.isActive}
-              />
-            )
-          : undefined,
-      }
-    : undefined;
   // The inset sidebar's spaces: the projects in the rail's order, the same
   // one Project: Previous / Next steps through.
   const spaceProjects = useMemo(
@@ -2210,8 +2157,8 @@ function SidebarComponent({
   }, [inset, spaceProjects]);
   const slideRefs = useRef<(HTMLElement | null)[]>([]);
   const previousSpace = useRef(cwd);
-  // The outgoing project's header and list, copied while they are still on
-  // screen, so they can be pushed away as the new ones arrive.
+  // The outgoing project's session list, copied while it is still on
+  // screen, so it can be pushed away as the new one arrives.
   const outgoingSpace = useRef<{
     to: string;
     nodes: { node: HTMLElement; scrollTop: number }[];
@@ -2378,19 +2325,11 @@ function SidebarComponent({
 
   const workspaceHeader = (
     <div
-      ref={(el) => {
-        slideRefs.current[0] = el;
-      }}
-      // Inset, it sits just under the title bar, so it keeps less above the
-      // project button than below it, and its search icon lines up with the
-      // sessions' filter and times.
-      className={`flex shrink-0 select-none items-center gap-1 pl-3${
-        inset ? " h-[39px] pb-px pr-3" : " h-10 border-b border-stroke pr-1.5"
-      }`}
+      className="flex h-10 shrink-0 select-none items-center gap-1 border-b border-stroke pl-3 pr-1.5"
       data-tauri-drag-region="deep"
     >
       <div className="flex min-w-0 flex-1 items-center">
-        {(headerProject || !remoteProject) && cwd && cwd !== "~" ? (
+        {!remoteProject && cwd && cwd !== "~" ? (
           <SidebarWorktreeSwitcher
             worktrees={!remoteProject}
             cwd={cwd}
@@ -2398,7 +2337,6 @@ function SidebarComponent({
             onSelect={onSelectWorkspace}
             pending={workspaceSwitchPending}
             switchError={workspaceSwitchError}
-            project={headerProject}
           />
         ) : (
           <span className="min-w-0 truncate text-sm font-medium leading-tight">
@@ -2406,12 +2344,7 @@ function SidebarComponent({
           </span>
         )}
       </div>
-      {/* Inset, a new session is the + at the end of the title bar's tabs. */}
-      <WorkspaceTitleActions
-        onSearch={onGoToFile}
-        onNew={inset ? undefined : onNew}
-      />
-      {headerProjectMenu.element}
+      <WorkspaceTitleActions onSearch={onGoToFile} onNew={onNew} />
     </div>
   );
 
@@ -2587,8 +2520,6 @@ function SidebarComponent({
           : " body-glass border-r border-stroke"
       }`}
     >
-      {/* Fork: keep the current project/worktree above global navigation and Projects. */}
-      {inset ? workspaceHeader : null}
       {/* Fork: projects stay visible while the selected project's sessions scroll. */}
       {inset ? navList : null}
       {inset && onSelectProject ? (
@@ -2602,8 +2533,8 @@ function SidebarComponent({
           onProjectContextMenu={headerProjectMenu.open}
         />
       ) : null}
-      {/* The inset layout keeps the open-rail header either way: its menu
-          switches projects. */}
+      {headerProjectMenu.element}
+      {/* Inset project selection lives in Projects and worktrees in the title bar. */}
       {railVisible || inset ? (
         <>
           {inset ? null : workspaceHeader}
@@ -2696,7 +2627,7 @@ function SidebarComponent({
           ref={(el) => {
             sessionsLock(el);
             sessionsScrollRef.current = el;
-            slideRefs.current[1] = el;
+            slideRefs.current[0] = el;
           }}
           className={`sidebar-session-scroll min-h-0 flex-1 overflow-y-auto overscroll-none ${
             tab === "sessions" ? "" : "hidden"

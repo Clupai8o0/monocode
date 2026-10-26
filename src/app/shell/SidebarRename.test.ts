@@ -265,19 +265,26 @@ describe("inset Projects list", () => {
     act(() => projects.querySelector<HTMLButtonElement>('[aria-label="Open project"]')!.click());
     expect(props.onOpenProject).toHaveBeenCalledOnce();
   });
-  it("keeps the real project settings and worktree menu reachable", async () => {
+  it("uses Projects for selection and settings without a duplicate project header", async () => {
     setupProjects();
     await act(async () => render());
-    const projectMenu = container.querySelector<HTMLButtonElement>('[aria-label="project menu"]')!;
     const projects = container.querySelector<HTMLElement>("[data-fork-projects]")!;
-    expect(projectMenu.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(container.querySelectorAll('[aria-label="project menu"]')).toHaveLength(1);
-    act(() => projectMenu.click());
-    expect(document.querySelector('[role="menu"][data-project-menu]')?.textContent).toContain("Switch worktree");
-    pressKey(document.body, "Escape");
+    expect(container.querySelector('[aria-label="project menu"]')).toBeNull();
+    expect(projects.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    const activeRow = projects.querySelector<HTMLElement>('[data-project-path="/workspace/project"]')!;
+    expect(activeRow.classList.contains("border-accent")).toBe(true);
+    expect(activeRow.querySelector('[aria-label="Project settings for project"]')?.classList.contains("opacity-100")).toBe(true);
     act(() => container.querySelector<HTMLButtonElement>('[aria-label="Project settings for other"]')!.click());
-    expect(document.querySelector('[aria-label="Group name"]')).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.value).toBe("other");
     expect(document.body.textContent).toContain("Background image");
+    expect(props.onSelectProject).not.toHaveBeenCalled();
+    const name = document.querySelector<HTMLInputElement>('[aria-label="Group name"]')!;
+    typeTitle(name, "Other project");
+    pressKey(name, "Enter");
+    expect(projects.querySelector('[data-project-path="/workspace/other"]')?.textContent).toContain("Other project");
+    expect(activeRow.querySelector('[aria-current="page"]')).not.toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Project settings for project"]')!.click());
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.value).toBe("project");
   });
   it("holds click targets still during interaction and releases latest run order afterwards", async () => {
     const paths = setupProjects();

@@ -25,6 +25,7 @@ import {
 } from "../features/monos/model/monoSessionCompletion";
 import { acceptQuickLaunch } from "./model/quickLaunchSession";
 import { useWorkspaceNavigation } from "./hooks/useWorkspaceNavigation";
+import { SidebarWorktreeSwitcher } from "../features/source-control/ui/SidebarWorktreeSwitcher";
 import { useIdleSessionDetach } from "./hooks/useIdleSessionDetach";
 import { HarnessEventQueue } from "./model/harnessFlush";
 import { noteStreamApplied } from "../features/sessions/model/streamingPerformance";
@@ -13978,6 +13979,29 @@ function Workspace({
       sessionSidebarOpen={sessionSidebarOpen}
       compactRail={!insetLayout && compactTitleNavigation}
       inset={insetLayout}
+      worktreeControl={
+        insetLayout && !settingsOpen && !monoCovers && !activeAppView && isLocalProject(sidebarCwd) ? (
+          <SidebarWorktreeSwitcher
+            key={sidebarCwd}
+            toolbar
+            cwd={sidebarCwd}
+            tabStats={worktreeTabStats}
+            onSelect={(focus) => {
+              // Creation may finish after the user has switched projects.
+              if (sameProjectPath(sidebarCwdRef.current, sidebarCwd)) {
+                onSelectWorkspace(focus);
+              }
+            }}
+            pending={workspaceNavigation.pending?.project === sidebarCwd}
+            switchError={
+              workspaceNavigation.error?.project === sidebarCwd
+                ? workspaceNavigation.error.message
+                : undefined
+            }
+            onManageWorktrees={onManageWorktrees}
+          />
+        ) : undefined
+      }
       rightPanelOpen={rightPanelOpen}
       onToggleRightPanel={
         showRightPanelToggle ? onToggleRightPanel : undefined

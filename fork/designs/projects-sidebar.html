@@ -35,6 +35,8 @@
     .traffic i { width: 11px; height: 11px; border-radius: 50%; background: #ff655e; }
     .traffic i:nth-child(2) { background: #efbd4f; } .traffic i:nth-child(3) { background: #58c65e; }
     .toolbar-glyph { width: 24px; display: grid; place-items: center; font-size: 17px; }
+    .titlebar-controls { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+    .titlebar-space { flex: 1; min-width: 6px; max-width: 36px; }
     .tab { display: flex; align-items: center; gap: 8px; background: #ffffff05; padding: 8px 12px; border-radius: 7px; max-width: 310px; color: #bcc5cf; margin-left: 12px; overflow: hidden; }
     .tab span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .tab .close { margin-left: 18px; opacity: .45; }
@@ -72,6 +74,9 @@
     .scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff19 transparent; min-height: 0; overscroll-behavior: contain; }
     .project-list { flex: 1; min-height: 120px; }
     .watchlist .body { grid-template-columns: 260px minmax(0,1fr); }
+    .watchlist.sidebar-hidden .body { grid-template-columns: minmax(0,1fr); padding-left: 8px; }
+    .watchlist.sidebar-hidden .sidebar { display: none; }
+    .watchlist.sidebar-hidden .app-footer { padding-left: 14px; }
     .watchlist .search { height: 32px; flex-shrink: 0; margin: 0 0 20px; padding: 6px 8px; background: transparent; border-color: #ffffff12; color: #999; }
     .watchlist .search input::placeholder { color: #999; }
     .native-projects { display: flex; flex-direction: column; min-height: 0; max-height: min(45%,304px); flex-shrink: 0; padding-bottom: 8px; }
@@ -93,13 +98,9 @@
     .watchlist .active .row-title { font-weight: 500; color: #e5e5e5; }
     .watchlist .project-detail { display: block; padding-top: 0; line-height: 12px; color: #ffffff73; }
     .native-project-item > .native-icon-button { width: 24px; height: 24px; margin-right: 4px; opacity: 0; }
-    .native-project-item:hover > .native-icon-button, .native-project-item:focus-within > .native-icon-button { opacity: 1; }
+    .native-project-item.active > .native-icon-button, .native-project-item:hover > .native-icon-button, .native-project-item:focus-within > .native-icon-button { opacity: 1; }
     .watchlist .counts { gap: 5px; padding: 0; }
     .watchlist .selected-project { border: 0; margin: 0; padding: 0; min-height: 0; }
-    .native-workspace-head { display: flex; align-items: center; gap: 8px; height: 39px; flex-shrink: 0; padding: 0 4px; }
-    .native-workspace-head .mascot { width: 16px; height: 16px; flex-basis: 16px; }
-    .native-workspace-head .project-menu-trigger { flex: 1; color: #e5e5e5; font-size: 13px; font-weight: 600; }
-    .native-workspace-head .project-menu-trigger .branch { color: #ffffff73; font-size: 12px; }
     .watchlist .section-heading { height: 28px; flex-shrink: 0; padding: 0 8px; font-size: 12px; color: #ffffff80; }
     .watchlist .session-list { flex: 1; padding: 0; }
     .watchlist .session-row { height: 32px; align-items: center; padding: 0 8px; margin: 0; }
@@ -237,6 +238,7 @@
     .menu-row { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 9px; border-radius: 5px; font-size: 11px; }
     .menu-row .menu-detail { margin-left: auto; color: #8393a5; font-size: 10px; }
     .menu-row .mascot { width: 14px; height: 14px; flex-basis: 14px; }
+    .menu-row > svg { width: 14px; height: 14px; flex: 0 0 14px; }
     .menu-separator { height: 1px; background: #ffffff0b; margin: 5px 4px; }
     .popover-note { color: #8a99aa; font-size: 10px; line-height: 1.5; margin: 5px 8px 7px; }
     .popover-scroll { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff20 transparent; }
@@ -351,7 +353,7 @@
       [".#....#.", ".##..##.", "########", "#.####.#", "########", "###..###", ".######.", "..#..#.."]
     ];
     const directions = [
-      { name: "Projects", className: "watchlist", copy: "<strong>Selected direction.</strong> Project controls at the top, followed by running projects, newest run first.", tradeoff: "<strong>Order changes when a run starts.</strong> Selection stays put; rows hold still while you point at or use the list." },
+      { name: "Projects", className: "watchlist", copy: "<strong>Selected direction.</strong> Select a project in the list; notifications, worktrees and app settings live in the top-left toolbar.", tradeoff: "<strong>Order changes when a run starts.</strong> Selection stays put; project settings are in each row’s options." },
       { name: "Project tree", className: "tree", copy: "Keep each project and its sessions together; expand the work you want to follow.", tradeoff: "<strong>Best for moving between related sessions.</strong> Open branches take space; collapse quiet projects." },
       { name: "Activity first", className: "activity", copy: "Put every decision and active task in one feed, with project names on each row.", tradeoff: "<strong>Best for watching many agents.</strong> Work is grouped by status, so project structure is less prominent." },
       { name: "Previous layout", className: "baseline", copy: "Reference before this change: the selected project gets the sidebar, with five project icons at the bottom.", tradeoff: "<strong>The previous tradeoff.</strong> Other projects are hidden behind icons and paging." }
@@ -365,12 +367,16 @@
     let carousel = 0;
     let compact = false;
     let laptop = false;
+    let sidebarOpen = true;
     let popover = null;
     let menuQuery = "";
+    let worktreeQuery = "";
+    let popoverTrigger = "";
     let demoSound = "Silent";
     let notificationFilter = "all";
     const readNotifications = new Set();
     const worktrees = new Map(projects.map(p => [p.id, p.id === 0 ? "mine" : "main"]));
+    const worktreeChoices = new Map(projects.map(p => [p.id, ["mine", "main", "feature/sidebar-watchlist", "fix/background-polling"]]));
     const usageSamples = {
       claude: { label: "Claude", short: 68, week: 41, shortReset: "2h 11m", weekReset: "3d 8h" },
       codex: { label: "Codex", short: 86, week: 73, shortReset: "3h 42m", weekReset: "5d 20h" }
@@ -421,6 +427,9 @@
         plus: '<path d="M12 5v14M5 12h14"/>',
         more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
+        sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+        worktree: '<path d="M3 3v14a2 2 0 0 0 2 2h3M3 7h5M9 4h3l2 2h6v5H9zM9 15h3l2 2h6v5H9z"/>',
+        settings: '<path d="m9.5 3-.6 2.3-2 .9-2.2-.7-2.2 3.8 1.7 1.6v2.2l-1.7 1.6 2.2 3.8 2.2-.7 2 .9.6 2.3h4l.6-2.3 2-.9 2.2.7 2.2-3.8-1.7-1.6v-2.2l1.7-1.6-2.2-3.8-2.2.7-2-.9-.6-2.3z"/><circle cx="11.5" cy="12" r="3"/>',
         filter: '<path d="M4 6h16M7 12h10M10 18h4"/>'
       };
       return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
@@ -452,8 +461,15 @@
       if (popover.kind === "project-menu") {
         content = `<button class="menu-row" data-action="worktrees">⑂ <span>Switch worktree</span><span class="menu-detail">${escape(worktrees.get(project.id))} ›</span></button><button class="menu-row" data-action="switch-project">▱ <span>Switch project</span><span class="menu-detail">›</span></button><div class="menu-separator"></div><button class="menu-row" data-action="project-settings">⚙ <span>Project settings</span></button><div class="menu-separator"></div><button class="menu-row" data-action="settings">⚙ <span>Settings</span><span class="menu-detail">⌘,</span></button>`;
       } else if (popover.kind === "worktrees") {
-        title = "Switch worktree";
-        content = ["mine", "main", "feature/sidebar-watchlist", "fix/background-polling"].map(branch => `<button class="menu-row" data-action="choose-worktree" data-branch="${branch}"><span>${worktrees.get(project.id) === branch ? "✓" : "⑂"}</span><span>${branch}</span></button>`).join("") + `<p class="popover-note">Demo branches only. Switching changes this preview’s branch label.</p>`;
+        title = `${project.name} worktrees`;
+        const found = worktreeChoices.get(project.id).filter(branch => branch.toLowerCase().includes(worktreeQuery.toLowerCase()));
+        content = `<label class="search"><span aria-hidden="true">⌕</span><input id="menu-worktree-search" aria-label="Find a worktree" value="${escape(worktreeQuery)}" placeholder="Find a worktree…"></label>${found.map(branch => `<button class="menu-row" data-action="choose-worktree" data-branch="${escape(branch)}"><span>${worktrees.get(project.id) === branch ? "✓" : "⑂"}</span><span>${escape(branch)}</span></button>`).join("") || '<p class="popover-note">No matching worktrees.</p>'}<div class="menu-separator"></div><button class="menu-row" data-action="create-worktree">＋ <span>New worktree…</span></button><button class="menu-row" data-action="manage-worktrees">${icon("settings")}<span>Manage worktrees…</span></button><p class="popover-note">Demo branches only. Nothing changes on disk.</p>`;
+      } else if (popover.kind === "create-worktree") {
+        title = "New worktree";
+        content = `<label class="setting-field">Branch name<input id="demo-worktree-name" placeholder="feature/project-sidebar" maxlength="80"></label><button class="save-demo" data-action="save-worktree">Create in this demo</button><p class="popover-note">Creates a sample branch and selects it in this preview.</p>`;
+      } else if (popover.kind === "manage-worktrees") {
+        title = `${project.name} worktrees`;
+        content = worktreeChoices.get(project.id).map(branch => `<button class="menu-row" data-action="choose-worktree" data-branch="${escape(branch)}"><span>⑂</span><span>${escape(branch)}</span><span class="menu-detail">${worktrees.get(project.id) === branch ? "Current" : "Switch"}</span></button>`).join("") + `<div class="menu-separator"></div><button class="menu-row" data-action="create-worktree">＋ <span>New worktree…</span></button><p class="popover-note">Sample worktrees for ${escape(project.name)}. Select one to switch.</p>`;
       } else if (popover.kind === "switch-project") {
         title = "Switch project";
         const found = projects.filter(p => p.name.toLowerCase().includes(menuQuery.toLowerCase()));
@@ -553,7 +569,7 @@
       const top = `<div class="side-title">${mascot(project, true)}<span>${i === 2 ? "Activity" : "Projects"}</span>${i === 0 ? '<span class="subtle">16</span>' : projectMenuTrigger(project)}</div>${search()}${summary()}`;
       const foot = `<div class="side-footer"><button data-action="settings" aria-haspopup="dialog">⚙ Settings <span class="subtle">⌘,</span></button><span>16 projects</span><button data-action="reset">Reset demo</button></div>`;
       if (i === 0) {
-        return `<div class="native-workspace-head">${mascot(project)}${projectMenuTrigger(project, true)}<button class="native-icon-button" data-action="focus-search" aria-label="Search project">${icon("search")}</button></div>${search("Search")}<section class="native-projects" aria-label="Projects"><div class="native-projects-head"><span>Projects</span><button class="native-icon-button" data-action="open-project" aria-label="Open project" aria-haspopup="dialog">${icon("plus")}</button></div><div class="project-list scroll" data-scroll="projects">${shownProjects.map(p => nativeProjectRow(p)).join("") || noResults()}</div></section><section class="selected-project"><div class="section-heading"><span>Today</span><button class="native-icon-button" data-action="session-filter" aria-label="Filter sessions" aria-haspopup="dialog">${icon("filter")}</button></div><div class="session-list scroll" data-scroll="sessions">${selected.map(s => sessionRow(s)).join("") || noResults()}</div></section>`;
+        return `${search("Search")}<section class="native-projects" aria-label="Projects"><div class="native-projects-head"><span>Projects</span><button class="native-icon-button" data-action="open-project" aria-label="Open project" aria-haspopup="dialog">${icon("plus")}</button></div><div class="project-list scroll" data-scroll="projects">${shownProjects.map(p => nativeProjectRow(p)).join("") || noResults()}</div></section><section class="selected-project"><div class="section-heading"><span>Today</span><button class="native-icon-button" data-action="session-filter" aria-label="Filter sessions" aria-haspopup="dialog">${icon("filter")}</button></div><div class="session-list scroll" data-scroll="sessions">${selected.map(s => sessionRow(s)).join("") || noResults()}</div></section>`;
       }
       if (i === 1) {
         return `${top}${heading("Projects and sessions", "Click to expand")}<div class="project-list scroll" data-scroll="projects">${shownProjects.map(p => `<section class="tree-project">${projectRow(p, true)}${expanded.has(p.id) ? `<div class="tree-sessions">${matching(p.sessions).map(s => sessionRow(s)).join("")}</div>` : ""}</section>`).join("") || noResults()}</div>${foot}`;
@@ -596,7 +612,8 @@
       document.getElementById("study-title").textContent = direction.name;
       document.getElementById("study-copy").innerHTML = direction.copy;
       document.getElementById("tradeoff").innerHTML = direction.tradeoff;
-      return `<main class="app ${direction.className} ${compact ? "dense" : ""} ${laptop ? "laptop" : ""}" aria-label="MonoCode ${direction.name} prototype"><div class="titlebar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><span class="toolbar-glyph" aria-hidden="true">◧</span>${notificationButton()}<span class="toolbar-glyph" aria-hidden="true">‹</span><span class="toolbar-glyph" aria-hidden="true">›</span><div class="tab">${provider(selected)}<span>${escape(selected.title)}</span><span class="close" aria-hidden="true">×</span></div><span class="toolbar-glyph" aria-hidden="true">+</span><span class="title-caption">Personal workspace — MonoCode</span></div><div class="body"><aside class="sidebar" aria-label="Projects and sessions">${sidebar(i)}</aside><section class="conversation" aria-label="Selected session">${conversation()}</section></div><footer class="app-footer">${usageChip("claude")}${usageChip("codex")}<span class="footer-right"><span>♧ ${demoSound}</span><span>▣ Workspaces · 3</span><span>▥ Stacks · 1 up</span></span></footer></main>${popoverContent()}`;
+      const projectTools = i === 0 ? `<button class="native-icon-button" data-action="worktree-menu" title="Worktrees · ${escape(worktrees.get(selectedProject))}" aria-label="Worktrees · ${escape(worktrees.get(selectedProject))}" aria-haspopup="dialog" aria-expanded="${popover?.kind === "worktrees"}">${icon("worktree")}</button><button class="native-icon-button" data-action="settings" title="Settings (⌘,)" aria-label="Settings (⌘,)" aria-haspopup="dialog" aria-expanded="${popover?.kind === "settings"}">${icon("settings")}</button>` : "";
+      return `<main class="app ${direction.className} ${compact ? "dense" : ""} ${laptop ? "laptop" : ""} ${sidebarOpen ? "" : "sidebar-hidden"}" aria-label="MonoCode ${direction.name} prototype"><div class="titlebar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><div class="titlebar-controls">${i === 0 ? `<button class="native-icon-button" data-action="toggle-sidebar" aria-label="Toggle sidebar" aria-pressed="${sidebarOpen}">${icon("sidebar")}</button>` : '<span class="toolbar-glyph" aria-hidden="true">◧</span>'}${notificationButton()}${projectTools}</div><span class="titlebar-space"></span><span class="toolbar-glyph" aria-hidden="true">‹</span><span class="toolbar-glyph" aria-hidden="true">›</span><div class="tab">${provider(selected)}<span>${escape(selected.title)}</span><span class="close" aria-hidden="true">×</span></div><span class="toolbar-glyph" aria-hidden="true">+</span><span class="title-caption">Personal workspace — MonoCode</span></div><div class="body"><aside class="sidebar" aria-label="Projects and sessions">${sidebar(i)}</aside><section class="conversation" aria-label="Selected session">${conversation()}</section></div><footer class="app-footer">${usageChip("claude")}${usageChip("codex")}<span class="footer-right"><span>♧ ${demoSound}</span><span>▣ Workspaces · 3</span><span>▥ Stacks · 1 up</span></span></footer></main>${popoverContent()}`;
     }
 
     const variants = [() => render(0), () => render(1), () => render(2), () => render(3)];
@@ -657,13 +674,14 @@
     replay?.addEventListener("click", () => mount(current));
     window.addEventListener("resize", () => { moveHighlight(); positionPopover(); });
     document.addEventListener("keydown", e => {
-      if (e.key === "Escape" && popover) { popover = null; update(); stage.querySelector('[data-action="project-menu"]')?.focus(); return; }
+      if (e.key === "Escape" && popover) { popover = null; update(); stage.querySelector(popoverTrigger || '[data-action="project-menu"]')?.focus(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
-        const rect = stage.querySelector(".sidebar").getBoundingClientRect();
-        popover = { kind: "settings", project: selectedProject, x: rect.left + 8, y: rect.top + 40 }; update(); return;
+        const rect = stage.querySelector(current === 0 ? '[data-action="settings"]' : ".sidebar").getBoundingClientRect();
+        popoverTrigger = current === 0 ? '[data-action="settings"]' : '[data-action="project-menu"]';
+        popover = { kind: "settings", project: selectedProject, x: rect.left, y: current === 0 ? rect.bottom + 6 : rect.top + 40 }; update(); return;
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); stage.querySelector("#project-search")?.focus(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); sidebarOpen = true; update(); stage.querySelector("#project-search")?.focus(); return; }
       if (popover) { return; }
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) { return; }
       if (e.metaKey || e.ctrlKey || e.altKey) { return; }
@@ -675,11 +693,12 @@
     });
     stage.addEventListener("input", e => {
       if (e.target.id === "project-search") { query = e.target.value; update(true); }
-      if (e.target.id === "menu-project-search") {
-        menuQuery = e.target.value;
+      if (["menu-project-search", "menu-worktree-search"].includes(e.target.id)) {
+        const id = e.target.id;
+        if (id === "menu-project-search") { menuQuery = e.target.value; } else { worktreeQuery = e.target.value; }
         const caret = e.target.selectionStart;
         update();
-        const input = stage.querySelector("#menu-project-search");
+        const input = stage.querySelector(`#${id}`);
         input.focus(); input.setSelectionRange(caret, caret);
       }
       if (e.target.id === "composer") { drafts.set(selectedSession, e.target.value); }
@@ -689,11 +708,15 @@
       if (!button) { return; }
       const action = button.dataset.action;
       if (action === "focus-search") { stage.querySelector("#project-search")?.focus(); return; }
-      if (["project-menu", "settings", "usage", "notifications", "open-project", "row-settings", "session-filter"].includes(action)) {
+      if (["project-menu", "settings", "usage", "notifications", "open-project", "row-settings", "session-filter", "worktree-menu"].includes(action)) {
         const rect = button.getBoundingClientRect();
-        const kind = action === "open-project" ? "switch-project" : action === "row-settings" ? "project-settings" : action;
+        const kind = action === "open-project" ? "switch-project" : action === "row-settings" ? "project-settings" : action === "worktree-menu" ? "worktrees" : action;
         popover = { kind, project: Number(button.dataset.project ?? selectedProject), provider: button.dataset.provider, x: rect.left, y: rect.bottom + 6 };
-        menuQuery = "";
+        if (!button.closest(".demo-popover")) { popoverTrigger = `[data-action="${action}"]${button.dataset.project ? `[data-project="${button.dataset.project}"]` : ""}${button.dataset.provider ? `[data-provider="${button.dataset.provider}"]` : ""}`; }
+        menuQuery = ""; worktreeQuery = "";
+      } else if (action === "toggle-sidebar") {
+        sidebarOpen = !sidebarOpen;
+        popover = null;
       } else if (action === "notification-filter") {
         notificationFilter = button.dataset.filter;
       } else if (action === "read-all") {
@@ -705,10 +728,18 @@
         selectedProject = sessions.find(session => session.id === selectedSession).project;
         readNotifications.add(selectedSession);
         popover = null;
-      } else if (["worktrees", "switch-project", "project-settings"].includes(action)) {
+      } else if (["worktrees", "switch-project", "project-settings", "create-worktree", "manage-worktrees"].includes(action)) {
         popover.kind = action;
       } else if (action === "choose-worktree") {
         worktrees.set(popover.project, button.dataset.branch); popover = null;
+      } else if (action === "save-worktree") {
+        const input = stage.querySelector("#demo-worktree-name");
+        const branch = input.value.trim();
+        if (!branch) { input.focus(); return; }
+        const choices = worktreeChoices.get(popover.project);
+        if (!choices.includes(branch)) { choices.push(branch); }
+        worktrees.set(popover.project, branch);
+        popover = null;
       } else if (action === "close-popover") {
         popover = null;
       } else if (action === "save-project-settings") {
@@ -750,21 +781,23 @@
         feedback.set(selectedSession, draft ? "Message previewed locally. This design does not send messages to an agent." : "Write a sample message first.");
       } else if (action === "reset") {
         selectedProject = 0; selectedSession = "0-0"; query = ""; filter = "all"; activityProject = null; expanded = new Set([0, 1, 2]); carousel = 0; drafts.clear(); feedback.clear();
-        popover = null; menuQuery = ""; demoSound = "Silent";
+        popover = null; menuQuery = ""; demoSound = "Silent"; sidebarOpen = true;
         notificationFilter = "all"; readNotifications.clear();
         projects.forEach((project, index) => {
           project.name = originalProjects[index].name; project.color = originalProjects[index].color;
           project.sessions.forEach((session, sessionIndex) => { Object.assign(session, originalProjects[index].sessions[sessionIndex]); });
           worktrees.set(project.id, project.id === 0 ? "mine" : "main");
+          worktreeChoices.set(project.id, ["mine", "main", "feature/sidebar-watchlist", "fix/background-polling"]);
         });
       }
       update();
-      if (["project-menu", "settings", "usage", "worktrees", "switch-project", "project-settings", "open-project", "row-settings", "session-filter"].includes(action)) {
+      if (action === "close-popover" && popoverTrigger) { stage.querySelector(popoverTrigger)?.focus(); }
+      if (["project-menu", "settings", "usage", "worktrees", "switch-project", "project-settings", "open-project", "row-settings", "session-filter", "worktree-menu", "create-worktree", "manage-worktrees"].includes(action)) {
         (stage.querySelector('.demo-popover input, .demo-popover .menu-row, .demo-popover select') || stage.querySelector('.demo-popover .close-popover'))?.focus();
       }
     });
     document.addEventListener("click", e => {
-      if (popover && !e.target.closest('.demo-popover, [data-action="project-menu"], [data-action="settings"], [data-action="usage"], [data-action="notifications"], [data-action="open-project"], [data-action="row-settings"], [data-action="session-filter"]')) {
+      if (popover && !e.target.closest('.demo-popover, [data-action="project-menu"], [data-action="settings"], [data-action="usage"], [data-action="notifications"], [data-action="open-project"], [data-action="row-settings"], [data-action="session-filter"], [data-action="worktree-menu"]')) {
         popover = null; update();
       }
     });

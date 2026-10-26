@@ -141,6 +141,8 @@ type Props = {
    * owns the rail toggle and history navigation in both rail states.
    */
   inset?: boolean;
+  /** Inset layout: the current project's worktree picker in the left toolbar. */
+  worktreeControl?: ReactNode;
   /** Inset layout: the right sidebar holding the project tools. */
   rightPanelOpen?: boolean;
   onToggleRightPanel?: () => void;
@@ -756,6 +758,7 @@ function TitleBarComponent({
   sessionSidebarOpen = true,
   compactRail = false,
   inset = false,
+  worktreeControl,
   rightPanelOpen = false,
   onToggleRightPanel,
   rightPanelDot = false,
@@ -1042,7 +1045,7 @@ function TitleBarComponent({
   const projectless = !showCurrentProject;
   // An open project is labeled in the sidebar, above Sessions / Explorer /
   // Changes. Without a project that sidebar is gone, so the picker stays here.
-  // The inset sidebar's header menu switches projects.
+  // The inset sidebar's Projects list switches projects.
   const showProjectButton =
     !inset && railClosed && Boolean(onSelectProject) && !showCurrentProject;
   const showTrailingActions =
@@ -1158,6 +1161,12 @@ function TitleBarComponent({
           ) : null}
           {/* Fork: app-wide activity stays reachable when the sidebar is closed. */}
           <NotificationsButton />
+          {worktreeControl}
+          {onOpenSettings ? (
+            <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>
+              <Settings className="size-3.5" strokeWidth={1.75} />
+            </IconButton>
+          ) : null}
           <DevModeIcon />
           {/* History sits at the rail's far edge and follows it as the
               sidebar resizes. */}

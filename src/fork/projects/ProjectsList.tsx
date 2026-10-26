@@ -171,7 +171,7 @@ function ProjectListRow({
   return (
     <li
       data-project-path={row.path}
-      className={`group flex h-8 items-center rounded-md ${active ? "bg-content/10" : "hover:bg-content/5"}`}
+      className={`group flex h-8 items-center rounded-md border-l-2 ${active ? "border-accent bg-content/10" : "border-transparent hover:bg-content/5"}`}
     >
       <button
         type="button"
@@ -262,7 +262,7 @@ function ProjectListRow({
         title={`Project settings for ${label}`}
         aria-haspopup="menu"
         onClick={(event) => openMenu(event.currentTarget)}
-        className="mr-1 grid size-6 shrink-0 place-items-center rounded-md text-content/50 opacity-0 outline-none transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-content/10 hover:text-content focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-accent active:bg-content/15 motion-reduce:transition-none"
+        className={`mr-1 grid size-6 shrink-0 place-items-center rounded-md text-content/50 ${active ? "opacity-100" : "opacity-0"} outline-none transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-content/10 hover:text-content focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-accent active:bg-content/15 motion-reduce:transition-none`}
       >
         <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
       </button>
