@@ -171,7 +171,7 @@ function ProjectListRow({
   return (
     <li
       data-project-path={row.path}
-      className={`group flex h-8 items-center rounded-md border-l-2 ${active ? "border-accent bg-content/10" : "border-transparent hover:bg-content/5"}`}
+      className={`group flex h-8 items-center rounded-md transition-colors duration-150 motion-reduce:transition-none ${active ? "bg-content/7" : "hover:bg-content/5"}`}
     >
       <button
         type="button"

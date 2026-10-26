@@ -2520,8 +2520,13 @@ function SidebarComponent({
           : " body-glass border-r border-stroke"
       }`}
     >
-      {/* Fork: projects stay visible while the selected project's sessions scroll. */}
+      {/* Fork: Monos and projects stay visible while sessions scroll. */}
       {inset ? navList : null}
+      {inset && railMonos && inProject ? (
+        <div className="max-h-[min(25%,14rem)] min-h-0 shrink-0 overflow-y-auto overscroll-contain">
+          <MonoRailSection {...railMonos} project={cwd} />
+        </div>
+      ) : null}
       {inset && onSelectProject ? (
         <ProjectsList
           paths={spaceProjects}
@@ -2644,10 +2649,6 @@ function SidebarComponent({
               : undefined
           }
         >
-          {/* The project's Monos, above its folders. */}
-          {inset && railMonos && inProject ? (
-            <MonoRailSection {...railMonos} project={cwd} />
-          ) : null}
           {!cwd || cwd === "~" ? (
             <div className="px-3 py-2 text-[12px] text-content/50">
               <p>No project folder</p>

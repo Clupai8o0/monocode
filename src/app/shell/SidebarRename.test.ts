@@ -272,7 +272,7 @@ describe("inset Projects list", () => {
     expect(container.querySelector('[aria-label="project menu"]')).toBeNull();
     expect(projects.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
     const activeRow = projects.querySelector<HTMLElement>('[data-project-path="/workspace/project"]')!;
-    expect(activeRow.classList.contains("border-accent")).toBe(true);
+    expect(activeRow.classList.contains("bg-content/7")).toBe(true);
     expect(activeRow.querySelector('[aria-label="Project settings for project"]')?.classList.contains("opacity-100")).toBe(true);
     act(() => container.querySelector<HTMLButtonElement>('[aria-label="Project settings for other"]')!.click());
     expect(document.querySelector<HTMLInputElement>('[aria-label="Group name"]')?.value).toBe("other");
