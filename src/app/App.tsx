@@ -104,7 +104,6 @@ import { useStableValue } from "../shared/hooks/useStableValue";
 import { useDragResize } from "../shared/hooks/useDragResize";
 import { beginLayoutTransition } from "../shared/lib/layoutTransition";
 import { noteProjectStep, Sidebar } from "./shell/Sidebar";
-import { ApprovalToasts } from "../features/sessions/ui/ApprovalToasts";
 import { ResourcePressureNotice } from "../features/notifications/ui/ResourcePressureNotice";
 import { HarnessUpdateNotice } from "../features/providers/ui/HarnessUpdateNotice";
 import { NewLayoutNotice } from "./shell/NewLayoutNotice";
@@ -578,7 +577,6 @@ import {
 } from "../features/sessions/ui/TranscriptPool";
 import { syncDockBadge } from "../features/notifications/model/dockBadge";
 import { liveAgentsFromSessions } from "../features/sessions/model/liveAgents";
-import { hiddenApprovalNotices } from "../features/notifications/model/approvalToast";
 import { useSessionReminders } from "../features/notifications/hooks/useSessionReminders";
 import { ReminderNotices } from "../features/sessions/ui/ReminderNotices";
 import { useUnseenFinishedSessions } from "../features/sessions/hooks/useUnseenFinishedSessions";
@@ -2409,28 +2407,8 @@ function Workspace({
   // Rebuilt for every streamed batch; identity only moves when a row does.
   const liveAgents = useStableValue(liveAgentRows);
 
-  const hiddenApprovalToasts = useMemo(
-    () =>
-      hiddenApprovalNotices(
-        monoViewId
-          ? promptableSessions.filter((session) => session.id !== monoViewId)
-          : promptableSessions,
-        monoCovers ? "" : activeTabId,
-        tabs,
-        composerFocused,
-      ),
-    [
-      promptableSessions,
-      activeTabId,
-      tabs,
-      composerFocused,
-      monoViewId,
-      monoCovers,
-    ],
-  );
   const [reminderNoticesHeight, setReminderNoticesHeight] = useState(0);
   const [harnessUpdateHeight, setHarnessUpdateHeight] = useState(0);
-  const [newLayoutNoticeHeight, setNewLayoutNoticeHeight] = useState(0);
   // The footer's slot for the resource pressure chip. Monitoring continues
   // while the footer is hidden.
   const [pressureChipHost, setPressureChipHost] =
@@ -14782,7 +14760,6 @@ function Workspace({
               (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
               (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
             }
-            onHeightChange={setNewLayoutNoticeHeight}
           />
           <ResourcePressureNotice
             sessions={sessionsRef}
@@ -14791,17 +14768,6 @@ function Workspace({
             onPressureChange={transcriptPool.setResourcePressure}
             chipHost={pressureChipHost}
             insetChip={insetLayout}
-          />
-          <ApprovalToasts
-            notices={hiddenApprovalToasts}
-            topOffset={
-              12 +
-              (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
-              (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0) +
-              (newLayoutNoticeHeight ? newLayoutNoticeHeight + 8 : 0)
-            }
-            onFocusSession={onOpenApprovalSession}
-            onApproval={onApproval}
           />
           <ReminderNotices
             reminders={sessionReminders.due}

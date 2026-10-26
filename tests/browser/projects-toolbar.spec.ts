@@ -14,6 +14,9 @@ test("keeps notifications and workspace controls in the window's top-left toolba
   await expect(sidebar.getByRole("button", { name: "monocode menu", exact: true })).toHaveCount(0);
   await expect(sidebar.locator('[aria-current="page"]')).toHaveCount(1);
   await expect(worktrees).toHaveAttribute("title", "Worktrees · mine");
+  await expect(page.locator("[data-fork-notifications]")).toHaveCount(1);
+  await expect(bell).toHaveAttribute("aria-label", /^Notifications, \d+ unread$/);
+  await expect(page.locator(".approval-toast")).toHaveCount(0);
 
   const toggleBox = (await toggle.boundingBox())!;
   const bellBox = (await bell.boundingBox())!;
@@ -26,6 +29,8 @@ test("keeps notifications and workspace controls in the window's top-left toolba
 
   await bell.click();
   await expect(page.getByRole("dialog", { name: "Notifications", exact: true })).toBeVisible();
+  await expect(page.locator("[data-fork-notification-row]")).toHaveCount(4);
+  await expect(page.locator(".approval-toast")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("top-left-notifications.png") });
   await page.keyboard.press("Escape");
   await worktrees.click();
