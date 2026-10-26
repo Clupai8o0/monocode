@@ -1,4 +1,4 @@
-import { newSession, type Session } from "../../sessions/model/session";
+import { newSession, type RuntimeMode, type Session } from "../../sessions/model/session";
 import {
   closeLeaf,
   leafIds,
@@ -20,8 +20,8 @@ const openingMonos = new Map<string, Promise<Session | undefined>>();
 
 /**
  * Load the Mono's conversation without opening or replacing a workspace tab.
- * A new one starts with Auto permissions in the home folder: no single
- * project is its own.
+ * A new one uses the home folder and Auto permissions unless its creator
+ * supplies a stricter mode. No single project is its own.
  */
 export function ensureMonoSession(
   monoId: string,
@@ -29,6 +29,8 @@ export function ensureMonoSession(
     home(): Promise<string>;
     load(id: string): Promise<Session | null | undefined>;
     create(cwd: string): Session;
+    /** Operator-created Monos keep the source turn's permissions. */
+    runtimeMode?: RuntimeMode;
     add(session: Session): void;
   },
 ): Promise<Session | undefined> {
@@ -45,19 +47,63 @@ async function loadMonoSession(
   monoId: string,
   host: Parameters<typeof ensureMonoSession>[1],
 ): Promise<Session | undefined> {
-  const mono = findMono(monoId);
-  if (!mono) return undefined;
-  if (mono.sessionId) {
-    const existing = await host.load(mono.sessionId);
-    if (existing) return existing;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const mono = findMono(monoId);
+    if (!mono) return undefined;
+    const sessionId = mono.sessionId;
+    if (sessionId) {
+      const existing = await host.load(sessionId);
+      const current = findMono(monoId);
+      if (!current) return undefined;
+      if (current.sessionId !== sessionId) continue;
+      if (existing) return existing;
+    }
+    const home = await host.home();
+    const current = findMono(monoId);
+    if (!current) return undefined;
+    // A reset or another opener may have assigned the replacement meanwhile.
+    if (current.sessionId !== sessionId) continue;
+    const session: Session = { ...host.create(home), runtimeMode: host.runtimeMode ?? "auto" };
+    saveMonoSessionId(monoId, session.id);
+    host.add(session);
+    return session;
   }
-  const home = await host.home();
-  // Removed while the home folder was looked up.
-  if (!findMono(monoId)) return undefined;
-  const session: Session = { ...host.create(home), runtimeMode: "auto" };
-  saveMonoSessionId(monoId, session.id);
-  host.add(session);
-  return session;
+  throw new Error("The Mono conversation kept changing during initialization; retry configuration");
+}
+
+/** Quiet configuration must survive its window closing before the first turn. */
+export async function ensurePersistedMonoSession(
+  monoId: string,
+  host: Parameters<typeof ensureMonoSession>[1] & {
+    saved(id: string): Promise<Session | null>;
+    persist(session: Session): Promise<{ id: string } | null>;
+  },
+): Promise<Session> {
+  const currentMono = () => {
+    const mono = findMono(monoId);
+    if (!mono) throw new Error("The Mono was removed before its conversation could be initialized");
+    return mono;
+  };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const sessionId = currentMono().sessionId;
+    if (sessionId) {
+      const saved = await host.saved(sessionId);
+      if (currentMono().sessionId !== sessionId) continue;
+      // An existing conversation may be active in another window. Do not
+      // claim it or rewrite that window's transcript just to configure a Mono.
+      if (saved?.id === sessionId) return saved;
+    }
+    const session = await ensureMonoSession(monoId, host);
+    const current = currentMono();
+    if (!session || current.sessionId !== session.id) continue;
+    const saved = await host.persist(session);
+    if (currentMono().sessionId !== session.id) continue;
+    if (!saved || saved.id !== session.id) {
+      throw new Error("The Mono conversation could not be saved; retry configuration before closing this window");
+    }
+    return session;
+  }
+  throw new Error("The Mono conversation kept changing while saving; retry configuration");
 }
 
 /** Reset only the Mono's chat, keeping its identity, habits and memory. */

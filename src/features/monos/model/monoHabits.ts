@@ -4,7 +4,7 @@ import {
   nextAutomationRunAt,
   type AutomationScheduleKind,
 } from "../../automations/model/automations";
-import type { Block, MonoSpawnedSession } from "../../sessions/model/session";
+import { RUNTIME_MODES, type Block, type MonoSpawnedSession, type RuntimeMode } from "../../sessions/model/session";
 import type { MonoLook } from "./mono";
 import {
   MonoFileConflict,
@@ -37,6 +37,8 @@ export type Habit = {
   instructions: string;
   schedule: HabitSchedule;
   enabled: boolean;
+  /** Operator-configured work retains its source's permission ceiling. */
+  runtimeMode?: RuntimeMode;
   createdAt: number;
   nextRunAt: number;
   lastRunAt?: number;
@@ -129,6 +131,10 @@ export function parseHabits(text: string | null | undefined): Habit[] {
         dayOfWeek: field(schedule, "dayOfWeek", isNumber) ?? 1,
       },
       enabled: value.enabled !== false,
+      ...(value.runtimeMode === undefined ? {} : {
+        runtimeMode: RUNTIME_MODES.includes(value.runtimeMode as RuntimeMode)
+          ? value.runtimeMode as RuntimeMode : "supervised" as const,
+      }),
       createdAt: field(value, "createdAt", isNumber) ?? 0,
       nextRunAt: field(value, "nextRunAt", isNumber) ?? 0,
       ...(isNumber(value.lastRunAt) ? { lastRunAt: value.lastRunAt } : {}),

@@ -82,8 +82,10 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 35] = [
+const APP_ACTIONS: [&str; 37] = [
     "models.list",
+    "monos.list",
+    "monos.configure",
     "projects.logo",
     "projects.logo.set",
     "projects.logo.clear",
@@ -129,6 +131,37 @@ left out when the Mono has a single project.
 
 Actions:
   models.list    {}  Available providers, models, settings and permission modes.
+  monos.list     {}  Monos assigned only to this local project, with id, name,
+                  instructions, soulHash and habits. Requires Monos enabled.
+  monos.configure {"name":"Project review","habit":{"name":"Daily review",
+                   "instructions":"Review changes and report blockers.",
+                   "schedule":{"kind":"daily","time":"09:00"},"enabled":true}}
+                  Create or configure a Mono only when the user asks; suggestions
+                  belong in your reply and must not create recurring work.
+                  A request to set up a daily review authorizes enabled:true.
+                  Ordinary /operator sessions can manage only Monos assigned
+                  exclusively to their current local project. No project override;
+                  multi-project Monos and hidden habit runs are excluded.
+                  Requires Monos enabled; never changes that setting.
+                  Omit id and provide name to create; an existing same-name Mono
+                  is reused. Pass id from monos.list to update or rename one.
+                  Optional instructions replace its standing SOUL instructions;
+                  this field requires a Full access session because all of the
+                  Mono's future work consumes it. Habit instructions below keep
+                  the calling session's permission mode.
+                  Replacing existing instructions requires expectedSoulHash
+                  from monos.list.
+                  On a conflict, list again and preserve the other instructions.
+                  Optional habit updates by id or name. A new habit requires name,
+                  instructions and schedule; it is paused unless enabled:true.
+                  Omitted fields stay unchanged. Schedule kind is hourly (minute),
+                  daily, weekdays, or weekly (dayOfWeek, 0 = Sunday); time is local
+                  24-hour HH:MM. Use enabled:false to pause.
+                  New Monos inherit this session's provider, model and permission
+                  mode; configured habits cannot increase those permissions.
+                  Runs need MonoCode open and use normal provider allowance.
+                  Returns the configured Mono and its habits. Reuse --request-id
+                  on retries. Existing Mono-only habits.* actions are separate.
   projects.logo  {}  Read the current project's saved logo path, or null.
   projects.logo.set {"path":"assets/logo.svg","background":"transparent"}
                   Apply an existing PNG, JPG, GIF, WebP or SVG image (up to 2 MB)
@@ -148,6 +181,7 @@ Actions:
   sessions.send  {"sessionId":"...","prompt":"...","notifyOnComplete":true}
                   Submit a follow-up to an idle session in this project.
                   A busy session is rejected. Reuse --request-id on retries.
+                  Its permission mode cannot exceed the calling session's.
                   Optional notifyOnComplete:true asks for a completion report
                   in the calling Mono's chat. It waits until that Mono is idle.
   sessions.draft {"sessionId":"...","prompt":"..."}
@@ -189,7 +223,7 @@ Actions:
                   workspaceMode:"worktree" and optional worktreeBase to make
                   a new worktree with an automatic branch name. Omit
                   runtimeMode to inherit this
-                  session's permission mode; set it to override. Run
+                  session's permission mode; an override can only reduce it. Run
                   models.list for allowed IDs. cwd is your project; no attachments.
   sessions.stop {"sessionId":"..."}
                   Stop a session's current turn and pause its queued messages.
@@ -697,6 +731,30 @@ mod tests {
         assert!(denied.get("requestId").is_none());
         let uncertain = with_retry_hint(json!({"ok":false,"error":"timeout"}), "id-1");
         assert_eq!(uncertain["retryWith"], "--request-id id-1");
+    }
+
+    #[test]
+    fn app_mode_accepts_project_mono_configuration() {
+        for (action, input) in [
+            ("monos.list", r#"{}"#),
+            (
+                "monos.configure",
+                r#"{"name":"Project review","habit":{"name":"Daily review","instructions":"Review changes","schedule":{"kind":"daily","time":"09:00"},"enabled":true}}"#,
+            ),
+            (
+                "monos.configure",
+                r#"{"id":"mono-1","instructions":"Keep reports brief","expectedSoulHash":"old-hash","habit":{"id":"habit-1","enabled":false}}"#,
+            ),
+        ] {
+            assert!(matches!(
+                parse_args_for(&args(&[action, "--json", input]), true),
+                Ok(Parsed::Call(parsed_action, parsed_input, _))
+                    if parsed_action == action
+                        && parsed_input == serde_json::from_str::<Value>(input).unwrap()
+            ));
+            assert!(parse_args_for(&args(&[action]), false).is_err());
+            assert!(app_help().contains(action));
+        }
     }
 
     #[test]

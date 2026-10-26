@@ -38,6 +38,7 @@ import {
 import {
   handleAgentApp,
   canAccessAgentAppProject,
+  requireAgentRuntimeMode,
   type AppSessionListing,
   type AppSessionPlacement,
 } from "../features/agent-app/model/agentApp";
@@ -553,6 +554,7 @@ import {
   discardDraftSessionRecord,
   deleteSession,
   getSession,
+  peekSession,
   readSession,
   repairSession,
   applySessionRepair,
@@ -673,6 +675,7 @@ import {
 import {
   detachMonoTabs,
   ensureMonoSession,
+  ensurePersistedMonoSession,
   resetMonoSession,
 } from "../features/monos/model/monoWorkspace";
 import {
@@ -11484,6 +11487,7 @@ function Workspace({
                 throw new Error(
                   "Session already has a draft; send or remove it first",
                 );
+              requireAgentRuntimeMode(source.runtimeMode, target.runtimeMode);
               const onSettled = notifyMonoId
                 ? monitorCompletion(
                     notifyMonoId,
@@ -11634,6 +11638,23 @@ function Workspace({
             },
             isMono: (id) => isMonoSession(id),
             isHabitRun: (id) => isHabitRun(id),
+            monos: {
+              enabled: loadMonosEnabled,
+              prepare: async (monoId) => {
+                await ensurePersistedMonoSession(monoId, {
+                  home: homeDir,
+                  load: async (id) => sessionsRef.current.find((entry) => entry.id === id) ?? await peekSession(id),
+                  saved: peekSession,
+                  persist: (session) => upsertSession(session, { allowEmptyMono: true }),
+                  create: (cwd) => newSession(source.harness, cwd, source.model, source.runtimeMode, source.modelSettings),
+                  runtimeMode: source.runtimeMode,
+                  add: (created) => {
+                    sessionsRef.current = [...sessionsRef.current, created];
+                    setSessions(sessionsRef.current);
+                  },
+                });
+              },
+            },
             monoOf: (id) => {
               const mono =
                 monoForSession(id) ?? findMono(habitRunMono(id) ?? "");

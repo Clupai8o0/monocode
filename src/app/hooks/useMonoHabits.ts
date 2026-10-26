@@ -177,13 +177,13 @@ export function useMonoHabits(host: MonoHabitHost, enabled = true) {
       if (!habit || stopped || !record) return;
       const look = monoLook(record);
       const run: Session = {
-        // Nobody is watching a habit's run, so it cannot stop to ask before
-        // each step. Anything the harness still asks goes to the user below.
+        // Operator-configured habits retain their saved permission ceiling.
+        // Legacy habits keep their existing mode; approvals go to the user below.
         ...newSession(
           mono.harness,
           mono.cwd,
           mono.model,
-          "full-access",
+          habit.runtimeMode ?? "full-access",
           mono.modelSettings,
         ),
         title: `${look.name} · ${habit.name}`,

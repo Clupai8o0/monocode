@@ -89,6 +89,7 @@ function setup(
   reply: string,
   approve?: { wait: Promise<void> },
   waitingHabit = false,
+  runtimeMode?: Habit["runtimeMode"],
 ) {
   stored = [
     {
@@ -104,6 +105,7 @@ function setup(
       enabled: true,
       createdAt: 0,
       nextRunAt: Date.now() - 60_000,
+      ...(runtimeMode ? { runtimeMode } : {}),
     },
   ];
   if (waitingHabit)
@@ -255,6 +257,13 @@ it("posts nothing when the run has nothing to say", async () => {
   await vi.waitFor(() => expect(stored[0].lastOutcome).toBe("quiet"));
   expect(host.post).not.toHaveBeenCalled();
   expect(host.remove).toHaveBeenCalled();
+});
+
+it("runs an operator-configured habit with its saved supervised permissions", async () => {
+  const host = setup("Review complete.", undefined, false, "supervised");
+  await vi.waitFor(() => expect(host.run).toHaveBeenCalled());
+  expect(host.add.mock.calls[0][0].runtimeMode).toBe("supervised");
+  await vi.waitFor(() => expect(stored[0].lastOutcome).toBe("posted"));
 });
 
 it("puts the sessions a run started on its report", async () => {

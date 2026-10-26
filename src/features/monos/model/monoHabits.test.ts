@@ -67,6 +67,12 @@ it("validates schedules from the CLI", () => {
   expect(() => habitSchedule({ kind: "daily", cron: "* *" })).toThrow("cron");
 });
 
+it("preserves saved permissions and treats malformed permissions as supervised", () => {
+  expect(parseHabits(serializeHabits([habit({ runtimeMode: "supervised" })]))[0].runtimeMode).toBe("supervised");
+  expect(parseHabits(JSON.stringify([{ ...habit(), runtimeMode: "invalid" }]))[0].runtimeMode).toBe("supervised");
+  expect(parseHabits(serializeHabits([habit()]))[0].runtimeMode).toBeUndefined();
+});
+
 it("runs a recent missed habit once and skips stale ones", () => {
   const due = habit({ nextRunAt: at(5, 9) });
   const stale = habit({

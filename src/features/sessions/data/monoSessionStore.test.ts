@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getSession,
+  peekSession,
   getMonoTranscriptPage,
   upsertSession,
   persistFingerprint,
 } from "./sessionStore";
-import type { Session } from "../model/session";
+import { newSession, type Session } from "../model/session";
 import {
   monoSessionCompletionMessage,
   monoSessionCompletionResult,
@@ -52,6 +53,35 @@ function saved(session: Session) {
 }
 
 describe("Mono database pagination and writes", () => {
+  it("explicitly saves an empty configured Mono and restores its provider and permissions", async () => {
+    const session = { ...newSession("codex", "/home", "codex:test", "supervised", { effort: "high" }), id: `mono-quiet-${++id}` };
+    expect(await upsertSession(session)).toBeNull();
+    expect(call).not.toHaveBeenCalled();
+    call.mockResolvedValueOnce(saved(session));
+    expect(await upsertSession(session, { allowEmptyMono: true })).toMatchObject({ id: session.id });
+    expect(call).toHaveBeenCalledWith("mono_session_upsert", expect.objectContaining({
+      session: expect.objectContaining({ id: session.id, blocks: [], runtimeMode: "supervised", modelSettings: { effort: "high" } }),
+    }));
+    const payload = (call.mock.calls.at(-1)![1] as { session: Session }).session;
+    call.mockResolvedValueOnce(saved(payload));
+    expect(await getSession(session.id)).toMatchObject({
+      id: session.id, blocks: [], runtimeMode: "supervised", model: "codex:test", modelSettings: { effort: "high" },
+    });
+  });
+
+  it("does not let explicit empty Mono persistence save ordinary or transient sessions", async () => {
+    const session = { ...newSession("codex", "/home"), id: `mono-transient-${++id}` };
+    for (const candidate of [
+      { ...session, id: "ordinary-empty" },
+      { ...session, ephemeral: true },
+      { ...session, inboxAsk: true },
+      { ...session, cwd: "remote://env/home/repo" },
+    ]) {
+      expect(await upsertSession(candidate, { allowEmptyMono: true })).toBeNull();
+    }
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("keeps document and visual references on the source turn after saving and reopening", async () => {
     let session = await load();
     const card = {
@@ -370,6 +400,38 @@ describe("Mono database pagination and writes", () => {
         blocksChanged: true,
       }),
     );
+  });
+
+  it("does not replace an open long conversation's save baseline when configuration peeks at the latest page", async () => {
+    const stored = {
+      ...record(),
+      blocks: Array.from({ length: 12 }, (_, turn) => [
+        { id: `u${turn}`, role: "user", text: `Question ${turn}` },
+        { id: `a${turn}`, role: "assistant", text: `Answer ${turn}` },
+      ]).flat(),
+      monoTranscript: { before: 0, firstBlockId: "u0" },
+    };
+    call.mockResolvedValueOnce(stored);
+    const open = (await getSession(stored.id))!;
+    call.mockResolvedValueOnce({
+      ...stored,
+      blocks: stored.blocks.slice(-20),
+      monoTranscript: { before: 4, firstBlockId: "u2" },
+    });
+    const peek = (await peekSession(open.id))!;
+    expect(peek.blocks).toHaveLength(20);
+    expect(open.blocks).toHaveLength(24);
+    open.blocks = [...open.blocks, { id: "new-turn", role: "user", text: "Continue" }];
+    call.mockResolvedValueOnce(saved(open));
+    await upsertSession(open);
+    expect(call).toHaveBeenLastCalledWith("mono_session_upsert", expect.objectContaining({
+      afterBlockId: "a11",
+      fromBlockId: null,
+      blocksChanged: true,
+      session: expect.objectContaining({
+        blocks: [expect.objectContaining({ id: "new-turn" })],
+      }),
+    }));
   });
 
   it("serializes overlapping saves against the last successful suffix", async () => {

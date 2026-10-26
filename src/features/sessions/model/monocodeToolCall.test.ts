@@ -40,6 +40,8 @@ describe("MonoCode CLI tool calls", () => {
       monoCodeToolCall(shell("monocode app sessions.draft --json '{}'"))?.label,
     ).toBe("Save a draft");
     for (const [action, label] of [
+      ["monos.list", "List project Monos"],
+      ["monos.configure", "Configure a Mono"],
       ["sessions.stop", "Stop a session"],
       ["sessions.archive", "Archive a session"],
       ["sessions.delete", "Delete a session"],

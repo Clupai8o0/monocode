@@ -1,4 +1,5 @@
 import { isHarnessAvailable } from "../../../integrations/harness/core/availability";
+import { handleAgentMonos } from "./agentAppMonos";
 // Fork: agents use the same project logo storage as the manual picker.
 import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { looksLikeProject } from "../../projects/model/recents";
@@ -145,6 +146,11 @@ export type AgentAppHost = {
   } | undefined;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
   isHabitRun?(sessionId: string): boolean;
+  monos?: {
+    enabled(): boolean;
+    /** Initialize a conversation quietly, without submitting work. */
+    prepare(monoId: string): Promise<void>;
+  };
   /** Puts a card in the Mono's chat, or holds it for a habit run's report. */
   postCard?(sourceSessionId: string, card: MonoCard): void;
   habits?: {
@@ -172,6 +178,8 @@ export type AgentAppHost = {
 
 const FIELDS = new Map<string, readonly string[]>([
   ["models.list", []],
+  ["monos.list", []],
+  ["monos.configure", ["id", "name", "instructions", "expectedSoulHash", "habit"]],
   ["projects.logo", ["project"]],
   ["projects.logo.set", ["path", "background", "project"]],
   ["projects.logo.clear", ["project"]],
@@ -248,6 +256,22 @@ function agentPrompt(value: unknown): string {
   if (consumeOperatorCommand(prompt).matched)
     throw new Error("App calls cannot enable /operator in another session");
   return prompt;
+}
+
+/** App access never lets an agent delegate beyond its own permission mode. */
+export function requireAgentRuntimeMode(source: Session["runtimeMode"], requested: Session["runtimeMode"]): void {
+  if (!RUNTIME_MODES.includes(source) || !RUNTIME_MODES.includes(requested)) {
+    throw new Error("Agent work requires a valid permission mode for both the caller and target session");
+  }
+  if (RUNTIME_MODES.indexOf(requested) > RUNTIME_MODES.indexOf(source)) {
+    throw new Error(`Agent work cannot use ${requested} permissions above the caller's ${source} mode; the user can change permissions in MonoCode`);
+  }
+}
+
+function habitRuntimeMode(source: Session, habit?: Habit): Session["runtimeMode"] {
+  const current = habit?.runtimeMode ?? "full-access";
+  return RUNTIME_MODES.indexOf(current) < RUNTIME_MODES.indexOf(source.runtimeMode)
+    ? current : source.runtimeMode;
 }
 
 function completionRecipient(
@@ -457,6 +481,7 @@ function startLaunch(
   const runtimeMode = input.runtimeMode ?? source.runtimeMode;
   if (!RUNTIME_MODES.includes(runtimeMode as Session["runtimeMode"]))
     throw new Error(`runtimeMode must be one of: ${RUNTIME_MODES.join(", ")}`);
+  requireAgentRuntimeMode(source.runtimeMode, runtimeMode as Session["runtimeMode"]);
   const reveal = input.reveal ?? false;
   if (typeof reveal !== "boolean") throw new Error("reveal must be a boolean");
   const workspaceMode = input.workspaceMode ?? "current";
@@ -707,6 +732,7 @@ function habitView(habit: Habit) {
     instructions: habit.instructions,
     schedule: habitScheduleLabel(habit.schedule),
     enabled: habit.enabled,
+    runtimeMode: habit.runtimeMode ?? "full-access",
     nextRun: habit.enabled ? new Date(habit.nextRunAt).toLocaleString() : null,
     ...(habitRunningSince(habit.id) != null ? { running: true } : {}),
     ...(habit.lastRunAt
@@ -749,10 +775,10 @@ async function handleHabits(
       const habit = await habits.update(monoId, (list) => {
         if (list.length >= HABITS_MAX)
           throw new Error(`A Mono can have at most ${HABITS_MAX} habits`);
-        const created = newHabit(
-          { name, instructions, schedule },
-          now.getTime(),
-        );
+        const created = {
+          ...newHabit({ name, instructions, schedule }, now.getTime()),
+          runtimeMode: habitRuntimeMode(source),
+        };
         return { habits: [...list, created], result: created };
       });
       return { habit: habitView(habit) };
@@ -782,6 +808,7 @@ async function handleHabits(
         const next: Habit = {
           ...current,
           ...patch,
+          runtimeMode: habitRuntimeMode(source, current),
           ...(input.enabled === undefined
             ? {}
             : { enabled: input.enabled as boolean }),
@@ -803,7 +830,8 @@ async function handleHabits(
           `That habit is already running (started ${new Date(running).toLocaleTimeString()}); its result will be posted here when it ends`,
         );
       const habit = await habits.update(monoId, (list) => {
-        const next = { ...find(list), runRequested: true };
+        const current = find(list);
+        const next = { ...current, runtimeMode: habitRuntimeMode(source, current), runRequested: true };
         return {
           habits: list.map((entry) => (entry.id === next.id ? next : entry)),
           result: next,
@@ -953,6 +981,8 @@ export async function handleAgentApp(
   host: AgentAppHost,
 ): Promise<unknown> {
   fields(action, input);
+  if (action.startsWith("monos."))
+    return handleAgentMonos(source, action, input, host);
   if (action.startsWith("artifacts."))
     return handleArtifacts(source, requestId, action, input, host);
   if (action.startsWith("soul."))
@@ -990,7 +1020,7 @@ export async function handleAgentApp(
     }
     case "models.list":
       return {
-        runtimeModes: RUNTIME_MODES.map((id) => ({
+        runtimeModes: RUNTIME_MODES.filter((id) => RUNTIME_MODES.indexOf(id) <= RUNTIME_MODES.indexOf(source.runtimeMode)).map((id) => ({
           id,
           label: RUNTIME_MODE_LABEL[id],
           description: RUNTIME_MODE_HINT[id],
@@ -1030,7 +1060,8 @@ export async function handleAgentApp(
         );
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
         throw new Error("Invalid request ID");
-      await projectSession(source, id, input, host);
+      const target = await projectSession(source, id, input, host);
+      requireAgentRuntimeMode(source.runtimeMode, target.runtimeMode);
       const result = await host.send(
         id,
         prompt,

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
-import { newSession } from "../../sessions/model/session";
+import { newSession, type RuntimeMode } from "../../sessions/model/session";
 import {
   MonoFileConflict,
   type AgentFilePath,
@@ -141,7 +141,7 @@ function habitsFixture(mono = true) {
   } as unknown as AgentAppHost;
   const run = (action: string, input: Record<string, unknown> = {}) =>
     handleAgentApp(source, `req-${Math.random()}`, action, input, host);
-  return { run, habits: () => stored };
+  return { source, run, habits: () => stored };
 }
 
 it("lets the Mono add, pause, try and remove its habits", async () => {
@@ -176,6 +176,28 @@ it("keeps habits to the Mono's own conversation", async () => {
     "Only a Mono",
   );
 });
+
+it.each([undefined, "supervised", "auto", "full-access"] as const)(
+  "preserves a Mono's permission ceiling when adding, editing or running habits with saved mode %s",
+  async (savedMode: RuntimeMode | undefined) => {
+    const { source, run, habits } = habitsFixture();
+    source.runtimeMode = "auto-accept-edits";
+    const added = await run("habits.add", {
+      name: "Daily review",
+      instructions: "Review recent changes.",
+      schedule: { kind: "daily", time: "09:00" },
+    }) as { habit: { id: string; runtimeMode: RuntimeMode } };
+    expect(added.habit.runtimeMode).toBe("auto-accept-edits");
+    expect(habits()[0].runtimeMode).toBe("auto-accept-edits");
+    const expected = savedMode === "supervised" ? "supervised" : "auto-accept-edits";
+    habits()[0].runtimeMode = savedMode;
+    await run("habits.update", { id: added.habit.id, instructions: "Keep the report brief." });
+    expect(habits()[0].runtimeMode).toBe(expected);
+    habits()[0].runtimeMode = savedMode;
+    await run("habits.run", { id: added.habit.id });
+    expect(habits()[0]).toMatchObject({ runtimeMode: expected, runRequested: true });
+  },
+);
 
 it("refuses to start a habit that is already running", async () => {
   const { run } = habitsFixture();

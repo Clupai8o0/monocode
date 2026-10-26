@@ -3,12 +3,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { newSession } from "../../sessions/model/session";
 import { leafIds, newTab, splitPane } from "../../workspace/model/layout";
 import { planWorkspaceTabClose } from "../../workspace/model/workspaceTabGroups";
-import { createMono, findMono, saveMonoName, saveMonoSessionId } from "./mono";
+import { createMono, findMono, removeMono, saveMonoName, saveMonoSessionId } from "./mono";
 import { planAgentContext, recordAgentContext } from "./monoFiles";
 import { loadMonoRotation, saveMonoRotation } from "./monoRotation";
 import {
   detachMonoTabs,
   ensureMonoSession,
+  ensurePersistedMonoSession,
   resetMonoSession,
 } from "./monoWorkspace";
 
@@ -78,6 +79,196 @@ it("opens nothing for a Mono that no longer exists", async () => {
   };
   expect(await ensureMonoSession("gone", host)).toBeUndefined();
   expect(host.create).not.toHaveBeenCalled();
+});
+
+it("keeps an operator-created Mono's model settings and supervised permissions", async () => {
+  const monoId = createMono(["/project"]).id;
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    load: vi.fn(),
+    create: vi.fn((cwd: string) => newSession("codex", cwd, "codex:test", "supervised", { effort: "high" })),
+    runtimeMode: "supervised" as const,
+    add: vi.fn(),
+  };
+  expect(await ensureMonoSession(monoId, host)).toMatchObject({
+    harness: "codex",
+    model: "codex:test",
+    modelSettings: { effort: "high" },
+    runtimeMode: "supervised",
+    blocks: [],
+  });
+});
+
+it("persists a quiet Mono before configuration succeeds, then reuses it from another window", async () => {
+  const monoId = createMono(["/project"]).id;
+  let stored: ReturnType<typeof chat> | null = null;
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async () => stored),
+    load: vi.fn(async () => stored),
+    create: vi.fn(createSession),
+    runtimeMode: "supervised" as const,
+    add: vi.fn(),
+    persist: vi.fn(async (session: ReturnType<typeof chat>) => {
+      stored = session;
+      return { id: session.id };
+    }),
+  };
+  const session = await ensurePersistedMonoSession(monoId, host);
+  expect(session.blocks).toEqual([]);
+  expect(session.runtimeMode).toBe("supervised");
+  expect(host.persist).toHaveBeenCalledExactlyOnceWith(session);
+  expect(await ensurePersistedMonoSession(monoId, host)).toBe(session);
+  expect(host.create).toHaveBeenCalledOnce();
+  expect(host.add).toHaveBeenCalledOnce();
+  expect(host.persist).toHaveBeenCalledOnce();
+  expect(host.load).not.toHaveBeenCalled();
+});
+
+it.each([null, { id: "wrong-session" }])("retries quiet persistence failures without replacing the resident conversation: %s", async (failedSave) => {
+  const monoId = createMono(["/project"]).id;
+  let resident: ReturnType<typeof chat> | null = null;
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async () => null),
+    load: vi.fn(async () => resident),
+    create: vi.fn(createSession),
+    add: vi.fn((session: ReturnType<typeof chat>) => { resident = session; }),
+    persist: vi.fn().mockResolvedValueOnce(failedSave).mockImplementation(async (session: ReturnType<typeof chat>) => ({ id: session.id })),
+  };
+  await expect(ensurePersistedMonoSession(monoId, host)).rejects.toThrow("could not be saved");
+  const sessionId = sessionOf(monoId);
+  const retried = await ensurePersistedMonoSession(monoId, host);
+  expect(retried.id).toBe(sessionId);
+  expect(host.create).toHaveBeenCalledOnce();
+  expect(host.persist).toHaveBeenCalledTimes(2);
+});
+
+it("repairs an orphaned session id when the creating window closed before persistence", async () => {
+  const monoId = monoFor("/project", "never-saved");
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async () => null),
+    load: vi.fn(async () => null),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+    persist: vi.fn(async (session: ReturnType<typeof chat>) => ({ id: session.id })),
+  };
+  const session = await ensurePersistedMonoSession(monoId, host);
+  expect(session.id).not.toBe("never-saved");
+  expect(sessionOf(monoId)).toBe(session.id);
+  expect(host.persist).toHaveBeenCalledExactlyOnceWith(session);
+});
+
+it("persists the replacement when reset races the saved-conversation lookup", async () => {
+  const old = chat("old");
+  const replacement = chat("replacement");
+  const monoId = monoFor("/project", old.id);
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn().mockImplementationOnce(async () => {
+      saveMonoSessionId(monoId, replacement.id);
+      return old;
+    }).mockResolvedValue(null),
+    load: vi.fn(async () => replacement),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+    persist: vi.fn(async (session: ReturnType<typeof chat>) => ({ id: session.id })),
+  };
+  expect(await ensurePersistedMonoSession(monoId, host)).toBe(replacement);
+  expect(host.saved.mock.calls.map(([id]) => id)).toEqual([old.id, replacement.id]);
+  expect(host.persist).toHaveBeenCalledExactlyOnceWith(replacement);
+  expect(host.create).not.toHaveBeenCalled();
+});
+
+it("persists a reset replacement when the old conversation's write is already pending", async () => {
+  const old = chat("old");
+  const replacement = chat("replacement");
+  const monoId = monoFor("/project", old.id);
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async () => null),
+    load: vi.fn(async (id: string) => id === old.id ? old : replacement),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+    persist: vi.fn(async (session: ReturnType<typeof chat>) => {
+      if (session.id === old.id) saveMonoSessionId(monoId, replacement.id);
+      return { id: session.id };
+    }),
+  };
+  expect(await ensurePersistedMonoSession(monoId, host)).toBe(replacement);
+  expect(host.persist.mock.calls.map(([session]) => session.id)).toEqual([old.id, replacement.id]);
+  expect(sessionOf(monoId)).toBe(replacement.id);
+});
+
+it.each(["read", "write"])("does not report persistence success after deletion during a %s", async (phase) => {
+  const session = chat("deleted");
+  const monoId = monoFor("/project", session.id);
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async () => {
+      if (phase === "read") {
+        removeMono(monoId);
+        return session;
+      }
+      return null;
+    }),
+    load: vi.fn(async () => session),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+    persist: vi.fn(async () => {
+      removeMono(monoId);
+      return { id: session.id };
+    }),
+  };
+  await expect(ensurePersistedMonoSession(monoId, host)).rejects.toThrow("Mono was removed");
+  expect(host.create).not.toHaveBeenCalled();
+  if (phase === "read") expect(host.persist).not.toHaveBeenCalled();
+});
+
+it("bounds retries if the conversation keeps changing during persistence lookup", async () => {
+  const monoId = monoFor("/project", "version-0");
+  let version = 0;
+  const host = {
+    home: vi.fn().mockResolvedValue("/home"),
+    saved: vi.fn(async (id: string) => {
+      saveMonoSessionId(monoId, `version-${++version}`);
+      return chat(id);
+    }),
+    load: vi.fn(async () => null),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+    persist: vi.fn(),
+  };
+  await expect(ensurePersistedMonoSession(monoId, host)).rejects.toThrow("kept changing");
+  expect(host.saved).toHaveBeenCalledTimes(3);
+  expect(host.persist).not.toHaveBeenCalled();
+});
+
+it.each(["load", "home"])("does not overwrite a replacement assigned while awaiting %s", async (phase) => {
+  const old = chat("old");
+  const replacement = chat("replacement");
+  const monoId = monoFor("/project", old.id);
+  const host = {
+    home: vi.fn(async () => {
+      saveMonoSessionId(monoId, replacement.id);
+      return "/home";
+    }),
+    load: vi.fn(async (id: string) => {
+      if (id === replacement.id) return replacement;
+      if (phase === "load") {
+        saveMonoSessionId(monoId, replacement.id);
+        return old;
+      }
+      return null;
+    }),
+    create: vi.fn(createSession),
+    add: vi.fn(),
+  };
+  expect(await ensureMonoSession(monoId, host)).toBe(replacement);
+  expect(sessionOf(monoId)).toBe(replacement.id);
+  expect(host.create).not.toHaveBeenCalled();
+  expect(host.add).not.toHaveBeenCalled();
 });
 
 it("shares concurrent first opens of the same Mono", async () => {

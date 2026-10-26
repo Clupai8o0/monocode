@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { newSession } from "../../sessions/model/session";
+import { newSession, RUNTIME_MODES } from "../../sessions/model/session";
 import {
   resetHarnessModelOverlays,
   setHarnessModels,
@@ -745,6 +745,7 @@ describe("agent app commands", () => {
 
   it("starts a submitted tab with explicit model, effort, permissions and workspace", async () => {
     const { source, host } = fixture();
+    source.runtimeMode = "auto";
     const result = await handleAgentApp(
       source,
       "request-1",
@@ -989,7 +990,7 @@ describe("agent app commands", () => {
     expect(host.start).not.toHaveBeenCalled();
   });
 
-  it("inherits the caller's permission mode unless start overrides it", async () => {
+  it("inherits the caller's permission mode and rejects a higher override", async () => {
     const { source, host } = fixture();
     source.runtimeMode = "auto";
     await handleAgentApp(
@@ -1003,17 +1004,69 @@ describe("agent app commands", () => {
       expect.objectContaining({ runtimeMode: "auto" }),
       "app-lead-inherited-mode",
     );
-    await handleAgentApp(
+    await expect(handleAgentApp(
       source,
       "explicit-mode",
       "sessions.start",
       { prompt: "Review this", runtimeMode: "full-access" },
       host,
-    );
-    expect(host.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({ runtimeMode: "full-access" }),
-      "app-lead-explicit-mode",
-    );
+    )).rejects.toThrow("above the caller's auto mode");
+    expect(host.start).toHaveBeenCalledOnce();
+  });
+
+  it.each(RUNTIME_MODES.flatMap((sourceMode) => RUNTIME_MODES.map((targetMode) => [sourceMode, targetMode] as const)))(
+    "keeps delegated starts and follow-ups within %s when requesting %s",
+    async (sourceMode, targetMode) => {
+      const { source, host } = fixture();
+      source.runtimeMode = sourceMode;
+      host.isHabitRun = () => true;
+      const target = { ...newSession("codex", source.cwd), id: "other", runtimeMode: targetMode };
+      vi.mocked(host.session).mockResolvedValue(target);
+      const start = handleAgentApp(source, "bounded-start", "sessions.start", {
+        prompt: "Review this", runtimeMode: targetMode,
+      }, host);
+      const allowed = RUNTIME_MODES.indexOf(targetMode) <= RUNTIME_MODES.indexOf(sourceMode);
+      if (allowed) {
+        await start;
+        expect(host.start).toHaveBeenCalledWith(expect.objectContaining({ runtimeMode: targetMode }), "app-lead-bounded-start");
+        await handleAgentApp(source, "bounded-send", "sessions.send", { sessionId: "other", prompt: "Review this" }, host);
+        expect(host.send).toHaveBeenCalledOnce();
+      } else {
+        await expect(start).rejects.toThrow("above the caller's");
+        await expect(handleAgentApp(source, "bounded-send", "sessions.send", { sessionId: "other", prompt: "Review this" }, host)).rejects.toThrow("above the caller's");
+        expect(host.start).not.toHaveBeenCalled();
+        expect(host.send).not.toHaveBeenCalled();
+      }
+      const models = await handleAgentApp(source, "allowed-models", "models.list", {}, host) as { runtimeModes: { id: string }[] };
+      expect(models.runtimeModes.map((mode) => mode.id)).toEqual(RUNTIME_MODES.slice(0, RUNTIME_MODES.indexOf(sourceMode) + 1));
+    },
+  );
+
+  it("prevents a lower-permission delegate from escalating again as an ordinary operator", async () => {
+    const { source, host } = fixture();
+    source.runtimeMode = "auto";
+    await handleAgentApp(source, "first", "sessions.start", { prompt: "Review", runtimeMode: "supervised" }, host);
+    const launch = vi.mocked(host.start).mock.calls[0][0];
+    const child = newSession(launch.harness, launch.cwd, launch.model, launch.runtimeMode);
+    await expect(handleAgentApp(child, "second", "sessions.start", { prompt: "Review", runtimeMode: "auto" }, host)).rejects.toThrow("above the caller's supervised mode");
+    expect(host.start).toHaveBeenCalledOnce();
+    vi.mocked(host.session).mockResolvedValue({ ...source, id: "other" });
+    await expect(handleAgentApp(child, "higher-target", "sessions.send", { sessionId: "other", prompt: "Do this for me" }, host)).rejects.toThrow("above the caller's supervised mode");
+    expect(host.send).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "unknown"])("rejects missing or malformed stored permission modes: %s", async (invalidMode) => {
+    const { source, host } = fixture();
+    vi.mocked(host.session).mockResolvedValue({
+      ...newSession("codex", source.cwd),
+      id: "other",
+      runtimeMode: invalidMode as typeof source.runtimeMode,
+    });
+    await expect(handleAgentApp(source, "invalid-target", "sessions.send", { sessionId: "other", prompt: "Review" }, host)).rejects.toThrow("valid permission mode");
+    expect(host.send).not.toHaveBeenCalled();
+    source.runtimeMode = invalidMode as typeof source.runtimeMode;
+    await expect(handleAgentApp(source, "invalid-source", "sessions.start", { prompt: "Review", runtimeMode: "supervised" }, host)).rejects.toThrow("valid permission mode");
+    expect(host.start).not.toHaveBeenCalled();
   });
 
   it("starts with an unsent draft and can immediately move the new session into a folder", async () => {

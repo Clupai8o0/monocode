@@ -131,8 +131,10 @@ type SessionUpsertPayload = {
   automationId?: string;
 };
 
-/** Only real chats belong in project history — blank tabs stay ephemeral. */
-export function shouldPersistSession(session: Session): boolean {
+type SessionPersistOptions = { allowEmptyMono?: boolean };
+
+/** Blank project tabs stay ephemeral; a configured Mono may need a durable identity before its first turn. */
+function canPersistSession(session: Session, options: SessionPersistOptions = {}): boolean {
   return (
     !session.ephemeral &&
     !session.inboxAsk &&
@@ -140,8 +142,12 @@ export function shouldPersistSession(session: Session): boolean {
     session.cwd !== "~" &&
     (session.blocks.some((block) => block.role === "user") ||
       (isMonoSession(session.id) &&
-        (session.blocks.length > 0 || !!session.monoTranscript)))
+        (options.allowEmptyMono || session.blocks.length > 0 || !!session.monoTranscript)))
   );
+}
+
+export function shouldPersistSession(session: Session): boolean {
+  return canPersistSession(session);
 }
 
 /** Matches Rust `validate_id` — a path here fails the whole upsert. */
@@ -381,8 +387,9 @@ function enqueueSessionWrite<T>(
 
 export async function upsertSession(
   session: Session,
+  options: SessionPersistOptions = {},
 ): Promise<SessionSummary | null> {
-  if (!shouldPersistSession(session) || deletedSessionIds.has(session.id)) {
+  if (!canPersistSession(session, options) || deletedSessionIds.has(session.id)) {
     return null;
   }
   const mono = !!session.monoTranscript || isMonoSession(session.id);
@@ -604,17 +611,21 @@ export async function getSession(sessionId: string): Promise<Session | null> {
   return session ? repairSession(session) : null;
 }
 
-/** Read the saved conversation without waiting for optional provider-log repairs. */
-export async function readSession(sessionId: string): Promise<Session | null> {
+/** Inspect persistence without changing an open Mono's incremental-save baseline. */
+export async function peekSession(sessionId: string): Promise<Session | null> {
   const record = await invoke<SessionRecord | null>(
     isMonoSession(sessionId) ? "mono_session_get" : "session_get",
     {
       sessionId,
     },
   );
-  if (!record) return null;
-  const session = recordToSession(record);
-  if (session.monoTranscript) monoSavedBlocks.set(sessionId, session.blocks);
+  return record ? recordToSession(record) : null;
+}
+
+/** Read the saved conversation without waiting for optional provider-log repairs. */
+export async function readSession(sessionId: string): Promise<Session | null> {
+  const session = await peekSession(sessionId);
+  if (session?.monoTranscript) monoSavedBlocks.set(sessionId, session.blocks);
   return session;
 }
 
