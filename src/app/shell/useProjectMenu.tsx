@@ -3,6 +3,7 @@ import {
   AppWindow,
   Archive,
   BellOff,
+  Check,
   FolderOpen,
   FolderTree,
   ImagePlus,
@@ -76,6 +77,8 @@ import { useProjectNotificationPreferences } from "../../features/notifications/
 import { useNotificationProjects } from "../../features/notifications/hooks/useNotificationProjects";
 import { updateNotificationPreferences } from "../../features/notifications/model/notificationPreferences";
 import type { ExplorerMenuItem } from "../../features/files/ui/ExplorerMenu";
+import { useHandoff } from "../../fork/handoff/HandoffCard";
+import { dismissHandoff } from "../../fork/handoff/handoffStore";
 
 const REVEAL_LABEL = IS_MAC
   ? "Reveal in Finder"
@@ -92,6 +95,7 @@ function projectMenuExtraItems(
   projectGroups: ProjectGroup[],
   currentProjectGroupId: string | undefined,
   railOptions: boolean,
+  hasHandoff: boolean,
 ): TabGroupMenuExtraItem[] {
   const groupSubmenu: ExplorerMenuItem[] = [
     { kind: "item", id: "project-group:new", label: "New group…" },
@@ -111,6 +115,16 @@ function projectMenuExtraItems(
     },
   ];
   const items: TabGroupMenuExtraItem[] = [
+    // Fork: hides the rail's handoff mark until a newer handoff is saved.
+    ...(hasHandoff
+      ? [
+          {
+            id: "handoff-complete",
+            label: "Mark handoff complete",
+            icon: Check,
+          },
+        ]
+      : []),
     {
       id: "background",
       label: "Background image",
@@ -212,6 +226,8 @@ export function useProjectMenu({
   const [projectMenu, setProjectMenu] = useState<
     (Point & { path: string; projectKey: string }) | null
   >(null);
+  // Fork: watched here too, since the project may not be on the rail.
+  const menuHandoff = useHandoff(projectMenu?.path ?? "");
   const [groupMenu, setGroupMenu] = useState<(Point & { id: string }) | null>(
     null,
   );
@@ -386,6 +402,8 @@ export function useProjectMenu({
         project: key,
         name: resolveTabGroupLabel(key, groupLabels, basename(path)),
       });
+    } else if (action === "handoff-complete") {
+      if (menuHandoff) dismissHandoff(menuHandoff);
     } else if (action === "reveal") void revealPath(path);
     else if (action === "archive") {
       onRemoveProject?.(path, { purgeData: false });
@@ -459,6 +477,7 @@ export function useProjectMenu({
             loadProjectGroupAssignments(),
           ),
           railOptions,
+          menuHandoff !== null,
         )}
         footer={
           menuError ? (
