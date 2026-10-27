@@ -60,11 +60,21 @@ export async function existingPath(root: string, input: unknown, allowRoot = fal
   return actual;
 }
 
-async function git(root: string, args: string[], maxBuffer = 4 * 1024 * 1024) {
+/** How long a read is given; a mutation that runs hooks is given `SLOW_MS`. */
+const GIT_MS = 10_000;
+/** A commit, a pull or a push can run hooks, sign, or talk to a remote. */
+const SLOW_GIT_MS = 120_000;
+
+async function git(
+  root: string,
+  args: string[],
+  maxBuffer = 4 * 1024 * 1024,
+  timeout = GIT_MS,
+) {
   return (
     await exec("git", ["-c", "core.pager=cat", ...args], {
       cwd: root,
-      timeout: 10_000,
+      timeout,
       maxBuffer,
       encoding: "utf8",
       env: { ...process.env, LC_ALL: "C" },
@@ -705,10 +715,12 @@ export async function hostFileDiff(
   root: string,
   input: unknown,
   staged: boolean,
+  /** An index already read, so a caller diffing many files scans status once. */
+  known?: GitDiffIndex,
 ): Promise<GitFileDiff> {
   const path = workspacePath(root, input);
   const relativePath = relative(root, path).split(sep).join("/");
-  const index = await hostGitIndex(root);
+  const index = known ?? (await hostGitIndex(root));
   const file = index.files.find((entry) => entry.relative === relativePath);
   if (!file) throw new Error("File has no uncommitted changes");
   const original = await gitBlob(
@@ -818,12 +830,29 @@ export async function hostGitAction(
         message.length > 100_000
       )
         throw new Error("Enter a commit message");
-      await git(root, ["commit", "-m", message], 1024 * 1024);
+      await git(root, ["commit", "-m", message], 1024 * 1024, SLOW_GIT_MS);
       return;
     }
     case "push":
-      await git(root, ["push", "-u", "origin", "HEAD"]);
+      await git(root, ["push", "-u", "origin", "HEAD"], undefined, SLOW_GIT_MS);
       return;
+    // As the desktop syncs (src-tauri/src/fs.rs `git_sync_changes_for`): fast
+    // forward onto the upstream first, so a branch that is behind catches up
+    // instead of having its push rejected.
+    case "sync": {
+      const upstream = await git(root, [
+        "rev-parse",
+        "--abbrev-ref",
+        "@{upstream}",
+      ]).catch(() => "");
+      if (!upstream.trim()) {
+        await git(root, ["push", "-u", "origin", "HEAD"], undefined, SLOW_GIT_MS);
+        return;
+      }
+      await git(root, ["pull", "--no-edit", "--ff"], 1024 * 1024, SLOW_GIT_MS);
+      await git(root, ["push"], undefined, SLOW_GIT_MS);
+      return;
+    }
     case "createPr": {
       const output = await exec("gh", ["pr", "create", "--fill"], {
         cwd: root,

@@ -4,6 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   type LayoutChangeEvent,
   Linking,
   Pressable,
@@ -242,9 +243,13 @@ export function CommitSheet({
       contentPadding={0}
       // Fill the whole sheet, so the hosted view takes its real size and the
       // buttons rest on its bottom edge rather than where the content ends.
-      modifiers={[
-        frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: "topLeading" }),
-      ]}
+      // Android's sheet hands its modifiers to Jetpack Compose, which has no
+      // idea what a SwiftUI one is, and sizes to its content anyway.
+      modifiers={
+        Platform.OS === "ios"
+          ? [frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: "topLeading" })]
+          : []
+      }
     >
       <RNHostView>
         <View style={styles.body} onLayout={onBodyLayout}>

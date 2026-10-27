@@ -40,7 +40,7 @@ export const hasNativeHeader = (pathname: string) => pathname.startsWith("/proje
 
 /** Routes the stack presents over the screen as native modals, which leave
  *  the screen under them as it was. */
-const MODAL_ROUTES = ["/projects", "/settings", "/models", "/changes", "/file", "/diff"];
+const MODAL_ROUTES = ["/projects", "/settings", "/models", "/changes", "/files", "/file", "/diff"];
 export const isModalRoute = (pathname: string) =>
   MODAL_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 

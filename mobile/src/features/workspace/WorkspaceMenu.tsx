@@ -75,6 +75,7 @@ export function WorkspaceMenu({
   files,
   loading,
   onOpenChanges,
+  onOpenFiles,
 }: {
   value: Workspace;
   worktrees: Worktree[];
@@ -86,6 +87,7 @@ export function WorkspaceMenu({
   /** The picked working copy's branch and changes are still being read. */
   loading: boolean;
   onOpenChanges: () => void;
+  onOpenFiles: () => void;
 }) {
   const colors = useColors();
   const styles = useStyles();
@@ -129,6 +131,7 @@ export function WorkspaceMenu({
         checkoutBranch={checkoutBranch}
         files={files}
         onOpenChanges={onOpenChanges}
+        onOpenFiles={onOpenFiles}
         onChange={(next) => {
           if (keyOf(next) === keyOf(value)) return dismiss();
           onChange(next);
@@ -154,6 +157,7 @@ function WorkspaceSheet({
   files,
   onChange,
   onOpenChanges,
+  onOpenFiles,
 }: {
   isPresented: boolean;
   onDismiss: () => void;
@@ -165,6 +169,7 @@ function WorkspaceSheet({
   files: ChangedFile[];
   onChange: (value: Workspace) => void;
   onOpenChanges: () => void;
+  onOpenFiles: () => void;
 }) {
   const diff = useDiffTheme();
   const { additions, deletions } = totals(files);
@@ -280,6 +285,28 @@ function WorkspaceSheet({
                     {`-${formatCount(deletions)}`}
                   </Text>
                 </HStack>
+              </HStack>
+            </Button>
+            <Button
+              modifiers={[
+                buttonStyle("plain"),
+                disabled(value.mode === "worktree" || !!pending),
+              ]}
+              onPress={() => {
+                if (value.mode === "worktree" || pending) return;
+                afterDismiss.current = onOpenFiles;
+                onDismiss();
+              }}
+            >
+              <HStack spacing={14} modifiers={[contentShape(shapes.rectangle())]}>
+                <RowIcon symbol="folder" />
+                <VStack alignment="leading" spacing={2}>
+                  <Text>Browse files</Text>
+                  <Text modifiers={[font({ textStyle: "footnote" }), SECONDARY]}>
+                    Read the working copy
+                  </Text>
+                </VStack>
+                <Spacer />
               </HStack>
             </Button>
           </Section>

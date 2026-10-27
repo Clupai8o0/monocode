@@ -100,6 +100,7 @@ it("bounds long branch labels in empty-session and chat workspace lines while pr
               files={files}
               loading={false}
               onOpenChanges={() => {}}
+        onOpenFiles={() => {}}
             />
           ) : (
             <WorkspaceLine current branch={branch} files={files} />
@@ -142,6 +143,7 @@ it("keeps worktree selection available while changes load and replaces the pendi
           files={[]}
           loading={loading}
           onOpenChanges={() => {}}
+        onOpenFiles={() => {}}
         />,
       ),
     );

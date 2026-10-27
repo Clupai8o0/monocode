@@ -338,6 +338,15 @@ export function ProjectScreen({
                 },
               })
             }
+            onOpenFiles={() =>
+              router.push({
+                pathname: "/files",
+                params: {
+                  projectId: project.id,
+                  ...(worktreePath ? { worktreePath } : {}),
+                },
+              })
+            }
             // A new worktree has nothing to read; the others, until their
             // first changes come in, or fail to.
             loading={!fresh && !changesState.result && !changesState.error}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -51,11 +52,13 @@ async function setup() {
     method: string,
     params: object = {},
     headers: Record<string, string> = { Authorization: `Bearer ${device.token}` },
+    /** The command id; given, a retry of the same request can be sent. */
+    id = `c${next++}`,
   ) => {
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ version: 1, id: `c${next++}`, method, params }),
+      body: JSON.stringify({ version: 1, id, method, params }),
     });
     const body = response.ok ? await response.json() : null;
     return { status: response.status, ...(body as { ok?: boolean; result?: any; error?: string }) };
@@ -145,5 +148,164 @@ describe("phone endpoint", () => {
     expect(
       await call("conversation.send", { conversationId: "missing", text: "hi" }),
     ).toMatchObject({ status: 200, ok: false });
+  });
+});
+
+describe("phone files and changes", () => {
+  it("lists a folder, reads a file, and finds one by name", async () => {
+    const { call, project } = await setup();
+    const root = project.cwd;
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "app.ts"), "export const x = 1;\n");
+    writeFileSync(join(root, "README.md"), "# Hello\n");
+
+    const top = await call("project.files", { projectId: project.id, path: "" });
+    expect(top.ok).toBe(true);
+    // The host's own database sits in this test's project folder too.
+    const names = top.result.entries.map((entry: { name: string }) => entry.name);
+    expect(names).toContain("README.md");
+    expect(names).toContain("src");
+    expect(top.result.entries.find((entry: { name: string }) => entry.name === "src"))
+      .toMatchObject({ isDir: true });
+
+    const read = await call("project.file", {
+      projectId: project.id,
+      path: "src/app.ts",
+    });
+    expect(read.result).toMatchObject({
+      path: "src/app.ts",
+      text: "export const x = 1;\n",
+      truncated: false,
+    });
+
+    // A transcript names a file short, with a line, or by its full path on the
+    // host; each still opens.
+    for (const asked of [
+      "app.ts:12",
+      "src/app.ts:12:3",
+      "./src/app.ts",
+      join(root, "src", "app.ts"),
+    ]) {
+      const opened = await call("project.file", {
+        projectId: project.id,
+        path: asked,
+      });
+      expect(opened.result?.path, asked).toBe("src/app.ts");
+    }
+
+    const found = await call("project.search", {
+      projectId: project.id,
+      query: "app",
+    });
+    expect(found.result.results).toEqual([{ path: "src/app.ts", name: "app.ts" }]);
+    expect((await call("project.search", { projectId: project.id, query: " " })).result)
+      .toEqual({ results: [] });
+  });
+
+  it("reports the branch, the changes with their diffs, and stages them", async () => {
+    const { call, project } = await setup();
+    const root = project.cwd;
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root });
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    writeFileSync(join(root, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "first");
+    writeFileSync(join(root, "a.txt"), "one\ntwo\n");
+
+    const changed = await call("project.changes", { projectId: project.id });
+    expect(changed.ok).toBe(true);
+    expect(changed.result.branch).toBe("main");
+    const [file] = changed.result.files;
+    expect(file).toMatchObject({ relative: "a.txt", status: "modified", staged: false });
+    expect(file.lines.some((line: { kind: string }) => line.kind === "add")).toBe(true);
+
+    const status = await call("project.git", { projectId: project.id });
+    expect(status.result).toMatchObject({
+      branch: "main",
+      remote: false,
+      upstream: false,
+      canGenerate: false,
+      pr: null,
+    });
+    expect(status.result.files).toBeGreaterThanOrEqual(1);
+
+    const staged = await call("project.gitAction", {
+      projectId: project.id,
+      action: "stage",
+      paths: ["a.txt"],
+    });
+    expect(staged.ok).toBe(true);
+    await vi.waitFor(async () => {
+      const again = await call("project.changes", { projectId: project.id });
+      expect(again.result.files[0].staged).toBe(true);
+    });
+
+    // Writing the message needs an agent, which the host has no equivalent of.
+    expect(
+      await call("project.gitAction", { projectId: project.id, action: "generate" }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("previews a file past the size limit instead of refusing it", async () => {
+    const { call, project } = await setup();
+    // A megabyte and a bit of text: over the slice the phone is sent.
+    writeFileSync(join(project.cwd, "big.txt"), "x".repeat(1024 * 1024 + 10));
+    const read = await call("project.file", {
+      projectId: project.id,
+      path: "big.txt",
+    });
+    expect(read.ok).toBe(true);
+    expect(read.result.truncated).toBe(true);
+    expect(read.result.text).toHaveLength(1024 * 1024);
+  });
+
+  it("cuts a multi-byte file on a character, not mid-sequence", async () => {
+    const { call, project } = await setup();
+    // Over the character limit, and two bytes per character, so a byte-wise
+    // cut would land inside one.
+    writeFileSync(join(project.cwd, "accents.txt"), "é".repeat(1024 * 1024 + 10));
+    const read = await call("project.file", {
+      projectId: project.id,
+      path: "accents.txt",
+    });
+    expect(read.result.truncated).toBe(true);
+    expect(read.result.text).toHaveLength(1024 * 1024);
+    expect(read.result.text).not.toContain("\uFFFD");
+    expect(read.result.text.at(-1)).toBe("é");
+  });
+
+  it("refuses a binary file", async () => {
+    const { call, project } = await setup();
+    writeFileSync(join(project.cwd, "blob.bin"), Buffer.from([1, 0, 2]));
+    expect(
+      await call("project.file", { projectId: project.id, path: "blob.bin" }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("lists no worktrees for a plain checkout, and refuses an unknown one", async () => {
+    const { call, project } = await setup();
+    execFileSync("git", ["init", "-q"], { cwd: project.cwd });
+    expect((await call("project.worktrees", { projectId: project.id })).result)
+      .toEqual({ worktrees: [] });
+    expect(
+      await call("project.changes", {
+        projectId: project.id,
+        worktreePath: "/tmp/not-a-worktree",
+      }),
+    ).toMatchObject({ ok: false });
+  });
+});
+
+describe("phone retries", () => {
+  it("starts one session for a command id asked twice", async () => {
+    const { call, project } = await setup();
+    const params = { projectId: project.id, text: "Hello", model: "codex:test" };
+    const first = await call("session.start", params, undefined, "retry");
+    const again = await call("session.start", params, undefined, "retry");
+    expect(first.ok).toBe(true);
+    expect(again.result.sessionId).toBe(first.result.sessionId);
+    expect((await call("workspace.list")).result.sessions).toHaveLength(1);
   });
 });

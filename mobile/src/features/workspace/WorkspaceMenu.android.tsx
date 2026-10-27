@@ -16,6 +16,7 @@ export function WorkspaceMenu({
   files,
   loading,
   onOpenChanges,
+  onOpenFiles,
 }: {
   value: Workspace;
   worktrees: Worktree[];
@@ -25,6 +26,7 @@ export function WorkspaceMenu({
   files: ChangedFile[];
   loading: boolean;
   onOpenChanges: () => void;
+  onOpenFiles: () => void;
 }) {
   return (
     <ChoiceMenu
@@ -51,6 +53,11 @@ export function WorkspaceMenu({
           label: "View changes",
           disabled: value.mode === "worktree",
           onPress: onOpenChanges,
+        },
+        {
+          label: "Browse files",
+          disabled: value.mode === "worktree",
+          onPress: onOpenFiles,
         },
       ]}
     >
