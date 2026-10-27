@@ -51,3 +51,27 @@ export function parseInvitation(text: string): Invitation {
     );
   return invitation;
 }
+
+/** A machine's host code, from `monocode-host pair --qr`. */
+export type HostInvitation = { url: string; token: string; name: string };
+export function parseHostInvitation(text: string): HostInvitation | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "monocode:" || url.hostname !== "host") return null;
+  const address = url.searchParams.get("u") ?? "";
+  const token = url.searchParams.get("t") ?? "";
+  const name = (url.searchParams.get("n") ?? "").trim().slice(0, 80);
+  let origin: URL;
+  try {
+    origin = new URL(address);
+  } catch {
+    throw new Error("Invalid machine code");
+  }
+  if (origin.protocol !== "https:" || !/^[A-Za-z0-9_-]{43}$/.test(token))
+    throw new Error("Invalid machine code");
+  return { url: origin.origin, token, name: name || origin.hostname.split(".")[0] };
+}

@@ -1,0 +1,490 @@
+import { hostname } from "node:os";
+import type { HostEngine } from "./engine";
+import { mobileTranscript } from "../src/features/mobile/model/mobileTranscript";
+import {
+  turnsBefore,
+  watchUpdate,
+  watchWindow,
+  type WatchBaseline,
+} from "../src/features/mobile/model/mobileWatch";
+import {
+  DEFAULT_RUNTIME_MODE,
+  HARNESS_TITLE,
+  RUNTIME_MODES,
+  RUNTIME_MODE_HINT,
+  RUNTIME_MODE_LABEL,
+  sessionDisplayTitle,
+  type RuntimeMode,
+  type Session,
+} from "../src/features/sessions/model/session";
+import {
+  mergeModelSettings,
+  resolveModel,
+} from "../src/features/sessions/model/models";
+import { toolCallLabel } from "../src/features/sessions/model/transcriptActivity";
+import {
+  isRemoteProvider,
+  type HostModelCatalog,
+  type HostSession,
+  type RemoteProvider,
+} from "../src/features/connections/model/protocol";
+
+/**
+ * The phone app's protocol, spoken by the host itself, so a phone on the
+ * tailnet works with the host's sessions without a desktop in between. The
+ * shapes match what the desktop sends the phone (src/features/mobile).
+ */
+
+/** Turns a watch opens on when the phone does not say; older ones page in. */
+const DEFAULT_TAIL = 3;
+const MAX_PAGE = 100;
+/** The longest a `watch.next` holds the request open waiting for a change. */
+const NEXT_MAX_MS = 15_000;
+const POLL_MS = 150;
+/** A watch the phone stopped asking about is dropped after this. */
+const WATCH_IDLE_MS = 60_000;
+/** Open watches kept at most; the least recently used goes first. */
+const MAX_WATCHES = 64;
+const DESKTOP_APPROVAL = "Waiting for approval on desktop: ";
+const COLORS = ["#e8a33d", "#5b9cf0", "#4fbf8a", "#d9677b", "#a37de8", "#3fb7c4"];
+
+type Watch = {
+  conversationId: string;
+  baseline: WatchBaseline | null;
+  revision: number | null;
+  tail: number;
+  incremental: boolean;
+  from: string | null;
+  used: number;
+};
+
+export type MobileRequest = {
+  id: string;
+  method: string;
+  params: Record<string, unknown>;
+};
+
+export function createMobileHandler(
+  engine: HostEngine,
+  providers: RemoteProvider[],
+  models: (projectId?: unknown) => Promise<HostModelCatalog>,
+) {
+  const machine = hostname();
+  const watches = new Map<number, Watch>();
+  let nextWatch = 1;
+  const sweep = () => {
+    const now = Date.now();
+    for (const [watchId, watch] of watches)
+      if (now - watch.used > WATCH_IDLE_MS) watches.delete(watchId);
+  };
+  // Also while no phone is asking, so abandoned watches don't pile up.
+  setInterval(sweep, WATCH_IDLE_MS).unref();
+
+  const defaultHarness = (): RemoteProvider => {
+    const harness = providers.includes("claude") ? "claude" : providers[0];
+    if (!harness) throw new Error("No agent is installed on this machine");
+    return harness;
+  };
+  const transcript = (
+    value: HostSession,
+    range?: (turnIds: string[]) => [number, number],
+  ) => {
+    const turns = mobileTranscript(value.session, {
+      busy: value.status === "running",
+      pendingQuestion: !!value.session.pendingQuestion,
+      backgroundTasks: value.session.backgroundTasks,
+      range,
+    });
+    // The phone approves here, not on a desktop.
+    return turns.map((turn) => ({
+      ...turn,
+      items: turn.items.map((item) =>
+        item.type === "notice" && item.text.startsWith(DESKTOP_APPROVAL)
+          ? { ...item, text: `Waiting for approval: ${item.text.slice(DESKTOP_APPROVAL.length)}` }
+          : item,
+      ),
+    }));
+  };
+  const pendingApproval = (session: Session) =>
+    session.blocks.find((block) => block.approval && !block.approval.decided);
+
+  const catalog = () => {
+    const projects = engine.store.projects();
+    const sessions = projects.flatMap((project) =>
+      engine.store
+        .summaries(project.id)
+        .filter((summary) => !summary.archived)
+        .map((summary) => {
+          let waiting = {};
+          if (summary.needsInput) {
+            const session = engine.store.session(summary.id).session;
+            const block = pendingApproval(session);
+            waiting = block
+              ? {
+                  waiting: "approval" as const,
+                  approval: {
+                    requestId: block.approval!.requestId,
+                    label: toolCallLabel(block, session.cwd),
+                  },
+                }
+              : session.pendingQuestion
+                ? { waiting: "question" as const }
+                : {};
+          }
+          return {
+            id: summary.id,
+            projectId: project.id,
+            title: sessionDisplayTitle(summary.title, summary.harness),
+            harness: summary.harness,
+            model: summary.model ?? "",
+            modelName: resolveModel(summary.harness, summary.model).name,
+            branch: "",
+            ...(summary.cwd && summary.cwd !== project.cwd
+              ? { worktreePath: summary.cwd }
+              : {}),
+            runtimeMode: summary.runtimeMode,
+            updatedAt: summary.updatedAt,
+            busy: summary.status === "running",
+            ...waiting,
+          };
+        }),
+    );
+    const harness = providers.length ? defaultHarness() : undefined;
+    const model = harness ? resolveModel(harness) : undefined;
+    return {
+      projects: projects.map((project, index) => ({
+        id: project.id,
+        path: project.cwd,
+        name: project.name,
+        machine,
+        branch: "",
+        color: COLORS[index % COLORS.length],
+        additions: 0,
+        deletions: 0,
+        busy: sessions.some(
+          (session) => session.projectId === project.id && session.busy,
+        ),
+        defaultHarness: harness,
+        defaultModel: model?.id,
+        defaultModelName: model?.name,
+        defaultRuntimeMode: DEFAULT_RUNTIME_MODE,
+      })),
+      monos: [],
+      sessions: sessions.sort((a, b) => b.updatedAt - a.updatedAt),
+    };
+  };
+
+  const modelCatalog = async (params: Record<string, unknown>) => {
+    const conversationId =
+      typeof params.conversationId === "string" ? params.conversationId : "";
+    const current = conversationId
+      ? engine.store.session(conversationId)
+      : undefined;
+    const projectId = current?.projectId ?? String(params.projectId ?? "");
+    engine.store.project(projectId);
+    const available = await models(projectId);
+    const harnesses = providers.filter(
+      (provider) => available.models[provider]?.length,
+    );
+    const harness = current?.session.harness ?? defaultHarness();
+    const model = resolveModel(harness, current?.session.model);
+    return {
+      harnesses: harnesses.map((id) => ({ id, label: HARNESS_TITLE[id] })),
+      models: harnesses.flatMap((harness) =>
+        available.models[harness]!.map((entry) => ({
+          id: entry.id,
+          harness,
+          name: entry.name,
+          provider: entry.provider?.name,
+          settings: entry.settings ?? [],
+        })),
+      ),
+      runtimeModes: RUNTIME_MODES.map((id) => ({
+        id,
+        label: RUNTIME_MODE_LABEL[id],
+        hint: RUNTIME_MODE_HINT[id],
+      })),
+      current: {
+        harness,
+        model: model.id,
+        modelSettings: mergeModelSettings(model, current?.session.modelSettings),
+        runtimeMode: current?.session.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+      },
+    };
+  };
+
+  const frame = (watch: Watch) => {
+    const value = engine.store.session(watch.conversationId);
+    if (watch.baseline && value.revision === watch.revision) return null;
+    let older = false;
+    const turns = transcript(value, (turnIds) => {
+      const window = watchWindow(turnIds, watch.from, watch.tail);
+      watch.from = window.from;
+      older = window.older;
+      return [window.start, turnIds.length];
+    });
+    watch.revision = value.revision;
+    return watchUpdate(
+      watch.baseline,
+      { busy: value.status === "running", older, turns },
+      watch.incremental,
+    );
+  };
+
+  const next = async (watchId: number, timeoutMs: number) => {
+    const deadline =
+      Date.now() + Math.min(Math.max(0, timeoutMs || 0), NEXT_MAX_MS);
+    for (;;) {
+      const watch = watches.get(watchId);
+      if (!watch) throw new Error("Watch ended");
+      watch.used = Date.now();
+      let result;
+      try {
+        result = frame(watch);
+      } catch (error) {
+        watches.delete(watchId);
+        return {
+          updates: [
+            { error: error instanceof Error ? error.message : String(error) },
+          ],
+        };
+      }
+      if (result) {
+        watch.baseline = result.baseline;
+        return { updates: [result.update] };
+      }
+      if (Date.now() >= deadline) return { updates: [] };
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  };
+
+  const text = (params: Record<string, unknown>) => {
+    const value = typeof params.text === "string" ? params.text.trim() : "";
+    if (!value || value.length > 100_000)
+      throw new Error("Enter a message under 100,000 characters");
+    return value;
+  };
+  const conversation = (params: Record<string, unknown>) =>
+    engine.store.session(String(params.conversationId ?? ""));
+
+  return async (input: MobileRequest, token: string): Promise<unknown> => {
+    const { id, method, params } = input;
+    const now = Date.now();
+    sweep();
+    if (
+      (method === "session.start" || method === "conversation.send") &&
+      Array.isArray(params.attachments) &&
+      params.attachments.length
+    )
+      throw new Error("Attachments aren't available on this machine yet");
+    switch (method) {
+      case "workspace.list":
+        return catalog();
+      case "device.leave":
+        return { revoked: engine.store.revokeToken(token) };
+      case "models.list":
+        return modelCatalog(params);
+      case "conversation.read": {
+        const value = conversation(params);
+        return {
+          id: value.session.id,
+          messages: messages(value.session),
+          turns: transcript(value),
+          busy: value.status === "running",
+        };
+      }
+      case "conversation.older": {
+        const value = conversation(params);
+        let older = false;
+        const turns = transcript(value, (turnIds) => {
+          const page = turnsBefore(
+            turnIds,
+            String(params.before ?? ""),
+            Math.min(MAX_PAGE, Math.max(1, Number(params.limit) || DEFAULT_TAIL)),
+          );
+          older = page.older;
+          return [page.start, page.end];
+        });
+        return { turns, older };
+      }
+      case "conversation.watch": {
+        conversation(params);
+        if (watches.size >= MAX_WATCHES) {
+          const [stalest] = [...watches].sort((a, b) => a[1].used - b[1].used)[0];
+          watches.delete(stalest);
+        }
+        const watchId = nextWatch++;
+        watches.set(watchId, {
+          conversationId: String(params.conversationId),
+          baseline: null,
+          revision: null,
+          tail: Math.min(
+            MAX_PAGE,
+            Math.max(1, Number(params.tail) || DEFAULT_TAIL),
+          ),
+          incremental: params.incremental === true,
+          from: typeof params.from === "string" ? params.from : null,
+          used: now,
+        });
+        return { watchId };
+      }
+      case "watch.next":
+        return next(Number(params.watchId), Number(params.timeoutMs));
+      case "watch.close":
+        watches.delete(Number(params.watchId));
+        return {};
+      case "session.start": {
+        if (params.workspaceMode === "worktree" || params.worktreePath)
+          throw new Error("Worktrees aren't available on this machine yet");
+        const message = text(params);
+        const project = engine.store.project(String(params.projectId ?? ""));
+        const harness =
+          isRemoteProvider(params.harness) && providers.includes(params.harness)
+            ? params.harness
+            : defaultHarness();
+        let model = resolveModel(
+          harness,
+          typeof params.model === "string" ? params.model : undefined,
+        );
+        // Codex has no built-in models; take the first one this machine found.
+        if (!model.id) {
+          const found = (await models(project.id)).models[harness]?.[0];
+          if (!found)
+            throw new Error(`No ${HARNESS_TITLE[harness]} models found on this machine`);
+          model = resolveModel(harness, found.id);
+        }
+        const runtimeMode = RUNTIME_MODES.includes(
+          params.runtimeMode as RuntimeMode,
+        )
+          ? (params.runtimeMode as RuntimeMode)
+          : DEFAULT_RUNTIME_MODE;
+        const created = engine.command({
+          type: "create",
+          commandId: `${id}:create`,
+          projectId: project.id,
+          harness,
+          model: model.id,
+          modelSettings: mergeModelSettings(
+            model,
+            stringRecord(params.modelSettings),
+          ),
+          runtimeMode,
+        });
+        const title = message.split("\n")[0].slice(0, 80);
+        if (engine.store.session(created.sessionId).session.title !== title)
+          engine.updateSession(created.sessionId, { title });
+        engine.command({
+          type: "send",
+          commandId: `${id}:send`,
+          sessionId: created.sessionId,
+          text: message,
+        });
+        return { sessionId: created.sessionId };
+      }
+      case "conversation.send": {
+        const value = conversation(params);
+        engine.command({
+          type: "send",
+          commandId: id,
+          sessionId: value.session.id,
+          text: text(params),
+        });
+        return { sessionId: value.session.id };
+      }
+      case "session.cancel": {
+        const value = conversation(params);
+        if (value.status === "running" && value.runId)
+          engine.command({
+            type: "cancel",
+            commandId: id,
+            sessionId: value.session.id,
+            runId: value.runId,
+          });
+        return { sessionId: value.session.id };
+      }
+      case "session.approve": {
+        const value = conversation(params);
+        if (!value.runId) throw new Error("This turn already ended");
+        engine.command({
+          type: "approve",
+          commandId: id,
+          sessionId: value.session.id,
+          runId: value.runId,
+          requestId: Number(params.requestId),
+          decision: params.decision === "allow" ? "allow" : "deny",
+        });
+        return { sessionId: value.session.id };
+      }
+      case "session.configure": {
+        const value = conversation(params);
+        if (
+          isRemoteProvider(params.harness) &&
+          params.harness !== value.session.harness
+        )
+          throw new Error("Start a new session to switch provider");
+        const model = resolveModel(
+          value.session.harness,
+          typeof params.model === "string" ? params.model : value.session.model,
+        );
+        engine.command({
+          type: "configure",
+          commandId: id,
+          sessionId: value.session.id,
+          model: model.id,
+          modelSettings: mergeModelSettings(
+            model,
+            stringRecord(params.modelSettings) ?? value.session.modelSettings,
+          ),
+          runtimeMode: RUNTIME_MODES.includes(params.runtimeMode as RuntimeMode)
+            ? (params.runtimeMode as RuntimeMode)
+            : value.session.runtimeMode,
+        });
+        return { sessionId: value.session.id };
+      }
+      case "session.rename": {
+        const value = conversation(params);
+        const title = typeof params.title === "string" ? params.title.trim() : "";
+        if (!title || title.length > 200)
+          throw new Error("Enter a title under 200 characters");
+        engine.updateSession(value.session.id, { title });
+        return { sessionId: value.session.id };
+      }
+      case "session.archive": {
+        const value = conversation(params);
+        engine.updateSession(value.session.id, { archived: true });
+        return { sessionId: value.session.id };
+      }
+      case "session.delete": {
+        const value = conversation(params);
+        if (value.status === "running")
+          throw new Error("Stop the session before deleting it");
+        engine.store.deleteSession(value.session.id);
+        return { sessionId: value.session.id };
+      }
+      default:
+        throw new Error("Not available on this machine yet");
+    }
+  };
+}
+
+function messages(session: Session) {
+  return session.blocks
+    .filter(
+      (block) =>
+        (block.role === "user" || block.role === "assistant") &&
+        !block.internal &&
+        !block.draft,
+    )
+    .slice(-200)
+    .map((block) => ({ id: block.id, role: block.role, text: block.text }));
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}

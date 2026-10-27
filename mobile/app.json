@@ -20,6 +20,7 @@
       }
     },
     "android": {
+      "package": "com.hardbeat920.monocodemobile",
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

@@ -39,6 +39,7 @@ import {
 } from "@/features/sessions/sessionError";
 import { LiveSessions } from "@/features/sessions/LiveSessions";
 import { NativeTranscript } from "@/features/sessions/NativeTranscript";
+import { ApprovalBar } from "@/features/sessions/ApprovalBar";
 import { FileOpener } from "@/features/sessions/Markdown";
 import {
   markStartedHere,
@@ -314,7 +315,9 @@ export function ProjectScreen({
       // Where a new session will work, under the tabs and in view across its
       // pages; a session's composer shows where it does.
       below={
-        sessionId ? undefined : offline ? (
+        sessionId ? (
+          <ApprovalBar sessionId={sessionId} />
+        ) : offline ? (
           // Nothing to pick from while the desktop can't be reached.
           <ReconnectingStatus />
         ) : (

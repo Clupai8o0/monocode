@@ -3,7 +3,10 @@ import {
   normalizeSelection,
   selectedWorkspace,
 } from "@/features/connection/selection";
-import { parseInvitation } from "@/features/connection/invitation";
+import {
+  parseHostInvitation,
+  parseInvitation,
+} from "@/features/connection/invitation";
 const catalog = {
   projects: [{ id: "a" }, { id: "b" }],
   monos: [{ id: "m" }, { id: "n" }],
@@ -76,5 +79,26 @@ describe("QR invitation", () => {
     expect(() =>
       parseInvitation(link({ ...invitation, fingerprint: "bad" })),
     ).toThrow();
+  });
+});
+
+describe("machine host code", () => {
+  const token = "A".repeat(43);
+  const code = (u: string, t = token, n = "vivobook") =>
+    `monocode://host?${new URLSearchParams({ u, t, n })}`;
+  it("reads the address, credential and name", () => {
+    expect(parseHostInvitation(code("https://vivobook.tail.ts.net/x"))).toEqual({
+      url: "https://vivobook.tail.ts.net",
+      token,
+      name: "vivobook",
+    });
+  });
+  it("leaves desktop codes and other links to the desktop parser", () => {
+    expect(parseHostInvitation("monocode://pair?i=abc")).toBeNull();
+    expect(parseHostInvitation("not a link")).toBeNull();
+  });
+  it("rejects plain http and malformed credentials", () => {
+    expect(() => parseHostInvitation(code("http://vivobook:3774"))).toThrow();
+    expect(() => parseHostInvitation(code("https://vivobook", "short"))).toThrow();
   });
 });

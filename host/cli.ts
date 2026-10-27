@@ -5,11 +5,14 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { homedir, hostname } from "node:os";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
+import QRCode from "qrcode";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -84,6 +87,9 @@ async function main() {
   status                Check the running host
   stop                  Stop the host and interrupt its running turns
   pair --name <device>  Issue a device credential (shown once)
+  pair --qr --url <https-url> [--link]
+                        Issue a phone credential as a QR code to scan
+  project add <folder>  List a folder as a project for the phone
   devices               List paired devices
   revoke <device-id>    Revoke a device credential
 Options: --data-dir <directory> --port <port> (default 3774)
@@ -182,6 +188,33 @@ Connect another computer using an SSH forward to the loopback port.`);
     throw new Error(`Host did not start. See ${join(directory, "host.log")}`);
   }
   const store = new HostStore(join(directory, "host.db"));
+  if (command === "pair" && args.includes("--qr")) {
+    // A phone code: the phone reaches this host at --url (e.g. the address
+    // `tailscale serve` gives it) and keeps the credential.
+    const url = new URL(option("url", ""));
+    if (url.protocol !== "https:")
+      throw new Error("Give the phone an https:// --url, e.g. from tailscale serve");
+    const device = store.issueDevice(option("name", "Phone"));
+    store.close();
+    const link = `monocode://host?${new URLSearchParams({
+      u: url.origin,
+      t: device.token,
+      n: hostname(),
+    })}`;
+    console.log(await QRCode.toString(link, { type: "terminal", small: true }));
+    if (args.includes("--link")) console.log(link);
+    console.log(`Scan this in the MonoCode phone app. Device ID: ${device.id}`);
+    return;
+  }
+  if (command === "project" && args[1] === "add") {
+    if (!args[2] || args[2].startsWith("--"))
+      throw new Error("Provide a folder to add");
+    const cwd = realpathSync(resolve(args[2]));
+    if (!statSync(cwd).isDirectory()) throw new Error("Not a folder");
+    console.log(JSON.stringify(store.addProject(cwd, basename(cwd))));
+    store.close();
+    return;
+  }
   if (command === "pair") {
     const device = store.issueDevice(option("name", "Desktop"));
     console.log(

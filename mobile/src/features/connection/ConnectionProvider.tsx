@@ -21,6 +21,7 @@ import type {
 } from "@/features/workspace/types";
 import {
   nativeCall,
+  parseHostInvitation,
   parseInvitation,
   request,
   type Pairing,
@@ -38,6 +39,10 @@ export type Catalog = {
 const EMPTY: Catalog = { projects: [], monos: [], sessions: [] };
 const PAIRING = "monocode.mobile.pairing";
 const IDENTITY = "monocode.mobile.identity";
+/** The credential for a machine paired by its host code. */
+const HOST_TOKEN = "monocode.mobile.hostToken";
+/** Host pairings need no certificate; the type still carries one. */
+const NO_IDENTITY: Identity = { certificate: "", privateKey: "" };
 const key = (fingerprint: string, kind: string) =>
   `monocode.mobile.${fingerprint}.${kind}`;
 type Connection = {
@@ -72,16 +77,18 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     void (async () => {
       try {
-        const [desktop, identity] = await Promise.all([
+        const [desktop, identity, token] = await Promise.all([
           Storage.getItem(PAIRING),
           SecureStore.getItemAsync(IDENTITY),
+          SecureStore.getItemAsync(HOST_TOKEN),
         ]);
-        if (disposed || !desktop || !identity) return;
-        const value: Pairing = {
-          desktop: JSON.parse(desktop),
-          identity: JSON.parse(identity),
-        };
-        const [chosen, saved] = await Promise.all([
+        if (disposed || !desktop) return;
+        const saved: Desktop = JSON.parse(desktop);
+        if (saved.host ? !token : !identity) return;
+        const value: Pairing = saved.host
+          ? { desktop: saved, identity: NO_IDENTITY, token: token! }
+          : { desktop: saved, identity: JSON.parse(identity!) };
+        const [chosen, cached] = await Promise.all([
           Storage.getItem(key(value.desktop.fingerprint, "selection")),
           Storage.getItem(key(value.desktop.fingerprint, "catalog")),
         ]);
@@ -89,7 +96,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         active.current = value;
         setPairing(value);
         setSelection(chosen ? normalizeSelection(JSON.parse(chosen)) : null);
-        if (saved) setCatalog(JSON.parse(saved));
+        if (cached) setCatalog(JSON.parse(cached));
       } catch {
         if (!disposed)
           setError("Could not restore the desktop connection. Connect again.");
@@ -158,12 +165,44 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       subscription.remove();
     };
   }, [pairing, refresh]);
+  const adopt = useCallback(async (value: Pairing) => {
+    await Storage.setItem(PAIRING, JSON.stringify(value.desktop));
+    const chosen = await Storage.getItem(
+      key(value.desktop.fingerprint, "selection"),
+    );
+    generation.current++;
+    active.current = value;
+    setPairing(value);
+    setCatalog(EMPTY);
+    lastCatalog.current = null;
+    setSelection(chosen ? normalizeSelection(JSON.parse(chosen)) : null);
+    await refresh();
+  }, [refresh]);
   const pair = useCallback(async (text: string) => {
     if (pairingNow.current) return;
     pairingNow.current = true;
     setWorking(true);
     setError(null);
     try {
+      const host = parseHostInvitation(text);
+      if (host) {
+        const desktop: Desktop = {
+          name: host.name,
+          // Keys this machine's cached catalog and choices, as a pin would.
+          fingerprint: `host:${host.url}`,
+          addresses: [],
+          deviceId: "",
+          host: { url: host.url },
+        };
+        const value: Pairing = { desktop, identity: NO_IDENTITY, token: host.token };
+        // Check the code before replacing a working pairing.
+        await request(value, "workspace.list");
+        await SecureStore.setItemAsync(HOST_TOKEN, host.token, {
+          keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        });
+        await adopt(value);
+        return;
+      }
       const invitation = parseInvitation(text);
       const existing = await SecureStore.getItemAsync(IDENTITY);
       const identity = existing
@@ -197,25 +236,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           },
         },
       });
-      const value = { desktop, identity };
-      await Storage.setItem(PAIRING, JSON.stringify(desktop));
-      const chosen = await Storage.getItem(
-        key(desktop.fingerprint, "selection"),
-      );
-      generation.current++;
-      active.current = value;
-      setPairing(value);
-      setCatalog(EMPTY);
-      lastCatalog.current = null;
-      setSelection(chosen ? normalizeSelection(JSON.parse(chosen)) : null);
-      await refresh();
+      await adopt({ desktop, identity });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       pairingNow.current = false;
       setWorking(false);
     }
-  }, [refresh]);
+  }, [adopt]);
   const select = useCallback(async (value: MobileSelection) => {
     const pairing = active.current;
     if (!pairing) return;
@@ -227,7 +255,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, []);
   const disconnect = useCallback(async () => {
     const value = active.current;
-    generation.current++;
+    const version = ++generation.current;
     active.current = null;
     setPairing(null);
     setConnected(false);
@@ -238,6 +266,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     await Storage.removeItem(PAIRING);
     if (value) {
       void request(value, "device.leave").catch(() => {});
+      // A pairing made meanwhile owns the saved token now.
+      if (value.desktop.host && version === generation.current)
+        await SecureStore.deleteItemAsync(HOST_TOKEN);
       await Storage.removeItem(key(value.desktop.fingerprint, "catalog"));
     }
     // Keep this installation's identity, so a new invitation can recover cleanly.

@@ -13,6 +13,7 @@ import {
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
 import { HostEngine } from "./engine";
+import { createMobileHandler } from "./mobile";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
 import type { LinkedWorkItem } from "../src/features/sessions/model/session";
 import { parseGithubWorkItemUrl } from "../src/features/sessions/model/sessionWorkItem";
@@ -191,6 +192,7 @@ export function createHostServer(
     }
     return catalog;
   };
+  const mobile = createMobileHandler(engine, providers, models);
   return createServer(
     { requestTimeout: 20_000, headersTimeout: 10_000, maxHeaderSize: 8192 },
     async (request, response) => {
@@ -207,7 +209,7 @@ export function createHostServer(
         if (
           request.headers.origin ||
           request.method !== "POST" ||
-          request.url !== "/rpc"
+          (request.url !== "/rpc" && request.url !== "/mobile")
         ) {
           response
             .writeHead(403)
@@ -234,6 +236,34 @@ export function createHostServer(
           response.writeHead(401).end(JSON.stringify({
             error: "Device credential is invalid or revoked",
           }));
+          return;
+        }
+        if (request.url === "/mobile") {
+          // The phone app's protocol; failures are replies, as the phone expects.
+          try {
+            const result = await mobile(
+              {
+                id: String(input.id ?? ""),
+                method: String(input.method ?? ""),
+                params:
+                  input.params &&
+                  typeof input.params === "object" &&
+                  !Array.isArray(input.params)
+                    ? (input.params as Record<string, unknown>)
+                    : {},
+              },
+              token,
+            );
+            response.end(JSON.stringify({ ok: true, result }));
+          } catch (error) {
+            response.end(
+              JSON.stringify({
+                ok: false,
+                error:
+                  error instanceof Error ? error.message : "Host request failed",
+              }),
+            );
+          }
           return;
         }
         if (input.version !== HOST_PROTOCOL_VERSION)

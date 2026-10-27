@@ -126,6 +126,8 @@ export type SessionSummary = {
   busy?: boolean;
   /** What it waits on the user for; absent from an older desktop. */
   waiting?: "approval" | "question";
+  /** The tool call it waits to run, from a machine's host. */
+  approval?: { requestId: number; label: string };
 };
 
 export type Message = {
