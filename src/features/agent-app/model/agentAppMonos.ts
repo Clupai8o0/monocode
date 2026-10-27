@@ -24,7 +24,7 @@ function scopedMono(id: string, cwd: string): Mono {
   return mono;
 }
 
-function habitInput(value: unknown) {
+export function habitInput(value: unknown) {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("habit must be an object");
@@ -44,7 +44,7 @@ function habitInput(value: unknown) {
   };
 }
 
-function configuredHabit(list: Habit[], input: NonNullable<ReturnType<typeof habitInput>>, sourceMode: RuntimeMode, now: number): Habit {
+export function configuredHabit(list: Habit[], input: NonNullable<ReturnType<typeof habitInput>>, sourceMode: RuntimeMode, now: number): Habit {
   const matches = input.id
     ? list.filter(entry => entry.id === input.id)
     : list.filter(entry => entry.name === input.name);
@@ -68,7 +68,7 @@ function configuredHabit(list: Habit[], input: NonNullable<ReturnType<typeof hab
   return next;
 }
 
-function habitView(habit: Habit) {
+export function habitView(habit: Habit) {
   return {
     id: habit.id,
     name: habit.name,

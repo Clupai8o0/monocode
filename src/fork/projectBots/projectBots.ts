@@ -295,6 +295,33 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 4],
     ]),
   },
+  // The Mono Maker (src/fork/starterMonos): a face on an anvil.
+  anvil: {
+    rest: [
+      "########",
+      ".######.",
+      ".#.##.#.",
+      ".######.",
+      "..####..",
+      "..####..",
+      ".######.",
+      "########",
+    ],
+    talk: [
+      "########",
+      ".######.",
+      ".#.##.#.",
+      ".######.",
+      "..#..#..",
+      "..####..",
+      ".######.",
+      "########",
+    ],
+    eyes: same([
+      [2, 2],
+      [5, 2],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(

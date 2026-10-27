@@ -3,6 +3,8 @@ import { handleAgentMonos } from "./agentAppMonos";
 // Fork: agents use the same project logo storage as the manual picker.
 import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { projectLook, setProjectLook } from "../../../fork/stylist/agentProjectLook";
+import { createAgentProject } from "../../../fork/starterMonos/agentProjectCreate";
+import { handleMonoMaker } from "../../../fork/starterMonos/agentMonoMaker";
 import { looksLikeProject } from "../../projects/model/recents";
 import {
   mergeModelSettings,
@@ -145,6 +147,8 @@ export type AgentAppHost = {
     /** Files the sessions it starts into a folder named after it. */
     folder?: { name: string; color: string };
   } | undefined;
+  /** Fork: puts a project a Mono just created on the rail. */
+  addProject?(path: string): void;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
   isHabitRun?(sessionId: string): boolean;
   monos?: {
@@ -181,11 +185,15 @@ const FIELDS = new Map<string, readonly string[]>([
   ["models.list", []],
   ["monos.list", []],
   ["monos.configure", ["id", "name", "instructions", "expectedSoulHash", "habit"]],
+  // Fork: the Mono Maker's own actions (src/fork/starterMonos).
+  ["monos.all", ["id"]],
+  ["monos.make", ["id", "name", "mascot", "color", "projects", "instructions", "expectedSoulHash", "habit"]],
   ["projects.logo", ["project"]],
   ["projects.logo.set", ["path", "background", "project"]],
   ["projects.logo.clear", ["project"]],
   ["projects.look", ["project"]],
   ["projects.look.set", ["label", "color", "mascot", "project"]],
+  ["projects.create", ["name", "parent"]],
   ["sessions.list", ["project"]],
   ["sessions.read", ["sessionId", "before", "limit", "maxChars", "project"]],
   ["sessions.send", ["sessionId", "prompt", "project", "notifyOnComplete"]],
@@ -996,6 +1004,8 @@ export async function handleAgentApp(
   host: AgentAppHost,
 ): Promise<unknown> {
   fields(action, input);
+  if (action === "monos.all" || action === "monos.make")
+    return handleMonoMaker(source, action, input, host);
   if (action.startsWith("monos."))
     return handleAgentMonos(source, action, input, host);
   if (action.startsWith("artifacts."))
@@ -1038,6 +1048,12 @@ export async function handleAgentApp(
       return projectLook(requireProject(source, input, host), await monoIconsDir(source, host));
     case "projects.look.set":
       return setProjectLook(requireProject(source, input, host), input, await monoIconsDir(source, host));
+    // Fork: a Mono starts a new, empty project (src/fork/starterMonos).
+    case "projects.create": {
+      const mono = host.monoOf?.(source.id);
+      if (!mono || !host.isMono(source.id)) throw new Error("Only a Mono's own chat can create a project");
+      return createAgentProject(mono.id, input, host.addProject);
+    }
     case "models.list":
       return {
         runtimeModes: RUNTIME_MODES.filter((id) => RUNTIME_MODES.indexOf(id) <= RUNTIME_MODES.indexOf(source.runtimeMode)).map((id) => ({

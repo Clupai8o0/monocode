@@ -82,15 +82,18 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 39] = [
+const APP_ACTIONS: [&str; 42] = [
     "models.list",
     "monos.list",
     "monos.configure",
+    "monos.all",
+    "monos.make",
     "projects.logo",
     "projects.logo.set",
     "projects.logo.clear",
     "projects.look",
     "projects.look.set",
+    "projects.create",
     "sessions.list",
     "sessions.read",
     "sessions.send",
@@ -164,6 +167,18 @@ Actions:
                   Runs need MonoCode open and use normal provider allowance.
                   Returns the configured Mono and its habits. Reuse --request-id
                   on retries. Existing Mono-only habits.* actions are separate.
+  monos.all      {}  The Mono Maker's chat only. Every Mono (name, mascot,
+                  color, projects, habit count) and choices: mascots, colors
+                  and the projects on the rail. {"id":"..."} returns one Mono
+                  with its SOUL.md text, soulHash and habits.
+  monos.make     {"name":"Releases","mascot":"owl","color":3,"projects":["app"],
+                   "instructions":"<SOUL.md>","habit":{...}}
+                  The Mono Maker's chat only. Make a Mono, or pass "id" to
+                  change one; omitted fields stay. color is a palette index or
+                  a 6-digit hex; projects replaces its list (paths or names
+                  from the rail). instructions need Full access, and replacing
+                  an existing SOUL.md needs expectedSoulHash. habit works as in
+                  monos.configure. It never deletes a Mono.
   projects.logo  {}  Read the current project's saved logo path, or null.
   projects.logo.set {"path":"assets/logo.svg","background":"transparent"}
                   Apply an existing PNG, JPG, GIF, WebP or SVG image (up to 2 MB)
@@ -186,6 +201,11 @@ Actions:
                   choices.mascots).
                   null restores that field's default. Change the look only
                   when the user asks; the project menu shows the same values.
+  projects.create {"name":"my-app","parent":"~/Documents/projects"}
+                  A Mono's own chat only. Make a new, empty project folder
+                  (parent defaults to ~/Documents/projects; an existing folder
+                  is refused), add it to MonoCode and to the Mono's projects,
+                  and return its path to pass as "project".
   sessions.list  {}  Project sessions with IDs, busy status, hasDraft and archived.
   sessions.read  {"sessionId":"...","before":"<turnId>","limit":3,"maxChars":1200}
                   Read up to 3 recent user/assistant exchanges. Tools and
@@ -726,6 +746,9 @@ mod tests {
             "projects.logo.clear",
             "projects.look",
             "projects.look.set",
+            "projects.create",
+            "monos.all",
+            "monos.make",
             "artifacts.list",
             "artifacts.read",
             "artifacts.write",

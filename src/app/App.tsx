@@ -602,6 +602,9 @@ import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
+import { seedStarterMonos } from "../fork/starterMonos/starterMono";
+import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
+import { MONO_MAKER } from "../fork/starterMonos/makerMono";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
 import {
@@ -2419,6 +2422,12 @@ function Workspace({
       void seedStylistMono(recents.map((project) => project.path));
     }
   }, [monosEnabled, recents]);
+  // Fork: the Kickoff and Mono Maker are made once (src/fork/starterMonos).
+  useEffect(() => {
+    if (import.meta.env.MODE !== "test" && monosEnabled) {
+      void seedStarterMonos([KICKOFF_MONO, MONO_MAKER]);
+    }
+  }, [monosEnabled]);
   const unseenFinishedIds = useUnseenFinishedSessions(
     sessions,
     busySessionIds,
@@ -11888,6 +11897,8 @@ function Workspace({
                 }
               );
             },
+            // Fork: projects.create puts the new folder on the rail.
+            addProject: (path) => setRecents(rememberProject(path)),
             habits: { load: loadHabits, update: updateHabits },
             agentFiles: (monoId) => loadMonoFiles(monoId),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
