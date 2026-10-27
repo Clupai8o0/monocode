@@ -252,6 +252,11 @@ export class HostEngine {
    * keeps the text alone. A Mono's conversation puts who it is ahead of it.
    */
   turnPrompt?: (value: HostSession, text: string) => string;
+  /** Told when a turn ends, however it ended. */
+  onSettled?: (
+    value: HostSession,
+    outcome: { error?: string; cancelled: boolean; interrupted: boolean },
+  ) => void;
   private switchingProjects = new Set<string>();
   private running = new Map<
     string,
@@ -850,14 +855,20 @@ export class HostEngine {
               : active.cancelled
               ? "Stopped by you."
               : error;
-          this.save(
-            this.settled(
-              latest,
-              this.closing || active.persistenceFailed ? "interrupted" : "idle",
-              message,
-            ),
+          const interrupted = this.closing || active.persistenceFailed;
+          const saved = this.save(
+            this.settled(latest, interrupted ? "interrupted" : "idle", message),
             { type: "settled", error, cancelled: active.cancelled },
           );
+          try {
+            this.onSettled?.(saved, {
+              error,
+              cancelled: active.cancelled,
+              interrupted,
+            });
+          } catch (reason) {
+            console.debug("[monocode] settled listener", reason);
+          }
         }
         this.running.delete(session.id);
         // stop/forget releases callbacks and native resources; bind only retained

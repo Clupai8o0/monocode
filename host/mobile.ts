@@ -6,6 +6,7 @@ import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
 import { createMobileMonos } from "./mobile-monos";
+import { startNotifications } from "./notify";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
@@ -113,6 +114,8 @@ export function createMobileHandler(
     };
   });
   engine.turnPrompt ??= monos.prompt;
+  // Pushes for a finished turn or one waiting on the user, once set up.
+  startNotifications(engine, dataDirOf(engine.store));
   const starts = new Map<string, Job>();
   const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();

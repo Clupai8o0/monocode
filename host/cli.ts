@@ -34,6 +34,7 @@ import { connectionInfo, installService, uninstallService } from "./service";
 import { version } from "../package.json";
 import { protectWindowsDirectory } from "./windows";
 import { importDesktop } from "./desktop-import";
+import { writeNotifyConfig } from "./notify";
 
 process.umask(0o077);
 // npm-based providers can launch Node subprocesses without a separate Node
@@ -92,6 +93,8 @@ async function main() {
                         Issue a phone credential as a QR code to scan
   project add <folder>  List a folder as a project for the phone
   import-desktop <dir>  Bring a desktop export's projects, looks and Monos here
+  notify <server> [topic]
+                        Push turn results to an ntfy server (random topic)
   devices               List paired devices
   revoke <device-id>    Revoke a device credential
 Options: --data-dir <directory> --port <port> (default 3774)
@@ -214,6 +217,20 @@ Connect another computer using an SSH forward to the loopback port.`);
     const cwd = realpathSync(resolve(args[2]));
     if (!statSync(cwd).isDirectory()) throw new Error("Not a folder");
     console.log(JSON.stringify(store.addProject(cwd, basename(cwd))));
+    store.close();
+    return;
+  }
+  if (command === "notify") {
+    if (!args[1] || args[1].startsWith("--"))
+      throw new Error("Provide the ntfy server address");
+    const config = writeNotifyConfig(
+      directory,
+      args[1],
+      args[2] && !args[2].startsWith("--") ? args[2] : undefined,
+    );
+    console.log(
+      `Pushes go to topic ${config.topic} on ${config.server}. In the ntfy app, subscribe to that topic on the address the phone reaches the server by.`,
+    );
     store.close();
     return;
   }
