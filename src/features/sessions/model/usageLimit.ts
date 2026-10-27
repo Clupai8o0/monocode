@@ -1,4 +1,5 @@
 import { formatResetDuration } from "../../providers/model/rateLimits";
+import { sameProviderAccountId } from "../../providers/model/providerAccounts";
 import type { Session, UsageLimit } from "./session";
 
 /** A fallback for adapters that report exhausted accounts as plain errors. */
@@ -51,6 +52,27 @@ export function withUsageLimitAccount(
       skipOutgoingRecap: true,
     },
   };
+}
+
+/**
+ * What picking another account does to the open session. A conversation
+ * that is not mid-turn moves there and carries on (`move`); an empty one just
+ * takes the account (`assign`). A running turn, or a Mono that is not
+ * limited, keeps its account while a fresh session opens on the pick (`open`).
+ */
+export function accountPickAction(
+  session: Session,
+  accountId: string,
+  mono: boolean,
+): "move" | "assign" | "open" | "none" {
+  if (session.usageLimit && !session.busy) return "move";
+  if (session.blocks.length === 0 && !session.busy) {
+    return session.providerAccountId === accountId ? "none" : "assign";
+  }
+  if (sameProviderAccountId(session.providerAccountId, accountId)) {
+    return "none";
+  }
+  return session.busy || mono ? "open" : "move";
 }
 
 /** Providers can still refuse right at the reset; give them a moment. */

@@ -104,11 +104,37 @@ it("opens the actual model picker and routes a different provider choice", () =>
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 
+it("continues on the only other account in one click", () => {
+  saveProviderAccount({
+    id: "account-work",
+    provider: "claude",
+    label: "Work account",
+  });
+  const onAccountChange = vi.fn();
+  render({ providerAccountId: "default" }, { onAccountChange });
+  expect(
+    container.querySelector('[aria-label="Choose another account"]'),
+  ).toBeNull();
+  act(() =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Continue on Work account"]',
+      )!
+      .click(),
+  );
+  expect(onAccountChange).toHaveBeenCalledWith("account-work");
+});
+
 it("offers other saved accounts and routes a selected profile", () => {
   saveProviderAccount({
     id: "account-work",
     provider: "claude",
     label: "Work account",
+  });
+  saveProviderAccount({
+    id: "account-other",
+    provider: "claude",
+    label: "Other account",
   });
   const onAccountChange = vi.fn();
   render({ providerAccountId: "default" }, { onAccountChange });

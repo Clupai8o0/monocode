@@ -540,6 +540,7 @@ import {
 import { deliverQueuedFollowUp } from "../features/sessions/model/queuedFollowUp";
 import {
   USAGE_LIMIT_RESUME_GRACE_MS,
+  accountPickAction,
   resumeUsageLimitedSession,
   usageLimitResumeDue,
   withUsageLimitAccount,
@@ -2912,7 +2913,7 @@ function Workspace({
     [insertBesideActive],
   );
 
-  const usageLimitAccountChangeRef = useRef<
+  const sessionAccountChangeRef = useRef<
     ((sessionId: string, accountId: string) => Promise<void>) | null
   >(null);
   const onSelectProviderAccount = useCallback(
@@ -2922,14 +2923,17 @@ function Workspace({
       );
       if (!current || current.harness !== provider) return;
 
-      // A limited session continues in place under the selected account.
-      if (current.usageLimit && !current.busy) {
-        void usageLimitAccountChangeRef.current?.(current.id, accountId);
+      const action = accountPickAction(
+        current,
+        accountId,
+        isMonoSession(current.id),
+      );
+      if (action === "none") return;
+      if (action === "move") {
+        void sessionAccountChangeRef.current?.(current.id, accountId);
         return;
       }
-
-      if (current.blocks.length === 0 && !current.busy) {
-        if (current.providerAccountId === accountId) return;
+      if (action === "assign") {
         updateSessionState(sessionsRef, setSessions, (sessions) =>
           sessions.map((session) =>
             session.id === current.id
@@ -2940,12 +2944,8 @@ function Workspace({
         return;
       }
 
-      const currentId =
-        current.providerAccountId ?? DEFAULT_PROVIDER_ACCOUNT_ID;
-      if (currentId === accountId) return;
-
-      // Provider thread ids are account-owned. Keep the current conversation
-      // pinned to its account and open a clean one for the selected profile.
+      // Provider thread ids are account-owned. A running turn keeps the
+      // conversation pinned to its account; open a clean one for the profile.
       const session = {
         ...newSession(
           current.harness,
@@ -9668,22 +9668,29 @@ function Workspace({
     [onSubmit, onUsageLimitDismiss],
   );
 
-  const usageLimitSwitching = useRef(new Set<string>());
-  const onUsageLimitAccountChange = useCallback(
+  const accountSwitching = useRef(new Set<string>());
+  /**
+   * Move an idle conversation to another account of its provider. A limited
+   * one continues straight away; any other picks up with the next message.
+   */
+  const onSessionAccountChange = useCallback(
     async (sessionId: string, accountId: string) => {
       const session = sessionsRef.current.find(
         (entry) => entry.id === sessionId,
       );
+      const limited = !!session?.usageLimit;
       if (
-        !session?.usageLimit ||
+        !session ||
         session.busy ||
         !supportsProviderAccounts(session.harness) ||
         !providerAccountExists(session.harness, accountId) ||
         sameProviderAccountId(session.providerAccountId, accountId) ||
-        usageLimitSwitching.current.has(sessionId)
+        accountSwitching.current.has(sessionId)
       )
         return;
       const mono = isMonoSession(sessionId);
+      // Monos change accounts only to get past a limit.
+      if (mono && !limited) return;
       // Copy the native transcript so the other account resumes the very same
       // provider session. Mono Codex threads live in a private store instead.
       let carried = false;
@@ -9692,7 +9699,7 @@ function Workspace({
         (session.harness === "claude" ||
           (session.harness === "codex" && !mono))
       ) {
-        usageLimitSwitching.current.add(sessionId);
+        accountSwitching.current.add(sessionId);
         try {
           await transferHarnessSessionAccount({
             harness: session.harness,
@@ -9710,14 +9717,15 @@ function Workspace({
             error,
           );
         } finally {
-          usageLimitSwitching.current.delete(sessionId);
+          accountSwitching.current.delete(sessionId);
         }
         const latest = sessionsRef.current.find(
           (entry) => entry.id === sessionId,
         );
         // The user moved on while the transcript was copied.
         if (
-          !latest?.usageLimit ||
+          !latest ||
+          !!latest.usageLimit !== limited ||
           latest.busy ||
           latest.providerSessionId !== session.providerSessionId ||
           !sameProviderAccountId(
@@ -9744,11 +9752,11 @@ function Workspace({
             : entry,
         ),
       );
-      onUsageLimitResume(sessionId);
+      if (limited) onUsageLimitResume(sessionId);
     },
     [onUsageLimitResume],
   );
-  usageLimitAccountChangeRef.current = onUsageLimitAccountChange;
+  sessionAccountChangeRef.current = onSessionAccountChange;
 
   const [usageLimitTick, setUsageLimitTick] = useState(0);
   useEffect(() => {
@@ -13530,7 +13538,7 @@ function Workspace({
     onUsageLimitResume,
     onUsageLimitResumeAtReset,
     onUsageLimitDismiss,
-    onUsageLimitAccountChange,
+    onUsageLimitAccountChange: onSessionAccountChange,
     onInboxCardDismiss,
     onLinkedWorkItemUpdateCardDismiss,
     onNoteCardDismiss,

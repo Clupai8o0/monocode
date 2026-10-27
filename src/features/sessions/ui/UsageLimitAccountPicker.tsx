@@ -53,6 +53,31 @@ export function UsageLimitAccountPicker({
     onSelect(account.id);
   };
   if (accounts.length === 0) return null;
+  // With one account to go to, the choice is already made.
+  const only = accounts.length === 1 ? accounts[0] : undefined;
+  if (only) {
+    return (
+      <button
+        type="button"
+        aria-label={`Continue on ${only.label}`}
+        title={`Carry this conversation to ${only.label} and continue`}
+        data-mono-account-picker
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => onSelect(only.id)}
+        className={
+          variant === "mono"
+            ? "flex h-6.5 min-w-0 shrink items-center gap-1 rounded-md bg-selection px-1.5 text-[11px] text-content hover:bg-selection-hover"
+            : "flex h-6 min-w-0 shrink items-center gap-1 rounded-md px-1.5 hover:bg-content/10 hover:text-content"
+        }
+      >
+        <HarnessIcon
+          harness={harness}
+          className="size-3 shrink-0 text-content/55"
+        />
+        <span className="truncate">Continue on {only.label}</span>
+      </button>
+    );
+  }
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newSession, type Session } from "./session";
 import {
+  accountPickAction,
   formatUsageLimitReset,
   USAGE_LIMIT_RESUME_GRACE_MS,
   usageLimitResumeDue,
@@ -123,5 +124,38 @@ describe("withUsageLimitAccount", () => {
       fromProviderAccountId: "personal",
       skipOutgoingRecap: true,
     });
+  });
+});
+
+describe("accountPickAction", () => {
+  const talked = (patch: Partial<Session> = {}): Session => ({
+    ...newSession("claude", "/tmp/project"),
+    blocks: [{ id: "u1", role: "user", text: "hi" }],
+    providerSessionId: "sess_1",
+    ...patch,
+  });
+
+  it("moves an idle conversation to the picked account", () => {
+    expect(accountPickAction(talked(), "account-b", false)).toBe("move");
+  });
+
+  it("moves a limited conversation, Mono or not", () => {
+    expect(
+      accountPickAction(talked({ usageLimit: {} }), "account-b", true),
+    ).toBe("move");
+  });
+
+  it("keeps a running turn on its account and opens a fresh session", () => {
+    expect(accountPickAction(talked({ busy: true }), "account-b", false)).toBe(
+      "open",
+    );
+    expect(accountPickAction(talked(), "account-b", true)).toBe("open");
+  });
+
+  it("gives an empty session the account and ignores the same account", () => {
+    expect(accountPickAction(talked({ blocks: [] }), "account-b", false)).toBe(
+      "assign",
+    );
+    expect(accountPickAction(talked(), "default", false)).toBe("none");
   });
 });
