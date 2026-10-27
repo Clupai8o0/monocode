@@ -1,7 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { createContext, memo, use, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 
 import { PixelMascot } from "@/features/mascots/PixelMascot";
@@ -154,7 +154,9 @@ function TurnFooter({ turn }: { turn: Turn }) {
   const [showMetrics, setShowMetrics] = useState(false);
   // Mounted on first open and kept, so the sheet can animate closed.
   const [metricsOpened, setMetricsOpened] = useState(false);
-  const metrics = hasTurnMetrics(turn.metrics) ? turn.metrics : undefined;
+  // The metrics sheet is built from SwiftUI views, which Android does not have.
+  const metrics =
+    Platform.OS !== "android" && hasTurnMetrics(turn.metrics) ? turn.metrics : undefined;
   return (
     <View style={styles.footer}>
       {metricsOpened && metrics ? (

@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { Fragment, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -17,6 +18,7 @@ import { SettingsPage } from "@/features/settings/SettingsUI";
 import { useDefaultModel } from "@/features/settings/defaultModel";
 import { projectForRoute } from "@/features/workspace/routing";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
+import { ChoiceMenu } from "@/ui/ChoiceMenu";
 import { Icon, type IconName } from "@/ui/Icon";
 import { withAlpha, themedStyles, useColors } from "@/ui/theme";
 
@@ -594,6 +596,24 @@ export function EffortControl({
     options.findIndex((option) => option.value === value),
   );
   const hot = HOT_EFFORT.test(options[index]?.value ?? "");
+  // SwiftUI's slider is iOS only; Android picks the level from a list.
+  if (Platform.OS === "android") return (
+    <ChoiceMenu
+      label={label}
+      actions={options.map((option) => ({
+        label: option.label,
+        selected: option.value === value,
+        onPress: () => onChange(option.value),
+      }))}
+    >
+      <View style={[styles.effort, styles.effortHeader]}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        <Text style={[styles.effortValue, hot && { color: colors.caution }]}>
+          {options[index]?.label}
+        </Text>
+      </View>
+    </ChoiceMenu>
+  );
   return (
     <View style={styles.effort}>
       <View style={styles.effortHeader}>
