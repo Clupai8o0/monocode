@@ -3991,7 +3991,8 @@ function SubagentStack({
  * where the reader puts it. The same row serves inside a settled turn's trail,
  * where the run sits as one step of the work it was spawned from.
  */
-function SubagentRow({
+// Fork: exported for the running-agents tray (src/fork/backgroundAgents).
+export function SubagentRow({
   block,
   cwd,
   live = false,

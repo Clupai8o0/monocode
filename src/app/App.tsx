@@ -598,6 +598,7 @@ import {
   useWindowSessions,
 } from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
+import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
@@ -2229,6 +2230,10 @@ function Workspace({
     busySessionIdsRef.current = nextBusySessionIds;
   }
   const busySessionIds = busySessionIdsRef.current;
+  // Fork: running subagents per session, for the sidebar's badge.
+  useEffect(() => {
+    publishRunningWork(sessions);
+  }, [sessions]);
 
   /** Probe the active session's harness for its live model catalog whenever
    * the active harness changes. Catalogs load lazily (probing spawns a CLI

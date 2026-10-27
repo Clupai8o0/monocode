@@ -5,6 +5,7 @@ import {
   useSessionStatus,
 } from "../../../fork/statusline/StatusExtras";
 import { ContextLabel } from "../../../fork/statusline/ContextLabel";
+import { BackgroundAgentsBar } from "../../../fork/backgroundAgents/BackgroundAgentsBar";
 import { untilCompaction } from "../model/contextUsage";
 import { useSessionSnapshot } from "../model/sessionStateStore";
 import {
@@ -665,6 +666,13 @@ const LocalSessionPane = memo(function LocalSessionPane({
   // Fork: the status strip sits under the composer, docked or centred.
   const composer = (
     <>
+    {/* Fork: subagents and background commands still running */}
+    <BackgroundAgentsBar
+      session={session}
+      cwd={workCwd}
+      onOpenFile={onOpenFile}
+      onOpenDiff={onOpenDiff}
+    />
     <Composer
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id}

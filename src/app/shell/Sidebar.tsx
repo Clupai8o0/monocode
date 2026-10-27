@@ -178,6 +178,7 @@ import {
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
+import { RunningBadge } from "../../fork/backgroundAgents/RunningBadge"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
 import {
   CurrentProjectIcon,
@@ -4852,6 +4853,8 @@ export const SessionCard = memo(function SessionCard({
           : "text-content/45";
   const closeBadge = (
     <>
+      {/* Fork: subagents and background commands running */}
+      {draft ? null : <RunningBadge sessionId={session.id} />}
       {/* Fork: messages from and to other sessions */}
       {showCloseBadge && !draft ? (
         <PeerBadge
