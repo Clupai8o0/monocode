@@ -11,6 +11,7 @@ import omp from "../../../assets/providers/omp.svg";
 import opencode from "../../../assets/providers/opencode.svg";
 import pi from "../../../assets/providers/pi.svg";
 import antigravity from "../../../assets/providers/antigravity.svg";
+import vivobook from "../../../assets/providers/vivobook.svg";
 import type { HarnessId } from "../model/session";
 
 export const HARNESS_ICONS: Record<HarnessId, string> = {
@@ -26,6 +27,7 @@ export const HARNESS_ICONS: Record<HarnessId, string> = {
   deepseek,
   antigravity,
   devin,
+  vivobook,
 };
 
 /** White marks that must follow `currentColor` so they stay visible in light mode. */
@@ -38,6 +40,7 @@ export const MONOCHROME_HARNESSES = new Set<HarnessId>([
   "hermes",
   "deepseek",
   "devin",
+  "vivobook",
 ]);
 
 function MonoIcon({

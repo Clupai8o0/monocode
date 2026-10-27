@@ -877,6 +877,20 @@ pub fn harness_resolve_deepseek() -> Result<CursorBinary, String> {
         })
 }
 
+/// Fork: resolve the Vivobook gateway, which runs Claude Code on the Vivobook
+/// over Tailscale SSH (`fork/vivobook/vivobook-agent`).
+#[tauri::command(async)]
+pub fn harness_resolve_vivobook() -> Result<CursorBinary, String> {
+    resolve_vivobook()
+        .map(|path| CursorBinary {
+            path: path.to_string_lossy().into_owned(),
+        })
+        .ok_or_else(|| {
+            "Vivobook gateway not found. Link fork/vivobook/vivobook-agent into ~/.local/bin, then retry."
+                .into()
+        })
+}
+
 /// Resolve Cognition's Devin CLI (`devin`).
 #[tauri::command(async)]
 pub fn harness_resolve_devin() -> Result<CursorBinary, String> {
@@ -2096,6 +2110,7 @@ fn resolve_harness_binary_default(provider: &str) -> Option<PathBuf> {
         "deepseek" => resolve_deepseek(),
         "antigravity" => resolve_antigravity(),
         "devin" => resolve_devin(),
+        "vivobook" => resolve_vivobook(),
         _ => None,
     }
 }
@@ -2143,6 +2158,7 @@ fn resolve_harness_binary_override(provider: &str, binary_path: &str) -> Result<
         "deepseek" => &["dsh"],
         "antigravity" => &["agy_acp_server.par"],
         "devin" => &["devin"],
+        "vivobook" => &["vivobook-agent"],
         _ => {
             return Err(format!(
                 "Unsupported configured harness provider: {provider}"
@@ -2269,6 +2285,7 @@ fn validate_configured_harness_binary_identity(
         "fx" => is_fx_agent(path),
         "grok" => is_grok_agent(path),
         "deepseek" => is_deepseek_dsh(path),
+        "vivobook" => is_vivobook_gateway(path),
         _ => true,
     };
     if identity_valid {
@@ -2545,6 +2562,28 @@ fn is_deepseek_dsh(path: &Path) -> bool {
         return false;
     };
     String::from_utf8_lossy(&buf[..n]).contains("@deepseek-ai/dsh")
+}
+
+fn resolve_vivobook() -> Option<PathBuf> {
+    let home = dirs_home().map(PathBuf::from)?;
+    first_binary_matching(
+        vec![home.join(".local/bin/vivobook-agent")],
+        is_vivobook_gateway,
+    )
+}
+
+fn is_vivobook_gateway(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut buf = vec![0u8; 4 * 1024];
+    let Ok(n) = file.read(&mut buf) else {
+        return false;
+    };
+    String::from_utf8_lossy(&buf[..n]).contains("monocode-vivobook-gateway")
 }
 
 fn resolve_devin() -> Option<PathBuf> {
@@ -3938,6 +3977,29 @@ mod tests {
         assert!(validate_configured_harness_binary_identity("deepseek", &dsh, "dsh").is_err());
 
         assert!(!is_deepseek_dsh(&dir.join("missing")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vivobook_accepts_only_the_fork_gateway() {
+        let dir = std::env::temp_dir().join(format!("monocode-vivobook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let gateway = dir.join("vivobook-agent");
+        std::fs::write(
+            &gateway,
+            b"#!/usr/bin/env python3\n\"\"\"monocode-vivobook-gateway: run Claude Code on the Vivobook.\"\"\"\n",
+        )
+        .unwrap();
+        assert!(is_vivobook_gateway(&gateway));
+        assert!(validate_configured_harness_binary_identity("vivobook", &gateway, "vivobook-agent").is_ok());
+
+        std::fs::write(&gateway, b"#!/bin/sh\nexec claude \"$@\"\n").unwrap();
+        assert!(!is_vivobook_gateway(&gateway));
+        assert!(validate_configured_harness_binary_identity("vivobook", &gateway, "vivobook-agent").is_err());
+
+        assert!(!is_vivobook_gateway(&dir.join("missing")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

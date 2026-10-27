@@ -245,6 +245,25 @@ export const MODELS: AgentModel[] = [
     name: "Adaptive",
     nativeId: "adaptive",
   },
+  // Fork: Claude Code on the Vivobook over SSH (src/fork/vivobook).
+  {
+    id: "vivobook:opus-5-5",
+    harness: "vivobook",
+    name: "Claude Opus 5.5",
+    nativeId: "claude-opus-5-5",
+  },
+  {
+    id: "vivobook:sonnet-5",
+    harness: "vivobook",
+    name: "Claude Sonnet 5",
+    nativeId: "claude-sonnet-5",
+  },
+  {
+    id: "vivobook:fable-5",
+    harness: "vivobook",
+    name: "Claude Fable 5",
+    nativeId: "claude-fable-5",
+  },
 ];
 
 export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
@@ -260,6 +279,7 @@ export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
   deepseek: "deepseek:deepseek-official/deepseek-v4-flash",
   antigravity: "antigravity:gemini-3.8-flash-high",
   devin: "devin:adaptive",
+  vivobook: "vivobook:opus-5-5",
 };
 
 const FAVORITES_KEY = "monocode.favoriteModels";
@@ -291,6 +311,7 @@ const HARNESS_ORDER: HarnessId[] = [
   "deepseek",
   "antigravity",
   "devin",
+  "vivobook",
 ];
 
 const EMPTY_MODELS: AgentModel[] = [];

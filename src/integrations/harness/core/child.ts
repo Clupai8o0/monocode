@@ -446,6 +446,7 @@ async function resolveHarnessBinary(
     deepseek: "harness_resolve_deepseek",
     antigravity: "harness_resolve_antigravity",
     devin: "harness_resolve_devin",
+    vivobook: "harness_resolve_vivobook",
   };
   return invoke(command[provider]);
 }
@@ -508,6 +509,12 @@ export function resolveDeepSeekBinary(
   binaryPath?: string | null,
 ): Promise<{ path: string }> {
   return resolveHarnessBinary("deepseek", binaryPath);
+}
+
+export function resolveVivobookBinary(
+  binaryPath?: string | null,
+): Promise<{ path: string }> {
+  return resolveHarnessBinary("vivobook", binaryPath);
 }
 
 export function resolveDevinBinary(

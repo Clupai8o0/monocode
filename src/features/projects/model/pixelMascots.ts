@@ -1,4 +1,5 @@
 import { PROJECT_MASCOTS } from "./projectMascots";
+import { PROJECT_BOT_SPRITES } from "../../../fork/projectBots/projectBots";
 
 /**
  * High-fidelity project mascots: the project's original 8×8 front sprites, styled
@@ -154,6 +155,11 @@ const FIGURES: Record<string, Figure> = {
     material: (_x, y, base) => (y === 4 ? tone(parse("#f5e7ad"), -0.03) : base),
   },
 };
+
+// Fork: each project's own bot (src/fork/projectBots).
+for (const [name, bot] of Object.entries(PROJECT_BOT_SPRITES)) {
+  FIGURES[name] = { eyes: bot.eyes };
+}
 
 const SPRITES = Object.fromEntries(
   PROJECT_MASCOTS.map((mascot) => [mascot.name, mascot]),

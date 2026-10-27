@@ -598,6 +598,7 @@ import {
   useWindowSessions,
 } from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
+import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
@@ -2370,6 +2371,12 @@ function Workspace({
     if (loadNotificationsEnabled())
       void probeNotificationPermission().then(askBannersOnce); // Fork
   }, []);
+  // Fork: each project gets its own bot once (src/fork/projectBots).
+  useEffect(() => {
+    if (import.meta.env.MODE !== "test") {
+      applyProjectBots(recents.map((project) => project.path));
+    }
+  }, [recents]);
   const unseenFinishedIds = useUnseenFinishedSessions(
     sessions,
     busySessionIds,

@@ -6,6 +6,11 @@
  * Each mascot has two frames: `rest`, and `talk` swapped in on a loop while the
  * project has a turn in flight — mouths chew, legs shuffle, flames flicker.
  */
+import {
+  PROJECT_BOT_NAMES,
+  PROJECT_BOT_SPRITES,
+} from "../../../fork/projectBots/projectBots";
+
 const GRID = 8;
 
 type MascotRows = readonly string[];
@@ -244,6 +249,12 @@ export function mascotPath(rows: MascotRows): string {
   return path;
 }
 
+// Fork: each project's own bot joins the roster (src/fork/projectBots).
+for (const [name, bot] of Object.entries(PROJECT_BOT_SPRITES)) {
+  REST[name] = bot.rest;
+  TALK[name] = bot.talk;
+}
+
 export const PROJECT_MASCOTS: readonly ProjectMascot[] = Object.entries(
   REST,
 ).map(([name, rest]) => ({
@@ -253,6 +264,11 @@ export const PROJECT_MASCOTS: readonly ProjectMascot[] = Object.entries(
   restPath: mascotPath(rest),
   talkPath: mascotPath(TALK[name]),
 }));
+
+/** Fork: the hash spreads projects over the stock roster only. */
+const HASHED_MASCOTS = PROJECT_MASCOTS.filter(
+  (mascot) => !PROJECT_BOT_NAMES.has(mascot.name),
+);
 
 export const MASCOT_GRID = GRID;
 
@@ -272,5 +288,5 @@ export function projectMascot(
   for (let i = 0; i < project.length; i++) {
     hash = (hash * 131 + project.charCodeAt(i)) >>> 0;
   }
-  return PROJECT_MASCOTS[hash % PROJECT_MASCOTS.length];
+  return HASHED_MASCOTS[hash % HASHED_MASCOTS.length];
 }

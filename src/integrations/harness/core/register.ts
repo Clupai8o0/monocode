@@ -10,6 +10,7 @@ import { ensureOmpRegistered } from "../providers/omp/ompAdapter";
 import { ensurePiRegistered } from "../providers/pi/piAdapter";
 import { ensureAntigravityRegistered } from "../providers/antigravity/antigravityAdapter";
 import { ensureDevinRegistered } from "../providers/devin/devinAdapter";
+import { ensureVivobookRegistered } from "../../../fork/vivobook/vivobookAdapter";
 
 /** Register all known live harness adapters. Idempotent. */
 export function registerBuiltinHarnesses(): void {
@@ -25,4 +26,5 @@ export function registerBuiltinHarnesses(): void {
   ensureDeepSeekRegistered();
   ensureAntigravityRegistered();
   ensureDevinRegistered();
+  ensureVivobookRegistered();
 }

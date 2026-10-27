@@ -21,6 +21,7 @@ let availability: HarnessAvailability = {
   deepseek: false,
   antigravity: false,
   devin: false,
+  vivobook: false,
 };
 let version = 0;
 let probedAt = 0;

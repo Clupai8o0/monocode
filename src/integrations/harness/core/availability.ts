@@ -10,6 +10,7 @@ import {
   resolveGrokBinary,
   resolveHermesBinary,
   resolveDeepSeekBinary,
+  resolveVivobookBinary,
   resolveOmpBinary,
   resolveOpenCodeBinary,
   resolvePiBinary,
@@ -63,6 +64,10 @@ const CLI: Record<HarnessId, { name: string; install?: string }> = {
     install: IS_WIN
       ? "irm https://static.devin.ai/cli/setup.ps1 | iex"
       : "curl -fsSL https://cli.devin.ai/install.sh | bash",
+  },
+  vivobook: {
+    name: "Vivobook gateway (vivobook-agent)",
+    install: "ln -s ~/Documents/projects/monocode/fork/vivobook/vivobook-agent ~/.local/bin/",
   },
 };
 
@@ -176,6 +181,14 @@ export function probeHarnessAvailability(
       if (id === "antigravity") {
         try {
           await resolveAntigravityBinary();
+          return [id, true] as const;
+        } catch {
+          return [id, false] as const;
+        }
+      }
+      if (id === "vivobook") {
+        try {
+          await resolveVivobookBinary();
           return [id, true] as const;
         } catch {
           return [id, false] as const;

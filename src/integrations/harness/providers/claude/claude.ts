@@ -10,6 +10,7 @@ import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
   killChild,
   resolveClaudeBinary,
+  resolveVivobookBinary,
   spawnChild,
   unwatchChild,
   watchChild,
@@ -188,6 +189,11 @@ type Resume = {
 
 const INIT_TIMEOUT_MS = 8_000;
 /**
+ * Fork: the Vivobook gateway may start Tailscale and run a Claude fixer before
+ * remote Claude answers `initialize`, so it gets longer to come up.
+ */
+const VIVOBOOK_INIT_TIMEOUT_MS = 10 * 60_000;
+/**
  * How long a finished background task may take to wake Claude before the turn
  * is let go anyway. The follow-up turn normally starts within a second or two.
  */
@@ -207,6 +213,13 @@ const tasksByThread = new Map<
 /** Task-list block key for TaskCreate/TaskUpdate items. */
 const CLAUDE_TASKS_KEY = "claude-tasks";
 const cancelledThreads = new Set<string>();
+/** Fork: threads whose Claude runs on the Vivobook (src/fork/vivobook). */
+const vivobookThreads = new Set<string>();
+
+export function setClaudeVivobookThread(sessionId: string, on: boolean): void {
+  if (on) vivobookThreads.add(sessionId);
+  else vivobookThreads.delete(sessionId);
+}
 
 let resolveClaudeBinaryImpl: () => Promise<{ path: string }> =
   resolveClaudeBinary;
@@ -458,7 +471,17 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   ) {
     resumeByThread.delete(input.sessionId);
   }
-  const { path } = await resolveClaudeBinaryImpl();
+  const vivobook = vivobookThreads.has(input.sessionId);
+  const { path } = vivobook
+    ? await resolveVivobookBinary()
+    : await resolveClaudeBinaryImpl();
+  // The gateway explains a failed start on stderr as `Vivobook: ...` lines.
+  const gatewayNotes: string[] = [];
+  let exited = false;
+  let gatewayExited: () => void = () => undefined;
+  const gatewayGone = new Promise<void>((resolve) => {
+    gatewayExited = resolve;
+  });
   const liveRef: { current: Live | null } = { current: null };
   const claudeSessionId =
     canResume && resume ? resume.sessionId : crypto.randomUUID();
@@ -526,12 +549,20 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       handleLine(input.sessionId, current, line);
     },
     (code) => {
+      exited = true;
+      gatewayExited();
       liveByThread.delete(input.sessionId);
       const current = liveRef.current;
       if (!current?.muteUpdates) {
         (current?.onEvent ?? input.onEvent)({ type: "session.ended", code });
       }
-      current?.turnFailed?.(new Error("Claude Code exited"));
+      current?.turnFailed?.(
+        new Error(
+          vivobook && gatewayNotes.length > 0
+            ? gatewayNotes.join("\n")
+            : "Claude Code exited",
+        ),
+      );
       current?.initDone?.();
       if (current) {
         current.turnDone = null;
@@ -539,6 +570,13 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
         current.initDone = null;
       }
     },
+    vivobook
+      ? (line) => {
+          if (!line.startsWith("Vivobook:")) return;
+          gatewayNotes.push(line);
+          if (gatewayNotes.length > 4) gatewayNotes.shift();
+        }
+      : undefined,
   );
 
   await spawnChild(
@@ -546,8 +584,11 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     path,
     buildClaudeSpawnArgs(launch),
     input.cwd,
-    { provider: "claude", id: input.providerAccountId ?? "default" },
-    "claude",
+    // The Vivobook signs in to Claude itself; local profiles stay local.
+    vivobook
+      ? undefined
+      : { provider: "claude", id: input.providerAccountId ?? "default" },
+    vivobook ? "vivobook" : "claude",
   );
 
   liveByThread.set(input.sessionId, live);
@@ -562,7 +603,23 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       input.sessionId,
       buildControlRequest(nextControlId(live), { subtype: "initialize" }),
     );
-    await waitForInit(live, INIT_TIMEOUT_MS);
+    if (vivobook) {
+      // Fork: a gateway that gave up, or never got Claude to answer, must not
+      // open as a live session.
+      await Promise.race([
+        waitForInit(live, VIVOBOOK_INIT_TIMEOUT_MS),
+        gatewayGone,
+      ]);
+      if (exited || !live.initialized) {
+        throw new Error(
+          gatewayNotes.join("\n") || "Vivobook: the session could not start.",
+        );
+      }
+      // Start-up notes must not explain a later crash.
+      gatewayNotes.length = 0;
+    } else {
+      await waitForInit(live, INIT_TIMEOUT_MS);
+    }
     live.onEvent({
       type: "session.providerBound",
       providerSessionId: live.claudeSessionId,
@@ -571,6 +628,15 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     return live;
   } catch (error) {
     await stopClaudeSession(input.sessionId);
+    if (vivobook) {
+      // Fork: no conversation exists on the Vivobook yet, so a retry must not
+      // try to resume one.
+      if (canResume && resume) resumeByThread.set(input.sessionId, resume);
+      else resumeByThread.delete(input.sessionId);
+      if (exited && gatewayNotes.length > 0) {
+        throw new Error(gatewayNotes.join("\n"));
+      }
+    }
     throw error;
   }
 }
@@ -1831,4 +1897,5 @@ export function __claudeTestReset(): void {
   resumeByThread.clear();
   tasksByThread.clear();
   cancelledThreads.clear();
+  vivobookThreads.clear();
 }
