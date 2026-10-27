@@ -2916,6 +2916,8 @@ function Workspace({
   const sessionAccountChangeRef = useRef<
     ((sessionId: string, accountId: string) => Promise<void>) | null
   >(null);
+  // Account picks made mid-turn, applied once that turn ends.
+  const pendingAccountMovesRef = useRef(new Map<string, string>());
   const onSelectProviderAccount = useCallback(
     (provider: ProviderAccountProvider, accountId: string) => {
       const current = sessionsRef.current.find(
@@ -2928,7 +2930,16 @@ function Workspace({
         accountId,
         isMonoSession(current.id),
       );
-      if (action === "none") return;
+      if (action === "none") {
+        pendingAccountMovesRef.current.delete(current.id);
+        return;
+      }
+      if (action === "open" && current.busy && !isMonoSession(current.id)) {
+        // Fork: the conversation moves to the picked account when the turn ends.
+        pendingAccountMovesRef.current.set(current.id, accountId);
+        return;
+      }
+      pendingAccountMovesRef.current.delete(current.id);
       if (action === "move") {
         void sessionAccountChangeRef.current?.(current.id, accountId);
         return;
@@ -2944,8 +2955,8 @@ function Workspace({
         return;
       }
 
-      // Provider thread ids are account-owned. A running turn keeps the
-      // conversation pinned to its account; open a clean one for the profile.
+      // Provider thread ids are account-owned. A Mono keeps its account
+      // unless limited; open a clean one for the profile.
       const session = {
         ...newSession(
           current.harness,
@@ -9757,6 +9768,26 @@ function Workspace({
     [onUsageLimitResume],
   );
   sessionAccountChangeRef.current = onSessionAccountChange;
+
+  useEffect(() => {
+    const pending = pendingAccountMovesRef.current;
+    if (pending.size === 0) return;
+    for (const [sessionId, accountId] of pending) {
+      const session = sessions.find((entry) => entry.id === sessionId);
+      // Kept until the move lands, so a turn that starts first only delays it.
+      if (
+        !session ||
+        !supportsProviderAccounts(session.harness) ||
+        !providerAccountExists(session.harness, accountId) ||
+        sameProviderAccountId(session.providerAccountId, accountId)
+      ) {
+        pending.delete(sessionId);
+        continue;
+      }
+      if (session.busy || accountSwitching.current.has(sessionId)) continue;
+      void onSessionAccountChange(sessionId, accountId);
+    }
+  }, [sessions, onSessionAccountChange]);
 
   const [usageLimitTick, setUsageLimitTick] = useState(0);
   useEffect(() => {
