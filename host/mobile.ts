@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
+import { createMobileMonos } from "./mobile-monos";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
@@ -90,6 +91,23 @@ export function createMobileHandler(
   const workspace = createMobileWorkspace(engine);
   const usage = createMobileUsage();
   const terminals = createMobileTerminals();
+  const monos = createMobileMonos(engine, async () => {
+    const harness = defaultHarness();
+    let model = resolveModel(harness);
+    // Codex has no built-in models; take the first one this machine found.
+    if (!model.id) {
+      const found = (await models()).models[harness]?.[0];
+      if (!found)
+        throw new Error(`No ${HARNESS_TITLE[harness]} models found on this machine`);
+      model = resolveModel(harness, found.id);
+    }
+    return {
+      harness,
+      model: model.id,
+      modelSettings: mergeModelSettings(model, undefined),
+    };
+  });
+  engine.turnPrompt ??= monos.prompt;
   const starts = new Map<string, Job>();
   const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();
@@ -131,7 +149,10 @@ export function createMobileHandler(
     session.blocks.find((block) => block.approval && !block.approval.decided);
 
   const catalog = () => {
-    const projects = engine.store.projects();
+    // A Mono's own folder is where its conversation runs, not a project.
+    const projects = engine.store
+      .projects()
+      .filter((project) => !monos.isMonoFolder(project.cwd));
     const sessions = projects.flatMap((project) =>
       engine.store
         .summaries(project.id)
@@ -191,7 +212,7 @@ export function createMobileHandler(
         defaultModelName: model?.name,
         defaultRuntimeMode: DEFAULT_RUNTIME_MODE,
       })),
-      monos: [],
+      monos: monos.list(projects),
       sessions: sessions.sort((a, b) => b.updatedAt - a.updatedAt),
     };
   };
@@ -200,7 +221,7 @@ export function createMobileHandler(
     const conversationId =
       typeof params.conversationId === "string" ? params.conversationId : "";
     const current = conversationId
-      ? engine.store.session(conversationId)
+      ? engine.store.session(await monos.resolve(conversationId))
       : undefined;
     const projectId = current?.projectId ?? String(params.projectId ?? "");
     engine.store.project(projectId);
@@ -309,8 +330,11 @@ export function createMobileHandler(
       throw new Error("Enter a message under 100,000 characters");
     return value;
   };
-  const conversation = (params: Record<string, unknown>) =>
-    engine.store.session(String(params.conversationId ?? ""));
+  /** The session a conversation id names; `mono:<id>` is that Mono's own. */
+  const conversation = async (params: Record<string, unknown>) =>
+    engine.store.session(
+      await monos.resolve(String(params.conversationId ?? "")),
+    );
 
   /**
    * Sends one message, with any attachments already staged for it. The caller
@@ -463,7 +487,7 @@ export function createMobileHandler(
       case "models.list":
         return modelCatalog(params);
       case "conversation.read": {
-        const value = conversation(params);
+        const value = await conversation(params);
         return {
           id: value.session.id,
           messages: messages(value.session),
@@ -472,7 +496,7 @@ export function createMobileHandler(
         };
       }
       case "conversation.older": {
-        const value = conversation(params);
+        const value = await conversation(params);
         let older = false;
         const turns = transcript(value, (turnIds) => {
           const page = turnsBefore(
@@ -486,14 +510,14 @@ export function createMobileHandler(
         return { turns, older };
       }
       case "conversation.watch": {
-        conversation(params);
+        const watched = (await conversation(params)).session.id;
         if (watches.size >= MAX_WATCHES) {
           const [stalest] = [...watches].sort((a, b) => a[1].used - b[1].used)[0];
           watches.delete(stalest);
         }
         const watchId = nextWatch++;
         watches.set(watchId, {
-          conversationId: String(params.conversationId),
+          conversationId: watched,
           baseline: null,
           revision: null,
           tail: Math.min(
@@ -542,8 +566,8 @@ export function createMobileHandler(
       case "conversation.send":
         // Deduplicated, like a start, so a retry joins the first attempt
         // rather than racing it.
-        return once(sends, id, params, MAX_JOBS, () => {
-          const value = conversation(params);
+        return once(sends, id, params, MAX_JOBS, async () => {
+          const value = await conversation(params);
           const attached = Array.isArray(params.attachments)
             ? params.attachments.length > 0
             : false;
@@ -555,10 +579,10 @@ export function createMobileHandler(
             discardAttachments(engine.store, created);
             throw error;
           }
-          return Promise.resolve({ sessionId: value.session.id });
+          return { sessionId: value.session.id };
         });
       case "session.cancel": {
-        const value = conversation(params);
+        const value = await conversation(params);
         if (value.status === "running" && value.runId)
           engine.command({
             type: "cancel",
@@ -569,7 +593,7 @@ export function createMobileHandler(
         return { sessionId: value.session.id };
       }
       case "session.approve": {
-        const value = conversation(params);
+        const value = await conversation(params);
         if (!value.runId) throw new Error("This turn already ended");
         engine.command({
           type: "approve",
@@ -582,7 +606,7 @@ export function createMobileHandler(
         return { sessionId: value.session.id };
       }
       case "session.configure": {
-        const value = conversation(params);
+        const value = await conversation(params);
         if (
           isRemoteProvider(params.harness) &&
           params.harness !== value.session.harness
@@ -608,7 +632,7 @@ export function createMobileHandler(
         return { sessionId: value.session.id };
       }
       case "session.rename": {
-        const value = conversation(params);
+        const value = await conversation(params);
         const title = typeof params.title === "string" ? params.title.trim() : "";
         if (!title || title.length > 200)
           throw new Error("Enter a title under 200 characters");
@@ -616,12 +640,12 @@ export function createMobileHandler(
         return { sessionId: value.session.id };
       }
       case "session.archive": {
-        const value = conversation(params);
+        const value = await conversation(params);
         engine.updateSession(value.session.id, { archived: true });
         return { sessionId: value.session.id };
       }
       case "session.delete": {
-        const value = conversation(params);
+        const value = await conversation(params);
         if (value.status === "running")
           throw new Error("Stop the session before deleting it");
         engine.store.deleteSession(value.session.id);

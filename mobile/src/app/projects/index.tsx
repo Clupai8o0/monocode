@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Fragment, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
+import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
 import { pickProject } from "@/features/workspace/projectPick";
@@ -20,7 +21,7 @@ export default function ProjectsScreen() {
   const colors = useColors();
   const styles = useStyles();
   const { current } = useLocalSearchParams<{ current?: string }>();
-  const { projects } = useWorkspace();
+  const { projects, monos } = useWorkspace();
   const selected = projectForRoute(projects, current);
   const [switching, setSwitching] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -30,6 +31,14 @@ export default function ProjectsScreen() {
         project.name.toLowerCase().includes(needle),
       )
     : projects;
+  const shownMonos = needle
+    ? monos.filter((mono) => mono.name.toLowerCase().includes(needle))
+    : monos;
+  const openMono = (id: string) => {
+    if (switching) return;
+    router.back();
+    router.push({ pathname: "/mono/[monoId]", params: { monoId: id } });
+  };
   const pick = (id: string) => {
     if (switching) return;
     if (id === selected?.id) return router.back();
@@ -85,7 +94,25 @@ export default function ProjectsScreen() {
             />
           </Fragment>
         ))}
-        {needle && !shown.length ? (
+        {shownMonos.length ? (
+          <Text style={styles.heading}>Monos</Text>
+        ) : null}
+        {shownMonos.map((mono) => (
+          <SettingsRow
+            key={mono.id}
+            icon={
+              <PixelMascot
+                name={mono.mascot}
+                color={mono.color}
+                status={mono.status}
+                size={20}
+              />
+            }
+            label={mono.name}
+            onPress={() => openMono(mono.id)}
+          />
+        ))}
+        {needle && !shown.length && !shownMonos.length ? (
           <Text style={styles.empty}>No projects match.</Text>
         ) : null}
       </SettingsPage>
@@ -104,6 +131,13 @@ const useStyles = themedStyles((colors) => ({
     height: StyleSheet.hairlineWidth,
     marginLeft: 40,
     backgroundColor: colors.stroke,
+  },
+  heading: {
+    color: colors.muted,
+    fontSize: 13,
+    marginTop: 28,
+    marginBottom: 6,
+    marginLeft: 16,
   },
   empty: {
     color: colors.muted,

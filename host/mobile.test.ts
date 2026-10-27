@@ -234,6 +234,53 @@ describe("phone endpoint", () => {
     turns[0]!.finish();
   });
 
+  it("lists a Mono, and talks to it in its own conversation with its soul handed over", async () => {
+    const { call, store, turns, project } = await setup();
+    const { discoverCodexModels } = await import(
+      "../src/integrations/harness/providers/codex/codexCatalog"
+    );
+    vi.mocked(discoverCodexModels).mockResolvedValue([
+      { id: "gpt-6.1", name: "GPT-6.1" } as never,
+    ]);
+    const monoDir = join(store.attachmentDir, "..", "monos");
+    mkdirSync(join(monoDir, "m1"), { recursive: true });
+    writeFileSync(join(monoDir, "m1", "SOUL.md"), "Answer in haiku.");
+    writeFileSync(
+      join(monoDir, "roster.json"),
+      JSON.stringify([
+        { id: "m1", name: "Poet", mascot: "ghost", color: "#fff", projects: [project.cwd] },
+      ]),
+    );
+    const listed = (await call("workspace.list")).result;
+    expect(listed.monos).toEqual([
+      expect.objectContaining({ id: "m1", name: "Poet", projectIds: [project.id], status: "idle" }),
+    ]);
+
+    const sent = await call("conversation.send", { conversationId: "mono:m1", text: "Hello" });
+    expect(sent.ok).toBe(true);
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    expect(turns[0]!.input.text).toContain("Answer in haiku.");
+    expect(turns[0]!.input.text).toMatch(/Hello$/);
+    expect(turns[0]!.input.cwd).toContain(join("monos", "m1"));
+    // The transcript keeps what the user wrote, and the Mono keeps its session.
+    const read = await call("conversation.read", { conversationId: "mono:m1" });
+    expect(read.result.messages).toEqual([
+      expect.objectContaining({ role: "user", text: "Hello" }),
+    ]);
+    expect(read.result.id).toBe(sent.result.sessionId);
+    turns[0]!.finish();
+    const again = (await call("workspace.list")).result;
+    // Its folder is not a project, and its conversation is not a project session.
+    expect(again.projects.map((entry: { id: string }) => entry.id)).toEqual([project.id]);
+    expect(again.sessions).toEqual([]);
+    expect(again.monos[0].sessionId).toBe(sent.result.sessionId);
+    // A message starting with a path is not a command: it still gets the soul.
+    await call("conversation.send", { conversationId: "mono:m1", text: "/tmp/x: look" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    expect(turns[1]!.input.text).toContain("Answer in haiku.");
+    turns[1]!.finish();
+  });
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });

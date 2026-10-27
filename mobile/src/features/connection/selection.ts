@@ -1,11 +1,10 @@
 export type MobileSelection = { projectIds: string[]; monoIds: string[] };
 
 /**
- * Whether monos can be picked and shown. Off for the first version, as the
- * phone has no good way to talk to them yet; monos picked before are kept in
- * the selection, so they come back when this is turned on.
+ * Whether monos can be picked and shown. Each one opens as its own
+ * conversation, from the project switcher; hosts serve them since phone v2.
  */
-export const MONOS_ENABLED = false;
+export const MONOS_ENABLED = true;
 export function normalizeSelection(value: unknown): MobileSelection | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;

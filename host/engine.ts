@@ -247,6 +247,11 @@ export function parseCommand(input: unknown): HostCommand {
 }
 
 export class HostEngine {
+  /**
+   * What a send hands the provider, given the user's text; the transcript
+   * keeps the text alone. A Mono's conversation puts who it is ahead of it.
+   */
+  turnPrompt?: (value: HostSession, text: string) => string;
   private switchingProjects = new Set<string>();
   private running = new Map<
     string,
@@ -633,7 +638,9 @@ export class HostEngine {
           effect = (saved) => {
             this.run(
               saved,
-              command.type === "compact" ? null : command.text,
+              command.type === "compact"
+                ? null
+                : (this.turnPrompt?.(saved, command.text) ?? command.text),
               command.type === "send" ? command.intent : undefined,
               attachments,
             );
