@@ -128,7 +128,11 @@ describe("UsageFooter provider authentication", () => {
 
     expect(container.textContent).toContain("grok");
     expect(container.textContent).not.toContain("sign in");
-    expect(container.querySelector("button")).toBeNull();
+    expect(
+      container.querySelector(
+        'button:not([aria-label="Usage on every account"])',
+      ),
+    ).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 

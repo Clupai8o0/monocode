@@ -23,6 +23,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The footer's own controls, past the "All" usage button every footer has. */
+const OWN_BUTTON = 'button:not([aria-label="Usage on every account"])';
+const TERMINAL_CONTROLS = /<button(?![^>]*aria-label="Usage on every account")/g;
+
 describe("UsageFooter terminal control", () => {
   it("replaces the generic terminal button with the live process control", () => {
     const markup = renderToStaticMarkup(
@@ -46,7 +50,7 @@ describe("UsageFooter terminal control", () => {
 
     expect(markup).toContain(">npm</span>");
     expect(markup).not.toContain(">Terminal</span>");
-    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup.match(TERMINAL_CONTROLS)).toHaveLength(1);
   });
 
   it("keeps the generic terminal button when no process is running", () => {
@@ -58,7 +62,7 @@ describe("UsageFooter terminal control", () => {
     );
 
     expect(markup).toContain(">Terminal</span>");
-    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup.match(TERMINAL_CONTROLS)).toHaveLength(1);
   });
 
   it("marks the terminal button pressed only while the dock is open", () => {
@@ -126,7 +130,7 @@ describe("UsageFooter terminal control", () => {
         ),
       );
 
-      const button = container.querySelector("button");
+      const button = container.querySelector<HTMLButtonElement>(OWN_BUTTON);
       expect(button).not.toBeNull();
       act(() => button!.click());
       expect(onToggleProjectTerminal).toHaveBeenCalledTimes(1);
@@ -148,7 +152,7 @@ describe("UsageFooter terminal control", () => {
       ),
     );
 
-    const button = container.querySelector("button");
+    const button = container.querySelector<HTMLButtonElement>(OWN_BUTTON);
     expect(button).not.toBeNull();
     act(() => button!.click());
     expect(onNewTerminal).toHaveBeenCalledTimes(1);

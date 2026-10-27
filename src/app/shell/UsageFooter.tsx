@@ -49,6 +49,7 @@ import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
 import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
+import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import {
   ProviderSignInPanel,
   type ProviderSignInState,
@@ -171,6 +172,8 @@ export function UsageFooter({
           inset={inset}
         />
       ) : null}
+      {/* Fork: every account's usage, whichever agent this session runs. */}
+      <AllUsageChip className={USAGE_CHIP_CLASSES[inset ? "inset" : "footer"]} />
       {/* Fork: the Stacks button always shows, so the right-hand group does too. */}
       {showTerminals || showTerminalButton || pressureSlot || FORK_STACKS ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">

@@ -584,7 +584,7 @@ fn keychain_user() -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn security_output(args: &[String]) -> Option<String> {
+pub(crate) fn security_output(args: &[String]) -> Option<String> {
     security_run(args)
 }
 
