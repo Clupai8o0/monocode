@@ -2,6 +2,7 @@ import { isHarnessAvailable } from "../../../integrations/harness/core/availabil
 import { handleAgentMonos } from "./agentAppMonos";
 // Fork: agents use the same project logo storage as the manual picker.
 import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
+import { projectLook, setProjectLook } from "../../../fork/stylist/agentProjectLook";
 import { looksLikeProject } from "../../projects/model/recents";
 import {
   mergeModelSettings,
@@ -183,6 +184,8 @@ const FIELDS = new Map<string, readonly string[]>([
   ["projects.logo", ["project"]],
   ["projects.logo.set", ["path", "background", "project"]],
   ["projects.logo.clear", ["project"]],
+  ["projects.look", ["project"]],
+  ["projects.look.set", ["label", "color", "mascot", "project"]],
   ["sessions.list", ["project"]],
   ["sessions.read", ["sessionId", "before", "limit", "maxChars", "project"]],
   ["sessions.send", ["sessionId", "prompt", "project", "notifyOnComplete"]],
@@ -326,6 +329,18 @@ function noteTags(value: unknown): string[] {
  * several, so it names one with "project" (its path or name), and may leave it
  * out when it has one project or is in one of its own.
  */
+/** Fork: a Mono saves icons it makes here, outside any project's repo. */
+async function monoIconsDir(source: Session, host: AgentAppHost): Promise<string | null> {
+  const mono = host.monoOf?.(source.id);
+  if (!mono || typeof host.agentFiles !== "function") return null;
+  try {
+    const { dir } = await host.agentFiles(mono.id);
+    return dir ? `${dir.replace(/\/+$/, "")}/icons` : null;
+  } catch {
+    return null;
+  }
+}
+
 function requireProject(
   source: Session,
   input: Record<string, unknown>,
@@ -1016,8 +1031,13 @@ export async function handleAgentApp(
       const background = input.background;
       if (background !== undefined && background !== "transparent" && background !== "light" && background !== "dark")
         throw new Error("background must be transparent, light, or dark");
-      return agentProjectLogo(cwd, action, path, background);
+      return agentProjectLogo(cwd, action, path, background, await monoIconsDir(source, host));
     }
+    // Fork: the rest of a project's look (src/fork/stylist).
+    case "projects.look":
+      return projectLook(requireProject(source, input, host), await monoIconsDir(source, host));
+    case "projects.look.set":
+      return setProjectLook(requireProject(source, input, host), input, await monoIconsDir(source, host));
     case "models.list":
       return {
         runtimeModes: RUNTIME_MODES.filter((id) => RUNTIME_MODES.indexOf(id) <= RUNTIME_MODES.indexOf(source.runtimeMode)).map((id) => ({

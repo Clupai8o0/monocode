@@ -82,13 +82,15 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 37] = [
+const APP_ACTIONS: [&str; 39] = [
     "models.list",
     "monos.list",
     "monos.configure",
     "projects.logo",
     "projects.logo.set",
     "projects.logo.clear",
+    "projects.look",
+    "projects.look.set",
     "sessions.list",
     "sessions.read",
     "sessions.send",
@@ -126,8 +128,8 @@ const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /o
 Usage: {exe} app ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
 A Mono works on several projects: add "project":"<path or name>" to the
-sessions.*, worktrees.*, folders.* and projects.logo* actions to choose which one. It may be
-left out when the Mono has a single project.
+sessions.*, worktrees.*, folders.*, projects.logo* and projects.look* actions
+to choose which one. It may be left out when the Mono has a single project.
 
 Actions:
   models.list    {}  Available providers, models, settings and permission modes.
@@ -172,6 +174,18 @@ Actions:
                   Idle projects show it; running projects alternate with the
                   working mascot. The same logo appears in project settings.
   projects.logo.clear {}  Restore the project's default mascot.
+  projects.look  {}  The project's whole look: name, label, color (value, palette
+                  index or custom hex), mascot (shown and saved), logo and
+                  background, plus choices.colors and choices.mascots. A Mono
+                  also gets iconsDir: save icons it makes there (it may need
+                  creating), then apply one with projects.logo.set and its
+                  absolute path. Project repos stay untouched.
+  projects.look.set {"label":"Panoptic","color":3,"mascot":"eye"}
+                  Change any of label (up to 40 characters), color (palette
+                  index or a 6-digit hex color) and mascot (a name from
+                  choices.mascots).
+                  null restores that field's default. Change the look only
+                  when the user asks; the project menu shows the same values.
   sessions.list  {}  Project sessions with IDs, busy status, hasDraft and archived.
   sessions.read  {"sessionId":"...","before":"<turnId>","limit":3,"maxChars":1200}
                   Read up to 3 recent user/assistant exchanges. Tools and
@@ -710,6 +724,8 @@ mod tests {
             "projects.logo",
             "projects.logo.set",
             "projects.logo.clear",
+            "projects.look",
+            "projects.look.set",
             "artifacts.list",
             "artifacts.read",
             "artifacts.write",

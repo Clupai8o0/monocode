@@ -8,7 +8,7 @@ import {
 
 describe("projectMascots", () => {
   it("keeps every sprite on the shared grid", () => {
-    expect(PROJECT_MASCOTS).toHaveLength(19);
+    expect(PROJECT_MASCOTS).toHaveLength(20);
     for (const mascot of PROJECT_MASCOTS) {
       for (const frame of [mascot.rest, mascot.talk]) {
         expect(frame).toHaveLength(MASCOT_GRID);

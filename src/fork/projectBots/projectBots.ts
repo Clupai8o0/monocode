@@ -268,6 +268,33 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 4],
     ]),
   },
+  // The Stylist Mono (src/fork/stylist): a face under a tilted beret.
+  beret: {
+    rest: [
+      "....#...",
+      ".#####..",
+      "#######.",
+      ".######.",
+      ".#.##.#.",
+      ".######.",
+      ".##..##.",
+      "..####..",
+    ],
+    talk: [
+      "...#....",
+      "..#####.",
+      ".#######",
+      ".######.",
+      ".#.##.#.",
+      ".######.",
+      ".#....#.",
+      "..####..",
+    ],
+    eyes: same([
+      [2, 4],
+      [5, 4],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(

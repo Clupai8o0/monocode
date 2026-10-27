@@ -13,6 +13,8 @@ const ACTION_LABELS: Record<string, string> = {
   "projects.logo": "Read project logo",
   "projects.logo.set": "Set project logo",
   "projects.logo.clear": "Clear project logo",
+  "projects.look": "Read project look",
+  "projects.look.set": "Change project look",
   "sessions.list": "List sessions",
   "sessions.read": "Read a session",
   "sessions.send": "Continue a session",

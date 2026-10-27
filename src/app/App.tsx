@@ -601,6 +601,7 @@ import {
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
+import { seedStylistMono } from "../fork/stylist/stylistMono";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
@@ -2383,6 +2384,12 @@ function Workspace({
       applyProjectBots(recents.map((project) => project.path));
     }
   }, [recents]);
+  // Fork: the Stylist Mono gets every local project once (src/fork/stylist).
+  useEffect(() => {
+    if (import.meta.env.MODE !== "test" && monosEnabled) {
+      void seedStylistMono(recents.map((project) => project.path));
+    }
+  }, [monosEnabled, recents]);
   const unseenFinishedIds = useUnseenFinishedSessions(
     sessions,
     busySessionIds,

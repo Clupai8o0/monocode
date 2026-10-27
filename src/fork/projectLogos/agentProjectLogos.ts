@@ -15,6 +15,7 @@ export async function agentProjectLogo(
   action: string,
   path?: string,
   background?: ProjectLogoBackground,
+  iconsDir?: string | null,
 ): Promise<{ project: string; logo: string | null; background: string }> {
   const key = projectKey(cwd);
   if (action === "projects.logo.set") {
@@ -24,7 +25,10 @@ export async function agentProjectLogo(
     if (!path) {
       throw new Error("path is required to set a project logo");
     }
-    await setProjectLogo(cwd, path, { projectRoot: cwd, background });
+    // Fork (src/fork/stylist): a Mono may apply an icon it made in its own
+    // icons folder; native code still checks the file stays inside that root.
+    const root = iconsDir && path.startsWith(`${iconsDir}/`) ? iconsDir : cwd;
+    await setProjectLogo(cwd, path, { projectRoot: root, background });
   } else if (action === "projects.logo.clear") {
     await clearProjectLogo(key);
   }
