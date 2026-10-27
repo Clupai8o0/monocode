@@ -51,6 +51,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from "react";
 import {
@@ -178,6 +179,10 @@ import {
 } from "../../fork/closeBadges/CloseBadges";
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
+import {
+  CurrentProjectIcon,
+  useProjectLabel,
+} from "../../features/projects/ui/CurrentProjectIcon"; // Fork
 import { SessionCardPreview } from "../../features/sessions/ui/SessionCardPreview";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
@@ -2157,7 +2162,7 @@ function SidebarComponent({
   }, [inset, spaceProjects]);
   const slideRefs = useRef<(HTMLElement | null)[]>([]);
   const previousSpace = useRef(cwd);
-  // The outgoing project's session list, copied while it is still on
+  // The outgoing project's session card, copied while it is still on
   // screen, so it can be pushed away as the new one arrives.
   const outgoingSpace = useRef<{
     to: string;
@@ -2175,7 +2180,7 @@ function SidebarComponent({
         const node = el.cloneNode(true) as HTMLElement;
         // A slide still holding the live copy hidden must not hide this one.
         node.style.opacity = "";
-        return [{ node, scrollTop: el.scrollTop }];
+        return [{ node, scrollTop: sessionScroller(el).scrollTop }];
       }),
     };
   }
@@ -2283,6 +2288,8 @@ function SidebarComponent({
       overlay.className =
         "pointer-events-none absolute inset-0 z-20 overflow-hidden";
       const asideRect = aside.getBoundingClientRect();
+      // Attached first, so the copies can take their scroll positions.
+      aside.append(overlay);
       outgoing.nodes.forEach(({ node, scrollTop }, index) => {
         const live = slideRefs.current[index];
         if (!live) return;
@@ -2293,11 +2300,11 @@ function SidebarComponent({
           top: `${rect.top - asideRect.top}px`,
           width: `${rect.width}px`,
           height: `${rect.height}px`,
+          margin: "0",
         });
         overlay!.append(node);
-        node.scrollTop = scrollTop;
+        sessionScroller(node).scrollTop = scrollTop;
       });
-      aside.append(overlay);
     }
     // Clicks and shortcuts can wait for first-load sessions. A swipe starts
     // immediately so disk/network latency does not hold the gesture still.
@@ -2628,288 +2635,138 @@ function SidebarComponent({
             {closeAllSafeButton}
           </div>
         ) : null}
-        <div
+        <ProjectSessionsCard
+          enabled={inset}
+          cwd={cwd}
+          hidden={tab !== "sessions"}
+          onNew={onNew}
           ref={(el) => {
-            sessionsLock(el);
-            sessionsScrollRef.current = el;
-            slideRefs.current[0] = el;
+            if (inset) slideRefs.current[0] = el;
           }}
-          className={`sidebar-session-scroll min-h-0 flex-1 overflow-y-auto overscroll-none ${
-            tab === "sessions" ? "" : "hidden"
-          }`}
-          // Marks a scrolled list straight on the element, so the header's
-          // fade comes and goes without re-rendering the rows.
-          onScroll={
-            inset
-              ? (event) =>
-                  event.currentTarget.toggleAttribute(
-                    "data-scrolled",
-                    event.currentTarget.scrollTop > 0,
-                  )
-              : undefined
-          }
         >
-          {!cwd || cwd === "~" ? (
-            <div className="px-3 py-2 text-[12px] text-content/50">
-              <p>No project folder</p>
-              {inset && onOpenProject ? (
-                <button
-                  type="button"
-                  onClick={onOpenProject}
-                  className="mt-2 flex items-center gap-1.5 rounded-md bg-content/5 px-2 py-1.5 text-content/70 hover:bg-content/10 hover:text-content"
-                >
-                  <Plus className="size-3.5" strokeWidth={1.75} />
-                  Open project
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <div>
-              {/*
-              A project's first load stays deliberately blank. The listing is
-              served from a covering index and resolves within a frame or two,
-              so a placeholder only ever flashed — reading as a glitch rather
-              than as progress. This is checked before the empty state so that
-              cannot claim "No sessions yet" before the rows have landed.
-            */}
-              {pendingFirstLoad ? null : status === "error" &&
-                projectSessions.length === 0 ? (
-                <p className="px-3 py-2 text-[12px] text-content/50">
-                  Couldn’t load sessions
-                </p>
-              ) : visibleSessions.length === 0 ? (
-                // Inset like the list it stands in for, so the label and
-                // its text line up with the sections above.
-                <div className={inset ? "px-2 pt-1" : undefined}>
-                  {sessionsLabel}
-                  {/* A narrowed-down result is a transient answer to what the user
-                    just typed, so it stays a quiet line of text. Only the genuine
-                    "this project has nothing in it" case earns the illustration. */}
-                  {narrowedByUser ? (
-                    <p
-                      className={`${inset ? "px-2" : "px-3"} py-2 text-[12px] text-content/50`}
-                    >
-                      {searchNarrowed
-                        ? "No matching sessions"
-                        : "No sessions match these filters"}
-                    </p>
-                  ) : remoteProject && !remote.machine ? (
-                    <p
-                      className={`${inset ? "px-2" : "px-3"} py-2 text-[12px] text-content/45`}
-                    >
-                      This project’s machine isn’t connected on this computer.
-                    </p>
-                  ) : (
-                    <SessionsEmpty message="Sessions you start will show up here" />
-                  )}
-                </div>
-              ) : (
-                <ul
-                  data-session-list
-                  className={`flex flex-col pb-10 ${
-                    inset ? "gap-px px-2 pt-1" : "gap-0.5 p-1.5"
-                  }`}
-                >
-                  {sessionListEntries.map((entry, index) => {
-                    if (entry.kind === "pinned" || entry.kind === "reminders") {
-                      const isReminders = entry.kind === "reminders";
-                      const expanded = searchNarrowed || !entry.collapsed;
-                      const beforeUngrouped =
-                        sessionListEntries[index + 1]?.kind === "session";
-                      const groupItem = (
-                        <li
-                          key={`${entry.kind}-sessions`}
-                          data-pinned-sessions={isReminders ? undefined : ""}
-                          data-reminder-sessions={isReminders ? "" : undefined}
-                          className={`relative ${
-                            inset
-                              ? groupFollows(index)
-                                ? "mb-0.5"
-                                : "mb-3"
-                              : expanded || beforeUngrouped
-                                ? "mb-1.5"
-                                : ""
-                          }`}
-                        >
-                          <div
-                            className={
+          <div
+            ref={(el) => {
+              sessionsLock(el);
+              sessionsScrollRef.current = el;
+              if (!inset) slideRefs.current[0] = el;
+            }}
+            className={`sidebar-session-scroll min-h-0 flex-1 overflow-y-auto overscroll-none ${
+              tab === "sessions" || inset ? "" : "hidden"
+            }`}
+            // Marks a scrolled list straight on the element, so the header's
+            // fade comes and goes without re-rendering the rows.
+            onScroll={
+              inset
+                ? (event) =>
+                    event.currentTarget.toggleAttribute(
+                      "data-scrolled",
+                      event.currentTarget.scrollTop > 0,
+                    )
+                : undefined
+            }
+          >
+            {!cwd || cwd === "~" ? (
+              <div className="px-3 py-2 text-[12px] text-content/50">
+                <p>No project folder</p>
+                {inset && onOpenProject ? (
+                  <button
+                    type="button"
+                    onClick={onOpenProject}
+                    className="mt-2 flex items-center gap-1.5 rounded-md bg-content/5 px-2 py-1.5 text-content/70 hover:bg-content/10 hover:text-content"
+                  >
+                    <Plus className="size-3.5" strokeWidth={1.75} />
+                    Open project
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <div>
+                {/*
+                A project's first load stays deliberately blank. The listing is
+                served from a covering index and resolves within a frame or two,
+                so a placeholder only ever flashed — reading as a glitch rather
+                than as progress. This is checked before the empty state so that
+                cannot claim "No sessions yet" before the rows have landed.
+              */}
+                {pendingFirstLoad ? null : status === "error" &&
+                  projectSessions.length === 0 ? (
+                  <p className="px-3 py-2 text-[12px] text-content/50">
+                    Couldn’t load sessions
+                  </p>
+                ) : visibleSessions.length === 0 ? (
+                  // Inset like the list it stands in for, so the label and
+                  // its text line up with the sections above.
+                  <div className={inset ? "px-1 pt-1" : undefined}>
+                    {sessionsLabel}
+                    {/* A narrowed-down result is a transient answer to what the user
+                      just typed, so it stays a quiet line of text. Only the genuine
+                      "this project has nothing in it" case earns the illustration. */}
+                    {narrowedByUser ? (
+                      <p
+                        className={`${inset ? "px-2" : "px-3"} py-2 text-[12px] text-content/50`}
+                      >
+                        {searchNarrowed
+                          ? "No matching sessions"
+                          : "No sessions match these filters"}
+                      </p>
+                    ) : remoteProject && !remote.machine ? (
+                      <p
+                        className={`${inset ? "px-2" : "px-3"} py-2 text-[12px] text-content/45`}
+                      >
+                        This project’s machine isn’t connected on this computer.
+                      </p>
+                    ) : (
+                      <SessionsEmpty message="Sessions you start will show up here" />
+                    )}
+                  </div>
+                ) : (
+                  <ul
+                    data-session-list
+                    className={`flex flex-col pb-10 ${
+                      inset ? "gap-px px-1 pt-1" : "gap-0.5 p-1.5"
+                    }`}
+                  >
+                    {sessionListEntries.map((entry, index) => {
+                      if (entry.kind === "pinned" || entry.kind === "reminders") {
+                        const isReminders = entry.kind === "reminders";
+                        const expanded = searchNarrowed || !entry.collapsed;
+                        const beforeUngrouped =
+                          sessionListEntries[index + 1]?.kind === "session";
+                        const groupItem = (
+                          <li
+                            key={`${entry.kind}-sessions`}
+                            data-pinned-sessions={isReminders ? undefined : ""}
+                            data-reminder-sessions={isReminders ? "" : undefined}
+                            className={`relative ${
                               inset
-                                ? ""
-                                : "overflow-hidden rounded-md bg-content/5"
-                            }
+                                ? groupFollows(index)
+                                  ? "mb-0.5"
+                                  : "mb-3"
+                                : expanded || beforeUngrouped
+                                  ? "mb-1.5"
+                                  : ""
+                            }`}
                           >
-                            <FolderRow
-                              folder={
-                                isReminders
-                                  ? {
-                                      name: "Reminders",
-                                      customColor: REMINDERS_COLOR,
-                                    }
-                                  : { name: "Pinned" }
+                            <div
+                              className={
+                                inset
+                                  ? ""
+                                  : "overflow-hidden rounded-md bg-content/5"
                               }
-                              sessions={entry.sessions}
-                              expanded={expanded}
-                              dense={inset}
-                              dropTarget={false}
-                              busy={entry.sessions.some((session) =>
-                                listedBusySessionIds.has(session.id),
-                              )}
-                              done={entry.sessions.some((session) =>
-                                unseenFinishedIds.has(session.id),
-                              )}
-                              needsApproval={entry.sessions.some((session) =>
-                                listedApprovalSessionIds.has(session.id),
-                              )}
-                              groupIcon={
-                                isReminders ? (
-                                  <Clock
-                                    className={inset ? "size-4" : "size-3.5"}
-                                    strokeWidth={1.75}
-                                  />
-                                ) : (
-                                  <Pin
-                                    className={
-                                      inset ? "size-4" : "size-3.5 text-content"
-                                    }
-                                    strokeWidth={1.75}
-                                  />
-                                )
-                              }
-                              onToggle={() => {
-                                if (searchNarrowed) return;
-                                const collapsed = !entry.collapsed;
-                                if (isReminders) {
-                                  setReminderSessionsCollapsed(collapsed);
-                                  saveReminderSessionsCollapsed(cwd, collapsed);
-                                  return;
-                                }
-                                setPinnedSessionsCollapsed(collapsed);
-                                savePinnedSessionsCollapsed(cwd, collapsed);
-                              }}
-                            />
-                            {expanded ? (
-                              <ul
-                                className={`flex flex-col gap-px ${
-                                  inset ? "pt-px" : "p-1"
-                                }`}
-                              >
-                                {entry.sessions.map((session) => (
-                                  <SessionListItem
-                                    key={session.id}
-                                    session={session}
-                                    cwd={cwd}
-                                    motion={sessionInsertMotion}
-                                  >
-                                    {renderSessionCard(session, true)}
-                                  </SessionListItem>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
-                        </li>
-                      );
-                      return inset && index === firstGroupIndex ? (
-                        <Fragment key={`${entry.kind}-sessions`}>
-                          <li className="list-none">
-                            <SidebarSectionLabel label="Folders" />
-                          </li>
-                          {groupItem}
-                        </Fragment>
-                      ) : (
-                        groupItem
-                      );
-                    }
-                    if (entry.kind === "folder") {
-                      const expanded =
-                        searchNarrowed || !entry.folder.collapsed;
-                      const shellFill = folderShellFill(
-                        entry.folder.colorIndex,
-                        entry.folder.customColor,
-                      );
-                      const folderIndex = visibleFolderIds.indexOf(
-                        entry.folder.id,
-                      );
-                      const beforeUngrouped =
-                        sessionListEntries[index + 1]?.kind === "session";
-                      const draggingFolder =
-                        folderSortable.draggingId === entry.folder.id;
-                      const showFolderDropStart =
-                        folderSortable.draggingId &&
-                        folderSortable.toIndex === folderIndex &&
-                        folderSortable.fromIndex !== null &&
-                        folderSortable.toIndex < folderSortable.fromIndex;
-                      const showFolderDropEnd =
-                        folderSortable.draggingId &&
-                        folderSortable.toIndex === folderIndex &&
-                        folderSortable.fromIndex !== null &&
-                        folderSortable.toIndex > folderSortable.fromIndex;
-                      const folderItem = (
-                        <li
-                          key={entry.folder.id}
-                          ref={(el) =>
-                            folderSortable.setItemRef(entry.folder.id, el)
-                          }
-                          data-session-folder={entry.folder.id}
-                          className={`relative ${
-                            inset
-                              ? groupFollows(index)
-                                ? "mb-0.5"
-                                : "mb-3"
-                              : expanded || beforeUngrouped
-                                ? "mb-1.5"
-                                : ""
-                          } ${draggingFolder ? "opacity-40" : ""}`}
-                        >
-                          {showFolderDropStart ? (
-                            <div className="pointer-events-none absolute inset-x-1 top-0 z-20 h-0.5 rounded-full bg-accent" />
-                          ) : null}
-                          {showFolderDropEnd ? (
-                            <div className="pointer-events-none absolute inset-x-1 bottom-0 z-20 h-0.5 rounded-full bg-accent" />
-                          ) : null}
-                          <div
-                            className={
-                              inset
-                                ? ""
-                                : `overflow-hidden rounded-md ${
-                                    shellFill ? "" : "bg-content/5"
-                                  }`
-                            }
-                            style={
-                              shellFill && !inset
-                                ? { background: shellFill }
-                                : undefined
-                            }
-                          >
-                            {renamingFolderId === entry.folder.id ? (
-                              <FolderRenameRow
-                                folder={entry.folder}
-                                memberCount={entry.sessions.length}
-                                dropTarget={isSessionDrop(
-                                  "folder",
-                                  entry.folder.id,
-                                )}
-                                onCommit={(name) => {
-                                  commitSessionFolders(
-                                    renameFolder(
-                                      sessionFolders,
-                                      entry.folder.id,
-                                      name,
-                                    ),
-                                  );
-                                  setRenamingFolderId(null);
-                                }}
-                                onCancel={() => setRenamingFolderId(null)}
-                              />
-                            ) : (
+                            >
                               <FolderRow
-                                folder={entry.folder}
+                                folder={
+                                  isReminders
+                                    ? {
+                                        name: "Reminders",
+                                        customColor: REMINDERS_COLOR,
+                                      }
+                                    : { name: "Pinned" }
+                                }
                                 sessions={entry.sessions}
                                 expanded={expanded}
                                 dense={inset}
-                                dropTarget={isSessionDrop(
-                                  "folder",
-                                  entry.folder.id,
-                                )}
+                                dropTarget={false}
                                 busy={entry.sessions.some((session) =>
                                   listedBusySessionIds.has(session.id),
                                 )}
@@ -2919,33 +2776,34 @@ function SidebarComponent({
                                 needsApproval={entry.sessions.some((session) =>
                                   listedApprovalSessionIds.has(session.id),
                                 )}
-                                onPointerDown={(event) =>
-                                  folderSortable.onItemPointerDown(
-                                    entry.folder.id,
-                                    event,
+                                groupIcon={
+                                  isReminders ? (
+                                    <Clock
+                                      className={inset ? "size-4" : "size-3.5"}
+                                      strokeWidth={1.75}
+                                    />
+                                  ) : (
+                                    <Pin
+                                      className={
+                                        inset ? "size-4" : "size-3.5 text-content"
+                                      }
+                                      strokeWidth={1.75}
+                                    />
                                   )
                                 }
                                 onToggle={() => {
-                                  if (folderSortable.consumeClick()) return;
                                   if (searchNarrowed) return;
-                                  commitSessionFolders(
-                                    setFolderCollapsed(
-                                      sessionFolders,
-                                      entry.folder.id,
-                                      !entry.folder.collapsed,
-                                    ),
-                                  );
+                                  const collapsed = !entry.collapsed;
+                                  if (isReminders) {
+                                    setReminderSessionsCollapsed(collapsed);
+                                    saveReminderSessionsCollapsed(cwd, collapsed);
+                                    return;
+                                  }
+                                  setPinnedSessionsCollapsed(collapsed);
+                                  savePinnedSessionsCollapsed(cwd, collapsed);
                                 }}
-                                onContextMenu={(event) =>
-                                  onFolderContextMenu(entry.folder.id, event)
-                                }
-                                onRename={() =>
-                                  setRenamingFolderId(entry.folder.id)
-                                }
                               />
-                            )}
-                            {expanded ? (
-                              <>
+                              {expanded ? (
                                 <ul
                                   className={`flex flex-col gap-px ${
                                     inset ? "pt-px" : "p-1"
@@ -2962,97 +2820,256 @@ function SidebarComponent({
                                     </SessionListItem>
                                   ))}
                                 </ul>
-                                {onNew ? (
-                                  <div
-                                    className={
-                                      inset
-                                        ? "pt-px"
-                                        : "border-t border-stroke p-1"
-                                    }
-                                  >
-                                    <button
-                                      type="button"
-                                      data-no-drag
-                                      data-tauri-drag-region="false"
-                                      title="New session"
-                                      aria-label="New session"
-                                      onClick={() =>
-                                        onNewInFolder(entry.folder.id)
-                                      }
-                                      className="relative flex w-full items-center gap-1 rounded-md border border-transparent px-2.5 py-1.5 text-left text-content/45 hover:bg-content/10 hover:text-content"
-                                    >
-                                      <Plus
-                                        className="size-3 shrink-0"
-                                        strokeWidth={1.75}
-                                      />
-                                      <span className="text-[13px] font-semibold leading-snug">
-                                        New session
-                                      </span>
-                                    </button>
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : null}
-                          </div>
-                        </li>
-                      );
-                      // The inset list groups its folders under one label.
-                      return inset && index === firstGroupIndex ? (
-                        <Fragment key={entry.folder.id}>
-                          <li className="list-none">
-                            <SidebarSectionLabel label="Folders" />
+                              ) : null}
+                            </div>
                           </li>
-                          {folderItem}
+                        );
+                        return inset && index === firstGroupIndex ? (
+                          <Fragment key={`${entry.kind}-sessions`}>
+                            <li className="list-none">
+                              <SidebarSectionLabel label="Folders" />
+                            </li>
+                            {groupItem}
+                          </Fragment>
+                        ) : (
+                          groupItem
+                        );
+                      }
+                      if (entry.kind === "folder") {
+                        const expanded =
+                          searchNarrowed || !entry.folder.collapsed;
+                        const shellFill = folderShellFill(
+                          entry.folder.colorIndex,
+                          entry.folder.customColor,
+                        );
+                        const folderIndex = visibleFolderIds.indexOf(
+                          entry.folder.id,
+                        );
+                        const beforeUngrouped =
+                          sessionListEntries[index + 1]?.kind === "session";
+                        const draggingFolder =
+                          folderSortable.draggingId === entry.folder.id;
+                        const showFolderDropStart =
+                          folderSortable.draggingId &&
+                          folderSortable.toIndex === folderIndex &&
+                          folderSortable.fromIndex !== null &&
+                          folderSortable.toIndex < folderSortable.fromIndex;
+                        const showFolderDropEnd =
+                          folderSortable.draggingId &&
+                          folderSortable.toIndex === folderIndex &&
+                          folderSortable.fromIndex !== null &&
+                          folderSortable.toIndex > folderSortable.fromIndex;
+                        const folderItem = (
+                          <li
+                            key={entry.folder.id}
+                            ref={(el) =>
+                              folderSortable.setItemRef(entry.folder.id, el)
+                            }
+                            data-session-folder={entry.folder.id}
+                            className={`relative ${
+                              inset
+                                ? groupFollows(index)
+                                  ? "mb-0.5"
+                                  : "mb-3"
+                                : expanded || beforeUngrouped
+                                  ? "mb-1.5"
+                                  : ""
+                            } ${draggingFolder ? "opacity-40" : ""}`}
+                          >
+                            {showFolderDropStart ? (
+                              <div className="pointer-events-none absolute inset-x-1 top-0 z-20 h-0.5 rounded-full bg-accent" />
+                            ) : null}
+                            {showFolderDropEnd ? (
+                              <div className="pointer-events-none absolute inset-x-1 bottom-0 z-20 h-0.5 rounded-full bg-accent" />
+                            ) : null}
+                            <div
+                              className={
+                                inset
+                                  ? ""
+                                  : `overflow-hidden rounded-md ${
+                                      shellFill ? "" : "bg-content/5"
+                                    }`
+                              }
+                              style={
+                                shellFill && !inset
+                                  ? { background: shellFill }
+                                  : undefined
+                              }
+                            >
+                              {renamingFolderId === entry.folder.id ? (
+                                <FolderRenameRow
+                                  folder={entry.folder}
+                                  memberCount={entry.sessions.length}
+                                  dropTarget={isSessionDrop(
+                                    "folder",
+                                    entry.folder.id,
+                                  )}
+                                  onCommit={(name) => {
+                                    commitSessionFolders(
+                                      renameFolder(
+                                        sessionFolders,
+                                        entry.folder.id,
+                                        name,
+                                      ),
+                                    );
+                                    setRenamingFolderId(null);
+                                  }}
+                                  onCancel={() => setRenamingFolderId(null)}
+                                />
+                              ) : (
+                                <FolderRow
+                                  folder={entry.folder}
+                                  sessions={entry.sessions}
+                                  expanded={expanded}
+                                  dense={inset}
+                                  dropTarget={isSessionDrop(
+                                    "folder",
+                                    entry.folder.id,
+                                  )}
+                                  busy={entry.sessions.some((session) =>
+                                    listedBusySessionIds.has(session.id),
+                                  )}
+                                  done={entry.sessions.some((session) =>
+                                    unseenFinishedIds.has(session.id),
+                                  )}
+                                  needsApproval={entry.sessions.some((session) =>
+                                    listedApprovalSessionIds.has(session.id),
+                                  )}
+                                  onPointerDown={(event) =>
+                                    folderSortable.onItemPointerDown(
+                                      entry.folder.id,
+                                      event,
+                                    )
+                                  }
+                                  onToggle={() => {
+                                    if (folderSortable.consumeClick()) return;
+                                    if (searchNarrowed) return;
+                                    commitSessionFolders(
+                                      setFolderCollapsed(
+                                        sessionFolders,
+                                        entry.folder.id,
+                                        !entry.folder.collapsed,
+                                      ),
+                                    );
+                                  }}
+                                  onContextMenu={(event) =>
+                                    onFolderContextMenu(entry.folder.id, event)
+                                  }
+                                  onRename={() =>
+                                    setRenamingFolderId(entry.folder.id)
+                                  }
+                                />
+                              )}
+                              {expanded ? (
+                                <>
+                                  <ul
+                                    className={`flex flex-col gap-px ${
+                                      inset ? "pt-px" : "p-1"
+                                    }`}
+                                  >
+                                    {entry.sessions.map((session) => (
+                                      <SessionListItem
+                                        key={session.id}
+                                        session={session}
+                                        cwd={cwd}
+                                        motion={sessionInsertMotion}
+                                      >
+                                        {renderSessionCard(session, true)}
+                                      </SessionListItem>
+                                    ))}
+                                  </ul>
+                                  {onNew ? (
+                                    <div
+                                      className={
+                                        inset
+                                          ? "pt-px"
+                                          : "border-t border-stroke p-1"
+                                      }
+                                    >
+                                      <button
+                                        type="button"
+                                        data-no-drag
+                                        data-tauri-drag-region="false"
+                                        title="New session"
+                                        aria-label="New session"
+                                        onClick={() =>
+                                          onNewInFolder(entry.folder.id)
+                                        }
+                                        className="relative flex w-full items-center gap-1 rounded-md border border-transparent px-2.5 py-1.5 text-left text-content/45 hover:bg-content/10 hover:text-content"
+                                      >
+                                        <Plus
+                                          className="size-3 shrink-0"
+                                          strokeWidth={1.75}
+                                        />
+                                        <span className="text-[13px] font-semibold leading-snug">
+                                          New session
+                                        </span>
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                        // The inset list groups its folders under one label.
+                        return inset && index === firstGroupIndex ? (
+                          <Fragment key={entry.folder.id}>
+                            <li className="list-none">
+                              <SidebarSectionLabel label="Folders" />
+                            </li>
+                            {folderItem}
+                          </Fragment>
+                        ) : (
+                          folderItem
+                        );
+                      }
+                      const item = (
+                        <SessionListItem
+                          key={entry.session.id}
+                          session={entry.session}
+                          cwd={cwd}
+                          motion={sessionInsertMotion}
+                        >
+                          {renderSessionCard(entry.session)}
+                        </SessionListItem>
+                      );
+                      const ageLabel = looseSessionLabels.get(index);
+                      return ageLabel ? (
+                        <Fragment key={entry.session.id}>
+                          <li
+                            className={`list-none ${
+                              index === firstLooseSessionIndex ? "" : "mt-3"
+                            }`}
+                          >
+                            <SidebarSectionLabel label={ageLabel}>
+                              {index === firstLooseSessionIndex
+                                ? sessionsFilterButton
+                                : null}
+                            </SidebarSectionLabel>
+                          </li>
+                          {item}
                         </Fragment>
                       ) : (
-                        folderItem
+                        item
                       );
-                    }
-                    const item = (
-                      <SessionListItem
-                        key={entry.session.id}
-                        session={entry.session}
-                        cwd={cwd}
-                        motion={sessionInsertMotion}
-                      >
-                        {renderSessionCard(entry.session)}
-                      </SessionListItem>
-                    );
-                    const ageLabel = looseSessionLabels.get(index);
-                    return ageLabel ? (
-                      <Fragment key={entry.session.id}>
-                        <li
-                          className={`list-none ${
-                            index === firstLooseSessionIndex ? "" : "mt-3"
-                          }`}
-                        >
-                          <SidebarSectionLabel label={ageLabel}>
-                            {index === firstLooseSessionIndex
-                              ? sessionsFilterButton
-                              : null}
-                          </SidebarSectionLabel>
-                        </li>
-                        {item}
-                      </Fragment>
-                    ) : (
-                      item
-                    );
-                  })}
-                  {sessionsLabel && firstLooseSessionIndex < 0 ? (
-                    <li className="list-none">{sessionsLabel}</li>
-                  ) : null}
-                  {hasMoreSessions ? (
-                    <li
-                      ref={loadMoreRef}
-                      aria-hidden
-                      className="h-px list-none"
-                    />
-                  ) : null}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
+                    })}
+                    {sessionsLabel && firstLooseSessionIndex < 0 ? (
+                      <li className="list-none">{sessionsLabel}</li>
+                    ) : null}
+                    {hasMoreSessions ? (
+                      <li
+                        ref={loadMoreRef}
+                        aria-hidden
+                        className="h-px list-none"
+                      />
+                    ) : null}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </ProjectSessionsCard>
         {paneHost ? null : changesPane}
         {showSidebarFooter ? (
           <>
@@ -4053,6 +4070,85 @@ export function groupStartedSessions<T extends { id: string }>(
     else byParent.set(root, [session]);
   }
   return { byParent, childIds };
+}
+
+/** The session list inside a slide element, which may be the list itself. */
+function sessionScroller(el: HTMLElement): HTMLElement {
+  return el.matches(".sidebar-session-scroll")
+    ? el
+    : (el.querySelector<HTMLElement>(".sidebar-session-scroll") ?? el);
+}
+
+/**
+ * Fork: the inset sidebar holds the current project's sessions in a card
+ * headed by the project, so it reads as belonging to the selection above.
+ * Its add button starts a session with the last used model, like Mod+T.
+ */
+function ProjectSessionsCard({
+  enabled,
+  cwd,
+  hidden,
+  onNew,
+  ref,
+  children,
+}: {
+  enabled: boolean;
+  cwd: string;
+  hidden: boolean;
+  onNew?: () => string | void;
+  ref?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  const project = !!cwd && cwd !== "~";
+  return (
+    <div
+      ref={ref}
+      data-project-sessions=""
+      className={`mx-2 mb-2 min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-content/4 ${
+        hidden ? "hidden" : "flex"
+      }`}
+    >
+      {project ? <ProjectSessionsHeader cwd={cwd} onNew={onNew} /> : null}
+      {children}
+    </div>
+  );
+}
+
+function ProjectSessionsHeader({
+  cwd,
+  onNew,
+}: {
+  cwd: string;
+  onNew?: () => string | void;
+}) {
+  const label = useProjectLabel(cwd);
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 pl-3 pr-1.5">
+      <CurrentProjectIcon
+        cwd={cwd}
+        className="size-4"
+        mascotClassName="size-3"
+      />
+      <span
+        className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80"
+        title={cwd}
+      >
+        {label}
+      </span>
+      {onNew ? (
+        <button
+          type="button"
+          aria-label={`New session in ${label}`}
+          title={`New session (${MOD}T)`}
+          onClick={() => onNew()}
+          className="grid size-6 shrink-0 place-items-center rounded-md text-content/60 outline-none transition-colors duration-150 hover:bg-content/10 hover:text-content focus-visible:ring-1 focus-visible:ring-accent active:bg-content/15 motion-reduce:transition-none"
+        >
+          <Plus className="size-3.5" strokeWidth={1.75} />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 /** A quiet heading over a group in the inset sidebar, actions at its end. */

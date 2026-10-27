@@ -298,11 +298,23 @@ describe("inset Projects list", () => {
     expect(rows()).toEqual([paths[1], paths[2], paths[0]]);
     expect(projects.querySelector('[aria-current="page"]')?.textContent).toContain("project");
   });
+  it("holds the sessions in a card headed by the project with a new-session button", async () => {
+    setupProjects();
+    props.onNew = vi.fn();
+    await act(async () => render());
+    const sessionsCard = container.querySelector<HTMLElement>("[data-project-sessions]")!;
+    expect(sessionsCard.querySelector(".sidebar-session-scroll")).not.toBeNull();
+    expect(sessionsCard.contains(container.querySelector("[data-fork-projects]"))).toBe(false);
+    expect(sessionsCard.textContent).toContain("project");
+    act(() => sessionsCard.querySelector<HTMLButtonElement>('[aria-label="New session in project"]')!.click());
+    expect(props.onNew).toHaveBeenCalledOnce();
+  });
   it("does not add the inset Projects section to the classic sidebar", async () => {
     setupProjects(); props.inset = false;
     await act(async () => render());
     expect(container.querySelector("[data-fork-projects]")).toBeNull();
     expect(card()).not.toBeNull();
+    expect(container.querySelector("[data-project-sessions]")).toBeNull();
   });
   it("reserves session space by replacing the duplicate live-agent footer only when Projects is shown", async () => {
     setupProjects();
