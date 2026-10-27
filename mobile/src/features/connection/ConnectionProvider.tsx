@@ -35,7 +35,11 @@ export type Catalog = {
   monos: Mono[];
   sessions: SessionSummary[];
   addresses?: Desktop["addresses"];
+  /** A host's name for this version of the catalog, to send back as `since`. */
+  etag?: string;
 };
+/** A host's reply when the catalog named by `since` is still current. */
+type Unchanged = { unchanged: true; etag: string };
 const EMPTY: Catalog = { projects: [], monos: [], sessions: [] };
 const PAIRING = "monocode.mobile.pairing";
 const IDENTITY = "monocode.mobile.identity";
@@ -71,6 +75,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const active = useRef<Pairing | null>(null);
   const refreshing = useRef(false);
   const lastCatalog = useRef<string | null>(null);
+  // Hosts only: what the last full catalog was called, so a poll that finds
+  // nothing new costs a few bytes. Desktops send no etag and always answer.
+  const lastEtag = useRef<string | null>(null);
   const pairingNow = useRef(false);
   const generation = useRef(0);
   useEffect(() => {
@@ -114,8 +121,19 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     const version = generation.current;
     refreshing.current = true;
     try {
-      const next = await request<Catalog>(value, "workspace.list");
+      const since = lastEtag.current;
+      const reply = await request<Catalog | Unchanged>(
+        value,
+        "workspace.list",
+        since ? { since } : {},
+      );
       if (active.current !== value || version !== generation.current) return;
+      if ("unchanged" in reply && reply.unchanged && since) {
+        setConnected(true);
+        setError(null);
+        return;
+      }
+      const next = reply as Catalog;
       if (
         !Array.isArray(next.projects) ||
         !Array.isArray(next.monos) ||
@@ -128,7 +146,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       }
       // The poll repeats every few seconds; only a changed workspace is saved
       // and re-rendered.
-      const { addresses: _, ...workspace } = next;
+      const { addresses: _, etag, ...workspace } = next;
       const serialized = JSON.stringify(workspace);
       if (serialized !== lastCatalog.current) {
         await Storage.setItem(key(value.desktop.fingerprint, "catalog"), serialized);
@@ -136,6 +154,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         lastCatalog.current = serialized;
         setCatalog((previous) => withUnchanged(previous, next));
       }
+      lastEtag.current = etag ?? null;
       setConnected(true);
       setError(null);
     } catch (reason) {
@@ -175,6 +194,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     setPairing(value);
     setCatalog(EMPTY);
     lastCatalog.current = null;
+    lastEtag.current = null;
     setSelection(chosen ? normalizeSelection(JSON.parse(chosen)) : null);
     await refresh();
   }, [refresh]);
@@ -261,6 +281,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     setConnected(false);
     setCatalog(EMPTY);
     lastCatalog.current = null;
+    lastEtag.current = null;
     setSelection(null);
     setError(null);
     await Storage.removeItem(PAIRING);

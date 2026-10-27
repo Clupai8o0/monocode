@@ -303,6 +303,21 @@ describe("phone endpoint", () => {
     expect(listed[1].mascot).toBeUndefined();
   });
 
+  it("answers a catalog the phone already has with a short reply", async () => {
+    const { call, project } = await setup();
+    const first = (await call("workspace.list")).result;
+    expect(first.projects[0].id).toBe(project.id);
+    expect(first.etag).toEqual(expect.any(String));
+    expect((await call("workspace.list", { since: first.etag })).result).toEqual({
+      unchanged: true,
+      etag: first.etag,
+    });
+    await call("session.start", { projectId: project.id, text: "Hi", model: "codex:test" });
+    const changed = (await call("workspace.list", { since: first.etag })).result;
+    expect(changed.sessions).toHaveLength(1);
+    expect(changed.etag).not.toBe(first.etag);
+  });
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });

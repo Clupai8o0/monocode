@@ -6,6 +6,7 @@ import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
 import { createMobileMonos } from "./mobile-monos";
+import { headBranch } from "./git-head";
 import { startNotifications } from "./notify";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
@@ -215,7 +216,7 @@ export function createMobileHandler(
         path: project.cwd,
         name: looks.projects[project.cwd]?.name ?? project.name,
         machine,
-        branch: "",
+        branch: headBranch(project.cwd),
         color: looks.projects[project.cwd]?.color ?? COLORS[index % COLORS.length],
         ...(looks.projects[project.cwd]?.mascot
           ? { mascot: looks.projects[project.cwd]!.mascot }
@@ -500,8 +501,18 @@ export function createMobileHandler(
     const now = Date.now();
     sweep();
     switch (method) {
-      case "workspace.list":
-        return catalog();
+      case "workspace.list": {
+        // A phone that names the catalog it has gets a short answer when
+        // nothing changed; one that doesn't (v1) always gets the whole list.
+        const value = catalog();
+        const etag = createHash("sha256")
+          .update(JSON.stringify(value))
+          .digest("base64url")
+          .slice(0, 22);
+        if (typeof params.since === "string" && params.since === etag)
+          return { unchanged: true, etag };
+        return { ...value, etag };
+      }
       case "device.leave":
         return { revoked: engine.store.revokeToken(token) };
       case "models.list":
