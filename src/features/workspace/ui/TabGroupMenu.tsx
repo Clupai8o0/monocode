@@ -341,7 +341,8 @@ export function TabGroupMenu({
 
         <div className="mb-2 px-0.5">
           <p className="mb-1 text-[11px] text-content/50">Mascot</p>
-          <div className="flex items-center justify-between gap-1">
+          {/* Fork: the roster outgrew one row (src/fork/projectBots). */}
+          <div className="grid grid-cols-10 justify-items-center gap-y-1">
             {PROJECT_MASCOTS.map((mascot) => (
               <MascotSwatch
                 key={mascot.name}
