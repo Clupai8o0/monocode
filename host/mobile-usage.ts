@@ -4,7 +4,7 @@ import {
 } from "../src/features/providers/model/rateLimitsFetch";
 import { errorRateLimits } from "../src/features/providers/model/rateLimits";
 import { mobileUsageSnapshot } from "../src/features/mobile/model/mobileAccountUsage";
-import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
+import { hostAccounts } from "./accounts";
 
 /**
  * How much of the plan this machine's Claude and Codex accounts have used, in
@@ -13,9 +13,8 @@ import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/pro
  * a small cache of its own with the same effect: the phone can ask as often as
  * it likes, and only a pull to refresh probes the provider again.
  *
- * One account per provider — the config directory this host runs its agents
- * with. Switching between several would mean a separate sign-in per directory,
- * which only the owner can do.
+ * Every sign-in the host found for the provider (see `accounts.ts`), each
+ * probed with its own config directory.
  */
 
 /** How long a reading stands before the next ask probes again. */
@@ -27,19 +26,26 @@ type Provider = (typeof PROVIDERS)[number];
 type Limits = Awaited<ReturnType<typeof fetchClaudeRateLimits>>;
 
 export function createMobileUsage() {
-  const cache = new Map<Provider, { at: number; limits: Limits }>();
-  const inflight = new Map<Provider, Promise<Limits>>();
+  const cache = new Map<string, { at: number; limits: Limits }>();
+  const inflight = new Map<string, Promise<Limits>>();
 
-  const read = async (provider: Provider, refresh: boolean): Promise<Limits> => {
-    const cached = cache.get(provider);
+  const read = async (
+    provider: Provider,
+    accountId: string,
+    refresh: boolean,
+  ): Promise<Limits> => {
+    const key = `${provider}:${accountId}`;
+    const cached = cache.get(key);
     if (!refresh && cached && Date.now() - cached.at < FRESH_MS)
       return cached.limits;
-    // One probe at a time per provider: the picker opening asks for both, and
+    // One probe at a time per account: the picker opening asks for both, and
     // Codex's probe starts a whole app-server.
-    const running = inflight.get(provider);
+    const running = inflight.get(key);
     if (running) return running;
     const probe = (
-      provider === "claude" ? fetchClaudeRateLimits() : fetchCodexRateLimits()
+      provider === "claude"
+        ? fetchClaudeRateLimits(accountId)
+        : fetchCodexRateLimits(accountId)
     )
       .catch((error: unknown) =>
         errorRateLimits(
@@ -66,13 +72,13 @@ export function createMobileUsage() {
         return limits;
       })
       .then((limits) => {
-        cache.set(provider, { at: Date.now(), limits });
+        cache.set(key, { at: Date.now(), limits });
         return limits;
       })
       .finally(() => {
-        if (inflight.get(provider) === probe) inflight.delete(provider);
+        if (inflight.get(key) === probe) inflight.delete(key);
       });
-    inflight.set(provider, probe);
+    inflight.set(key, probe);
     return probe;
   };
 
@@ -82,17 +88,17 @@ export function createMobileUsage() {
       throw new Error(
         "Usage is only available for Claude Code and Codex accounts",
       );
-    const limits = await read(provider, params.refresh === true);
-    return {
-      accounts: {
+    const accounts = hostAccounts().filter(
+      (account) => account.provider === provider && !account.duplicate,
+    );
+    const readings = await Promise.all(
+      accounts.map(async (account) => {
+        const limits = await read(provider, account.id, params.refresh === true);
         // Used, not remaining: the desktop's own preference lives in its
         // browser storage, which a host has none of.
-        [DEFAULT_PROVIDER_ACCOUNT_ID]: mobileUsageSnapshot(
-          limits,
-          Date.now(),
-          false,
-        ),
-      },
-    };
+        return [account.id, mobileUsageSnapshot(limits, Date.now(), false)];
+      }),
+    );
+    return { accounts: Object.fromEntries(readings) };
   };
 }

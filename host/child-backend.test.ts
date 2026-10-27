@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -327,5 +327,52 @@ it("reads Claude usage with the stored sign-in, and never refreshes it", async (
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previous;
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("runs an agent with the named account's directory, and refuses an unknown one", async () => {
+  const home = mkdtempSync(join(tmpdir(), "monocode-account-home-"));
+  const named = join(home, ".claude-work");
+  mkdirSync(named);
+  writeFileSync(join(named, ".credentials.json"), "{}");
+  const file = join(home, "provider.cjs");
+  writeFileSync(
+    file,
+    "console.log(JSON.stringify({ dir: process.env.CLAUDE_CONFIG_DIR ?? null })); setInterval(() => {}, 1000);",
+  );
+  const previous = process.env.HOME;
+  process.env.HOME = home;
+  const backend = new HostChildBackend();
+  let dir: string | null | undefined;
+  const stopListening = await backend.listen<{ line: string }>(
+    "harness-stdout",
+    ({ payload }) => {
+      dir = JSON.parse(payload.line).dir;
+    },
+  );
+  try {
+    await expect(
+      backend.invoke("harness_spawn", {
+        sessionId: "gone",
+        command: file,
+        args: [],
+        cwd: home,
+        account: { provider: "claude", id: "gone" },
+      }),
+    ).rejects.toThrow(/not signed in/);
+    await backend.invoke("harness_spawn", {
+      sessionId: "work",
+      command: file,
+      args: [],
+      cwd: home,
+      account: { provider: "claude", id: "work" },
+    });
+    await vi.waitFor(() => expect(dir).toBe(named));
+  } finally {
+    stopListening();
+    await backend.close();
+    if (previous === undefined) delete process.env.HOME;
+    else process.env.HOME = previous;
+    rmSync(home, { recursive: true, force: true });
   }
 });

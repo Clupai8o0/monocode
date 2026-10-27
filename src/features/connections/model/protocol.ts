@@ -152,6 +152,8 @@ export type HostCommand =
       model: string;
       modelSettings?: Record<string, string>;
       runtimeMode: RuntimeMode;
+      /** One of the host's Claude or Codex sign-ins; its default if left out. */
+      providerAccountId?: string;
     }
   | {
       type: "configure";

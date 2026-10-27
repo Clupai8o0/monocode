@@ -108,6 +108,9 @@ export function parseCommand(input: unknown): HostCommand {
         ? { modelSettings: modelSettings(v.modelSettings) }
         : {}),
       runtimeMode: v.runtimeMode as Session["runtimeMode"],
+      ...(v.providerAccountId !== undefined
+        ? { providerAccountId: text(v.providerAccountId, "account", 64) }
+        : {}),
     };
   }
   const sessionId = text(v.sessionId, "session ID");
@@ -284,6 +287,7 @@ export class HostEngine {
           value.session.id,
           value.session.providerSessionId,
           value.session.cwd,
+          value.session.providerAccountId,
         );
     }
   }
@@ -397,6 +401,7 @@ export class HostEngine {
               id,
               latest.session.providerSessionId,
               latest.session.cwd,
+              latest.session.providerAccountId,
             );
         } catch (error) {
           console.error(
@@ -445,6 +450,9 @@ export class HostEngine {
             model: command.model,
             runtimeMode: command.runtimeMode,
             modelSettings: command.modelSettings ?? {},
+            ...(command.providerAccountId
+              ? { providerAccountId: command.providerAccountId }
+              : {}),
             title: "New remote session",
             ...(command.autoWorktreeBranch
               ? { branch: command.autoWorktreeBranch, worktreeCwd: cwd }
@@ -717,10 +725,10 @@ export class HostEngine {
     generateTitle: boolean,
   ): void {
     const provider = this.provider(value.session.harness);
-    const { id, cwd, harness, title } = value.session;
+    const { id, cwd, harness, title, providerAccountId } = value.session;
     if (generateTitle && provider.generateTitle) {
       void provider
-        .generateTitle({ sessionId: id, cwd, message })
+        .generateTitle({ sessionId: id, cwd, message, providerAccountId })
         .then((generated) => {
           if (!generated) return;
           this.flush(id);
@@ -746,7 +754,7 @@ export class HostEngine {
     const temporary = value.autoWorktreeBranch;
     if (temporary && provider.generateBranchName) {
       void provider
-        .generateBranchName(cwd, message)
+        .generateBranchName(cwd, message, providerAccountId)
         .then(async (fragment) => {
           const branch = fragment ? namedWorktreeBranch(fragment) : null;
           if (!branch) return;
@@ -796,6 +804,7 @@ export class HostEngine {
               cwd: session.cwd,
               model: session.model,
               modelSettings: session.modelSettings,
+              providerAccountId: session.providerAccountId,
               runtimeMode: session.runtimeMode,
               intent,
               onEvent: (event) => this.event(session.id, runId!, event),
@@ -848,7 +857,12 @@ export class HostEngine {
         // provider conversation identity for an explicit future follow-up.
         const persisted = this.store.session(session.id).session;
         if (persisted.providerSessionId)
-          provider.bind(session.id, persisted.providerSessionId, persisted.cwd);
+          provider.bind(
+            session.id,
+            persisted.providerSessionId,
+            persisted.cwd,
+            persisted.providerAccountId,
+          );
       })
       .catch((error) => {
         clearTimeout(this.live.get(session.id)?.timer);

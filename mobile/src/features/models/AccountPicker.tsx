@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 
+import { useConnection } from "@/features/connection/ConnectionProvider";
 import { Icon } from "@/ui/Icon";
 import { themedStyles, useColors, withAlpha } from "@/ui/theme";
 
@@ -31,6 +32,8 @@ export function AccountPicker({
   const colors = useColors();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
+  // A host finds its accounts by their config folders, not in Settings.
+  const host = !!useConnection().pairing?.desktop.host;
   const selected = accounts.find((account) => account.id === value);
   const selectedUsage = selected ? usage.accounts[selected.id] : undefined;
 
@@ -123,7 +126,9 @@ export function AccountPicker({
             <Text style={styles.note}>
               {existingSession
                 ? "Switching accounts opens a new chat."
-                : "Add accounts in desktop Settings → Accounts."}
+                : host
+                  ? "Sign in with another ~/.claude-<name> or ~/.codex-<name> folder on the host to add it here."
+                  : "Add accounts in desktop Settings → Accounts."}
             </Text>
           ) : null}
         </View>

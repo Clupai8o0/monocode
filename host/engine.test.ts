@@ -561,6 +561,7 @@ describe("headless session ownership", () => {
       id,
       "provider-thread",
       expect.any(String),
+      undefined,
     );
     expect(() =>
       engine.command({ ...command, text: "Changed payload" }),
@@ -734,6 +735,7 @@ describe("headless session ownership", () => {
       id,
       "retained",
       value.session.cwd,
+      undefined,
     );
     await recovered.close();
   });

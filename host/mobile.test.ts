@@ -22,6 +22,22 @@ import type { SendTurnInput } from "../src/integrations/harness/core/types";
 vi.mock("../src/integrations/harness/providers/codex/codexCatalog", () => ({
   discoverCodexModels: vi.fn(),
 }));
+// This machine's real sign-ins stay out of the tests.
+vi.mock("./accounts", () => {
+  const accounts = [
+    { id: "default", provider: "codex", label: "Default account", dir: "/c", isDefault: true },
+    { id: "work", provider: "codex", label: "work@example.com (work)", dir: "/w", isDefault: false },
+    { id: "default", provider: "claude", label: "Default account", dir: "/a", isDefault: true },
+  ];
+  return {
+    hostAccounts: () => accounts,
+    hostAccount: (provider: unknown, id: unknown) =>
+      accounts.find(
+        (account) =>
+          account.provider === provider && account.id === (id || "default"),
+      ),
+  };
+});
 configureChildBackend(new HostChildBackend({}));
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -161,6 +177,7 @@ describe("phone endpoint", () => {
     const catalog = await call("models.list", { projectId: project.id });
     expect(catalog.result.accounts).toEqual([
       { id: "default", provider: "codex", label: "Default account", isDefault: true },
+      { id: "work", provider: "codex", label: "work@example.com (work)", isDefault: false },
     ]);
     const usage = await call("accounts.usage", { provider: "opencode" });
     expect(usage.ok).toBe(false);
@@ -189,6 +206,33 @@ describe("phone endpoint", () => {
     },
     20_000,
   );
+
+  it("starts a session with the account the phone picked, and refuses an unknown one", async () => {
+    const { call, project, turns } = await setup();
+    const refused = await call("session.start", {
+      projectId: project.id,
+      harness: "codex",
+      model: "gpt-6.1",
+      text: "hi",
+      providerAccountId: "gone",
+    });
+    expect(refused.error).toMatch(/no longer available/);
+    const started = await call("session.start", {
+      projectId: project.id,
+      harness: "codex",
+      model: "gpt-6.1",
+      text: "hi",
+      providerAccountId: "work",
+    });
+    expect(started.ok).toBe(true);
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    expect(turns[0]!.input.providerAccountId).toBe("work");
+    const catalog = await call("models.list", {
+      conversationId: started.result.sessionId,
+    });
+    expect(catalog.result.current.providerAccountId).toBe("work");
+    turns[0]!.finish();
+  });
 
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();

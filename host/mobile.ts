@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
+import { hostAccount, hostAccounts } from "./accounts";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
@@ -225,21 +226,33 @@ export function createMobileHandler(
         label: RUNTIME_MODE_LABEL[id],
         hint: RUNTIME_MODE_HINT[id],
       })),
-      // The account this host signs its agents in with. Listing it is what
-      // makes the phone's picker show its usage.
-      accounts: harnesses
-        .filter((id) => id === "claude" || id === "codex")
-        .map((provider) => ({
-          id: DEFAULT_PROVIDER_ACCOUNT_ID,
+      // The sign-ins a session can run with; the phone shows each one's usage.
+      accounts: hostAccounts()
+        .filter(
+          (account) =>
+            harnesses.includes(account.provider) &&
+            // A copy only for the conversation already using it.
+            (!account.duplicate ||
+              (current?.session.harness === account.provider &&
+                current.session.providerAccountId === account.id)),
+        )
+        .map(({ id, provider, label, isDefault }) => ({
+          id,
           provider,
-          label: "Default account",
-          isDefault: true,
+          label,
+          isDefault,
         })),
       current: {
         harness,
         model: model.id,
         modelSettings: mergeModelSettings(model, current?.session.modelSettings),
         runtimeMode: current?.session.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        ...(harness === "claude" || harness === "codex"
+          ? {
+              providerAccountId:
+                current?.session.providerAccountId ?? DEFAULT_PROVIDER_ACCOUNT_ID,
+            }
+          : {}),
       },
     };
   };
@@ -317,6 +330,18 @@ export function createMobileHandler(
       ...(attachments.length ? { attachments } : {}),
     });
 
+  /** The named account a new session runs with; none means the default. */
+  const startAccount = (harness: RemoteProvider, id: unknown) => {
+    if (id === undefined || id === DEFAULT_PROVIDER_ACCOUNT_ID) return undefined;
+    if (harness !== "claude" && harness !== "codex")
+      throw new Error("This provider does not support account switching");
+    if (!hostAccount(harness, id))
+      throw new Error(
+        "Account is no longer available. Choose another account in the model picker.",
+      );
+    return id as string;
+  };
+
   /** Everything `session.start` does, so one command id runs it only once. */
   const start = async (id: string, params: Record<string, unknown>) => {
     const attached = Array.isArray(params.attachments)
@@ -343,6 +368,7 @@ export function createMobileHandler(
           throw new Error(`No ${HARNESS_TITLE[harness]} models found on this machine`);
         model = resolveModel(harness, found.id);
       }
+      const providerAccountId = startAccount(harness, params.providerAccountId);
       const runtimeMode = RUNTIME_MODES.includes(
         params.runtimeMode as RuntimeMode,
       )
@@ -394,6 +420,7 @@ export function createMobileHandler(
           stringRecord(params.modelSettings),
         ),
         runtimeMode,
+        ...(providerAccountId ? { providerAccountId } : {}),
       });
       // A message of attachments alone has no first line to name the session by;
       // it keeps the default title until the harness renames it.

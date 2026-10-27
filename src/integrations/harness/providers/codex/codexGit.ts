@@ -80,10 +80,12 @@ export async function generateCodexPrContent(
 export async function generateCodexBranchName(
   cwd: string,
   message: string,
+  providerAccountId?: string,
 ): Promise<string | null> {
   try {
     const output = await runCodexTextPrompt({
       cwd,
+      providerAccountId,
       prompt: buildBranchNamePrompt(message),
       timeoutMs: GIT_TIMEOUT_MS,
     });

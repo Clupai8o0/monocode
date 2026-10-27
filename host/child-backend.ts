@@ -17,6 +17,7 @@ import {
   isRemoteProvider,
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
+import { accountEnv, hostAccount } from "./accounts";
 import { providerLaunch, resolveProvider } from "./process";
 
 const exec = promisify(execFile);
@@ -332,11 +333,10 @@ export class HostChildBackend implements ChildBackend {
     if (this.closing) throw new Error("Host is stopping");
     await this.kill(id);
     if (this.closing) throw new Error("Host is stopping");
-    const account = args.account as { id?: string } | undefined;
-    if (account?.id && account.id !== "default")
-      throw new Error(
-        "Named provider accounts are not supported by this host yet",
-      );
+    const named = args.account as { provider?: string; id?: string } | undefined;
+    const account = named?.id ? hostAccount(named.provider, named.id) : undefined;
+    if (named?.id && !account)
+      throw new Error("That account is not signed in on this machine");
     let commandArgs = args.args as string[];
     if (args.devinAskEdits) {
       if (
@@ -362,7 +362,10 @@ export class HostChildBackend implements ChildBackend {
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         detached: process.platform !== "win32",
         windowsHide: true,
-        env: { ...process.env, MONOCODE_HOST: "1" },
+        env: {
+          ...(account ? accountEnv(account, process.env) : process.env),
+          MONOCODE_HOST: "1",
+        },
       },
     );
     this.children.set(id, child);
@@ -501,10 +504,7 @@ type ClaudeUsageFetch = {
  * forces the user to sign in again.
  */
 async function claudeUsage(accountId: unknown): Promise<ClaudeUsageFetch> {
-  const dir =
-    typeof accountId === "string" && accountId && accountId !== "default"
-      ? undefined
-      : (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"));
+  const dir = hostAccount("claude", accountId)?.dir;
   if (!dir)
     return { status: "unavailable", error: "Unknown Claude account on this machine" };
   let raw: string;
