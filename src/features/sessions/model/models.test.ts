@@ -136,6 +136,33 @@ describe("model settings memory", () => {
     });
   });
 
+  it("turns a saved Ultracode effort into Extra High with the toggle on", () => {
+    const ultra: AgentModel = {
+      ...opus,
+      settings: [
+        ...(opus.settings ?? []),
+        {
+          id: "ultracode",
+          label: "Ultracode",
+          kind: "toggle",
+          value: "false",
+          options: [
+            { value: "true", label: "On" },
+            { value: "false", label: "Off" },
+          ],
+        },
+      ],
+    };
+    expect(mergeModelSettings(ultra, { effort: "ultracode" })).toEqual({
+      effort: "xhigh",
+      fast: "false",
+      ultracode: "true",
+    });
+    expect(
+      mergeModelSettings(ultra, { effort: "high", ultracode: "true" }),
+    ).toEqual({ effort: "high", fast: "false", ultracode: "true" });
+  });
+
   it("remembers extra-high and fast across models that support them", () => {
     saveLastModelSettings({ effort: "xhigh", fast: "true" });
     expect(preferredModelSettings(opus)).toEqual({

@@ -1850,6 +1850,7 @@ function settingsKeyFor(input: HarnessSessionInput): string {
     fast: input.modelSettings?.fast,
     thinking: input.modelSettings?.thinking,
     context: input.modelSettings?.context,
+    ultracode: input.modelSettings?.ultracode,
     runtimeMode: input.runtimeMode,
     hooks: loadClaudeHooks(),
   })}`;
@@ -1877,7 +1878,10 @@ function launchOptions(
   if (input.modelSettings?.fast === "true") {
     settings.fastMode = true;
   }
-  if (isClaudeUltracodeEffort(effortRaw)) {
+  if (
+    input.modelSettings?.ultracode === "true" ||
+    isClaudeUltracodeEffort(effortRaw)
+  ) {
     settings.ultracode = true;
   }
   if (!loadClaudeHooks()) {

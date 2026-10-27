@@ -117,6 +117,7 @@ const SETTING_ORDER = [
   "fast",
   "lead",
   "effort",
+  "ultracode",
   "sidekick",
   "reasoning",
   "reasoningEffort",
@@ -130,6 +131,7 @@ const SETTING_ORDER = [
 /** Toolbar pill order: reasoning level first, then the remaining controls. */
 const PILL_ORDER = [
   "effort",
+  "ultracode",
   "reasoning",
   "reasoningEffort",
   "variant",
@@ -1116,7 +1118,10 @@ export function ModelControlPills({
   );
   const groupedSettings = effort
     ? pills.filter(
-        (setting) => setting.id === "fast" || setting.id === "serviceTier",
+        (setting) =>
+          setting.id === "ultracode" ||
+          setting.id === "fast" ||
+          setting.id === "serviceTier",
       )
     : [];
   if (pills.length === 0) return null;
@@ -1318,7 +1323,13 @@ function SelectPill({
   const menuId = useId();
 
   const value = settingValue(setting, values);
-  const valueLabel = settingValueLabel(setting, values);
+  const ultracode = additionalSettings?.find(
+    (extra) => extra.id === "ultracode",
+  );
+  const valueLabel =
+    ultracode && settingValue(ultracode, values) === "true"
+      ? `Ultracode ${settingValueLabel(setting, values)}`
+      : settingValueLabel(setting, values);
   const label = settingLabel(setting);
   const iconic = isEffortSetting(setting) || setting.id === "serviceTier";
   const menuSettings = [setting, ...(additionalSettings ?? [])];

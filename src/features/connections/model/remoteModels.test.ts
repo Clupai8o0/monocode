@@ -50,6 +50,7 @@ it("describes a Claude model from built-in metadata when the host cannot", () =>
   expect(controls.fallback).toBe("no-catalog");
   expect(controls.settings.map((setting) => setting.id)).toEqual([
     "effort",
+    "ultracode",
     "fast",
     "context",
   ]);

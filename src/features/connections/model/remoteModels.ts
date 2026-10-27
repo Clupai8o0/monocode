@@ -94,6 +94,7 @@ function knownSetting(
   if (id === "effort")
     return effort(id, ["low", "medium", "high", "max", "ultrathink"]);
   if (id === "fast") return toggle(id, "Fast");
+  if (id === "ultracode") return toggle(id, "Ultracode");
   if (id === "thinking") return toggle(id, "Thinking");
   if (id === "context")
     return {

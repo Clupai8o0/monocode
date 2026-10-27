@@ -57,11 +57,20 @@ const EFFORT_WITH_XHIGH: ModelSetting = {
     { value: "high", label: "High" },
     { value: "xhigh", label: "Extra High" },
     { value: "max", label: "Max" },
-    {
-      value: "ultracode",
-      label: "Ultracode",
-    },
     { value: "ultrathink", label: "Ultrathink" },
+  ],
+};
+
+/** Ultracode runs at any effort level, so it is a toggle beside Reasoning. */
+const ULTRACODE: ModelSetting = {
+  id: "ultracode",
+  label: "Ultracode",
+  description: "Workflow orchestration at the chosen reasoning level",
+  kind: "toggle",
+  value: "false",
+  options: [
+    { value: "true", label: "On" },
+    { value: "false", label: "Off" },
   ],
 };
 
@@ -122,35 +131,35 @@ export const CLAUDE_MODEL_CATALOG: AgentModel[] = [
     harness: "claude",
     name: "Claude Fable 5",
     nativeId: "claude-fable-5",
-    settings: [EFFORT_WITH_XHIGH, contextWindow("1m")],
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("1m")],
   },
   {
     id: "claude:opus-5",
     harness: "claude",
     name: "Claude Opus 5",
     nativeId: "claude-opus-5",
-    settings: [EFFORT_WITH_XHIGH, FAST_MODE, contextWindow("1m")],
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE, contextWindow("1m")],
   },
   {
     id: "claude:opus-5-5",
     harness: "claude",
     name: "Claude Opus 5.5",
     nativeId: "claude-opus-5-5",
-    settings: [EFFORT_WITH_XHIGH, FAST_MODE, contextWindow("1m")],
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE, contextWindow("1m")],
   },
   {
     id: "claude:sonnet-5",
     harness: "claude",
     name: "Claude Sonnet 5",
     nativeId: "claude-sonnet-5",
-    settings: [EFFORT_WITH_XHIGH, contextWindow("200k")],
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("200k")],
   },
   {
     id: "claude:opus-4.8",
     harness: "claude",
     name: "Claude Opus 4.8",
     nativeId: "claude-opus-4-8",
-    settings: [EFFORT_WITH_XHIGH, FAST_MODE],
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE],
   },
   {
     id: "claude:opus-4.7",
@@ -402,7 +411,11 @@ function settingsFromListRow(
   const settings: ModelSetting[] = [];
   const levels = advertisedEffortLevels(rec);
   if (rec.supportsEffort === true || levels.length > 0) {
-    settings.push(effortSetting(levels));
+    const effort = effortSetting(levels);
+    settings.push(effort);
+    if (effort.options.some((option) => option.value === "xhigh")) {
+      settings.push(ULTRACODE);
+    }
   } else if (rec.supportsAdaptiveThinking === true) {
     settings.push(THINKING);
   }
@@ -425,9 +438,6 @@ function effortSetting(levels: string[]): ModelSetting {
   const options = (
     known.length > 0 ? known : ["low", "medium", "high", "max"]
   ).map((value) => ({ value, label: EFFORT_LABELS[value] ?? value }));
-  if (options.some((option) => option.value === "xhigh")) {
-    options.push({ value: "ultracode", label: "Ultracode" });
-  }
   options.push({ value: "ultrathink", label: "Ultrathink" });
   const defaultValue = options.some((option) => option.value === "high")
     ? "high"

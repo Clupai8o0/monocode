@@ -1106,6 +1106,7 @@ export function claudeSettingsKey(input: {
   fast?: string;
   thinking?: string;
   context?: string;
+  ultracode?: string;
   runtimeMode: RuntimeMode;
   hooks?: boolean;
 }): string {
@@ -1115,6 +1116,7 @@ export function claudeSettingsKey(input: {
     input.fast ?? "",
     input.thinking ?? "",
     input.context ?? "",
+    input.ultracode === "true" ? "ultracode" : "",
     input.runtimeMode,
     input.hooks === false ? "nohooks" : "hooks",
   ].join("|");

@@ -523,9 +523,11 @@ describe("list_models catalog", () => {
       "high",
       "xhigh",
       "max",
-      "ultracode",
       "ultrathink",
     ]);
+    expect(
+      sonnet?.settings?.find((setting) => setting.id === "ultracode"),
+    ).toMatchObject({ kind: "toggle", value: "false" });
     expect(sonnet?.settings?.some((setting) => setting.id === "fast")).toBe(
       false,
     );

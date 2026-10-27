@@ -614,11 +614,28 @@ export function mergeModelSettings(
   if (modelsFor(model.harness).length === 0) return { ...current };
   const next = defaultModelSettings(model);
   if (!current) return next;
+  current = withUltracodeToggle(model, current);
   for (const setting of model.settings ?? []) {
     const value = compatibleSettingValue(setting, current[setting.id]);
     if (value != null) next[setting.id] = value;
   }
   return next;
+}
+
+/**
+ * Claude's Ultracode used to be an effort level that meant Extra High. It is
+ * now a toggle beside Reasoning, so a saved `effort=ultracode` becomes
+ * Extra High with the toggle on.
+ */
+function withUltracodeToggle(
+  model: AgentModel,
+  current: Record<string, string>,
+): Record<string, string> {
+  if (current.effort !== "ultracode") return current;
+  if (!model.settings?.some((setting) => setting.id === "ultracode")) {
+    return current;
+  }
+  return { ...current, effort: "xhigh", ultracode: "true" };
 }
 
 const EFFORT_SETTING_IDS = new Set([

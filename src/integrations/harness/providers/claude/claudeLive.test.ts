@@ -72,6 +72,7 @@ async function startTurn(
     runtimeMode?: RuntimeMode;
     intent?: TurnIntent;
     providerAccountId?: string;
+    modelSettings?: Record<string, string>;
   } = {},
 ) {
   const events: HarnessEvent[] = [];
@@ -79,7 +80,7 @@ async function startTurn(
     sessionId,
     cwd: "/repo",
     model: "claude:claude-sonnet-5",
-    modelSettings: {},
+    modelSettings: options.modelSettings ?? {},
     runtimeMode: options.runtimeMode ?? "supervised",
     intent: options.intent,
     providerAccountId: options.providerAccountId,
@@ -267,6 +268,55 @@ beforeEach(() => {
 afterEach(async () => {
   await stopClaudeSession("s1");
   __claudeTestReset();
+});
+
+describe("claude ultracode", () => {
+  function launch(args: string[] | undefined) {
+    const at = args?.indexOf("--settings") ?? -1;
+    const settings =
+      at >= 0 ? (JSON.parse(args![at + 1]!) as Record<string, unknown>) : {};
+    const effortAt = args?.indexOf("--effort") ?? -1;
+    return {
+      ultracode: settings.ultracode,
+      effort: effortAt >= 0 ? args![effortAt + 1] : undefined,
+    };
+  }
+
+  it("runs the Ultracode toggle at the chosen effort", async () => {
+    const { turn } = await startTurn("s1", {
+      modelSettings: { effort: "medium", ultracode: "true" },
+    });
+    expect(launch(spawned.at(-1))).toEqual({
+      ultracode: true,
+      effort: "medium",
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("still reads a saved Ultracode effort as Extra High", async () => {
+    const { turn } = await startTurn("s1", {
+      modelSettings: { effort: "ultracode" },
+    });
+    expect(launch(spawned.at(-1))).toEqual({
+      ultracode: true,
+      effort: "xhigh",
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("leaves Ultracode off by default", async () => {
+    const { turn } = await startTurn("s1", {
+      modelSettings: { effort: "high" },
+    });
+    expect(launch(spawned.at(-1))).toEqual({
+      ultracode: undefined,
+      effort: "high",
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
 });
 
 describe("claude streamed tool inputs", () => {
