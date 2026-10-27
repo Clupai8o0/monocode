@@ -48,7 +48,7 @@ import type { ChangedFile, Worktree } from "./types";
 export type Workspace =
   { mode: "current" } | { mode: "worktree" } | { mode: "existing"; worktree: Worktree };
 
-type RowSymbol = "folder" | "arrow.triangle.branch" | "folder.badge.gearshape" | "plus.forwardslash.minus";
+type RowSymbol = "folder" | "arrow.triangle.branch" | "folder.badge.gearshape" | "plus.forwardslash.minus" | "terminal";
 
 const SECONDARY = foregroundStyle({ type: "hierarchical", style: "secondary" });
 /** The pushed page of existing worktrees, by its `NavigationLink` value. */
@@ -76,6 +76,7 @@ export function WorkspaceMenu({
   loading,
   onOpenChanges,
   onOpenFiles,
+  onOpenTerminal,
 }: {
   value: Workspace;
   worktrees: Worktree[];
@@ -88,6 +89,8 @@ export function WorkspaceMenu({
   loading: boolean;
   onOpenChanges: () => void;
   onOpenFiles: () => void;
+  /** Hosts only: a desktop has no terminal to offer. */
+  onOpenTerminal?: () => void;
 }) {
   const colors = useColors();
   const styles = useStyles();
@@ -132,6 +135,7 @@ export function WorkspaceMenu({
         files={files}
         onOpenChanges={onOpenChanges}
         onOpenFiles={onOpenFiles}
+        onOpenTerminal={onOpenTerminal}
         onChange={(next) => {
           if (keyOf(next) === keyOf(value)) return dismiss();
           onChange(next);
@@ -158,6 +162,7 @@ function WorkspaceSheet({
   onChange,
   onOpenChanges,
   onOpenFiles,
+  onOpenTerminal,
 }: {
   isPresented: boolean;
   onDismiss: () => void;
@@ -170,6 +175,8 @@ function WorkspaceSheet({
   onChange: (value: Workspace) => void;
   onOpenChanges: () => void;
   onOpenFiles: () => void;
+  /** Hosts only: a desktop has no terminal to offer. */
+  onOpenTerminal?: () => void;
 }) {
   const diff = useDiffTheme();
   const { additions, deletions } = totals(files);
@@ -309,6 +316,30 @@ function WorkspaceSheet({
                 <Spacer />
               </HStack>
             </Button>
+            {onOpenTerminal ? (
+              <Button
+                modifiers={[
+                  buttonStyle("plain"),
+                  disabled(value.mode === "worktree" || !!pending),
+                ]}
+                onPress={() => {
+                  if (value.mode === "worktree" || pending) return;
+                  afterDismiss.current = onOpenTerminal;
+                  onDismiss();
+                }}
+              >
+                <HStack spacing={14} modifiers={[contentShape(shapes.rectangle())]}>
+                  <RowIcon symbol="terminal" />
+                  <VStack alignment="leading" spacing={2}>
+                    <Text>Open terminal</Text>
+                    <Text modifiers={[font({ textStyle: "footnote" }), SECONDARY]}>
+                      A shell in the working copy
+                    </Text>
+                  </VStack>
+                  <Spacer />
+                </HStack>
+              </Button>
+            ) : null}
           </Section>
         </List>
         <NavigationDestination value={EXISTING}>

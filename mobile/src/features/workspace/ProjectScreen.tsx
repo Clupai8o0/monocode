@@ -4,6 +4,7 @@ import {
   ReconnectingStatus,
   useOffline,
 } from "@/features/connection/ConnectionNotice";
+import { useConnection } from "@/features/connection/ConnectionProvider";
 import { hasNativeTranscript } from "@/features/connection/nativeLink";
 import { useProjectChanges } from "@/features/connection/useProjectChanges";
 import { useProjectWorktrees } from "@/features/connection/useProjectWorktrees";
@@ -258,6 +259,8 @@ export function ProjectScreen({
 
   const sessionNotice = useSessionErrorNotice(sessionId);
   const offline = useOffline();
+  // Only a host runs a shell for the phone.
+  const hostConnection = !!useConnection().pairing?.desktop.host;
 
   const openSettings = () =>
     router.push({ pathname: "/settings", params: { projectId: project.id } });
@@ -346,6 +349,18 @@ export function ProjectScreen({
                   ...(worktreePath ? { worktreePath } : {}),
                 },
               })
+            }
+            onOpenTerminal={
+              hostConnection
+                ? () =>
+                    router.push({
+                      pathname: "/terminal",
+                      params: {
+                        projectId: project.id,
+                        ...(worktreePath ? { worktreePath } : {}),
+                      },
+                    })
+                : undefined
             }
             // A new worktree has nothing to read; the others, until their
             // first changes come in, or fail to.

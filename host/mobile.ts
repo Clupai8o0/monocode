@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
+import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
 import { createMobileWorkspace, once, type Job } from "./mobile-workspace";
@@ -87,6 +88,7 @@ export function createMobileHandler(
   const machine = hostname();
   const workspace = createMobileWorkspace(engine);
   const usage = createMobileUsage();
+  const terminals = createMobileTerminals();
   const starts = new Map<string, Job>();
   const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();
@@ -484,6 +486,16 @@ export function createMobileHandler(
         return {};
       case "accounts.usage":
         return usage(params);
+      case "terminal.open": {
+        const cwd = await workspace.root(params);
+        return terminals.open(cwd, params);
+      }
+      case "terminal.read":
+        return terminals.read(params);
+      case "terminal.write":
+        return terminals.write(params);
+      case "terminal.close":
+        return terminals.close(params);
       case "project.files":
         return workspace.files(params);
       case "project.file":

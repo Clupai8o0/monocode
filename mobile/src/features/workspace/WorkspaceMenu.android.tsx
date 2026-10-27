@@ -17,6 +17,7 @@ export function WorkspaceMenu({
   loading,
   onOpenChanges,
   onOpenFiles,
+  onOpenTerminal,
 }: {
   value: Workspace;
   worktrees: Worktree[];
@@ -27,6 +28,7 @@ export function WorkspaceMenu({
   loading: boolean;
   onOpenChanges: () => void;
   onOpenFiles: () => void;
+  onOpenTerminal?: () => void;
 }) {
   return (
     <ChoiceMenu
@@ -59,6 +61,15 @@ export function WorkspaceMenu({
           disabled: value.mode === "worktree",
           onPress: onOpenFiles,
         },
+        ...(onOpenTerminal
+          ? [
+              {
+                label: "Open terminal",
+                disabled: value.mode === "worktree",
+                onPress: onOpenTerminal,
+              },
+            ]
+          : []),
       ]}
     >
       <View style={{ padding: 8, maxWidth: "100%" }}>

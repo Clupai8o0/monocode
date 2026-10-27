@@ -246,7 +246,7 @@ export function createMobileWorkspace(engine: HostEngine) {
     };
   };
 
-  return { files, file, search, changes, git, gitAction, worktrees };
+  return { root, files, file, search, changes, git, gitAction, worktrees };
 }
 
 /**

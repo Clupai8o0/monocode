@@ -167,6 +167,29 @@ describe("phone endpoint", () => {
     expect(usage.error).toMatch(/only available/);
   });
 
+  it.runIf(process.platform === "linux")(
+    "opens a shell in the project and refuses a closed one",
+    async () => {
+      const { call, project } = await setup();
+      const opened = await call("terminal.open", { projectId: project.id });
+      expect(opened.ok).toBe(true);
+      const { terminalId } = opened.result;
+      expect((await call("terminal.write", { terminalId, data: "pwd\r" })).ok).toBe(true);
+      let output = "";
+      let cursor = 0;
+      for (let i = 0; i < 20 && !output.includes(project.cwd); i++) {
+        const read = await call("terminal.read", { terminalId, cursor, timeoutMs: 500 });
+        output += read.result.output;
+        cursor = read.result.cursor;
+      }
+      expect(output).toContain(project.cwd);
+      expect((await call("terminal.close", { terminalId })).ok).toBe(true);
+      const closed = await call("terminal.read", { terminalId, cursor });
+      expect(closed.error).toMatch(/closed/);
+    },
+    20_000,
+  );
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });
