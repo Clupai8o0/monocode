@@ -33,6 +33,7 @@ import {
 import { connectionInfo, installService, uninstallService } from "./service";
 import { version } from "../package.json";
 import { protectWindowsDirectory } from "./windows";
+import { importDesktop } from "./desktop-import";
 
 process.umask(0o077);
 // npm-based providers can launch Node subprocesses without a separate Node
@@ -90,6 +91,7 @@ async function main() {
   pair --qr --url <https-url> [--link]
                         Issue a phone credential as a QR code to scan
   project add <folder>  List a folder as a project for the phone
+  import-desktop <dir>  Bring a desktop export's projects, looks and Monos here
   devices               List paired devices
   revoke <device-id>    Revoke a device credential
 Options: --data-dir <directory> --port <port> (default 3774)
@@ -212,6 +214,15 @@ Connect another computer using an SSH forward to the loopback port.`);
     const cwd = realpathSync(resolve(args[2]));
     if (!statSync(cwd).isDirectory()) throw new Error("Not a folder");
     console.log(JSON.stringify(store.addProject(cwd, basename(cwd))));
+    store.close();
+    return;
+  }
+  if (command === "import-desktop") {
+    if (!args[1] || args[1].startsWith("--"))
+      throw new Error("Provide the desktop export folder");
+    console.log(
+      JSON.stringify(importDesktop(resolve(args[1]), directory, store), null, 2),
+    );
     store.close();
     return;
   }

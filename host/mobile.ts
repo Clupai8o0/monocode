@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
+import { dataDirOf, readLooks } from "./desktop-import";
 import { createMobileMonos } from "./mobile-monos";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
@@ -28,6 +29,7 @@ import {
   RUNTIME_MODE_HINT,
   RUNTIME_MODE_LABEL,
   sessionDisplayTitle,
+  type HarnessId,
   type RuntimeMode,
   type Session,
 } from "../src/features/sessions/model/session";
@@ -91,9 +93,12 @@ export function createMobileHandler(
   const workspace = createMobileWorkspace(engine);
   const usage = createMobileUsage();
   const terminals = createMobileTerminals();
+  /** The desktop's default model for a provider, once imported. */
+  const defaultModel = (harness: HarnessId) =>
+    resolveModel(harness, readLooks(dataDirOf(engine.store)).defaultModels[harness]);
   const monos = createMobileMonos(engine, async () => {
     const harness = defaultHarness();
-    let model = resolveModel(harness);
+    let model = defaultModel(harness);
     // Codex has no built-in models; take the first one this machine found.
     if (!model.id) {
       const found = (await models()).models[harness]?.[0];
@@ -149,10 +154,17 @@ export function createMobileHandler(
     session.blocks.find((block) => block.approval && !block.approval.decided);
 
   const catalog = () => {
-    // A Mono's own folder is where its conversation runs, not a project.
+    const looks = readLooks(dataDirOf(engine.store));
+    const rank = (cwd: string) => {
+      const index = looks.order.indexOf(cwd);
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    // A Mono's own folder is where its conversation runs, not a project. The
+    // rest in the desktop rail's order, then by name.
     const projects = engine.store
       .projects()
-      .filter((project) => !monos.isMonoFolder(project.cwd));
+      .filter((project) => !monos.isMonoFolder(project.cwd))
+      .sort((a, b) => rank(a.cwd) - rank(b.cwd));
     const sessions = projects.flatMap((project) =>
       engine.store
         .summaries(project.id)
@@ -193,15 +205,18 @@ export function createMobileHandler(
         }),
     );
     const harness = providers.length ? defaultHarness() : undefined;
-    const model = harness ? resolveModel(harness) : undefined;
+    const model = harness ? defaultModel(harness) : undefined;
     return {
       projects: projects.map((project, index) => ({
         id: project.id,
         path: project.cwd,
-        name: project.name,
+        name: looks.projects[project.cwd]?.name ?? project.name,
         machine,
         branch: "",
-        color: COLORS[index % COLORS.length],
+        color: looks.projects[project.cwd]?.color ?? COLORS[index % COLORS.length],
+        ...(looks.projects[project.cwd]?.mascot
+          ? { mascot: looks.projects[project.cwd]!.mascot }
+          : {}),
         additions: 0,
         deletions: 0,
         busy: sessions.some(
@@ -230,7 +245,9 @@ export function createMobileHandler(
       (provider) => available.models[provider]?.length,
     );
     const harness = current?.session.harness ?? defaultHarness();
-    const model = resolveModel(harness, current?.session.model);
+    const model = current
+      ? resolveModel(harness, current.session.model)
+      : defaultModel(harness);
     return {
       harnesses: harnesses.map((id) => ({ id, label: HARNESS_TITLE[id] })),
       models: harnesses.flatMap((harness) =>
@@ -381,10 +398,10 @@ export function createMobileHandler(
         isRemoteProvider(params.harness) && providers.includes(params.harness)
           ? params.harness
           : defaultHarness();
-      let model = resolveModel(
-        harness,
-        typeof params.model === "string" ? params.model : undefined,
-      );
+      let model =
+        typeof params.model === "string"
+          ? resolveModel(harness, params.model)
+          : defaultModel(harness);
       // Codex has no built-in models; take the first one this machine found.
       if (!model.id) {
         const found = (await models(project.id)).models[harness]?.[0];

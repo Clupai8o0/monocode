@@ -281,6 +281,28 @@ describe("phone endpoint", () => {
     turns[1]!.finish();
   });
 
+  it("shows projects with the desktop's names, colours, mascots and order", async () => {
+    const { call, store, project } = await setup();
+    const other = mkdtempSync(join(tmpdir(), "monocode-mobile-test-other-"));
+    cleanups.push(async () => rmSync(other, { recursive: true, force: true }));
+    const second = store.addProject(other, "zzz");
+    writeFileSync(
+      join(store.attachmentDir, "..", "desktop.json"),
+      JSON.stringify({
+        order: [second.cwd, project.cwd],
+        projects: { [second.cwd]: { name: "First", color: "#123456", mascot: "bird" } },
+        defaultModels: {},
+      }),
+    );
+    const listed = (await call("workspace.list")).result.projects;
+    expect(listed.map((entry: { name: string }) => entry.name)).toEqual([
+      "First",
+      project.name,
+    ]);
+    expect(listed[0]).toMatchObject({ color: "#123456", mascot: "bird" });
+    expect(listed[1].mascot).toBeUndefined();
+  });
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });
