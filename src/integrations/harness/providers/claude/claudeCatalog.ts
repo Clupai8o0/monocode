@@ -20,11 +20,14 @@ import {
   compareSemver,
   isClaudeInitMessage,
   listModelsFromControlResponse,
+  MINIMUM_CLAUDE_FABLE_5_1_VERSION,
   MINIMUM_CLAUDE_FABLE_5_VERSION,
+  MINIMUM_CLAUDE_HAIKU_5_5_VERSION,
   MINIMUM_CLAUDE_OPUS_4_7_VERSION,
   MINIMUM_CLAUDE_OPUS_4_8_VERSION,
   MINIMUM_CLAUDE_OPUS_5_5_VERSION,
   MINIMUM_CLAUDE_OPUS_5_VERSION,
+  MINIMUM_CLAUDE_SONNET_5_5_VERSION,
   MINIMUM_CLAUDE_SONNET_5_VERSION,
   parseClaudeVersion,
   parseControlResponse,
@@ -127,10 +130,31 @@ function contextWindow(defaultValue: "200k" | "1m"): ModelSetting {
 /** Fallback catalog when `list_models` is unavailable. */
 export const CLAUDE_MODEL_CATALOG: AgentModel[] = [
   {
-    id: "claude:fable-5",
+    id: "claude:opus-5-5",
     harness: "claude",
-    name: "Claude Fable 5",
-    nativeId: "claude-fable-5",
+    name: "Claude Opus 5.5",
+    nativeId: "claude-opus-5-5",
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE, contextWindow("1m")],
+  },
+  {
+    id: "claude:sonnet-5-5",
+    harness: "claude",
+    name: "Claude Sonnet 5.5",
+    nativeId: "claude-sonnet-5-5",
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("1m")],
+  },
+  {
+    id: "claude:haiku-5-5",
+    harness: "claude",
+    name: "Claude Haiku 5.5",
+    nativeId: "claude-haiku-5-5",
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("200k")],
+  },
+  {
+    id: "claude:fable-5-1",
+    harness: "claude",
+    name: "Claude Fable 5.1",
+    nativeId: "claude-fable-5-1",
     settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("1m")],
   },
   {
@@ -141,18 +165,18 @@ export const CLAUDE_MODEL_CATALOG: AgentModel[] = [
     settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE, contextWindow("1m")],
   },
   {
-    id: "claude:opus-5-5",
-    harness: "claude",
-    name: "Claude Opus 5.5",
-    nativeId: "claude-opus-5-5",
-    settings: [EFFORT_WITH_XHIGH, ULTRACODE, FAST_MODE, contextWindow("1m")],
-  },
-  {
     id: "claude:sonnet-5",
     harness: "claude",
     name: "Claude Sonnet 5",
     nativeId: "claude-sonnet-5",
     settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("200k")],
+  },
+  {
+    id: "claude:fable-5",
+    harness: "claude",
+    name: "Claude Fable 5",
+    nativeId: "claude-fable-5",
+    settings: [EFFORT_WITH_XHIGH, ULTRACODE, contextWindow("1m")],
   },
   {
     id: "claude:opus-4.8",
@@ -559,6 +583,21 @@ export function modelsForClaudeVersion(
 ): AgentModel[] {
   return CLAUDE_MODEL_CATALOG.filter((model) => {
     const slug = model.nativeId ?? "";
+    if (slug === "claude-sonnet-5-5") {
+      return version
+        ? compareSemver(version, MINIMUM_CLAUDE_SONNET_5_5_VERSION) >= 0
+        : false;
+    }
+    if (slug === "claude-haiku-5-5") {
+      return version
+        ? compareSemver(version, MINIMUM_CLAUDE_HAIKU_5_5_VERSION) >= 0
+        : false;
+    }
+    if (slug === "claude-fable-5-1") {
+      return version
+        ? compareSemver(version, MINIMUM_CLAUDE_FABLE_5_1_VERSION) >= 0
+        : false;
+    }
     if (slug === "claude-opus-5-5") {
       return version
         ? compareSemver(version, MINIMUM_CLAUDE_OPUS_5_5_VERSION) >= 0

@@ -254,7 +254,7 @@ describe("model picker", () => {
     expect(trigger.title).toContain(name);
   });
 
-  it("lists Claude Opus 5.5 after Opus 5 in the built-in Claude catalog", () => {
+  it("lists the newest Claude generation first in the built-in catalog", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
@@ -283,8 +283,11 @@ describe("model picker", () => {
       (option) => option.textContent,
     );
     expect(options).toContain("Claude Opus 5.5");
-    expect(options.indexOf("Claude Opus 5.5")).toBe(
-      options.indexOf("Claude Opus 5") + 1,
+    expect(options.indexOf("Claude Opus 5.5")).toBeLessThan(
+      options.indexOf("Claude Opus 5"),
+    );
+    expect(options.indexOf("Claude Sonnet 5.5")).toBeLessThan(
+      options.indexOf("Claude Sonnet 5"),
     );
   });
 

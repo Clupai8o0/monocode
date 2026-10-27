@@ -57,10 +57,28 @@ const DEEPSEEK_EFFORT: ModelSetting = {
 
 export const MODELS: AgentModel[] = [
   {
-    id: "claude:sonnet-5",
+    id: "claude:opus-5-5",
     harness: "claude",
-    name: "Claude Sonnet 5",
-    nativeId: "claude-sonnet-5",
+    name: "Claude Opus 5.5",
+    nativeId: "claude-opus-5-5",
+  },
+  {
+    id: "claude:sonnet-5-5",
+    harness: "claude",
+    name: "Claude Sonnet 5.5",
+    nativeId: "claude-sonnet-5-5",
+  },
+  {
+    id: "claude:haiku-5-5",
+    harness: "claude",
+    name: "Claude Haiku 5.5",
+    nativeId: "claude-haiku-5-5",
+  },
+  {
+    id: "claude:fable-5-1",
+    harness: "claude",
+    name: "Claude Fable 5.1",
+    nativeId: "claude-fable-5-1",
   },
   {
     id: "claude:opus-5",
@@ -69,10 +87,10 @@ export const MODELS: AgentModel[] = [
     nativeId: "claude-opus-5",
   },
   {
-    id: "claude:opus-5-5",
+    id: "claude:sonnet-5",
     harness: "claude",
-    name: "Claude Opus 5.5",
-    nativeId: "claude-opus-5-5",
+    name: "Claude Sonnet 5",
+    nativeId: "claude-sonnet-5",
   },
   {
     id: "claude:fable-5",
@@ -130,6 +148,47 @@ export const MODELS: AgentModel[] = [
     nativeId: "grok-4.6",
   },
 
+  {
+    id: "grok:grok-4.7",
+    harness: "grok",
+    name: "Grok 4.7",
+    nativeId: "grok-4.7",
+    contextWindow: 500_000,
+    settings: [
+      {
+        id: "effort",
+        label: "Reasoning",
+        kind: "select",
+        value: "high",
+        options: [
+          { value: "xhigh", label: "Extra High" },
+          { value: "high", label: "High" },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "grok:grok-4.7-build-fast",
+    harness: "grok",
+    name: "Grok 4.7 Build Fast",
+    nativeId: "grok-4.7-build-fast",
+    contextWindow: 500_000,
+    settings: [
+      {
+        id: "effort",
+        label: "Reasoning",
+        kind: "select",
+        value: "medium",
+        options: [
+          { value: "high", label: "High" },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+      },
+    ],
+  },
   {
     id: "grok:grok-4.6",
     harness: "grok",
@@ -253,6 +312,25 @@ export const MODELS: AgentModel[] = [
     nativeId: "claude-opus-5-5",
   },
   {
+    id: "vivobook:sonnet-5-5",
+    harness: "vivobook",
+    name: "Claude Sonnet 5.5",
+    nativeId: "claude-sonnet-5-5",
+  },
+  {
+    id: "vivobook:haiku-5-5",
+    harness: "vivobook",
+    name: "Claude Haiku 5.5",
+    nativeId: "claude-haiku-5-5",
+  },
+  {
+    id: "vivobook:fable-5-1",
+    harness: "vivobook",
+    name: "Claude Fable 5.1",
+    nativeId: "claude-fable-5-1",
+  },
+  // Kept so a session saved on the old catalog still resolves its own model.
+  {
     id: "vivobook:sonnet-5",
     harness: "vivobook",
     name: "Claude Sonnet 5",
@@ -267,10 +345,10 @@ export const MODELS: AgentModel[] = [
 ];
 
 export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
-  claude: "claude:sonnet-5",
+  claude: "claude:sonnet-5-5",
   codex: "",
   cursor: "cursor:composer-2.5",
-  grok: "grok:grok-4.6",
+  grok: "grok:grok-4.7",
   opencode: "opencode:glm-5",
   pi: "pi:default",
   omp: "omp:default",
@@ -1069,8 +1147,11 @@ function comparableNativeId(harness: HarnessId, id: string): string {
 function pickDefaultId(harness: HarnessId, models: AgentModel[]): string {
   if (harness === "claude") {
     return (
-      models.find((model) => model.nativeId === "claude-sonnet-5")?.id ??
+      // The moving alias first, so a new Sonnet release is picked up without
+      // a code change; then the newest concrete id this catalog knows.
       models.find((model) => model.nativeId === "sonnet")?.id ??
+      models.find((model) => model.nativeId === "claude-sonnet-5-5")?.id ??
+      models.find((model) => model.nativeId === "claude-sonnet-5")?.id ??
       models.find((model) => model.id === DEFAULT_MODEL_ID.claude)?.id ??
       models[0]?.id ??
       DEFAULT_MODEL_ID.claude
@@ -1091,6 +1172,7 @@ function pickDefaultId(harness: HarnessId, models: AgentModel[]): string {
   }
   if (harness === "grok") {
     return (
+      models.find((model) => model.nativeId === "grok-4.7")?.id ??
       models.find((model) => model.nativeId === "grok-4.6")?.id ??
       models.find((model) => model.id === DEFAULT_MODEL_ID.grok)?.id ??
       models[0]?.id ??
