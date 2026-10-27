@@ -411,6 +411,9 @@ fn usage_error(status: u16) -> ClaudeUsageFetch {
         "Claude sign-in expired".into()
     } else if status == 403 {
         "Claude usage is unavailable for this account".into()
+    } else if status == 429 {
+        // Fork: Anthropic limits this endpoint; turns still update the footer.
+        "Anthropic is limiting usage checks; it updates on your next Claude turn".into()
     } else {
         format!("Claude usage request failed ({status})")
     };

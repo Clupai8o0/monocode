@@ -207,6 +207,9 @@ export function loadRateLimits(
       return shared.value;
     }
     const epoch = shared?.epoch ?? "";
+    // Fork: after a restart, a failed read still shows the last saved numbers.
+    const previous = cached ?? shared?.value;
+    const started = Date.now();
     let result: ProviderRateLimits;
     try {
       result =
@@ -221,15 +224,20 @@ export function loadRateLimits(
         result = errorRateLimits(
           provider,
           result.error || "Usage unavailable",
-          cached,
+          previous,
         );
       }
     } catch (error) {
       result = errorRateLimits(
         provider,
         error instanceof Error ? error.message : String(error),
-        cached,
+        previous,
       );
+    }
+    // Fork: a Claude turn's stream may have reported fresher numbers while
+    // this read waited on an error; keep those (see fork/usage).
+    if (result.status === "error" && (checkedAt.get(key) ?? 0) >= started) {
+      return getCachedRateLimits(provider, accountId);
     }
     if (
       generation === (generations.get(key) ?? 0) &&

@@ -90,6 +90,7 @@ import type {
 } from "../../core/types";
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
 import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
+import { publishClaudeStreamUsage } from "../../../../fork/usage/claudeStreamUsage"; // Fork
 
 /**
  * A PermissionRequest hook can decide before the user touches the prompt; Claude
@@ -796,6 +797,10 @@ function handleLine(sessionId: string, live: Live, line: string): void {
   }
   if (type === "rate_limit_event") {
     live.usageLimit = usageLimitFromRateLimitEvent(rec);
+    // Fork: live plan usage for the footer; the Vivobook signs in by itself.
+    if (!vivobookThreads.has(sessionId)) {
+      publishClaudeStreamUsage(live.providerAccountId, rec);
+    }
     return;
   }
   if (type === "system") {
