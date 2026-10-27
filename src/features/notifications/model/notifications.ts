@@ -280,7 +280,7 @@ async function announceSession(
     occurredAt,
   };
   // Fork: retain actual events even when OS banners or sounds are disabled.
-  recordSessionNotification(session, event, notificationText(session, event), project.id, occurredAt);
+  recordSessionNotification(session, event, notificationText(session, event), project.id, occurredAt, sessionVisible);
   const sent = await notifyProjectSession(
     session,
     event,

@@ -72,6 +72,18 @@ function publish(): void {
   void emit(CHANGED).catch(() => {});
 }
 
+const popupListeners = new Set<(row: HistoryNotification) => void>();
+
+/** New events in this window whose session was not on screen, once each. */
+export function subscribeNotificationPopups(
+  listener: (row: HistoryNotification) => void,
+): () => void {
+  popupListeners.add(listener);
+  return () => {
+    popupListeners.delete(listener);
+  };
+}
+
 /** This local history does not depend on OS banner permission or sound settings. */
 export function recordSessionNotification(
   session: Session,
@@ -79,6 +91,7 @@ export function recordSessionNotification(
   text: NotificationText,
   projectId: string,
   occurredAt: number,
+  sessionVisible = false,
 ): void {
   try {
     const entry = historyNotification(
@@ -90,6 +103,12 @@ export function recordSessionNotification(
     );
     if (entry && history.record(entry)) {
       publish();
+      // A brief pop-up as well; the bell keeps the event after it goes.
+      if (!sessionVisible) {
+        for (const listener of popupListeners) {
+          listener(entry);
+        }
+      }
     }
   } catch {
     /* History must never interrupt the normal banner/sound path. */

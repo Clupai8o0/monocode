@@ -600,6 +600,7 @@ import {
 } from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
+import { NotificationPopups } from "../fork/notifications/NotificationPopups"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
 import { seedStarterMonos } from "../fork/starterMonos/starterMono";
@@ -2470,6 +2471,7 @@ function Workspace({
 
   const [reminderNoticesHeight, setReminderNoticesHeight] = useState(0);
   const [harnessUpdateHeight, setHarnessUpdateHeight] = useState(0);
+  const [newLayoutNoticeHeight, setNewLayoutNoticeHeight] = useState(0);
   // The footer's slot for the resource pressure chip. Monitoring continues
   // while the footer is hidden.
   const [pressureChipHost, setPressureChipHost] =
@@ -15019,6 +15021,7 @@ function Workspace({
               (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
               (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
             }
+            onHeightChange={setNewLayoutNoticeHeight}
           />
           <ResourcePressureNotice
             sessions={sessionsRef}
@@ -15027,6 +15030,15 @@ function Workspace({
             onPressureChange={transcriptPool.setResourcePressure}
             chipHost={pressureChipHost}
             insetChip={insetLayout}
+          />
+          {/* Fork: each new event pops up briefly, then lives in the bell. */}
+          <NotificationPopups
+            topOffset={
+              12 +
+              (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
+              (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0) +
+              (newLayoutNoticeHeight ? newLayoutNoticeHeight + 8 : 0)
+            }
           />
           <ReminderNotices
             reminders={sessionReminders.due}
