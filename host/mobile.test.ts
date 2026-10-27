@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -70,7 +78,7 @@ async function setup() {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return { call, project, turns, approve, device };
+  return { call, project, turns, approve, device, store };
 }
 
 describe("phone endpoint", () => {
@@ -307,5 +315,85 @@ describe("phone retries", () => {
     expect(first.ok).toBe(true);
     expect(again.result.sessionId).toBe(first.result.sessionId);
     expect((await call("workspace.list")).result.sessions).toHaveLength(1);
+  });
+});
+
+describe("phone attachments", () => {
+  it("stages a photo sent inline and passes it to the turn", async () => {
+    const { call, project, turns } = await setup();
+    const data = Buffer.from("not really a png").toString("base64");
+    const started = await call("session.start", {
+      projectId: project.id,
+      text: "What is this?",
+      model: "codex:test",
+      attachments: [{ name: "shot.png", mimeType: "image/png", data }],
+    });
+    expect(started.error).toBeUndefined();
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    const [file] = turns[0].input.attachments ?? [];
+    expect(file).toMatchObject({
+      name: "shot.png",
+      mimeType: "image/png",
+      kind: "image",
+      size: 16,
+    });
+    expect(readFileSync(file.path!, "utf8")).toBe("not really a png");
+  });
+
+  it("stages one copy of an attachment for a command id asked twice", async () => {
+    const { call, project, turns } = await setup();
+    const data = Buffer.from("once only").toString("base64");
+    const params = {
+      projectId: project.id,
+      text: "Look",
+      model: "codex:test",
+      attachments: [{ name: "a.png", mimeType: "image/png", data }],
+    };
+    const first = await call("session.start", params, undefined, "same");
+    const again = await call("session.start", params, undefined, "same");
+    expect(again.result.sessionId).toBe(first.result.sessionId);
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    expect(turns[0].input.attachments).toHaveLength(1);
+  });
+
+  it("leaves no files behind when the send is refused", async () => {
+    const { call, project, store } = await setup();
+    const data = Buffer.from("orphan").toString("base64");
+    // No such session, so the turn is never accepted.
+    expect(
+      await call("conversation.send", {
+        conversationId: "missing",
+        text: "hi",
+        attachments: [{ name: "a.png", mimeType: "image/png", data }],
+      }),
+    ).toMatchObject({ ok: false });
+    expect(existsSync(store.attachmentDir) ? readdirSync(store.attachmentDir) : [])
+      .toEqual([]);
+    void project;
+  });
+
+  it("takes attachments with no message, and refuses an oversized set", async () => {
+    const { call, project, turns } = await setup();
+    const data = Buffer.from("x").toString("base64");
+    expect(
+      (
+        await call("session.start", {
+          projectId: project.id,
+          text: "",
+          model: "codex:test",
+          attachments: [{ name: "a.png", mimeType: "image/png", data }],
+        })
+      ).ok,
+    ).toBe(true);
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+
+    const huge = "A".repeat(13 * 1024 * 1024);
+    expect(
+      await call("conversation.send", {
+        conversationId: turns[0].input.sessionId,
+        text: "hi",
+        attachments: [{ name: "big.bin", mimeType: "application/octet-stream", data: huge }],
+      }),
+    ).toMatchObject({ ok: false });
   });
 });

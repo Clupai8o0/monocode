@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { HostEngine } from "./engine";
+import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { createMobileWorkspace, once, type Job } from "./mobile-workspace";
 import {
   createHostWorktree,
@@ -33,6 +34,7 @@ import { toolCallLabel } from "../src/features/sessions/model/transcriptActivity
 import {
   isRemoteProvider,
   type HostModelCatalog,
+  type RemoteAttachment,
   type HostSession,
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
@@ -53,9 +55,9 @@ const POLL_MS = 150;
 const WATCH_IDLE_MS = 60_000;
 /** Open watches kept at most; the least recently used goes first. */
 const MAX_WATCHES = 64;
-/** Session starts remembered by command id, so a retry joins the first one
- *  instead of creating a second session, or a second worktree. */
-const MAX_STARTS = 100;
+/** Starts and sends remembered by command id, so a retry joins the first one
+ *  instead of creating a second session, worktree or copy of an attachment. */
+const MAX_JOBS = 100;
 const DESKTOP_APPROVAL = "Waiting for approval on desktop: ";
 const COLORS = ["#e8a33d", "#5b9cf0", "#4fbf8a", "#d9677b", "#a37de8", "#3fb7c4"];
 
@@ -83,6 +85,7 @@ export function createMobileHandler(
   const machine = hostname();
   const workspace = createMobileWorkspace(engine);
   const starts = new Map<string, Job>();
+  const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();
   let nextWatch = 1;
   const sweep = () => {
@@ -271,108 +274,145 @@ export function createMobileHandler(
     }
   };
 
-  const text = (params: Record<string, unknown>) => {
+  const text = (params: Record<string, unknown>, attached = false) => {
     const value = typeof params.text === "string" ? params.text.trim() : "";
-    if (!value || value.length > 100_000)
+    // Attachments on their own are a message; the desktop sends those too.
+    if ((!value && !attached) || value.length > 100_000)
       throw new Error("Enter a message under 100,000 characters");
     return value;
   };
   const conversation = (params: Record<string, unknown>) =>
     engine.store.session(String(params.conversationId ?? ""));
 
-  /** Everything `session.start` does, so one command id runs it only once. */
-  const start = async (id: string, params: Record<string, unknown>) => {
-    const message = text(params);
-    const project = engine.store.project(String(params.projectId ?? ""));
-    const harness =
-      isRemoteProvider(params.harness) && providers.includes(params.harness)
-        ? params.harness
-        : defaultHarness();
-    let model = resolveModel(
-      harness,
-      typeof params.model === "string" ? params.model : undefined,
-    );
-    // Codex has no built-in models; take the first one this machine found.
-    if (!model.id) {
-      const found = (await models(project.id)).models[harness]?.[0];
-      if (!found)
-        throw new Error(`No ${HARNESS_TITLE[harness]} models found on this machine`);
-      model = resolveModel(harness, found.id);
-    }
-    const runtimeMode = RUNTIME_MODES.includes(
-      params.runtimeMode as RuntimeMode,
-    )
-      ? (params.runtimeMode as RuntimeMode)
-      : DEFAULT_RUNTIME_MODE;
-    // A named worktree runs the session there; "worktree" mode makes a
-    // fresh one on a temporary branch, as the desktop's picker does.
-    let worktreeCwd: string | undefined;
-    let autoWorktreeBranch: string | undefined;
-    if (params.workspaceMode === "worktree") {
-      // Named after the command id, not at random, so a phone retrying a
-      // start whose reply it lost — even after a host restart, which empties
-      // the in-memory record of it — reuses that worktree instead of
-      // stranding it and making another.
-      autoWorktreeBranch = `mc/${createHash("sha256")
-        .update(id)
-        .digest("hex")
-        .slice(0, 8)}`;
-      const listed = await hostWorktrees(project.cwd);
-      // By branch, and by the path that branch name gets, because the engine
-      // renames a temporary branch once the session has a title.
-      const expected = join(listed.defaultRoot, `wt-${autoWorktreeBranch.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
-      const existing = listed.worktrees.find(
-        (tree) =>
-          !tree.missing &&
-          (tree.branch === autoWorktreeBranch || tree.path === expected),
-      );
-      worktreeCwd =
-        existing?.path ??
-        (await createHostWorktree(
-          project.cwd,
-          autoWorktreeBranch,
-          "HEAD",
-          false,
-        )).path;
-    } else if (typeof params.worktreePath === "string" && params.worktreePath) {
-      worktreeCwd = resolveHostWorktree(project.cwd, params.worktreePath);
-    }
-    const created = engine.command({
-      type: "create",
-      commandId: `${id}:create`,
-      projectId: project.id,
-      ...(worktreeCwd ? { worktreeCwd } : {}),
-      ...(autoWorktreeBranch ? { autoWorktreeBranch } : {}),
-      harness,
-      model: model.id,
-      modelSettings: mergeModelSettings(
-        model,
-        stringRecord(params.modelSettings),
-      ),
-      runtimeMode,
-    });
-    const title = message.split("\n")[0].slice(0, 80);
-    if (engine.store.session(created.sessionId).session.title !== title)
-      engine.updateSession(created.sessionId, { title });
+  /**
+   * Sends one message, with any attachments already staged for it. The caller
+   * removes those again if the turn is refused, so nothing is left behind.
+   */
+  const deliver = (
+    commandId: string,
+    sessionId: string,
+    message: string,
+    attachments: RemoteAttachment[],
+  ) =>
     engine.command({
       type: "send",
-      commandId: `${id}:send`,
-      sessionId: created.sessionId,
+      commandId,
+      sessionId,
       text: message,
+      ...(attachments.length ? { attachments } : {}),
     });
-    return { sessionId: created.sessionId };
+
+  /** Everything `session.start` does, so one command id runs it only once. */
+  const start = async (id: string, params: Record<string, unknown>) => {
+    const attached = Array.isArray(params.attachments)
+      ? params.attachments.length > 0
+      : false;
+    const message = text(params, attached);
+    const project = engine.store.project(String(params.projectId ?? ""));
+    // Staged before a worktree or a session exists, so malformed attachments
+    // fail with nothing created; and removed again if anything after them does.
+    const { attachments, created } = stage("session.start", id, params);
+    try {
+      const harness =
+        isRemoteProvider(params.harness) && providers.includes(params.harness)
+          ? params.harness
+          : defaultHarness();
+      let model = resolveModel(
+        harness,
+        typeof params.model === "string" ? params.model : undefined,
+      );
+      // Codex has no built-in models; take the first one this machine found.
+      if (!model.id) {
+        const found = (await models(project.id)).models[harness]?.[0];
+        if (!found)
+          throw new Error(`No ${HARNESS_TITLE[harness]} models found on this machine`);
+        model = resolveModel(harness, found.id);
+      }
+      const runtimeMode = RUNTIME_MODES.includes(
+        params.runtimeMode as RuntimeMode,
+      )
+        ? (params.runtimeMode as RuntimeMode)
+        : DEFAULT_RUNTIME_MODE;
+      // A named worktree runs the session there; "worktree" mode makes a
+      // fresh one on a temporary branch, as the desktop's picker does.
+      let worktreeCwd: string | undefined;
+      let autoWorktreeBranch: string | undefined;
+      if (params.workspaceMode === "worktree") {
+        // Named after the command id, not at random, so a phone retrying a
+        // start whose reply it lost — even after a host restart, which empties
+        // the in-memory record of it — reuses that worktree instead of
+        // stranding it and making another.
+        autoWorktreeBranch = `mc/${createHash("sha256")
+          .update(id)
+          .digest("hex")
+          .slice(0, 8)}`;
+        const listed = await hostWorktrees(project.cwd);
+        // By branch, and by the path that branch name gets, because the engine
+        // renames a temporary branch once the session has a title.
+        const expected = join(listed.defaultRoot, `wt-${autoWorktreeBranch.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+        const existing = listed.worktrees.find(
+          (tree) =>
+            !tree.missing &&
+            (tree.branch === autoWorktreeBranch || tree.path === expected),
+        );
+        worktreeCwd =
+          existing?.path ??
+          (await createHostWorktree(
+            project.cwd,
+            autoWorktreeBranch,
+            "HEAD",
+            false,
+          )).path;
+      } else if (typeof params.worktreePath === "string" && params.worktreePath) {
+        worktreeCwd = resolveHostWorktree(project.cwd, params.worktreePath);
+      }
+      const created = engine.command({
+        type: "create",
+        commandId: `${id}:create`,
+        projectId: project.id,
+        ...(worktreeCwd ? { worktreeCwd } : {}),
+        ...(autoWorktreeBranch ? { autoWorktreeBranch } : {}),
+        harness,
+        model: model.id,
+        modelSettings: mergeModelSettings(
+          model,
+          stringRecord(params.modelSettings),
+        ),
+        runtimeMode,
+      });
+      // A message of attachments alone has no first line to name the session by;
+      // it keeps the default title until the harness renames it.
+      const title = message.split("\n")[0].slice(0, 80);
+      if (title && engine.store.session(created.sessionId).session.title !== title)
+        engine.updateSession(created.sessionId, { title });
+      deliver(`${id}:send`, created.sessionId, message, attachments);
+      return { sessionId: created.sessionId };
+    } catch (error) {
+      discardAttachments(engine.store, created);
+      throw error;
+    }
   };
+
+  /**
+   * Attachment ids are namespaced by the method as well as the command id, so
+   * a start and a send that happen to share an id never land on each other's
+   * files, however the phone allocates them.
+   */
+  const stage = (
+    method: string,
+    id: string,
+    params: Record<string, unknown>,
+  ) =>
+    stageInlineAttachments(
+      engine.store,
+      params.attachments,
+      `${method}\u0000${id}`,
+    );
 
   return async (input: MobileRequest, token: string): Promise<unknown> => {
     const { id, method, params } = input;
     const now = Date.now();
     sweep();
-    if (
-      (method === "session.start" || method === "conversation.send") &&
-      Array.isArray(params.attachments) &&
-      params.attachments.length
-    )
-      throw new Error("Attachments aren't available on this machine yet");
     switch (method) {
       case "workspace.list":
         return catalog();
@@ -444,17 +484,25 @@ export function createMobileHandler(
       case "project.worktrees":
         return workspace.worktrees(params);
       case "session.start":
-        return once(starts, id, params, MAX_STARTS, () => start(id, params));
-      case "conversation.send": {
-        const value = conversation(params);
-        engine.command({
-          type: "send",
-          commandId: id,
-          sessionId: value.session.id,
-          text: text(params),
+        return once(starts, id, params, MAX_JOBS, () => start(id, params));
+      case "conversation.send":
+        // Deduplicated, like a start, so a retry joins the first attempt
+        // rather than racing it.
+        return once(sends, id, params, MAX_JOBS, () => {
+          const value = conversation(params);
+          const attached = Array.isArray(params.attachments)
+            ? params.attachments.length > 0
+            : false;
+          const message = text(params, attached);
+          const { attachments, created } = stage("conversation.send", id, params);
+          try {
+            deliver(id, value.session.id, message, attachments);
+          } catch (error) {
+            discardAttachments(engine.store, created);
+            throw error;
+          }
+          return Promise.resolve({ sessionId: value.session.id });
         });
-        return { sessionId: value.session.id };
-      }
       case "session.cancel": {
         const value = conversation(params);
         if (value.status === "running" && value.runId)

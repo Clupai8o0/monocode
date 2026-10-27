@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
@@ -370,7 +371,10 @@ export function once(
   limit: number,
   work: () => Promise<unknown>,
 ): Promise<unknown> {
-  const signature = JSON.stringify(params);
+  // Hashed, not kept whole: a message's attachments are megabytes of base64.
+  const signature = createHash("sha256")
+    .update(JSON.stringify(params))
+    .digest("hex");
   const existing = jobs.get(id);
   if (existing) {
     if (existing.signature !== signature)
