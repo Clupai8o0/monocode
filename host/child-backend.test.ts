@@ -278,3 +278,54 @@ setInterval(() => {}, 1000);
     });
   }
 }, 10_000);
+
+it("reads Claude usage with the stored sign-in, and never refreshes it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monocode-usage-test-"));
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = directory;
+  const fetch = vi.fn(async () => new Response('{"five_hour":{}}', { status: 200 }));
+  vi.stubGlobal("fetch", fetch);
+  const backend = new HostChildBackend({});
+  const usage = (accountId?: string) =>
+    backend.invoke<{ status: string; error?: string; body?: string }>(
+      "fetch_claude_usage",
+      { accountId },
+    );
+  try {
+    expect(await usage()).toMatchObject({ status: "unavailable" });
+    const credentials = join(directory, ".credentials.json");
+    writeFileSync(
+      credentials,
+      JSON.stringify({
+        claudeAiOauth: { accessToken: "token", expiresAt: Date.now() - 1 },
+      }),
+    );
+    expect(await usage()).toMatchObject({ error: "Claude sign-in expired" });
+    expect(fetch).not.toHaveBeenCalled();
+    writeFileSync(
+      credentials,
+      JSON.stringify({
+        claudeAiOauth: { accessToken: "token", expiresAt: Date.now() + 60_000 },
+      }),
+    );
+    expect(await usage("default")).toMatchObject({
+      status: "ok",
+      body: '{"five_hour":{}}',
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.anthropic.com/api/oauth/usage",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer token" }),
+      }),
+    );
+    fetch.mockResolvedValueOnce(new Response("", { status: 429 }));
+    expect(await usage()).toMatchObject({ error: "Claude usage is rate limited" });
+    expect(await usage("work")).toMatchObject({ status: "unavailable" });
+    expect(readFileSync(credentials, "utf8")).toContain("token");
+  } finally {
+    vi.unstubAllGlobals();
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

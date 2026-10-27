@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "../../../platform/tauri/fs";
+import { invokeHarness as invoke } from "../../../integrations/harness/core/childBackend";
 import {
   errorRateLimits,
   parseClaudeOAuthUsage,

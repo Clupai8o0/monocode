@@ -215,6 +215,13 @@ export class HostChildBackend implements ChildBackend {
       case "harness_sse_close":
         this.stopStream(id);
         return undefined as T;
+      // The desktop asks Rust for this. It is the one outward request the host
+      // makes, so it is its own case rather than going through `harness_http`,
+      // which only allows loopback.
+      case "fetch_claude_usage":
+        return (await claudeUsage(args.accountId)) as T;
+      case "home_dir":
+        return homedir() as T;
       case "harness_read_text_file": {
         const path = String(args.path ?? "");
         const info = await stat(path);
@@ -470,5 +477,95 @@ export class HostChildBackend implements ChildBackend {
     this.closing = true;
     for (const id of this.streams.keys()) this.stopStream(id);
     await Promise.all([...this.children.keys()].map((id) => this.kill(id)));
+  }
+}
+
+/** Claude Code's usage endpoint, and what it needs to be asked with. */
+const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_OAUTH_BETA = "oauth-2025-04-20";
+const CLAUDE_USAGE_AGENT = "claude-code/2.1.0";
+const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
+
+type ClaudeUsageFetch = {
+  status: "ok" | "error" | "unavailable";
+  httpStatus?: number | null;
+  body?: string | null;
+  error?: string | null;
+};
+
+/**
+ * This machine's Claude usage, read the way the desktop's Rust does it
+ * (src-tauri/src/rate_limits.rs): the credential Claude Code already holds,
+ * used read only. The token is never refreshed here — Claude Code owns and
+ * rotates it, and refreshing behind its back spends the refresh token and
+ * forces the user to sign in again.
+ */
+async function claudeUsage(accountId: unknown): Promise<ClaudeUsageFetch> {
+  const dir =
+    typeof accountId === "string" && accountId && accountId !== "default"
+      ? undefined
+      : (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"));
+  if (!dir)
+    return { status: "unavailable", error: "Unknown Claude account on this machine" };
+  let raw: string;
+  try {
+    raw = await readFile(join(dir, ".credentials.json"), "utf8");
+  } catch {
+    return { status: "unavailable", error: "Claude not signed in" };
+  }
+  let token: string | undefined;
+  let expiresAt: number | undefined;
+  try {
+    const value: unknown = JSON.parse(raw.trim());
+    const rec = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+    const oauth = rec.claudeAiOauth && typeof rec.claudeAiOauth === "object"
+      ? (rec.claudeAiOauth as Record<string, unknown>)
+      : rec;
+    if (typeof oauth.accessToken === "string" && oauth.accessToken.trim())
+      token = oauth.accessToken.trim();
+    if (typeof oauth.expiresAt === "number") expiresAt = oauth.expiresAt;
+  } catch {
+    return { status: "unavailable", error: "Claude credential could not be read" };
+  }
+  if (!token) return { status: "unavailable", error: "Claude not signed in" };
+  if (expiresAt !== undefined && expiresAt <= Date.now())
+    return { status: "error", httpStatus: 401, error: "Claude sign-in expired" };
+  try {
+    const response = await fetch(CLAUDE_USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-beta": CLAUDE_OAUTH_BETA,
+        "User-Agent": CLAUDE_USAGE_AGENT,
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(CLAUDE_USAGE_TIMEOUT_MS),
+    });
+    const body = await response.text();
+    if (response.ok) return { status: "ok", httpStatus: response.status, body };
+    return {
+      status: "error",
+      httpStatus: response.status,
+      error:
+        response.status === 401
+          ? "Claude sign-in expired"
+          : response.status === 403
+            ? "Claude usage is unavailable for this account"
+            : response.status === 429
+              ? "Claude usage is rate limited"
+              : `Claude usage returned HTTP ${response.status}`,
+    };
+  } catch (error) {
+    // Node's fetch reports every network problem as a bare "fetch failed", so
+    // the cause it carries is what actually says what went wrong.
+    const cause =
+      error instanceof Error && error.cause instanceof Error
+        ? `: ${error.cause.message}`
+        : "";
+    return {
+      status: "error",
+      error: `Claude usage request failed${cause || `: ${
+        error instanceof Error ? error.message : String(error)
+      }`}`,
+    };
   }
 }

@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
+import { createMobileUsage } from "./mobile-usage";
+import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
 import { createMobileWorkspace, once, type Job } from "./mobile-workspace";
 import {
   createHostWorktree,
@@ -84,6 +86,7 @@ export function createMobileHandler(
 ) {
   const machine = hostname();
   const workspace = createMobileWorkspace(engine);
+  const usage = createMobileUsage();
   const starts = new Map<string, Job>();
   const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();
@@ -220,6 +223,16 @@ export function createMobileHandler(
         label: RUNTIME_MODE_LABEL[id],
         hint: RUNTIME_MODE_HINT[id],
       })),
+      // The account this host signs its agents in with. Listing it is what
+      // makes the phone's picker show its usage.
+      accounts: harnesses
+        .filter((id) => id === "claude" || id === "codex")
+        .map((provider) => ({
+          id: DEFAULT_PROVIDER_ACCOUNT_ID,
+          provider,
+          label: "Default account",
+          isDefault: true,
+        })),
       current: {
         harness,
         model: model.id,
@@ -469,6 +482,8 @@ export function createMobileHandler(
       case "watch.close":
         watches.delete(Number(params.watchId));
         return {};
+      case "accounts.usage":
+        return usage(params);
       case "project.files":
         return workspace.files(params);
       case "project.file":

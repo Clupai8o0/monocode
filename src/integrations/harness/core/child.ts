@@ -1,35 +1,30 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   runtimeProviderBinaryPath,
   type ConfigurableBinaryProvider,
 } from "../../../features/providers/model/providerBinaryPaths";
+import {
+  childBackend,
+  invokeHarness,
+  setChildBackend,
+  type ChildBackend,
+} from "./childBackend";
 
-/** Process I/O is supplied by the desktop or a headless host. Provider
- * protocols never need to know which process owns their children. */
-export interface ChildBackend {
-  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
-  listen<T>(
-    event: string,
-    handler: (event: { payload: T }) => void,
-  ): Promise<UnlistenFn>;
-}
-
-let backend: ChildBackend | undefined;
+export type { ChildBackend };
 
 export function configureChildBackend(next: ChildBackend): void {
   if (bridge || users)
     throw new Error("Configure the child backend before starting the bridge");
-  backend = next;
+  setChildBackend(next);
 }
 
 export function hasHeadlessChildBackend(): boolean {
-  return backend !== undefined;
+  return childBackend() !== undefined;
 }
 
 /** Provider-owned transcript files are read on the machine running the child. */
 export function readHarnessTextFile(path: string): Promise<string> {
-  return invoke<string>(backend ? "harness_read_text_file" : "read_text_file", {
+  return invoke<string>(childBackend() ? "harness_read_text_file" : "read_text_file", {
     path,
   });
 }
@@ -81,19 +76,13 @@ export function restoreMonoCodexAgentState(
   });
 }
 
-function invoke<T>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  return backend
-    ? backend.invoke<T>(command, args)
-    : tauriInvoke<T>(command, args);
-}
+const invoke = invokeHarness;
 
 function listen<T>(
   event: string,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
+  const backend = childBackend();
   return backend ? backend.listen(event, handler) : tauriListen(event, handler);
 }
 

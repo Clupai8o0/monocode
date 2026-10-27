@@ -1,4 +1,5 @@
 import { invoke as invokeLocal } from "@tauri-apps/api/core";
+import { invokeHarness } from "../../integrations/harness/core/childBackend";
 import { open } from "@tauri-apps/plugin-dialog";
 import { joinPath, slash } from "../../shared/lib/paths";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
@@ -527,8 +528,13 @@ export function openPathWithDefaultApp(path: string): Promise<void> {
   return invoke<void>("open_path_with_default_app", { path });
 }
 
+/**
+ * The user's home directory. Asked for through the harness bridge, because a
+ * headless host reaches this too — catalogs and the usage probes run there —
+ * and it has no Tauri to answer `home_dir`.
+ */
 export function homeDir(): Promise<string> {
-  return invoke<string>("home_dir");
+  return invokeHarness<string>("home_dir");
 }
 
 /**

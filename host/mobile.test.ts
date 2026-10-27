@@ -150,6 +150,23 @@ describe("phone endpoint", () => {
     expect((await call("watch.close", { watchId: watch.result.watchId })).ok).toBe(true);
   });
 
+  it("lists the host's account and refuses usage for providers without it", async () => {
+    const { discoverCodexModels } = await import(
+      "../src/integrations/harness/providers/codex/codexCatalog"
+    );
+    vi.mocked(discoverCodexModels).mockResolvedValue([
+      { id: "gpt-6.1", name: "GPT-6.1" } as never,
+    ]);
+    const { call, project } = await setup();
+    const catalog = await call("models.list", { projectId: project.id });
+    expect(catalog.result.accounts).toEqual([
+      { id: "default", provider: "codex", label: "Default account", isDefault: true },
+    ]);
+    const usage = await call("accounts.usage", { provider: "opencode" });
+    expect(usage.ok).toBe(false);
+    expect(usage.error).toMatch(/only available/);
+  });
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });
