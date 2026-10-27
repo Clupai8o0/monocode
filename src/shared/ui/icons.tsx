@@ -24,6 +24,7 @@ import Chatting01Icon from "@hugeicons/core-free-icons/Chatting01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import CircleArrowDown01Icon from "@hugeicons/core-free-icons/CircleArrowDown01Icon";
 import CancelCircleIcon from "@hugeicons/core-free-icons/CancelCircleIcon";
+import CleanIcon from "@hugeicons/core-free-icons/CleanIcon";
 import ChartBreakoutSquareIcon from "@hugeicons/core-free-icons/ChartBreakoutSquareIcon";
 import CircleDashedIcon from "@hugeicons/core-free-icons/CircleDashedIcon";
 import CircleDotIcon from "@hugeicons/core-free-icons/CircleDotIcon";
@@ -290,6 +291,7 @@ export const Ungroup = wrap(UngroupItemsIcon, "Ungroup");
 export const WandSparkles = wrap(MagicWand01Icon, "WandSparkles");
 export const WholeWord = wrap(WholeWordIcon, "WholeWord");
 export const Wrench = wrap(Wrench01Icon, "Wrench");
+export const Sweep = wrap(CleanIcon, "Sweep");
 export const X = wrap(Cancel01Icon, "X");
 export const Zap = wrap(FlashIcon, "Zap");
 // Fork: the footer Stacks button.

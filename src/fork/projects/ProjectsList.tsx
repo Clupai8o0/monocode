@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { LiveAgent } from "../../features/sessions/model/liveAgents";
 import { sameProjectPath } from "../../features/projects/model/recents";
 import {
@@ -26,6 +32,9 @@ export function ProjectsList({
   onSelectProject,
   onOpenProject,
   onProjectContextMenu,
+  sectionRef,
+  capped = true,
+  style,
 }: {
   paths: readonly string[];
   cwd: string;
@@ -39,6 +48,11 @@ export function ProjectsList({
     y: number,
     trigger: HTMLElement,
   ) => void;
+  /** The section, for the sidebar's height handle below it. */
+  sectionRef?: (el: HTMLElement | null) => void;
+  /** Whether the default height cap applies; off once the user sets one. */
+  capped?: boolean;
+  style?: CSSProperties;
 }) {
   const sorted = useMemo(
     () => projectRows(paths, agents, busyPaths),
@@ -82,9 +96,11 @@ export function ProjectsList({
 
   return (
     <section
+      ref={sectionRef}
       data-fork-projects=""
       aria-label="Projects"
-      className="flex max-h-[min(45%,19rem)] min-h-0 shrink-0 flex-col px-2 pb-2"
+      style={style}
+      className={`flex min-h-0 flex-col px-2 pb-2${capped ? " max-h-[min(45%,19rem)] shrink-0" : " shrink"}`}
       onPointerEnter={() => {
         pointerInside.current = true;
         hold();

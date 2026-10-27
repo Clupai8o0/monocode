@@ -30,6 +30,7 @@ import {
   Share,
   Settings,
   StickyNote,
+  X,
   Zap,
   type IconComponent,
 } from "../../shared/ui/icons";
@@ -177,6 +178,13 @@ import {
   CloseAllSafeButton,
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
+import { FreeMemoryButton } from "../../fork/sessionClose/FreeMemoryButton"; // Fork
+import { SplitHandle } from "../../fork/sidebarSplit/SplitHandle"; // Fork
+import {
+  loadStoredSize,
+  saveStoredSize,
+  useHeightSplit,
+} from "../../fork/sidebarSplit/useHeightSplit"; // Fork
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
 import { RunningBadge } from "../../fork/backgroundAgents/RunningBadge"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
@@ -255,7 +263,24 @@ const MAX_WIDTH = 560;
 const DEFAULT_WIDTH = 260;
 const REMINDERS_COLOR = "#f59e0b";
 
-let rememberedWidth = DEFAULT_WIDTH;
+// Fork: the width outlives a restart.
+let rememberedWidth = loadStoredSize("width") ?? DEFAULT_WIDTH;
+/** Fork: a section can grow until the session list below keeps this much. */
+const SESSIONS_MIN_HEIGHT = 160;
+
+/** Fork: how tall a sidebar section may grow, leaving the session list room. */
+function sectionSplitMax(pane: HTMLElement): number {
+  const own = pane.getBoundingClientRect().height;
+  const list = pane.parentElement?.querySelector<HTMLElement>(
+    ":scope > [data-project-sessions]",
+  );
+  if (!list) {
+    return own + Math.max(0, (pane.parentElement?.clientHeight ?? 0) * 0.3);
+  }
+  return own + list.getBoundingClientRect().height - SESSIONS_MIN_HEIGHT;
+}
+const NO_SESSION_IDS: ReadonlySet<string> = new Set();
+const CLOSE_SESSION_LABEL = "Close to free memory";
 
 type SidebarTab = SidebarTabId;
 
@@ -322,6 +347,13 @@ type Props = {
     sessionIds: readonly string[],
     archived: boolean,
   ) => void;
+  /** Fork: loaded sessions that can close to free memory. */
+  closableSessionIds?: ReadonlySet<string>;
+  /** Fork: closes sessions to free memory, keeping them in the list. */
+  onCloseSessions?: (sessionIds: readonly string[]) => void;
+  /** Fork: how many closable sessions are off screen. */
+  idleClosableCount?: number;
+  onCloseIdleSessions?: () => void;
   onPinSession?: (sessionId: string, pinned: boolean) => void;
   onPinSessions?: (sessionIds: readonly string[], pinned: boolean) => void;
   onSetSessionLinkedWorkItem?: (
@@ -438,6 +470,10 @@ function SidebarComponent({
   onRenameSession: onRenameLocalSession,
   onArchiveSession: onArchiveLocalSession,
   onArchiveSessions: onArchiveLocalSessions,
+  closableSessionIds = NO_SESSION_IDS,
+  onCloseSessions,
+  idleClosableCount = 0,
+  onCloseIdleSessions,
   onPinSession: onPinLocalSession,
   onPinSessions: onPinLocalSessions,
   onSetSessionLinkedWorkItem: onSetLocalSessionLinkedWorkItem,
@@ -679,9 +715,24 @@ function SidebarComponent({
     initial: rememberedWidth,
     onCommit: (next) => {
       rememberedWidth = next;
+      saveStoredSize("width", next);
     },
   });
   const { setPaneWidth: setSidebarWidth } = resize;
+  // Fork: the inset sidebar's Monos and Projects sections resize; the
+  // session list below takes what is left.
+  const monosSplit = useHeightSplit({
+    name: "monosHeight",
+    min: 48,
+    max: sectionSplitMax,
+    cap: 0.3,
+  });
+  const projectsSplit = useHeightSplit({
+    name: "projectsHeight",
+    min: 72,
+    max: sectionSplitMax,
+    cap: 0.5,
+  });
   const railSharedWidth = useMemo(
     () => ({
       width: resize.width,
@@ -689,6 +740,7 @@ function SidebarComponent({
       max: () => Math.min(MAX_WIDTH, Math.floor(window.innerWidth * 0.5)),
       onCommit: (next: number) => {
         rememberedWidth = next;
+        saveStoredSize("width", next);
         setSidebarWidth(next);
       },
     }),
@@ -1458,6 +1510,9 @@ function SidebarComponent({
   const allMenuSessionsArchived =
     menuSessions.length > 0 &&
     menuSessions.every((session) => session.archived);
+  const closeMenuVisible =
+    !!onCloseSessions &&
+    menuSessionIds.some((sessionId) => closableSessionIds.has(sessionId));
   const menuSessionFolder =
     menuSessionIds.length === 1
       ? folderContaining(sessionFolders, menuSessionIds[0])
@@ -1574,12 +1629,23 @@ function SidebarComponent({
           },
         ]
       : []),
-    ...(onArchiveSession ||
+    ...(closeMenuVisible ||
+    onArchiveSession ||
     onArchiveSessions ||
     onDeleteSession ||
     onDeleteSessions
       ? [
           { kind: "sep" as const },
+          // Fork: close to free memory
+          ...(closeMenuVisible
+            ? [
+                {
+                  kind: "item" as const,
+                  id: "close",
+                  label: "Close to free memory",
+                },
+              ]
+            : []),
           ...(onArchiveSession || onArchiveSessions
             ? [
                 {
@@ -1713,6 +1779,10 @@ function SidebarComponent({
       );
       return;
     }
+    if (id === "close") {
+      onCloseSessions?.(sessionIds);
+      return;
+    }
     if (id === "archive") {
       if (sessionIds.length > 1 && onArchiveSessions) {
         onArchiveSessions(sessionIds, !archived);
@@ -1830,6 +1900,7 @@ function SidebarComponent({
     onSessionListDrop,
     onSessionContextMenu,
     onArchiveSession,
+    onCloseSessions,
     setRenamingSessionId,
     onDeleteSession,
   });
@@ -1841,6 +1912,7 @@ function SidebarComponent({
     onSessionListDrop,
     onSessionContextMenu,
     onArchiveSession,
+    onCloseSessions,
     setRenamingSessionId,
     onDeleteSession,
   };
@@ -1862,6 +1934,8 @@ function SidebarComponent({
         cardHandlers.current.onSessionContextMenu(sessionId, e),
       archive: (sessionId: string, archived: boolean) =>
         cardHandlers.current.onArchiveSession?.(sessionId, archived),
+      close: (sessionId: string) =>
+        cardHandlers.current.onCloseSessions?.([sessionId]),
       rename: (sessionId: string) =>
         cardHandlers.current.setRenamingSessionId(sessionId),
       delete: (sessionId: string) =>
@@ -1993,6 +2067,11 @@ function SidebarComponent({
         onListDropTargetChange={setSessionDrop}
         onContextMenu={cardActions.contextMenu}
         onArchive={onArchiveSession ? cardActions.archive : undefined}
+        onClose={
+          onCloseSessions && closableSessionIds.has(session.id)
+            ? cardActions.close
+            : undefined
+        }
         onRename={onRenameSession ? cardActions.rename : undefined}
         onDelete={onDeleteSession ? cardActions.delete : undefined}
       />
@@ -2379,6 +2458,15 @@ function SidebarComponent({
       />
     ) : null;
 
+  // Fork: closes the loaded sessions off screen, to free memory.
+  const freeMemoryButton =
+    onCloseIdleSessions && !remoteProject ? (
+      <FreeMemoryButton
+        count={idleClosableCount}
+        onClose={onCloseIdleSessions}
+      />
+    ) : null;
+
   // The inset list names its loose sessions like the groups above them, and
   // carries the filter the search row holds elsewhere.
   const sessionsFilterButton = (
@@ -2393,6 +2481,7 @@ function SidebarComponent({
         <ListFilter className="size-3" strokeWidth={1.75} />
       </SessionsHeaderButton>
       {closeAllSafeButton}
+      {freeMemoryButton}
     </>
   );
   // Stands in for the date labels when no loose session is listed, so the
@@ -2531,20 +2620,49 @@ function SidebarComponent({
       {/* Fork: Monos and projects stay visible while sessions scroll. */}
       {inset ? navList : null}
       {inset && railMonos && inProject ? (
-        <div className="max-h-[min(25%,14rem)] min-h-0 shrink-0 overflow-y-auto overscroll-contain">
-          <MonoRailSection {...railMonos} project={cwd} />
-        </div>
+        <>
+          {/* The padding sits outside the scroller, so the handle over it
+              never covers a Mono row. */}
+          <div
+            ref={monosSplit.setPaneRef}
+            style={monosSplit.style}
+            className={`flex min-h-0 flex-col pb-2${
+              monosSplit.capped ? " max-h-[min(25%,14rem)] shrink-0" : " shrink"
+            }`}
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <MonoRailSection {...railMonos} project={cwd} />
+            </div>
+          </div>
+          <SplitHandle
+            label="Resize Monos"
+            onPointerDown={monosSplit.onPointerDown}
+            onDoubleClick={monosSplit.onDoubleClick}
+            onKeyDown={monosSplit.onKeyDown}
+          />
+        </>
       ) : null}
       {inset && onSelectProject ? (
-        <ProjectsList
-          paths={spaceProjects}
-          cwd={cwd}
-          agents={liveAgents}
-          busyPaths={busyProjectPaths}
-          onSelectProject={onSelectProject}
-          onOpenProject={onOpenProject}
-          onProjectContextMenu={headerProjectMenu.open}
-        />
+        <>
+          <ProjectsList
+            paths={spaceProjects}
+            cwd={cwd}
+            agents={liveAgents}
+            busyPaths={busyProjectPaths}
+            onSelectProject={onSelectProject}
+            onOpenProject={onOpenProject}
+            onProjectContextMenu={headerProjectMenu.open}
+            sectionRef={projectsSplit.setPaneRef}
+            capped={projectsSplit.capped}
+            style={projectsSplit.style}
+          />
+          <SplitHandle
+            label="Resize Projects"
+            onPointerDown={projectsSplit.onPointerDown}
+            onDoubleClick={projectsSplit.onDoubleClick}
+            onKeyDown={projectsSplit.onKeyDown}
+          />
+        </>
       ) : null}
       {headerProjectMenu.element}
       {/* Inset project selection lives in Projects and worktrees in the title bar. */}
@@ -2634,12 +2752,16 @@ function SidebarComponent({
               <ListFilter className="size-3" strokeWidth={1.75} />
             </SessionsHeaderButton>
             {closeAllSafeButton}
+            {freeMemoryButton}
           </div>
         ) : null}
         <ProjectSessionsCard
           enabled={inset}
           cwd={cwd}
           hidden={tab !== "sessions"}
+          keepRoom={
+            monosSplit.height != null || projectsSplit.height != null
+          }
           onNew={onNew}
           ref={(el) => {
             if (inset) slideRefs.current[0] = el;
@@ -4089,6 +4211,7 @@ function ProjectSessionsCard({
   enabled,
   cwd,
   hidden,
+  keepRoom = false,
   onNew,
   ref,
   children,
@@ -4096,6 +4219,8 @@ function ProjectSessionsCard({
   enabled: boolean;
   cwd: string;
   hidden: boolean;
+  /** Fork: resized sections above shrink before this list does. */
+  keepRoom?: boolean;
   onNew?: () => string | void;
   ref?: Ref<HTMLDivElement>;
   children: ReactNode;
@@ -4106,6 +4231,7 @@ function ProjectSessionsCard({
     <div
       ref={ref}
       data-project-sessions=""
+      style={keepRoom ? { minHeight: SESSIONS_MIN_HEIGHT } : undefined}
       className={`mx-2 mb-2 min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-content/4 ${
         hidden ? "hidden" : "flex"
       }`}
@@ -4705,6 +4831,7 @@ export const SessionCard = memo(function SessionCard({
   onListDropTargetChange,
   onContextMenu,
   onArchive,
+  onClose,
   onRename,
   onDelete,
 }: {
@@ -4754,6 +4881,8 @@ export const SessionCard = memo(function SessionCard({
     e: ReactMouseEvent<HTMLDivElement>,
   ) => void;
   onArchive?: (sessionId: string, archived: boolean) => void;
+  /** Fork: set while the session is loaded and can close to free memory. */
+  onClose?: (sessionId: string) => void;
   onRename?: (sessionId: string) => void;
   onDelete?: (sessionId: string) => void;
 }) {
@@ -5263,6 +5392,24 @@ export const SessionCard = memo(function SessionCard({
                       <Zap className="size-3" strokeWidth={1.75} />
                     </span>
                   ) : null}
+                  {onClose ? (
+                    <button
+                      type="button"
+                      data-no-drag
+                      data-tauri-drag-region="false"
+                      data-fork-close-session
+                      title={CLOSE_SESSION_LABEL}
+                      aria-label={`Close ${title} to free memory`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onClose(session.id);
+                      }}
+                      className="hidden size-5 place-items-center rounded-md text-content/50 hover:bg-content/10 hover:text-content group-focus-within:grid group-hover:grid"
+                    >
+                      <X className="size-3 shrink-0" strokeWidth={1.75} />
+                    </button>
+                  ) : null}
                   {onArchive ? (
                     <button
                       type="button"
@@ -5286,7 +5433,7 @@ export const SessionCard = memo(function SessionCard({
                     so the row keeps its alignment. */}
                   <span
                     className={`flex items-center text-[11px] tabular-nums text-content/40 ${
-                      onArchive
+                      onArchive || onClose
                         ? "group-focus-within:hidden group-hover:hidden"
                         : ""
                     }`}
@@ -5407,6 +5554,24 @@ export const SessionCard = memo(function SessionCard({
                       className="size-3.5 shrink-0"
                     />
                   </span>
+                ) : null}
+                {onClose ? (
+                  <button
+                    type="button"
+                    data-no-drag
+                    data-tauri-drag-region="false"
+                    data-fork-close-session
+                    title={CLOSE_SESSION_LABEL}
+                    aria-label={`Close ${title} to free memory`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onClose(session.id);
+                    }}
+                    className="pointer-events-none grid size-5 place-items-center rounded-md text-content/50 opacity-0 hover:bg-content/10 hover:text-content group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+                  >
+                    <X className="size-3 shrink-0" strokeWidth={1.75} />
+                  </button>
                 ) : null}
                 {onArchive ? (
                   <button

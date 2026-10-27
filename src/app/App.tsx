@@ -604,6 +604,12 @@ import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
+import {
+  canCloseForMemory,
+  planSessionClose,
+  referencedSessionIds,
+  withRunningLeads,
+} from "../fork/sessionClose/sessionClose"; // Fork
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
 import {
   adjacentItemId,
@@ -2232,6 +2238,29 @@ function Workspace({
     busySessionIdsRef.current = nextBusySessionIds;
   }
   const busySessionIds = busySessionIdsRef.current;
+  // Fork: loaded sessions a list row can close to free memory. One shown
+  // beside a Mono is on screen, though no tab holds it; the lead of a run
+  // still going waits for its workers.
+  const nextClosableSessionIds = useMemo(() => {
+    const held = withRunningLeads(busySessionIds, orchestrationRuns);
+    const referenced = referencedSessionIds(tabs);
+    const ids = new Set<string>();
+    for (const session of sessions) {
+      if (
+        session.id !== shownMonoSessionId &&
+        !referenced.has(session.id) &&
+        canCloseForMemory(session, held)
+      ) {
+        ids.add(session.id);
+      }
+    }
+    return ids;
+  }, [sessions, tabs, busySessionIds, orchestrationRuns, shownMonoSessionId]);
+  const closableSessionIdsRef = useRef(nextClosableSessionIds);
+  if (!setsEqual(closableSessionIdsRef.current, nextClosableSessionIds)) {
+    closableSessionIdsRef.current = nextClosableSessionIds;
+  }
+  const closableSessionIds = closableSessionIdsRef.current;
   // Fork: running subagents per session, for the sidebar's badge.
   useEffect(() => {
     publishRunningWork(sessions);
@@ -6763,6 +6792,132 @@ function Workspace({
     },
     [activeTabId, invalidateLoadedSession, onSelectProject, persistSession],
   );
+
+  // Fork: closes conversations to free memory (src/fork/sessionClose). Their
+  // panes close, the agent CLI stops and the transcript leaves the window;
+  // the list keeps them, and the next message resumes the provider session.
+  // Fork: a blank for a tab whose session closed, kept in the tab's worktree
+  // with the old session's agent, as onClearTabSession makes one.
+  const blankSessionLike = useCallback(
+    (tab: WorkspaceTab, old: Session, list: readonly Session[]): Session => {
+      const workspace = tabWorkspace(tab, list);
+      const focus = worktreeFocus(old.cwd);
+      return {
+        ...newSession(
+          old.harness,
+          old.cwd,
+          old.model,
+          old.runtimeMode,
+          old.modelSettings,
+        ),
+        ...(workspace && !sameProjectPath(workspace, old.cwd)
+          ? {
+              worktreeCwd: workspace,
+              branch:
+                (focus && sameProjectPath(focus.path, workspace)
+                  ? focus.branch
+                  : undefined) ??
+                (old.worktreeCwd && sameProjectPath(old.worktreeCwd, workspace)
+                  ? old.branch
+                  : undefined) ??
+                undefined,
+            }
+          : {}),
+      };
+    },
+    [tabWorkspace],
+  );
+  const onCloseSessionsForMemory = useCallback(
+    (ids: readonly string[]) => {
+      const sessions = sessionsRef.current;
+      // Sessions on screen outside the workspace tabs stay open.
+      const surface = foregroundSurfaceRef.current;
+      const plan = planSessionClose({
+        tabs: tabsRef.current,
+        sessions,
+        ids: ids.filter(
+          (id) =>
+            id !== surface.sideSessionId && id !== surface.standaloneSessionId,
+        ),
+        busyIds: withRunningLeads(
+          busySessionIdsRef.current,
+          orchestrator.snapshot(),
+        ),
+        activeTabId: activeTabIdRef.current,
+        scope: tabCloseScope,
+        worktreeOf: tabWorktreeOf,
+      });
+      if (plan.closed.length === 0) return;
+      const closed = new Set(plan.closed);
+      for (const session of sessions) {
+        if (!closed.has(session.id)) continue;
+        // Bridges a save still in flight, as removing a project does.
+        rememberLoadedSession(loadedSessionCache.current, session);
+        persistSession(session);
+        pendingPersist.current.delete(session.id);
+        rememberRemoteSession(session.id);
+        rememberRemotePendingWorktree(session.id);
+        // Stop, not forget: the resume id stays for the next message.
+        for (const harness of sessionChildHarnesses(session)) {
+          void stopHarnessSession(harness, session.id);
+        }
+      }
+      const blankTabIds = new Set(plan.blankTabIds);
+      const blanks: Session[] = [];
+      const nextTabs = plan.tabs.map((tab) => {
+        if (!blankTabIds.has(tab.id)) return tab;
+        const original = tabsRef.current.find((entry) => entry.id === tab.id);
+        const old = sessions.find((session) =>
+          leafIds((original ?? tab).layout).includes(session.id),
+        );
+        const blank = old
+          ? blankSessionLike(original ?? tab, old, sessions)
+          : seedSession(projectCwdRef.current);
+        blanks.push(blank);
+        return resetTabToSession(tab, blank.id);
+      });
+      const nextSessions = [
+        ...sessions.filter((session) => !closed.has(session.id)),
+        ...blanks,
+      ];
+      sessionsRef.current = nextSessions;
+      tabsRef.current = nextTabs;
+      setSessions(nextSessions);
+      setTabs(nextTabs);
+      if (plan.activeTabId !== activeTabIdRef.current) {
+        // A view over the workspace, such as a Mono, stays up; only the tab
+        // beneath it moves on.
+        if (surface.workspaceVisible) {
+          activateTab(plan.activeTabId);
+        } else {
+          setActiveTabIdState(plan.activeTabId);
+        }
+      }
+      void refreshHistory(sidebarCwd);
+    },
+    [
+      activateTab,
+      blankSessionLike,
+      persistSession,
+      refreshHistory,
+      seedSession,
+      sidebarCwd,
+      tabCloseScope,
+      tabWorktreeOf,
+    ],
+  );
+  // Fork: every loaded session not on screen, for the list's "free memory".
+  const onCloseIdleSessions = useCallback(() => {
+    const active = tabsRef.current.find(
+      (tab) => tab.id === activeTabIdRef.current,
+    );
+    const onScreen = new Set(active ? leafIds(active.layout) : []);
+    onCloseSessionsForMemory(
+      sessionsRef.current
+        .map((session) => session.id)
+        .filter((id) => !onScreen.has(id)),
+    );
+  }, [onCloseSessionsForMemory]);
 
   const onRestoreProject = useCallback(
     (path: string) => {
@@ -14094,6 +14249,16 @@ function Workspace({
     />
   );
 
+  // Fork: the closable sessions off screen, which "free memory" closes.
+  const idleClosableCount = useMemo(() => {
+    const onScreen = new Set(activeTab ? leafIds(activeTab.layout) : []);
+    let count = 0;
+    for (const id of closableSessionIds) {
+      if (!onScreen.has(id)) count += 1;
+    }
+    return count;
+  }, [activeTab, closableSessionIds]);
+
   const sessionSidebar = (
     <Sidebar
       cwd={sidebarCwd}
@@ -14141,6 +14306,10 @@ function Workspace({
       onRenameSession={onRenameHistorySession}
       onArchiveSession={onArchiveHistorySession}
       onArchiveSessions={onArchiveHistorySessions}
+      closableSessionIds={closableSessionIds}
+      onCloseSessions={onCloseSessionsForMemory}
+      idleClosableCount={idleClosableCount}
+      onCloseIdleSessions={onCloseIdleSessions}
       onPinSession={onPinHistorySession}
       onPinSessions={onPinHistorySessions}
       onSetSessionLinkedWorkItem={onSetHistorySessionLinkedWorkItem}
