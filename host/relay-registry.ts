@@ -21,6 +21,9 @@ export type LocalSession = {
   bridgeSessionId?: string;
   version?: string;
   startedAt?: number;
+  /** Its own registry times, when it has them. */
+  updatedAt?: number;
+  statusUpdatedAt?: number;
   pid: number;
   /** Its real messagingSocketPath. */
   socket: string;
@@ -98,6 +101,12 @@ export function localSession(value: unknown, filePid: number, account: string): 
   if (typeof raw.version === "string" && formats.version(raw.version)) session.version = raw.version;
   if (typeof raw.startedAt === "number" && Number.isFinite(raw.startedAt)) {
     session.startedAt = raw.startedAt;
+  }
+  if (typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt)) {
+    session.updatedAt = raw.updatedAt;
+  }
+  if (typeof raw.statusUpdatedAt === "number" && Number.isFinite(raw.statusUpdatedAt)) {
+    session.statusUpdatedAt = raw.statusUpdatedAt;
   }
   return session;
 }
