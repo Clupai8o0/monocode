@@ -705,7 +705,7 @@ export function newSessionLike(
     cwd,
     seed?.model,
     seed?.runtimeMode,
-    seed?.modelSettings,
+    seed?.modelSettings ? withoutUltracode(seed.modelSettings) : undefined,
   );
 }
 
