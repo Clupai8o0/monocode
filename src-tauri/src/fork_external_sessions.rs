@@ -130,7 +130,7 @@ struct Env {
     home: PathBuf,
     now_ms: i64,
     mac: bool,
-    /// The process table on the Mac; None reads /proc (Linux).
+    /// The process table; None skips the start-time check.
     procs: Option<Vec<Proc>>,
     common_dir: Box<dyn Fn(&Path) -> Option<PathBuf>>,
 }
@@ -143,7 +143,7 @@ impl Env {
             home: crate::dirs_home().map(PathBuf::from).unwrap_or_default(),
             now_ms,
             mac,
-            procs: mac.then(|| process_table(now_ms)),
+            procs: Some(process_table(now_ms)),
             common_dir: Box::new(cached_common_dir),
         }
     }
@@ -243,6 +243,20 @@ fn is_live(env: &Env, pid: i64, proc_start: Option<&str>) -> bool {
     if pid <= 0 {
         return false;
     }
+    // Claude Code on Linux writes clock ticks from /proc; the other agents,
+    // and Claude on the Mac, write a UTC time.
+    let ticks = proc_start
+        .map(str::trim)
+        .filter(|s| !env.mac && !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    if let Some(ticks) = ticks {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        return stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+            .is_some_and(|field| field == ticks);
+    }
     match &env.procs {
         Some(procs) => {
             let Some(proc) = procs.iter().find(|p| p.pid == pid) else {
@@ -255,18 +269,7 @@ fn is_live(env: &Env, pid: i64, proc_start: Option<&str>) -> bool {
                 }),
             }
         }
-        None => {
-            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-                return false;
-            };
-            match proc_start {
-                None => true,
-                Some(start) => stat
-                    .rsplit_once(')')
-                    .and_then(|(_, rest)| rest.split_whitespace().nth(19).map(str::to_string))
-                    .is_some_and(|field| field == start.trim()),
-            }
-        }
+        None => proc_start.is_none() && Path::new(&format!("/proc/{pid}")).exists(),
     }
 }
 
@@ -447,14 +450,56 @@ fn match_project<'a>(env: &Env, projects: &'a [ProjectRef], cwd: &str) -> Option
 
 // ---- transcripts ----
 
+/// Kimi and OpenCode ids carry underscores ("session_…", "ses_…").
 fn valid_session_id(id: &str) -> bool {
-    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn valid_handoff_name(name: &str) -> bool {
+    name.strip_prefix("handoff")
+        .and_then(|rest| rest.strip_suffix(".md"))
+        .is_some_and(|mid| mid.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)))
 }
 
 fn valid_handoff_rel(path: &str) -> bool {
-    path.strip_prefix(".claude/handoff")
-        .and_then(|rest| rest.strip_suffix(".md"))
-        .is_some_and(|mid| mid.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)))
+    path.strip_prefix(".claude/").is_some_and(valid_handoff_name)
+}
+
+/// A handoff file's path: `.claude/handoff*.md`, maybe in a worktree.
+fn is_handoff_path(path: &str) -> bool {
+    let mut parts = path.rsplit('/');
+    matches!((parts.next(), parts.next()), (Some(name), Some(".claude")) if valid_handoff_name(name))
+}
+
+/// The real path of a project's handoff file, or None when `rel` is not a
+/// handoff file inside the project. A link may point anywhere, so the real
+/// path has to be a handoff file too.
+fn handoff_file(project: &str, rel: &str) -> Option<PathBuf> {
+    if !is_handoff_path(rel) {
+        return None;
+    }
+    let root = std::fs::canonicalize(project).ok()?;
+    let file = std::fs::canonicalize(root.join(rel)).ok()?;
+    let inside = file.starts_with(&root) && file != root;
+    (inside && file.to_str().is_some_and(is_handoff_path) && file.is_file()).then_some(file)
+}
+
+/// The agent a claims name such as "monocode-cx79" belongs to, when it is
+/// not Claude ("monocode-14").
+fn agent_of_name(name: Option<&str>) -> Option<&'static str> {
+    let (_, tail) = name?.rsplit_once('-')?;
+    let tail = tail.as_bytes();
+    if tail.len() != 4 || !tail[2..].iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)) {
+        return None;
+    }
+    match &tail[..2] {
+        b"cx" => Some("codex"),
+        b"oc" => Some("opencode"),
+        b"ds" => Some("dsh"),
+        b"km" => Some("kimi"),
+        b"gk" => Some("grok"),
+        _ => None,
+    }
 }
 
 fn project_key(cwd: &str) -> String {
@@ -544,7 +589,8 @@ fn latest_notes(env: &Env, common: &Path) -> HashMap<String, Note> {
         }
         let note = Note {
             at,
-            name: text(&v["name"]),
+            // claims.py writes "?" when it has no name for the session.
+            name: text(&v["name"]).filter(|name| name != "?"),
             worktree: text(&v["worktree"]),
             branch: text(&v["branch"]),
             text: v["text"].as_str().unwrap_or("").to_string(),
@@ -595,10 +641,8 @@ fn note_handoff(env: &Env, note: &Note, project: &str) -> Option<String> {
     };
     let path = normalize(&path);
     let rel = path.strip_prefix(normalize(Path::new(project))).ok()?;
-    if rel.as_os_str().is_empty() || !path.is_file() {
-        return None;
-    }
-    Some(rel.to_string_lossy().into_owned())
+    let rel = rel.to_str()?.to_string();
+    handoff_file(project, &rel).map(|_| rel)
 }
 
 // ---- list ----
@@ -613,6 +657,9 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
 
     let mut rows: Vec<ExternalSession> = Vec::new();
     for record in &live {
+        if !valid_session_id(&record.session_id) {
+            continue;
+        }
         let Some(project) = match_project(env, projects, &record.cwd) else {
             continue;
         };
@@ -662,16 +709,17 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
                 }
                 continue;
             }
-            if !handed_over(&note.text) {
+            if !handed_over(&note.text) || !valid_session_id(&session) {
                 continue;
             }
             let cwd = note.worktree.clone().unwrap_or_else(|| project.cwd.clone());
             let owner = match_project(env, projects, &cwd).unwrap_or(project);
-            let found = find_transcript(env, "claude", &cwd, &session);
+            let agent = agent_of_name(note.name.as_deref());
+            let found = if agent.is_some() { None } else { find_transcript(env, "claude", &cwd, &session) };
             handed.push(ExternalSession {
                 id: session.clone(),
                 project_id: owner.project_id.clone(),
-                source: found.as_ref().map(|f| f.1).unwrap_or("claude").to_string(),
+                source: found.as_ref().map(|f| f.1).or(agent).unwrap_or("claude").to_string(),
                 name: note.name.clone(),
                 cwd,
                 branch: note.branch.clone(),
@@ -794,11 +842,7 @@ fn read(
 }
 
 fn read_handoff(project: &str, rel: &str) -> Option<Handoff> {
-    let root = std::fs::canonicalize(project).ok()?;
-    let file = std::fs::canonicalize(Path::new(project).join(rel)).ok()?;
-    if !file.starts_with(&root) || !file.is_file() {
-        return None;
-    }
+    let file = handoff_file(project, rel)?;
     let mut buf = Vec::new();
     File::open(&file).ok()?.take(HANDOFF_MAX as u64).read_to_end(&mut buf).ok()?;
     let mut text = String::from_utf8_lossy(&buf).into_owned();
@@ -856,16 +900,47 @@ fn read_page(path: &Path, before: Option<u64>, limit: usize) -> std::io::Result<
         }
         pos = start;
     }
-    // Keep the page small: drop the oldest lines first.
-    let mut total: usize = lines.iter().flat_map(|(_, t)| t).map(|t| t.text.len()).sum();
-    while total > PAGE_TEXT_MAX && lines.len() > 1 {
-        let (_, dropped) = lines.pop().unwrap();
-        total -= dropped.iter().map(|t| t.text.len()).sum::<usize>();
+    // A line longer than the whole scan is skipped, or paging would stop on it.
+    if oldest.is_none() && pos > 0 {
+        oldest = Some(pos);
         truncated = true;
-        oldest = lines.last().map(|(o, _)| *o);
+    }
+    // Newest first here. Whole lines only, up to the turn limit and the text
+    // cap; the rest waits for the next page. Only a newest line too big for a
+    // page on its own is cut, keeping its newest turns.
+    let mut kept: Vec<Vec<Turn>> = Vec::new();
+    let mut last_kept: Option<u64> = None;
+    let mut total = 0;
+    let mut bytes = 0;
+    for (offset, turns) in lines {
+        let size: usize = turns.iter().map(|t| t.text.len()).sum();
+        if total + turns.len() <= limit && bytes + size <= PAGE_TEXT_MAX {
+            total += turns.len();
+            bytes += size;
+            kept.push(turns);
+            last_kept = Some(offset);
+            continue;
+        }
+        if kept.is_empty() {
+            let mut part: Vec<Turn> = Vec::new();
+            for turn in turns.into_iter().rev() {
+                if part.len() >= limit || (!part.is_empty() && bytes + turn.text.len() > PAGE_TEXT_MAX) {
+                    break;
+                }
+                bytes += turn.text.len();
+                part.push(turn);
+            }
+            part.reverse();
+            kept.push(part);
+            oldest = Some(offset);
+            truncated = true;
+        } else {
+            oldest = last_kept;
+        }
+        break;
     }
     let before = oldest.filter(|o| *o > 0);
-    let turns = lines.into_iter().rev().flat_map(|(_, t)| t).collect();
+    let turns = kept.into_iter().rev().flatten().collect();
     Ok(TranscriptPage { turns, before, handoff: None, truncated: truncated.then_some(true) })
 }
 
@@ -1283,11 +1358,131 @@ mod tests {
         }
         let expect: Vec<String> = (0..520).map(|i| format!("m{i}")).collect();
         assert_eq!(seen, expect);
-        // A page stays under the text cap.
+        // A page stays under the text cap; older lines wait for the next page.
         let page = read_page(&path, None, 200).unwrap();
         let size: usize = page.turns.iter().map(|t| t.text.len()).sum();
         assert!(size <= PAGE_TEXT_MAX);
+        assert_eq!(page.truncated, None);
+    }
+
+    #[test]
+    fn pages_whole_lines_and_cuts_only_a_line_too_big() {
+        let dir = temp();
+        let path = dir.join("t.jsonl");
+        let tools = |tag: &str| {
+            let parts: Vec<String> =
+                (1..=3).map(|n| format!(r#"{{"type":"tool_use","name":"{tag}{n}","input":{{}}}}"#)).collect();
+            format!(r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#, parts.join(",")) + "\n"
+        };
+        write(&path, &(tools("a") + &tools("b")));
+        let page = read_page(&path, None, 4).unwrap();
+        let texts: Vec<&str> = page.turns.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, vec!["b1", "b2", "b3"]);
+        assert_eq!(page.truncated, None);
+        let next = read_page(&path, page.before, 4).unwrap();
+        let texts: Vec<&str> = next.turns.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, vec!["a1", "a2", "a3"]);
+        assert_eq!(next.before, None);
+
+        // One line bigger than a page keeps its newest turns.
+        let parts: Vec<String> = (0..300)
+            .map(|i| format!(r#"{{"type":"text","text":"t{i:03} {}"}}"#, "w".repeat(2995)))
+            .collect();
+        let big = format!(r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#, parts.join(","));
+        write(&path, &format!("{{\"type\":\"user\",\"message\":{{\"content\":\"hello\"}}}}\n{big}\n"));
+        let page = read_page(&path, None, 200).unwrap();
         assert_eq!(page.truncated, Some(true));
+        assert_eq!(page.turns.len(), PAGE_TEXT_MAX / 3000);
+        assert!(page.turns.last().unwrap().text.starts_with("t299 "));
+        let next = read_page(&path, page.before, 200).unwrap();
+        assert_eq!(next.turns.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), vec!["hello"]);
+        let few = read_page(&path, None, 5).unwrap();
+        let heads: Vec<&str> = few.turns.iter().map(|t| &t.text[..4]).collect();
+        assert_eq!(heads, vec!["t295", "t296", "t297", "t298", "t299"]);
+    }
+
+    #[test]
+    fn moves_past_a_line_longer_than_the_scan() {
+        let dir = temp();
+        let path = dir.join("t.jsonl");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(b"{\"type\":\"user\",\"message\":{\"content\":\"first\"}}\n").unwrap();
+        file.write_all(&vec![b'x'; 17 * 1024 * 1024]).unwrap();
+        file.write_all(b"\n{\"type\":\"user\",\"message\":{\"content\":\"last\"}}\n").unwrap();
+        drop(file);
+        let mut texts = Vec::new();
+        let mut before = None;
+        let mut cut = false;
+        for _ in 0..5 {
+            let page = read_page(&path, before, 60).unwrap();
+            texts.extend(page.turns.into_iter().map(|t| t.text));
+            cut |= page.truncated == Some(true);
+            before = page.before;
+            if before.is_none() {
+                break;
+            }
+        }
+        assert_eq!(texts, vec!["last", "first"]);
+        assert!(before.is_none() && cut);
+    }
+
+    #[test]
+    fn linux_agent_records_use_the_process_table() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let ps = "Wed Oct 28 08:34:18 2026";
+        let started = parse_proc_start(ps).unwrap();
+        let utc = format!(r#","procStart":"{ps}""#);
+        write(&home.join(".kimi-code/agent-sessions/21.json"), &rec(21, "session_live-1", &repo, 2, &utc));
+        write(&home.join(".dsh/agent-sessions/22.json"), &rec(22, "session-reused-1", &repo, 1, &utc));
+        // Clock ticks are checked against /proc, which this pid does not have.
+        write(&home.join(".claude/sessions/23.json"), &rec(23, "cccccccc-3", &repo, 3, r#","procStart":"123456""#));
+        let kimi = Proc { pid: 21, start_ms: started + 1_000, args: "/home/u/.local/bin/kimi".into() };
+        let reused = Proc { pid: 22, start_ms: started + 600_000, args: "kimi".into() };
+        let e = Env { mac: false, ..env(&home, vec![kimi, reused, proc(23)]) };
+        let ids: Vec<String> = list(&e, &[project("p", &repo)]).into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec!["session_live-1"]);
+        assert!(read(&e, &[project("p", &repo)], "p", "session_live-1", None, None).is_ok());
+    }
+
+    #[test]
+    fn only_handoff_files_are_shown() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        write(&repo.join(".claude/notes.md"), "not a handoff");
+        write(&repo.join(".env"), "TOKEN=1");
+        std::os::unix::fs::symlink(repo.join(".env"), repo.join(".claude/handoff-env.md")).unwrap();
+        let now = NOW as f64 / 1000.0;
+        let line = |at: f64, session: &str, name: &str, text: &str| {
+            format!(
+                r#"{{"at":{at},"event":"note","session":"{session}","name":"{name}","worktree":"{}","text":"{text}"}}"#,
+                repo.display()
+            )
+        };
+        let history = [
+            line(now - 30.0, "codexsess-1", "repo-cx79", "handed over: .claude/notes.md"),
+            line(now - 20.0, "gonegone-2", "?", "handed over: .claude/handoff-env.md"),
+            line(now - 10.0, "bad id/x", "n", "handed over: .claude/notes.md"),
+        ]
+        .join("\n");
+        write(&repo.join(".git/claude-claims-history.jsonl"), &history);
+        let e = env(&home, vec![]);
+        let projects = [project("p", &repo)];
+        let rows = list(&e, &projects);
+        let ids: Vec<(&str, Option<&str>, &str)> =
+            rows.iter().map(|r| (r.id.as_str(), r.handoff_path.as_deref(), r.source.as_str())).collect();
+        assert_eq!(ids, vec![("gonegone-2", None, "claude"), ("codexsess-1", None, "codex")]);
+        assert_eq!(rows[0].name, None);
+        assert!(read_handoff(repo.to_str().unwrap(), ".claude/handoff-env.md").is_none());
+        assert_eq!(
+            read(&e, &projects, "p", "handoff:.claude/handoff-env.md", None, None).unwrap_err(),
+            "Session not found"
+        );
+        assert_eq!(agent_of_name(Some("monocode-14")), None);
+        assert_eq!(agent_of_name(Some("morgue-km93")), Some("kimi"));
+        assert_eq!(agent_of_name(Some("x-cé1")), None);
     }
 
     #[test]

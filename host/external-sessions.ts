@@ -24,8 +24,10 @@ export type ExternalSessionsOptions = {
   isAlive?: (pid: number, procStart: string | undefined) => boolean | Promise<boolean>;
   /** The absolute git common dir of a folder, or null. */
   gitCommonDir?: (path: string) => Promise<string | null>;
-  /** `ps -Ao pid=,etime=,args=` output (Mac liveness). */
+  /** `ps -Ao pid=,etime=,args=` output (Mac, and other agents on Linux). */
   processTable?: () => Promise<string>;
+  /** `/proc/<pid>/stat`, or null when the process is gone (Linux). */
+  readProcStat?: (pid: number) => Promise<string | null>;
   /** Provider session ids of MonoCode's own sessions. */
   excludeIds?: Iterable<string>;
 };
@@ -61,9 +63,20 @@ const CHUNK = 512 * 1024;
 const SCAN_MAX = 16 * 1024 * 1024;
 const PAGE_MAX = 200 * 1024;
 const TURN_MAX = 4000;
-const SESSION_ID = /^[A-Za-z0-9-]{8,64}$/;
+// Kimi and OpenCode ids carry underscores ("session_…", "ses_…").
+const SESSION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const HANDOFF_ID = /^handoff:(\.claude\/handoff[A-Za-z0-9._-]*\.md)$/;
 const HANDOFF_FILE = /^handoff[A-Za-z0-9._-]*\.md$/;
+/** A handoff file's path in a project: `.claude/handoff*.md`, maybe in a worktree. */
+const HANDOFF_REL = /(?:^|\/)\.claude\/handoff[A-Za-z0-9._-]*\.md$/;
+/** The agent a claims name such as "monocode-cx79" belongs to. */
+const NAME_AGENT: Record<string, string> = {
+  cx: "codex",
+  oc: "opencode",
+  ds: "dsh",
+  km: "kimi",
+  gk: "grok",
+};
 const AGENT_ARGS =
   /(?:^|[\/\s])(?:claude|codex|opencode|dsh|kimi|grok(?:-macos-[A-Za-z0-9_]+)?)(?:\s|$)/i;
 const SKIPPED_USER = [
@@ -157,13 +170,22 @@ function pidAlive(pid: number) {
   }
 }
 
+async function defaultReadProcStat(pid: number): Promise<string | null> {
+  try {
+    return await readFile(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 function makeLiveness(
   platform: NodeJS.Platform,
   now: () => number,
   processTable: () => Promise<string>,
+  readProcStat: (pid: number) => Promise<string | null>,
 ) {
   let table: Promise<Map<number, { start: number; args: string }>> | undefined;
-  const mac = () => {
+  const processes = () => {
     table ??= processTable().then((text) => {
       const at = now();
       const rows = new Map<number, { start: number; args: string }>();
@@ -178,22 +200,26 @@ function makeLiveness(
     });
     return table;
   };
+  const sameStart = async (pid: number, procStart: string) => {
+    const row = (await processes()).get(pid);
+    const start = macProcStart(procStart);
+    return (
+      !!row && start !== null && Math.abs(row.start - start) <= 5_000 && AGENT_ARGS.test(row.args)
+    );
+  };
   return async (pid: number, procStart: string | undefined) => {
     if (platform === "darwin") {
-      const row = (await mac()).get(pid);
-      if (!row) return false;
-      if (!procStart) return true;
-      const start = macProcStart(procStart);
-      return start !== null && Math.abs(row.start - start) <= 5_000 && AGENT_ARGS.test(row.args);
+      if (!procStart) return (await processes()).has(pid);
+      return sameStart(pid, procStart);
     }
     if (platform === "linux" && procStart) {
-      try {
-        const text = await readFile(`/proc/${pid}/stat`, "utf8");
-        const fields = text.slice(text.lastIndexOf(")") + 1).trim().split(/\s+/);
-        return fields[19] === String(procStart).trim();
-      } catch {
-        return false;
-      }
+      const stamp = procStart.trim();
+      // Other agents' records hold a UTC time here too, written by agent_hook.py.
+      if (!/^\d+$/.test(stamp)) return sameStart(pid, stamp);
+      const text = await readProcStat(pid);
+      if (text === null) return false;
+      const fields = text.slice(text.lastIndexOf(")") + 1).trim().split(/\s+/);
+      return fields[19] === stamp;
     }
     return pidAlive(pid);
   };
@@ -318,7 +344,8 @@ async function readHistory(commonDir: string, now: number): Promise<HistoryLine[
       at,
       event: "note",
       session: value.session,
-      name: str(value.name),
+      // claims.py writes "?" when it has no name for the session.
+      name: value.name === "?" ? undefined : str(value.name),
       worktree: str(value.worktree),
       branch: str(value.branch),
       text: typeof value.text === "string" ? value.text : undefined,
@@ -377,12 +404,41 @@ function handoffTarget(text: string) {
   return match ? match[1].replace(/[.,;:!?)\]}'"`>]+$/, "") : undefined;
 }
 
+/**
+ * The real path of a project's handoff file, or null when the path is not a
+ * handoff file inside the project. A link may point anywhere, so the real
+ * path has to be a handoff file too.
+ */
+async function handoffFile(projectPath: string, rel: string): Promise<string | null> {
+  if (!HANDOFF_REL.test(rel)) return null;
+  try {
+    const root = await realpath(projectPath);
+    const file = await realpath(join(root, rel));
+    if (!within(root, file) || file === root || !HANDOFF_REL.test(file.split(sep).join("/")))
+      return null;
+    return (await stat(file)).isFile() ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The agent a claims name belongs to when it is not Claude. */
+function agentOfName(name: string | undefined) {
+  const match = name ? /-(cx|oc|ds|km|gk)[0-9a-f]{2}$/.exec(name) : null;
+  return match ? NAME_AGENT[match[1]] : undefined;
+}
+
 type Row = ExternalSession & { transcriptPath?: string };
 
-/** Every external session of the given projects, transcript paths included. */
+/**
+ * The external sessions of every project, or of `only`, transcript paths
+ * included. Folders match against every project either way, so a nested
+ * project keeps its own sessions.
+ */
 async function buildRows(
   projects: ExternalProject[],
   options: ExternalSessionsOptions,
+  only?: string,
 ): Promise<Row[]> {
   const home = options.home ?? homedir();
   const platform = options.platform ?? process.platform;
@@ -391,8 +447,16 @@ async function buildRows(
   const gitCommonDir = options.gitCommonDir ?? defaultGitCommonDir;
   const isAlive =
     options.isAlive ??
-    makeLiveness(platform, now, options.processTable ?? defaultProcessTable);
+    makeLiveness(
+      platform,
+      now,
+      options.processTable ?? defaultProcessTable,
+      options.readProcStat ?? defaultReadProcStat,
+    );
   const excluded = new Set(options.excludeIds ?? []);
+  const scope = only === undefined ? projects : projects.filter((project) => project.id === only);
+  const wanted = (project: ExternalProject | undefined): project is ExternalProject =>
+    !!project && (only === undefined || project.id === only);
 
   const commonOf = new Map<string, string | null>();
   for (const project of projects)
@@ -412,11 +476,11 @@ async function buildRows(
   const rows: Row[] = [];
   const live = new Set<string>();
   for (const record of await readRegistries(home, platform)) {
-    if (excluded.has(record.sessionId)) continue;
+    if (excluded.has(record.sessionId) || !SESSION_ID.test(record.sessionId)) continue;
     if (!(await isAlive(record.pid, record.procStart))) continue;
     live.add(record.sessionId);
     const project = await match(record.cwd);
-    if (!project) continue;
+    if (!wanted(project)) continue;
     const claude = record.source === "claude" || record.source === "claude-cx";
     const found = claude
       ? await locateTranscript(home, platform, record.source, record.cwd, record.sessionId)
@@ -437,7 +501,7 @@ async function buildRows(
 
   // Notes and hand-overs, one history file per repository.
   const histories = new Map<string, Promise<HistoryLine[]>>();
-  for (const project of projects) {
+  for (const project of scope) {
     const common = commonOf.get(project.id);
     if (common && !histories.has(common)) histories.set(common, readHistory(common, at));
   }
@@ -457,28 +521,31 @@ async function buildRows(
   const handedOver: Row[] = [];
   for (const line of latest.values()) {
     if (live.has(line.session) || excluded.has(line.session)) continue;
+    if (!SESSION_ID.test(line.session)) continue;
     const text = line.text ?? "";
     if (!/^handed over/i.test(text.trim())) continue;
     const worktree = line.worktree;
     if (!worktree) continue;
     const project = await match(worktree);
-    if (!project) continue;
+    if (!wanted(project)) continue;
     let handoffPath: string | undefined;
     const target = handoffTarget(text);
     if (target) {
       const expanded = target.startsWith("~/") ? join(home, target.slice(2)) : target;
       const absolute = resolve(worktree, expanded);
-      const rel = relative(project.path, absolute);
-      if (rel && !rel.startsWith("..") && !isAbsolute(rel) && (await exists(absolute)))
-        handoffPath = rel.split(sep).join("/");
+      const rel = relative(project.path, absolute).split(sep).join("/");
+      // Only a handoff file is ever shown, never another file a note names.
+      if (!rel.startsWith("..") && !isAbsolute(rel) && (await handoffFile(project.path, rel)))
+        handoffPath = rel;
     }
-    const found = SESSION_ID.test(line.session)
-      ? await locateTranscript(home, platform, "claude", worktree, line.session)
-      : null;
+    const agent = agentOfName(line.name);
+    const found = agent
+      ? null
+      : await locateTranscript(home, platform, "claude", worktree, line.session);
     handedOver.push({
       id: line.session,
       projectId: project.id,
-      source: found?.source ?? "claude",
+      source: found?.source ?? agent ?? "claude",
       ...(line.name ? { name: line.name } : {}),
       cwd: worktree,
       ...(line.branch ? { branch: line.branch } : {}),
@@ -492,7 +559,7 @@ async function buildRows(
   }
 
   // Handoff files no row names yet.
-  for (const project of projects) {
+  for (const project of scope) {
     const named = new Set(
       [...rows, ...handedOver]
         .filter((row) => row.projectId === project.id && row.handoffPath)
@@ -508,13 +575,15 @@ async function buildRows(
       if (!HANDOFF_FILE.test(name)) continue;
       const rel = `.claude/${name}`;
       if (named.has(rel)) continue;
+      const file = await handoffFile(project.path, rel);
+      if (!file) continue;
       let info;
       try {
-        info = await stat(join(project.path, rel));
+        info = await stat(file);
       } catch {
         continue;
       }
-      if (!info.isFile() || at - info.mtimeMs > WINDOW_MS) continue;
+      if (at - info.mtimeMs > WINDOW_MS) continue;
       handedOver.push({
         id: `handoff:${rel}`,
         projectId: project.id,
@@ -531,7 +600,7 @@ async function buildRows(
 
   const byUpdate = (a: Row, b: Row) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   const result: Row[] = [];
-  for (const project of projects) {
+  for (const project of scope) {
     result.push(...rows.filter((row) => row.projectId === project.id).sort(byUpdate));
     result.push(
       ...handedOver
@@ -552,13 +621,14 @@ export async function listExternalSessions(
   options: ExternalSessionsOptions = {},
   params: { projectId?: unknown } = {},
 ): Promise<{ sessions: ExternalSession[] }> {
-  let scope = projects;
+  let only: string | undefined;
   if (params.projectId !== undefined && params.projectId !== null) {
     if (typeof params.projectId !== "string") throw new Error("Invalid project id");
-    scope = projects.filter((project) => project.id === params.projectId);
-    if (!scope.length) throw new Error("Project is not registered on this machine");
+    if (!projects.some((project) => project.id === params.projectId))
+      throw new Error("Project is not registered on this machine");
+    only = params.projectId;
   }
-  return { sessions: (await buildRows(scope, options)).map(publicRow) };
+  return { sessions: (await buildRows(projects, options, only)).map(publicRow) };
 }
 
 function clip(text: string, page: { truncated: boolean }) {
@@ -660,23 +730,45 @@ export async function readTranscriptPage(
         }
       }
     }
+    // A line longer than the whole scan is skipped, or paging would stop on it.
+    if (!done && pos > 0 && cursor === end) {
+      cursor = pos;
+      page.truncated = true;
+    }
   } finally {
     await handle.close();
   }
-  // Newest first here; drop the oldest lines until the page is small enough.
+  // Newest first here. Whole lines only, up to the turn limit and the size
+  // cap; the rest waits for the next page. Only a newest line too big for a
+  // page on its own is cut, keeping its newest turns.
+  const kept: ExternalTurn[][] = [];
+  let total = 0;
   let bytes = 0;
-  let kept = 0;
   for (const line of lines) {
     const size = line.turns.reduce((sum, turn) => sum + Buffer.byteLength(turn.text), 0);
-    if (kept > 0 && bytes + size > PAGE_MAX) {
-      page.truncated = true;
-      cursor = lines[kept - 1].offset;
-      break;
+    if (total + line.turns.length <= limit && bytes + size <= PAGE_MAX) {
+      kept.push(line.turns);
+      total += line.turns.length;
+      bytes += size;
+      continue;
     }
-    bytes += size;
-    kept += 1;
+    if (kept.length) {
+      cursor = lines[kept.length - 1].offset;
+    } else {
+      const part: ExternalTurn[] = [];
+      for (let i = line.turns.length - 1; i >= 0 && part.length < limit; i--) {
+        const turnSize = Buffer.byteLength(line.turns[i].text);
+        if (part.length && bytes + turnSize > PAGE_MAX) break;
+        part.unshift(line.turns[i]);
+        bytes += turnSize;
+      }
+      kept.push(part);
+      cursor = line.offset;
+      page.truncated = true;
+    }
+    break;
   }
-  const turns = lines.slice(0, kept).reverse().flatMap((line) => line.turns);
+  const turns = kept.reverse().flat();
   return {
     turns,
     ...(cursor > 0 ? { before: cursor } : {}),
@@ -685,14 +777,8 @@ export async function readTranscriptPage(
 }
 
 async function readHandoff(projectPath: string, handoffPath: string) {
-  const root = await realpath(projectPath);
-  let file: string;
-  try {
-    file = await realpath(join(root, handoffPath));
-  } catch {
-    return undefined;
-  }
-  if (!within(root, file) || file === root) return undefined;
+  const file = await handoffFile(projectPath, handoffPath);
+  if (!file) return undefined;
   const handle = await open(file, "r");
   try {
     const buffer = Buffer.alloc(HANDOFF_MAX);
@@ -723,7 +809,7 @@ export async function readExternalSession(
     typeof params.limit === "number" && Number.isFinite(params.limit)
       ? Math.min(200, Math.max(1, Math.floor(params.limit)))
       : 60;
-  const row = (await buildRows([project], options)).find((item) => item.id === sessionId);
+  const row = (await buildRows(projects, options, project.id)).find((item) => item.id === sessionId);
   if (!row) throw new Error("Session not found");
   const handoff =
     before === undefined && row.handoffPath

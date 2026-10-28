@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -123,6 +124,20 @@ describe("externalSessions.list", () => {
       ["inside-p1-1", "p1"],
       ["inside-p2-1", "p2"],
     ]);
+    // One project at a time still matches against all of them.
+    const scoped = await listExternalSessions(projects, { ...options, gitCommonDir: undefined }, { projectId: "p1" });
+    expect(scoped.sessions.map((s) => s.id)).toEqual(["worktree-elsewhere", "inside-p1-1"]);
+    await expect(readExternalSession(projects, { ...options, gitCommonDir: undefined }, { projectId: "p1", sessionId: "inside-p2-1" })).rejects.toThrow("Session not found");
+  });
+
+  it("keeps ids with underscores and drops ids it could not read", async () => {
+    const { home, project, projects, options } = setup([1, 2, 3]);
+    record(home, ".kimi-code/agent-sessions", "1.json", { pid: 1, sessionId: "session_0b1c2d3e-aaaa", cwd: project, updatedAt: 3 });
+    record(home, ".local/state/opencode/agent-sessions", "2.json", { pid: 2, sessionId: "ses_4f5a6b7c8d", cwd: project, updatedAt: 2 });
+    record(home, ".dsh/agent-sessions", "3.json", { pid: 3, sessionId: "bad id/../x", cwd: project, updatedAt: 1 });
+    const { sessions } = await listExternalSessions(projects, options);
+    expect(sessions.map((s) => [s.id, s.source])).toEqual([["session_0b1c2d3e-aaaa", "kimi"], ["ses_4f5a6b7c8d", "opencode"]]);
+    expect(await readExternalSession(projects, options, { projectId: "p1", sessionId: "ses_4f5a6b7c8d" })).toEqual({ turns: [] });
   });
 
   it("puts notes on live rows and lists hand-overs and handoff files", async () => {
@@ -146,19 +161,29 @@ describe("externalSessions.list", () => {
       { at: at(1000), event: "note", session: "gone-session-3", worktree: project, text: "handed over: .claude/missing.md" },
       { at: at(8 * 86_400_000), event: "note", session: "gone-session-4", worktree: project, text: "handed over: x" },
       { at: at(500), event: "note", session: "gone-session-5", worktree: project, text: "still working" },
+      { at: at(400), event: "note", session: "codex-session-6", name: "proj-cx79", worktree: project, text: "handed over: .claude/notes.md" },
+      { at: at(300), event: "note", session: "gone-session-7", name: "?", worktree: project, text: "handed over: .claude/handoff-link.md" },
     ];
+    write(join(project, ".claude/notes.md"), "not a handoff");
+    write(join(project, "secret.txt"), "secret");
+    symlinkSync(join(project, "secret.txt"), join(project, ".claude/handoff-link.md"));
     write(join(common, "claude-claims-history.jsonl"), "partial}\n" + history.map(line).join(""));
     record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: project, updatedAt: NOW });
     const { sessions } = await listExternalSessions(projects, options);
     expect(sessions[0]).toMatchObject({ id: "aaaaaaaa-1", note: "doing tests", branch: "feat", state: "running" });
+    // Notes naming other files, or links out of the handoff files, show no handoff.
     expect(sessions.slice(1).map((s) => [s.id, s.handoffPath])).toEqual([
+      ["gone-session-7", undefined],
+      ["codex-session-6", undefined],
       ["gone-session-3", undefined],
       ["gone-session-2", undefined],
       ["gone-session-1", ".claude/handoff.md"],
       ["handoff:.claude/handoff-b.md", ".claude/handoff-b.md"],
     ]);
-    expect(sessions[3]).toMatchObject({ name: "g1", branch: "b1", cwd: project, state: "handed-over", source: "claude", updatedAt: NOW - 3000 });
-    expect(sessions[4]).toMatchObject({ name: "handoff-b.md", cwd: project, hasTranscript: false, source: "claude" });
+    expect(sessions[1].name).toBeUndefined();
+    expect(sessions[2]).toMatchObject({ name: "proj-cx79", source: "codex", hasTranscript: false });
+    expect(sessions[5]).toMatchObject({ name: "g1", branch: "b1", cwd: project, state: "handed-over", source: "claude", updatedAt: NOW - 3000 });
+    expect(sessions[6]).toMatchObject({ name: "handoff-b.md", cwd: project, hasTranscript: false, source: "claude" });
   });
 
   it("caps hand-overs at 20 per project, newest first", async () => {
@@ -203,6 +228,18 @@ describe("externalSessions.list", () => {
     expect(sessions.map((s) => s.id)).toEqual(["aaaaaaaa-1"]);
     expect(etimeSeconds("1-02:03:04")).toBe(93_784);
     expect(macProcStart("Wed Oct 28 08:34:18 2026")).toBe(Date.UTC(2026, 9, 28, 8, 34, 18));
+  });
+
+  it("checks other agents' UTC start times on Linux against the process table", async () => {
+    const { home, project, projects, options } = setup();
+    const start = new Date(NOW - 3_600_000).toUTCString().replace(/^(\w+), (\d+) (\w+) (\d+) (\S+) GMT$/, "$1 $3 $2 $5 $4");
+    record(home, ".kimi-code/agent-sessions", "21.json", { pid: 21, sessionId: "session_live-1", cwd: project, procStart: start, updatedAt: 2 });
+    record(home, ".dsh/agent-sessions", "22.json", { pid: 22, sessionId: "session-reused-1", cwd: project, procStart: start, updatedAt: 1 });
+    // Claude's own records hold clock ticks, read from /proc.
+    record(home, ".claude/sessions", "23.json", { pid: 23, sessionId: "cccccccc-3", cwd: project, procStart: "123456", updatedAt: 3 });
+    const table = "   21    01:00:01 /home/u/.local/bin/kimi\n   22    00:10:00 kimi\n   23    01:00:00 claude\n";
+    const { sessions } = await listExternalSessions(projects, { ...options, isAlive: undefined, processTable: async () => table, readProcStat: async (pid) => (pid === 23 ? "23 (claude) S " + "0 ".repeat(18) + "123456 0" : null) });
+    expect(sessions.map((s) => s.id)).toEqual(["cccccccc-3", "session_live-1"]);
   });
 
   it("rejects an unknown project", async () => {
@@ -279,12 +316,66 @@ describe("transcript paging", () => {
     for (let i = 0; i < 100; i++) text += line({ type: "user", message: { content: `n${i} ` + "z".repeat(3900) } });
     writeFileSync(path, text);
     const page = await readTranscriptPage(path, undefined, 200);
-    expect(page.truncated).toBe(true);
+    // Older lines wait for the next page; nothing was cut.
+    expect(page.truncated).toBeUndefined();
     const size = page.turns.reduce((sum, t) => sum + t.text.length, 0);
     expect(size).toBeLessThanOrEqual(200 * 1024);
     expect(page.turns.at(-1)!.text.startsWith("n99 ")).toBe(true);
     const next = await readTranscriptPage(path, page.before, 200);
     expect(next.turns.at(-1)!.text.startsWith(`n${99 - page.turns.length} `)).toBe(true);
+  });
+
+  it("keeps whole lines within the turn limit", async () => {
+    const dir = temp("ext-tr-");
+    const path = join(dir, "t.jsonl");
+    const tools = (tag: string) => line({ type: "assistant", message: { content: [1, 2, 3].map((n) => ({ type: "tool_use", name: `${tag}${n}`, input: {} })) } });
+    writeFileSync(path, tools("a") + tools("b"));
+    const page = await readTranscriptPage(path, undefined, 4);
+    expect(page.turns.map((t) => t.text)).toEqual(["b1", "b2", "b3"]);
+    expect(page.truncated).toBeUndefined();
+    const next = await readTranscriptPage(path, page.before, 4);
+    expect(next.turns.map((t) => t.text)).toEqual(["a1", "a2", "a3"]);
+    expect(next.before).toBeUndefined();
+  });
+
+  it("cuts one line too big for a page and keeps its newest turns", async () => {
+    const dir = temp("ext-tr-");
+    const path = join(dir, "t.jsonl");
+    const parts = Array.from({ length: 300 }, (_, i) => ({ type: "text", text: `t${String(i).padStart(3, "0")} ` + "w".repeat(2995) }));
+    writeFileSync(path, line({ type: "user", message: { content: "hello" } }) + line({ type: "assistant", message: { content: parts } }));
+    const page = await readTranscriptPage(path, undefined, 200);
+    expect(page.truncated).toBe(true);
+    expect(page.turns.length).toBe(Math.floor((200 * 1024) / 3000));
+    expect(page.turns.at(-1)!.text.startsWith("t299 ")).toBe(true);
+    const next = await readTranscriptPage(path, page.before, 200);
+    expect(next.turns.map((t) => t.text)).toEqual(["hello"]);
+    const few = await readTranscriptPage(path, undefined, 5);
+    expect(few.turns.map((t) => t.text.slice(0, 4))).toEqual(["t295", "t296", "t297", "t298", "t299"]);
+    expect(few.truncated).toBe(true);
+  });
+
+  it("moves past a line longer than the whole scan", async () => {
+    const dir = temp("ext-tr-");
+    const path = join(dir, "t.jsonl");
+    const huge = Buffer.alloc(17 * 1024 * 1024, "x");
+    writeFileSync(path, Buffer.concat([
+      Buffer.from(line({ type: "user", message: { content: "first" } })),
+      huge,
+      Buffer.from("\n" + line({ type: "user", message: { content: "last" } })),
+    ]));
+    const texts: string[][] = [];
+    let before: number | undefined;
+    let cut = false;
+    for (let i = 0; i < 5; i++) {
+      const page = await readTranscriptPage(path, before, 60);
+      texts.push(page.turns.map((t) => t.text));
+      cut ||= !!page.truncated;
+      before = page.before;
+      if (before === undefined) break;
+    }
+    expect(texts.flat()).toEqual(["last", "first"]);
+    expect(before).toBeUndefined();
+    expect(cut).toBe(true);
   });
 });
 
@@ -318,5 +409,14 @@ describe("externalSessions.read", () => {
     write(join(project, ".claude/handoff-x.md"), "notes");
     const page = await readExternalSession(projects, options, { projectId: "p1", sessionId: "handoff:.claude/handoff-x.md" });
     expect(page).toEqual({ turns: [], handoff: { path: ".claude/handoff-x.md", text: "notes" } });
+  });
+
+  it("never lists or reads a handoff name that links to another file", async () => {
+    const { project, projects, options } = setup();
+    write(join(project, ".env"), "TOKEN=1");
+    mkdirSync(join(project, ".claude"));
+    symlinkSync(join(project, ".env"), join(project, ".claude/handoff-env.md"));
+    expect((await listExternalSessions(projects, options)).sessions).toEqual([]);
+    await expect(readExternalSession(projects, options, { projectId: "p1", sessionId: "handoff:.claude/handoff-env.md" })).rejects.toThrow("Session not found");
   });
 });
