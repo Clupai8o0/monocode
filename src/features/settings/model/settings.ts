@@ -21,6 +21,7 @@ const SECTION_KEY = "monocode.settingsSection";
 export type SettingsSectionId =
   | "general"
   | "connections"
+  | "lab" // Fork: Home lab
   | "appearance"
   | "keybindings"
   | "chat"
@@ -68,6 +69,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     keywords:
       "ssh remote host machine server environment always on mobile phone iphone qr pair router",
   },
+  // Fork: Home lab, right after Connections.
+  {
+    id: "lab", // Fork
+    group: "app", // Fork
+    label: "Home lab", // Fork
+    description: // Fork
+      "Remote Control, the relay, uresourced and remote desktop on your lab machines.", // Fork
+    keywords: // Fork
+      "lab vivobook linux remote control relay uresourced krdp rdp remote desktop tailscale", // Fork
+  }, // Fork
   {
     id: "appearance",
     group: "app",
