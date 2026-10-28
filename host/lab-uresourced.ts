@@ -1,7 +1,12 @@
+import { readlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { UresourcedStatus } from "../src/fork/lab/labProtocol";
 import {
   parseShow,
   parseUnixTimestamp,
+  runUntil,
+  settled,
   type CommandRunner,
 } from "./lab-system";
 
@@ -11,6 +16,10 @@ const PROBE_SECONDS = 2;
 export const LOOPING_CALLS_PER_SECOND = 20;
 /** Senders resolved to a pid per look; a busy bus has few callers anyway. */
 const MAX_SENDERS = 16;
+/** A set, queue wait included, ends within this; clients wait 60 s. */
+const SET_BUDGET_MS = 30_000;
+/** A look ends within this. */
+const LOOK_BUDGET_MS = 12_000;
 
 type UnitState = {
   installed: boolean;
@@ -24,6 +33,8 @@ export type UresourcedOptions = {
   run: CommandRunner;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Where ~/.config/systemd/user lives. */
+  home?: string;
 };
 
 /** The senders of each SetUnitProperties call in busctl monitor's
@@ -61,6 +72,8 @@ export function parsePidReply(stdout: string): number | null {
 export class UresourcedControl {
   private lastLook: UresourcedStatus["loop"] = null;
   private probing: Promise<void> | null = null;
+  /** One set at a time, as the phone and the desktop may both call. */
+  private setting: Promise<unknown> = Promise.resolve();
   private readonly now: () => number;
   private readonly wait: (ms: number) => Promise<void>;
 
@@ -83,19 +96,32 @@ export class UresourcedControl {
   }
 
   /** Takes a fresh 2 s look; a look already running is shared. */
-  probe(): Promise<void> {
-    this.probing ??= this.look().finally(() => {
+  probe(deadline = this.now() + LOOK_BUDGET_MS): Promise<void> {
+    this.probing ??= this.look(deadline).finally(() => {
       this.probing = null;
     });
     return this.probing;
   }
 
-  async set(action: "off" | "on" | "restart"): Promise<void> {
-    const unit = await this.unit();
+  set(action: "off" | "on" | "restart"): Promise<void> {
+    // The deadline counts the wait behind another set.
+    const deadline = this.now() + SET_BUDGET_MS;
+    const next = this.setting.then(() => this.apply(action, deadline));
+    this.setting = next.catch(() => undefined);
+    return next;
+  }
+
+  private async apply(
+    action: "off" | "on" | "restart",
+    deadline: number,
+  ): Promise<void> {
+    const run = runUntil(this.options.run, deadline, this.now);
+    const unit = await this.unit(run);
     if (!unit.installed) throw new Error("uresourced is not installed");
     if (action === "off") {
-      await this.systemctl(["stop", UNIT], "Could not stop uresourced");
+      await this.systemctl(run, ["stop", UNIT], "Could not stop uresourced");
       await this.systemctl(
+        run,
         ["mask", "--no-reload", UNIT],
         "Could not turn uresourced off",
       );
@@ -104,24 +130,58 @@ export class UresourcedControl {
     }
     if (action === "on") {
       await this.systemctl(
+        run,
         ["unmask", "--no-reload", UNIT],
         "Could not turn uresourced on",
       );
       // Unmasking changes a unit file; it is stopped, so a reload is safe.
       if (unit.masked) {
-        await this.systemctl(["daemon-reload"], "Could not turn uresourced on");
+        await this.systemctl(
+          run,
+          ["daemon-reload"],
+          "Could not turn uresourced on",
+        );
       }
-      await this.systemctl(["start", UNIT], "Could not start uresourced");
-      await this.probe();
+      await this.systemctl(run, ["start", UNIT], "Could not start uresourced");
+      await this.freshLook(deadline);
       return;
     }
-    await this.systemctl(["restart", UNIT], "Could not restart uresourced");
-    await this.wait(3000);
-    await this.probe();
+    await this.systemctl(
+      run,
+      ["restart", UNIT],
+      "Could not restart uresourced",
+    );
+    await this.wait(Math.min(3000, Math.max(0, deadline - this.now())));
+    await this.freshLook(deadline);
   }
 
-  private async unit(): Promise<UnitState> {
-    const result = await this.options.run(
+  /** A look begun after the action; it never fails an action that worked. */
+  private async freshLook(deadline: number): Promise<void> {
+    // A look already running may have started before the action.
+    await settled(this.probing, deadline - this.now());
+    if (this.probing || this.now() >= deadline) return;
+    await this.probe(Math.min(deadline, this.now() + LOOK_BUDGET_MS)).catch(
+      () => undefined,
+    );
+  }
+
+  /** `systemctl --user mask` writes a link to /dev/null, which systemd's
+   *  LoadState only shows after a daemon-reload. */
+  private async maskedOnDisk(): Promise<boolean> {
+    const file = join(
+      this.options.home ?? homedir(),
+      ".config/systemd/user",
+      UNIT,
+    );
+    try {
+      return (await readlink(file)) === "/dev/null";
+    } catch {
+      return false;
+    }
+  }
+
+  private async unit(run = this.options.run): Promise<UnitState> {
+    const result = await run(
       "systemctl",
       [
         "--user",
@@ -134,6 +194,7 @@ export class UresourcedControl {
       { timeoutMs: 5000 },
     );
     if (result.code !== 0) throw new Error("Could not read uresourced");
+    const linked = await this.maskedOnDisk();
     const fields = parseShow(result.stdout)[0] ?? {};
     const load = fields.LoadState ?? "not-found";
     const active = fields.ActiveState === "active";
@@ -141,15 +202,16 @@ export class UresourcedControl {
     return {
       installed: load !== "not-found",
       active,
-      masked: load === "masked",
+      masked: load === "masked" || linked,
       pid: active && pid > 0 ? pid : null,
       since: active ? parseUnixTimestamp(fields.ActiveEnterTimestamp) : null,
     };
   }
 
-  private async look(): Promise<void> {
-    const unit = await this.unit();
-    const result = await this.options.run(
+  private async look(deadline: number): Promise<void> {
+    const run = runUntil(this.options.run, deadline, this.now);
+    const unit = await this.unit(run);
+    const result = await run(
       "timeout",
       [
         String(PROBE_SECONDS),
@@ -160,7 +222,7 @@ export class UresourcedControl {
         "--match",
         "type='method_call',member='SetUnitProperties'",
       ],
-      { timeoutMs: PROBE_SECONDS * 1000 + 3000 },
+      { timeoutMs: PROBE_SECONDS * 1000 + 2000 },
     );
     // timeout ends busctl with 124; anything else without output failed.
     if (result.code !== 124 && result.code !== 0 && !result.stdout) {
@@ -175,7 +237,8 @@ export class UresourcedControl {
     if (unit.pid !== null) {
       const busiest = [...counts].sort((a, b) => b[1] - a[1]);
       for (const [sender, calls] of busiest.slice(0, MAX_SENDERS)) {
-        const reply = await this.options.run(
+        if (this.now() >= deadline) break;
+        const reply = await run(
           "busctl",
           [
             "--user",
@@ -187,7 +250,7 @@ export class UresourcedControl {
             "s",
             sender,
           ],
-          { timeoutMs: 3000 },
+          { timeoutMs: 1500 },
         );
         if (reply.code === 0 && parsePidReply(reply.stdout) === unit.pid) {
           fromUresourced += calls;
@@ -201,9 +264,13 @@ export class UresourcedControl {
     };
   }
 
-  private async systemctl(args: string[], failure: string): Promise<void> {
-    const result = await this.options.run("systemctl", ["--user", ...args], {
-      timeoutMs: 20_000,
+  private async systemctl(
+    run: CommandRunner,
+    args: string[],
+    failure: string,
+  ): Promise<void> {
+    const result = await run("systemctl", ["--user", ...args], {
+      timeoutMs: 10_000,
     });
     if (result.code !== 0) throw new Error(failure);
   }

@@ -60,6 +60,8 @@ const DEFAULT_CHOICE: RemoteControlChoice = {
 /** The account folders the host reads; it never writes them. */
 const ACCOUNTS = [".claude", ".claude-exec"];
 const MAX_MACHINES = 64;
+/** A saved choice stamped further ahead than this came from a wrong clock. */
+const MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Home lab controls: where Remote Control starts, the relay's switch,
@@ -83,9 +85,10 @@ export class HostLab {
     this.now = options.now ?? Date.now;
     this.uresourced =
       options.uresourced ??
-      new UresourcedControl({ run: this.run, now: this.now });
+      new UresourcedControl({ run: this.run, now: this.now, home: this.home });
     this.krdp =
-      options.krdp ?? new KrdpControl({ run: this.run, home: this.home });
+      options.krdp ??
+      new KrdpControl({ run: this.run, home: this.home, now: this.now });
   }
 
   private get relay(): LabRelay {
@@ -174,8 +177,11 @@ export class HostLab {
     caller: LabCaller,
   ): Promise<void> {
     const scope = asScope(params.scope);
-    const updatedAt =
-      params.updatedAt === undefined ? this.now() : asTime(params.updatedAt);
+    // A clock running ahead must not lock the choice for everyone else.
+    const updatedAt = Math.min(
+      params.updatedAt === undefined ? this.now() : asTime(params.updatedAt),
+      this.now(),
+    );
     await this.update((file) => {
       // Newest wins; the same moment again changes nothing either.
       if (updatedAt <= file.desired.updatedAt) return false;
@@ -270,22 +276,32 @@ export class HostLab {
     let text: string;
     try {
       text = await readFile(this.file, "utf8");
-    } catch {
-      return { desired: { ...DEFAULT_CHOICE }, machines: {} };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" || !strict) {
+        return { desired: { ...DEFAULT_CHOICE }, machines: {} };
+      }
+      throw new Error("Could not read the saved lab settings");
     }
     try {
       const raw = JSON.parse(text) as Partial<LabFile>;
       const desired = raw.desired;
+      const machines: Record<string, RemoteControlMachine> = {};
+      if (raw.machines && typeof raw.machines === "object") {
+        for (const [name, entry] of Object.entries(raw.machines)) {
+          if (validMachine(entry)) machines[name] = entry;
+        }
+      }
       return {
         desired:
           desired &&
           (desired.scope === "all" || desired.scope === "lab") &&
           Number.isFinite(desired.updatedAt) &&
           typeof desired.by === "string"
-            ? desired
+            ? desired.updatedAt > this.now() + MAX_FUTURE_MS
+              ? { ...desired, updatedAt: 0 }
+              : desired
             : { ...DEFAULT_CHOICE },
-        machines:
-          raw.machines && typeof raw.machines === "object" ? raw.machines : {},
+        machines,
       };
     } catch {
       if (strict) throw new Error("The saved lab settings are damaged");
@@ -307,6 +323,20 @@ export class HostLab {
     this.saving = next.catch(() => undefined);
     return next;
   }
+}
+
+/** One lab.json machine entry, whole enough for status() to use. */
+function validMachine(entry: unknown): entry is RemoteControlMachine {
+  if (!entry || typeof entry !== "object") return false;
+  const machine = entry as Partial<RemoteControlMachine>;
+  return (
+    typeof machine.machine === "string" &&
+    typeof machine.lab === "boolean" &&
+    (machine.scope === "all" || machine.scope === "lab") &&
+    Array.isArray(machine.accounts) &&
+    typeof machine.reportedAt === "number" &&
+    Number.isFinite(machine.reportedAt)
+  );
 }
 
 function asScope(value: unknown): RemoteControlScope {

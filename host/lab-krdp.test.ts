@@ -54,6 +54,10 @@ describe("krdp parsers", () => {
     expect(exposedBeyond(listeners(ON_LAN, 3389), IP)).toBe(true);
     expect(exposedBeyond(["0.0.0.0"], null)).toBe(true);
     expect(exposedBeyond(["127.0.0.1", "[::1]"], IP)).toBe(false);
+    // Another Tailscale address of this machine is not the LAN.
+    expect(exposedBeyond(["100.64.0.1", "100.127.255.254"], IP)).toBe(false);
+    expect(exposedBeyond(["100.128.0.1"], IP)).toBe(true);
+    expect(exposedBeyond(["100.63.0.1"], IP)).toBe(true);
     expect(
       parsePermission('a{sas}v 1 "org.kde.krdpserver" 1 "yes" b false'),
     ).toBe(true);
@@ -178,10 +182,13 @@ describe("remote desktop", () => {
     const crt = join(certDir, "krdp.crt");
     const key = join(certDir, "krdp.key");
     const order = calls.filter((call) => !/show|ss -ltnH|tailscale/.test(call));
-    expect(order[0]).toMatch(
+    expect(order[0]).toBe(
+      "systemctl --user is-enabled app-org.kde.krdpserver.service",
+    );
+    expect(order[1]).toMatch(
       /^openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj \/CN=clupai /,
     );
-    expect(order.slice(1)).toEqual([
+    expect(order.slice(2)).toEqual([
       "kwriteconfig6 --file krdpserverrc --group General --key SystemUserEnabled true",
       "busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas kde-authorized true remote-desktop org.kde.krdpserver 1 yes",
       "systemctl --user stop app-org.kde.krdpserver.service",
@@ -198,7 +205,98 @@ describe("remote desktop", () => {
     expect(calls).toEqual([
       "systemctl --user stop monocode-krdp.service",
       "systemctl --user stop app-org.kde.krdpserver.service",
+      "kwriteconfig6 --file krdpserverrc --group General --key SystemUserEnabled false",
+      "busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore DeletePermission sss kde-authorized remote-desktop org.kde.krdpserver",
     ]);
+  });
+
+  it("refuses to turn on while KDE's own unit starts at login", async () => {
+    const { run, calls } = fakeRunner({
+      "systemctl --user is-enabled app-org.kde.krdpserver.service": {
+        stdout: "enabled\n",
+      },
+      "tailscale ip -4": { stdout: `${IP}\n` },
+    });
+    const control = new KrdpControl({ run, home: home(), exists: () => true });
+    await expect(control.set(true)).rejects.toThrow(
+      "KDE's own remote desktop starts at login; turn that off in System Settings first",
+    );
+    expect(calls).toEqual([
+      "systemctl --user is-enabled app-org.kde.krdpserver.service",
+    ]);
+    expect(calls.some((call) => / (enable|disable) /.test(call))).toBe(false);
+  });
+
+  it("turns off cleanly when the portal grant is already gone", async () => {
+    const { run } = fakeRunner({
+      "systemctl --user stop": {},
+      kwriteconfig6: {},
+      "busctl --user call": {
+        code: 1,
+        stderr:
+          "Call failed: No entry for remote-desktop (org.freedesktop.portal.Error.NotFound)",
+      },
+    });
+    const control = new KrdpControl({ run, exists: () => true });
+    await expect(control.set(false)).resolves.toBeUndefined();
+    const denied = fakeRunner({
+      "systemctl --user stop": {},
+      kwriteconfig6: {},
+      "busctl --user call": { code: 1, stderr: "Access denied" },
+    });
+    await expect(
+      new KrdpControl({ run: denied.run, exists: () => true }).set(false),
+    ).rejects.toThrow("Could not take back screen sharing");
+  });
+
+  it("runs one set at a time", async () => {
+    const order: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const { run } = fakeRunner({
+      "systemctl --user stop": {},
+      kwriteconfig6: {},
+      "busctl --user call": {},
+    });
+    const control = new KrdpControl({
+      exists: () => true,
+      run: async (command, args, options) => {
+        const line = [command, ...args].join(" ");
+        if (line === "systemctl --user stop monocode-krdp.service") {
+          order.push("stop");
+          if (order.length === 1) await gate;
+        }
+        return run(command, args, options);
+      },
+    });
+    const first = control.set(false);
+    const second = control.set(false);
+    await new Promise((done) => setTimeout(done, 20));
+    expect(order).toEqual(["stop"]);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["stop", "stop"]);
+  });
+
+  it("gives every command only the time left", async () => {
+    let clock = 0;
+    const timeouts: number[] = [];
+    const control = new KrdpControl({
+      exists: () => true,
+      now: () => clock,
+      run: async (_command, _args, options) => {
+        timeouts.push(options.timeoutMs);
+        clock += 12_000;
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    // Each slow step eats the budget; the last one never starts.
+    await expect(control.set(false)).rejects.toThrow(
+      "Could not take back screen sharing",
+    );
+    expect(timeouts).toEqual([10_000, 10_000, 6_000]);
   });
 
   it("fails plainly when the port never opens", async () => {

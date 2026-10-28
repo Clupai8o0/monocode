@@ -219,6 +219,110 @@ describe("host lab", () => {
     expect(readFileSync(join(dataDir, "lab.json"), "utf8")).toBe("{not json");
   });
 
+  it("refuses to save over a lab.json it could not read", async () => {
+    const { lab, dataDir } = setup();
+    // A directory in its place fails the read with EISDIR, not ENOENT.
+    mkdirSync(join(dataDir, "lab.json"));
+    expect(
+      (await lab.handle("lab.status", {}, phone)).remoteControl.desired.by,
+    ).toBe("default");
+    await expect(
+      lab.handle(
+        "lab.remoteControl.set",
+        { scope: "lab", updatedAt: 5 },
+        phone,
+      ),
+    ).rejects.toThrow("Could not read the saved lab settings");
+  });
+
+  it("drops damaged machine entries instead of failing", async () => {
+    const { lab, dataDir } = setup();
+    const good = {
+      machine: "vivobook",
+      lab: true,
+      scope: "lab",
+      accounts: [],
+      reportedAt: 3,
+    };
+    writeFileSync(
+      join(dataDir, "lab.json"),
+      JSON.stringify({
+        desired: { scope: "all", updatedAt: 0, by: "default" },
+        machines: {
+          vivobook: good,
+          a: null,
+          b: 7,
+          c: { ...good, machine: 1 },
+          d: { ...good, scope: "some" },
+          e: { ...good, accounts: "x" },
+          f: { ...good, reportedAt: "now" },
+          g: { ...good, lab: "yes" },
+        },
+      }),
+    );
+    const status = await lab.handle("lab.status", {}, phone);
+    expect(status.remoteControl.machines.map((m) => m.machine)).toEqual([
+      "clupai",
+      "vivobook",
+    ]);
+  });
+
+  it("never lets a clock running ahead lock the choice", async () => {
+    const { lab, dataDir, tick } = setup();
+    const day = 24 * 60 * 60 * 1000;
+    // A click stamped an hour ahead is kept as now.
+    let status = await lab.handle(
+      "lab.remoteControl.set",
+      { scope: "lab", updatedAt: 1000 + 3_600_000 },
+      phone,
+    );
+    expect(status.remoteControl.desired.updatedAt).toBe(1000);
+    tick(1);
+    status = await lab.handle(
+      "lab.remoteControl.set",
+      { scope: "all", updatedAt: 1001 },
+      mac,
+    );
+    expect(status.remoteControl.desired).toMatchObject({
+      scope: "all",
+      updatedAt: 1001,
+    });
+    // One already saved far ahead counts as 0.
+    writeFileSync(
+      join(dataDir, "lab.json"),
+      JSON.stringify({
+        desired: { scope: "lab", updatedAt: 1001 + day + 1, by: "x" },
+        machines: {},
+      }),
+    );
+    status = await lab.handle("lab.status", {}, phone);
+    expect(status.remoteControl.desired).toEqual({
+      scope: "lab",
+      updatedAt: 0,
+      by: "x",
+    });
+    status = await lab.handle(
+      "lab.remoteControl.set",
+      { scope: "all", updatedAt: 500 },
+      mac,
+    );
+    expect(status.remoteControl.desired.scope).toBe("all");
+    // Within a day ahead, newest still wins.
+    writeFileSync(
+      join(dataDir, "lab.json"),
+      JSON.stringify({
+        desired: { scope: "lab", updatedAt: 1001 + day, by: "x" },
+        machines: {},
+      }),
+    );
+    status = await lab.handle(
+      "lab.remoteControl.set",
+      { scope: "all", updatedAt: 900 },
+      mac,
+    );
+    expect(status.remoteControl.desired.scope).toBe("lab");
+  });
+
   it("switches the relay", async () => {
     const { lab, relay } = setup();
     const status = await lab.handle("lab.relay.set", { enabled: true }, phone);
