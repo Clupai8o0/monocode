@@ -8,7 +8,34 @@
 
 export const HANDOFF_FILE = ".claude/handoff.md";
 
-export const CONTINUE_PROMPT = `Read ${HANDOFF_FILE} and continue from where it left off.`;
+/** The prompt that picks up from a handoff file, relative to the project. */
+export function continuePrompt(path: string = HANDOFF_FILE): string {
+  return `Read ${path} and continue from where it left off.`;
+}
+
+export const CONTINUE_PROMPT = continuePrompt();
+
+const bare = (path: string) => path.replace(/^\.\//, "");
+
+/** `.claude/handoff.md`, or a named one such as `.claude/handoff-api.md`. */
+export function isHandoffFile(path: string): boolean {
+  return /^\.claude\/handoff(-[^/]+)?\.md$/.test(bare(path));
+}
+
+/**
+ * The handoff to show among a project's files: `.claude/handoff.md` first,
+ * else the newest `.claude/handoff-*.md`.
+ */
+export function pickHandoffFile(
+  files: { path: string; mtimeMs: number }[],
+): string | null {
+  const found = files.filter((file) => isHandoffFile(file.path));
+  if (found.some((file) => bare(file.path) === HANDOFF_FILE)) {
+    return HANDOFF_FILE;
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return found[0] ? bare(found[0].path) : null;
+}
 
 export function handoffPath(cwd: string): string | null {
   // Local folders only: a remote project's files are not on this Mac.

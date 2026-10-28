@@ -186,6 +186,10 @@ import {
   useHeightSplit,
 } from "../../fork/sidebarSplit/useHeightSplit"; // Fork
 import { PeerBadge } from "../../fork/peerMessages/PeerBadge"; // Fork
+import {
+  ElsewhereGroup,
+  elsewhereTarget,
+} from "../../fork/externalSessions/ElsewhereGroup"; // Fork
 import { RunningBadge } from "../../fork/backgroundAgents/RunningBadge"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
 import {
@@ -3191,6 +3195,16 @@ function SidebarComponent({
                 )}
               </div>
             )}
+            {/* Fork: sessions MonoCode did not start. */}
+            <ElsewhereGroup
+              cwd={cwd ?? ""}
+              target={elsewhereTarget(
+                cwd,
+                remoteProject
+                  ? { machineId: remote.machine?.id, projectId: hostProject?.projectId }
+                  : undefined,
+              )}
+            />
           </div>
         </ProjectSessionsCard>
         {paneHost ? null : changesPane}

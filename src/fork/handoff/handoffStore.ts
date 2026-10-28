@@ -1,5 +1,9 @@
 import { readTextFile, statFiles } from "../../platform/tauri/fs";
-import { handoffPath, summarizeHandoff } from "./handoffModel";
+import {
+  continuePrompt,
+  handoffPath,
+  summarizeHandoff,
+} from "./handoffModel";
 
 /** Off under the test runner, so upstream tests see no extra reads. */
 export const FORK_HANDOFF = import.meta.env.MODE !== "test";
@@ -189,17 +193,20 @@ export function watchHandoff(cwd: string): () => void {
 
 // --- Launcher ----------------------------------------------------------------
 
-let launcher: ((cwd: string) => void) | null = null;
+type Launcher = (cwd: string, prompt: string) => void;
+
+let launcher: Launcher | null = null;
 
 /** App registers how to open a new session with the prompt in its composer. */
-export function setHandoffLauncher(fn: ((cwd: string) => void) | null) {
+export function setHandoffLauncher(fn: Launcher | null) {
   launcher = fn;
 }
 
-export function continueFromHandoff(cwd: string): boolean {
+/** Opens a new session that reads `path` (relative to `cwd`) and carries on. */
+export function continueFromHandoff(cwd: string, path?: string): boolean {
   if (!launcher) {
     return false;
   }
-  launcher(cwd);
+  launcher(cwd, continuePrompt(path));
   return true;
 }

@@ -608,7 +608,6 @@ import { seedStarterMonos } from "../fork/starterMonos/starterMono";
 import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
 import { MONO_MAKER } from "../fork/starterMonos/makerMono";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
-import { CONTINUE_PROMPT as HANDOFF_PROMPT } from "../fork/handoff/handoffModel";
 import {
   canCloseForMemory,
   planSessionClose,
@@ -3073,14 +3072,14 @@ function Workspace({
 
   // Fork: "Continue from handoff" opens a session with the prompt in its composer.
   useEffect(() => {
-    setHandoffLauncher((cwd) => {
+    setHandoffLauncher((cwd, prompt) => {
       setSearchViewOpen(false);
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
       const session = {
         ...newWorkspaceSession(cwd, sessionDefaults?.runtimeMode),
-        composerSeed: HANDOFF_PROMPT,
+        composerSeed: prompt,
       };
       const tab = newTab(session.id);
       setSessions((prev) => [...prev, session]);

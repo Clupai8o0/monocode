@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   CONTINUE_PROMPT,
+  continuePrompt,
   handoffAge,
   handoffPath,
+  isHandoffFile,
+  pickHandoffFile,
   summarizeHandoff,
 } from "./handoffModel";
 
@@ -59,5 +62,39 @@ describe("handoffAge", () => {
 
   it("names the file in the prompt", () => {
     expect(CONTINUE_PROMPT).toContain(".claude/handoff.md");
+  });
+});
+
+describe("named handoffs", () => {
+  it("accepts .claude/handoff-*.md", () => {
+    expect(isHandoffFile(".claude/handoff.md")).toBe(true);
+    expect(isHandoffFile(".claude/handoff-api.md")).toBe(true);
+    expect(isHandoffFile("./.claude/handoff-x.md")).toBe(true);
+    expect(isHandoffFile(".claude/handoffs.md")).toBe(false);
+    expect(isHandoffFile(".claude/handoff-a/b.md")).toBe(false);
+    expect(isHandoffFile("handoff.md")).toBe(false);
+  });
+
+  it("keeps .claude/handoff.md first, else the newest named one", () => {
+    expect(
+      pickHandoffFile([
+        { path: ".claude/handoff-new.md", mtimeMs: 9 },
+        { path: ".claude/handoff.md", mtimeMs: 1 },
+      ]),
+    ).toBe(".claude/handoff.md");
+    expect(
+      pickHandoffFile([
+        { path: ".claude/handoff-old.md", mtimeMs: 1 },
+        { path: ".claude/handoff-new.md", mtimeMs: 9 },
+        { path: "notes.md", mtimeMs: 20 },
+      ]),
+    ).toBe(".claude/handoff-new.md");
+    expect(pickHandoffFile([{ path: "a.md", mtimeMs: 1 }])).toBeNull();
+  });
+
+  it("builds the prompt for any handoff path", () => {
+    expect(continuePrompt(".claude/handoff-api.md")).toBe(
+      "Read .claude/handoff-api.md and continue from where it left off.",
+    );
   });
 });
