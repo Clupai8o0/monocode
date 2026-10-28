@@ -2095,3 +2095,78 @@ describe("claude manual compaction", () => {
     expect(events.some((event) => event.type === "message.delta")).toBe(false);
   });
 });
+
+describe("claude Remote Control at startup (fork)", () => {
+  async function startWithInitReply(reply: Record<string, unknown>) {
+    const turn = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    await waitFor(
+      () =>
+        parse().some((m) => {
+          const request = m.request as Record<string, unknown> | undefined;
+          return request?.subtype === "initialize";
+        }),
+      "initialize",
+    );
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "control_response",
+      response: { subtype: "success", request_id: "monocode_1", response: reply },
+    });
+    await waitFor(() => parse().some((m) => m.type === "user"), "user prompt");
+    // Wrapped: an async function returning the turn would wait for it to end.
+    return { turn };
+  }
+
+  function remoteControlRequests() {
+    return parse().filter((m) => {
+      const request = m.request as Record<string, unknown> | undefined;
+      return request?.subtype === "remote_control";
+    });
+  }
+
+  it("turns Remote Control on once when Claude's setting asks", async () => {
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: true,
+      remote_control_available: true,
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    expect(remoteControlRequests()).toEqual([
+      expect.objectContaining({
+        type: "control_request",
+        request: { subtype: "remote_control", enabled: true },
+      }),
+    ]);
+
+    // Its own reply must not ask again.
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "monocode_2",
+        response: { bridge_session_id: "b1" },
+      },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+    expect(remoteControlRequests()).toHaveLength(1);
+  });
+
+  it("leaves Remote Control off when the setting is off", async () => {
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: true,
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+    expect(remoteControlRequests()).toHaveLength(0);
+  });
+});

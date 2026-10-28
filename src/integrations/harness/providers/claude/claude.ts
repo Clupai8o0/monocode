@@ -90,6 +90,7 @@ import type {
 } from "../../core/types";
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
 import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
+import { remoteControlRequest } from "../../../../fork/peerMessages/remoteControl"; // Fork
 import { publishClaudeStreamUsage } from "../../../../fork/usage/claudeStreamUsage"; // Fork
 
 /**
@@ -765,6 +766,17 @@ function handleLine(sessionId: string, live: Live, line: string): void {
 
   if (type === "control_response") {
     markInitialized(live);
+    // Fork: start Remote Control when Claude's setting asks, as the terminal
+    // does, so sessions on other machines can message this one.
+    const remoteControl = remoteControlRequest(live, rec);
+    if (remoteControl) {
+      void writeJson(
+        sessionId,
+        buildControlRequest(nextControlId(live), remoteControl),
+      ).catch(() => {
+        // The session works without it; only other machines can't reach it.
+      });
+    }
     return;
   }
 
