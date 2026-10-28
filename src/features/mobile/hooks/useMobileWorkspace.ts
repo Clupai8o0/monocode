@@ -6,6 +6,7 @@ import {
   mobileConversation,
   mobileModels,
   mobileProjectChanges,
+  mobileExternalSessions,
   mobileProjectWorktrees,
   mobileProjectFiles,
   mobileProjectFile,
@@ -280,6 +281,15 @@ export function useMobileWorkspace(options: Options) {
                 typeof payload.params.worktreePath === "string"
                   ? payload.params.worktreePath
                   : undefined,
+              );
+            } else if (
+              payload.method === "externalSessions.list" ||
+              payload.method === "externalSessions.read"
+            ) {
+              result = await mobileExternalSessions(
+                payload.method,
+                payload.params,
+                current.current.sessions,
               );
             } else if (
               payload.method === "project.files" ||

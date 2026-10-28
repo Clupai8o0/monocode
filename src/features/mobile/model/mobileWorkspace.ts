@@ -66,6 +66,11 @@ import {
 import { isHarnessAvailable } from "../../../integrations/harness/core/availability";
 import { mobileTranscript } from "./mobileTranscript";
 import {
+  ownSessionIds,
+  withoutOwnSessions,
+} from "../../../fork/externalSessions/externalSessionsStore";
+import type { ExternalSession } from "../../../fork/externalSessions/externalSessionsModel";
+import {
   mobileAccountChoice,
   mobileProviderAccounts,
   mobileSessionAccountId,
@@ -452,6 +457,35 @@ async function readSaved(sessionId: string, saved?: Map<string, Session>) {
 }
 
 /** The project's checkout, or one of its worktrees when the phone names it. */
+/** Fork: "Elsewhere" for the phone, this Mac's outside sessions on one project. */
+export async function mobileExternalSessions(
+  method: "externalSessions.list" | "externalSessions.read",
+  params: Record<string, unknown>,
+  sessions: readonly { providerSessionId?: string }[],
+) {
+  const projectId = String(params.projectId ?? "");
+  const cwd = mobileProjectPaths().find((path) => mobileProjectId(path) === projectId);
+  if (!cwd) throw new Error("Project is no longer available");
+  const projects = [{ projectId, cwd }];
+  const own = ownSessionIds(sessions);
+  if (method === "externalSessions.list") {
+    const result = await invoke<{ sessions: ExternalSession[] }>(
+      "fork_external_sessions_list",
+      { projects },
+    );
+    return { sessions: withoutOwnSessions(result.sessions, own) };
+  }
+  const sessionId = String(params.sessionId ?? "");
+  if (own.has(sessionId)) throw new Error("Session not found");
+  return invoke("fork_external_sessions_read", {
+    projects,
+    projectId,
+    sessionId,
+    before: typeof params.before === "number" ? params.before : null,
+    limit: typeof params.limit === "number" ? params.limit : null,
+  });
+}
+
 async function mobileRoot(projectId: string, worktreePath?: string) {
   const cwd = mobileProjectPaths().find((path) => mobileProjectId(path) === projectId);
   if (!cwd) throw new Error("Project is no longer available");

@@ -9,6 +9,8 @@ mod fork_stacks;
 mod fork_poll_cache; // Fork: share short-lived helper reads across windows.
 // Fork: who is editing which file (vault claims.py), for file tab and Explorer tags.
 mod fork_claims;
+// Fork: agent sessions MonoCode did not start ("Elsewhere"), read-only.
+mod fork_external_sessions;
 mod fork_latex;
 mod fork_office;
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
@@ -682,6 +684,8 @@ pub fn run() {
             fork_stacks::fork_stacks_list,    // Fork
             fork_stacks::fork_stacks_stop,    // Fork
             fork_claims::fork_claims_list,    // Fork
+            fork_external_sessions::fork_external_sessions_list, // Fork
+            fork_external_sessions::fork_external_sessions_read, // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
             fork_html::fork_html_preview_create, // Fork

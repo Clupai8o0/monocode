@@ -522,6 +522,8 @@ fn supported_remote_method(method: &str) -> bool {
             | "git.index"
             | "git.fileDiff"
             | "git.action"
+            | "externalSessions.list"
+            | "externalSessions.read"
     )
 }
 

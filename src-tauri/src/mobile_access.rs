@@ -756,6 +756,8 @@ async fn handle(
             "session.rename",
             "session.delete",
             "session.archive",
+            "externalSessions.list",
+            "externalSessions.read",
         ]
         .contains(&method)
         {
@@ -777,7 +779,9 @@ async fn handle(
             | "project.search"
             | "project.fileHighlight"
             | "project.git"
-            | "project.gitAction" => "project.changes",
+            | "project.gitAction"
+            | "externalSessions.list"
+            | "externalSessions.read" => "project.changes",
             _ => method,
         };
         let entity = if route == "session.start" || route == "project.changes" {
