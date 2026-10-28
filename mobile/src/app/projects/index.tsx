@@ -3,6 +3,7 @@ import { Fragment, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { formatCount } from "@/features/changes/diffTheme";
+import { projectMachineLabel } from "@/features/connection/machineLabel";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
@@ -86,6 +87,11 @@ export default function ProjectsScreen() {
               label={project.name}
               accessory={
                 <View style={styles.trailing}>
+                  {project.machineName ? (
+                    <Text style={styles.machine} numberOfLines={1}>
+                      {projectMachineLabel(project)}
+                    </Text>
+                  ) : null}
                   {project.additions || project.deletions ? (
                     <Text style={styles.counts} numberOfLines={1}>
                       <Text style={{ color: colors.additions }}>
@@ -150,6 +156,17 @@ const useStyles = themedStyles((colors) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  // The remote machine a relayed project is on: a tinted pill, no border.
+  machine: {
+    maxWidth: 140,
+    color: colors.muted,
+    fontSize: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: colors.stroke,
   },
   counts: {
     fontSize: 13,

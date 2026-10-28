@@ -5,7 +5,9 @@ import {
   useOffline,
 } from "@/features/connection/ConnectionNotice";
 import { useConnection } from "@/features/connection/ConnectionProvider";
+import { projectMachineLabel } from "@/features/connection/machineLabel";
 import { hasNativeTranscript } from "@/features/connection/nativeLink";
+import { useConnectionLabel } from "@/features/connection/useConnectionLabel";
 import { useProjectChanges } from "@/features/connection/useProjectChanges";
 import { useProjectWorktrees } from "@/features/connection/useProjectWorktrees";
 import type { Project, SessionSummary } from "@/features/workspace/types";
@@ -267,6 +269,11 @@ export function ProjectScreen({
   const offline = useOffline();
   // Only a host runs a shell for the phone.
   const hostConnection = !!useConnection().pairing?.desktop.host;
+  const connectionWhere = useConnectionLabel();
+  // Which computer the session runs on: "Vivobook · Linux" or "Mac".
+  const where =
+    projectMachineLabel(project) ??
+    (connectionWhere === "desktop" ? undefined : connectionWhere);
 
   const openSettings = () =>
     router.push({ pathname: "/settings", params: { projectId: project.id } });
@@ -304,7 +311,7 @@ export function ProjectScreen({
   const sessionTitle = sessionId ? (
     <SessionTitle
       title={session?.title ?? "Session"}
-      subtitle={[project.name, branch].filter(Boolean).join(" · ")}
+      subtitle={[project.name, branch, where].filter(Boolean).join(" · ")}
     />
   ) : null;
   const sessionToolbar = sessionId ? (

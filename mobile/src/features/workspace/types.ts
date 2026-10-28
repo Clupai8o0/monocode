@@ -22,6 +22,10 @@ export type Project = {
   name: string;
   path: string;
   machine: string;
+  /** The remote machine a project the Mac relays lives on, e.g. "Vivobook". */
+  machineName?: string;
+  /** That machine's platform: "linux", "darwin" or "win32". */
+  machinePlatform?: string;
   branch: string;
   /** Group color, as on the desktop rail. */
   color: string;
