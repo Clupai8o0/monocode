@@ -13,7 +13,8 @@ export default defineConfig({
     },
   },
   esbuild: { jsx: "automatic" },
-  server: { fs: { strict: false } },
+  // The desktop watch-frame test lives one level up, outside the mobile root.
+  server: { fs: { allow: [`${root}..`, `${root}node_modules`] } },
   test: {
     environment: "happy-dom",
     // Protocol round trips need both the desktop and mobile dependency trees.
