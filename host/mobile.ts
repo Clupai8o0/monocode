@@ -7,7 +7,8 @@ import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
 import { createMobileMonos } from "./mobile-monos";
 import { headBranch } from "./git-head";
-import { startNotifications } from "./notify";
+import { createDiffStats } from "./git-diff-stats";
+import { readNotifyConfig, startNotifications } from "./notify";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
@@ -117,6 +118,35 @@ export function createMobileHandler(
   engine.turnPrompt ??= monos.prompt;
   // Pushes for a finished turn or one waiting on the user, once set up.
   startNotifications(engine, dataDirOf(engine.store));
+  // Each project's added and removed lines, counted in the background: once at
+  // start, when a turn in it ends, when the phone opens it, and every minute
+  // while it is active. The catalog's etag follows the counts.
+  const diffStats = createDiffStats({
+    active: () =>
+      engine.store.projects().map((project) => ({
+        id: project.id,
+        cwd: project.cwd,
+        updatedAt: Math.max(
+          0,
+          ...engine.store.summaries(project.id).map((summary) => summary.updatedAt),
+        ),
+      })),
+  });
+  const recount = (projectId: unknown) => {
+    try {
+      const project = engine.store.project(String(projectId ?? ""));
+      void diffStats.refresh(project.id, project.cwd);
+    } catch {
+      // Not a project on this machine; the method itself will say so.
+    }
+  };
+  for (const project of engine.store.projects())
+    void diffStats.refresh(project.id, project.cwd);
+  const previousSettled = engine.onSettled;
+  engine.onSettled = (value, outcome) => {
+    previousSettled?.(value, outcome);
+    recount(value.projectId);
+  };
   const starts = new Map<string, Job>();
   const sends = new Map<string, Job>();
   const watches = new Map<number, Watch>();
@@ -221,8 +251,7 @@ export function createMobileHandler(
         ...(looks.projects[project.cwd]?.mascot
           ? { mascot: looks.projects[project.cwd]!.mascot }
           : {}),
-        additions: 0,
-        deletions: 0,
+        ...diffStats.get(project.id),
         busy: sessions.some(
           (session) => session.projectId === project.id && session.busy,
         ),
@@ -513,6 +542,10 @@ export function createMobileHandler(
           return { unchanged: true, etag };
         return { ...value, etag };
       }
+      case "notify.config":
+        // The topic is what keeps others off the ntfy server; this route is
+        // only reached with a device credential. Null until set up.
+        return { config: readNotifyConfig(dataDirOf(engine.store)) };
       case "device.leave":
         return { revoked: engine.store.revokeToken(token) };
       case "models.list":
@@ -579,12 +612,14 @@ export function createMobileHandler(
       case "terminal.close":
         return terminals.close(params);
       case "project.files":
+        recount(params.projectId);
         return workspace.files(params);
       case "project.file":
         return workspace.file(params);
       case "project.search":
         return workspace.search(params);
       case "project.changes":
+        recount(params.projectId);
         return workspace.changes(params);
       case "project.git":
         return workspace.git(params);

@@ -17,6 +17,7 @@ import {
   type NotificationCategory,
 } from "@/features/settings/notifications";
 import { useOpenSessionAfterStarting } from "@/features/settings/newSessions";
+import { usePushConfig } from "@/features/settings/pushSetup";
 import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
 import { projectForRoute } from "@/features/workspace/routing";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
@@ -41,6 +42,7 @@ export default function SettingsScreen() {
   const notifications = useNotificationPreferences();
   const [openAfterStarting, setOpenAfterStarting] = useOpenSessionAfterStarting();
   const blocked = useNotificationsBlocked();
+  const push = usePushConfig();
   // Both pages act on the project open under settings.
   const params = project ? { projectId: project.id } : {};
   const connection = useConnection();
@@ -111,6 +113,16 @@ export default function SettingsScreen() {
             />
           </Fragment>
         ))}
+      </View>
+      <View style={[styles.card, styles.pushCard]}>
+        <SettingsRow
+          icon="notifications"
+          label="Push notifications"
+          value={
+            push === undefined ? undefined : push ? "Set up" : "Not set up"
+          }
+          onPress={() => router.push("/settings/push")}
+        />
       </View>
       {blocked ? (
         <Text style={styles.note} onPress={() => void Linking.openSettings()}>
@@ -260,6 +272,10 @@ const useStyles = themedStyles((colors) => ({
     lineHeight: 18,
     marginTop: 8,
     marginHorizontal: 16,
+  },
+  // Apart from the in-app switches above, with space rather than a line.
+  pushCard: {
+    marginTop: 12,
   },
   lastCard: {
     marginTop: 24,

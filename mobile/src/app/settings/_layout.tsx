@@ -43,6 +43,13 @@ export default function SettingsLayout() {
         name="permissions"
         options={{ title: "Permissions", ...androidBackHeader("Permissions") }}
       />
+      <Stack.Screen
+        name="push"
+        options={{
+          title: "Push notifications",
+          ...androidBackHeader("Push notifications"),
+        }}
+      />
       {/* The provider's models title themselves. */}
       <Stack.Screen name="models" options={{ title: "" }} />
       <Stack.Screen

@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { Fragment, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
+import { formatCount } from "@/features/changes/diffTheme";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
@@ -84,11 +85,23 @@ export default function ProjectsScreen() {
               }
               label={project.name}
               accessory={
-                switching === project.id ? (
-                  <ActivityIndicator size="small" color={colors.muted} />
-                ) : project.id === (switching ? null : selected?.id) ? (
-                  <Icon name="check" size={18} color={colors.accent} />
-                ) : null
+                <View style={styles.trailing}>
+                  {project.additions || project.deletions ? (
+                    <Text style={styles.counts} numberOfLines={1}>
+                      <Text style={{ color: colors.additions }}>
+                        {`+${formatCount(project.additions)}`}
+                      </Text>{" "}
+                      <Text style={{ color: colors.deletions }}>
+                        {`-${formatCount(project.deletions)}`}
+                      </Text>
+                    </Text>
+                  ) : null}
+                  {switching === project.id ? (
+                    <ActivityIndicator size="small" color={colors.muted} />
+                  ) : project.id === (switching ? null : selected?.id) ? (
+                    <Icon name="check" size={18} color={colors.accent} />
+                  ) : null}
+                </View>
               }
               onPress={() => pick(project.id)}
             />
@@ -131,6 +144,16 @@ const useStyles = themedStyles((colors) => ({
     height: StyleSheet.hairlineWidth,
     marginLeft: 40,
     backgroundColor: colors.stroke,
+  },
+  // The lines changed, as the host last counted them, before the check.
+  trailing: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  counts: {
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
   },
   heading: {
     color: colors.muted,

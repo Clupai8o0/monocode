@@ -318,6 +318,55 @@ describe("phone endpoint", () => {
     expect(changed.etag).not.toBe(first.etag);
   });
 
+  it("counts a project's changed lines once opened, and changes the etag", async () => {
+    const { call, store } = await setup();
+    const repo = mkdtempSync(join(tmpdir(), "monocode-mobile-test-repo-"));
+    cleanups.push(async () => rmSync(repo, { recursive: true, force: true }));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: repo,
+      });
+    git("init", "-q");
+    writeFileSync(join(repo, "a.txt"), "one\ntwo\n");
+    git("add", ".");
+    git("commit", "-qm", "first");
+    writeFileSync(join(repo, "a.txt"), "one\nthree\nfour\n");
+    writeFileSync(join(repo, "new.txt"), "x\ny\n");
+    const added = store.addProject(repo, "repo");
+    const first = (await call("workspace.list")).result;
+    expect(first.projects.find((p: { id: string }) => p.id === added.id)).toMatchObject({
+      additions: 0,
+      deletions: 0,
+    });
+    await call("project.files", { projectId: added.id });
+    let listed = first;
+    for (let tries = 0; tries < 100; tries++) {
+      listed = (await call("workspace.list", { since: first.etag })).result;
+      if (!listed.unchanged) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(listed.etag).not.toBe(first.etag);
+    expect(listed.projects.find((p: { id: string }) => p.id === added.id)).toMatchObject({
+      additions: 4,
+      deletions: 1,
+    });
+  });
+
+  it("gives a device this host's notification server and topic, once set up", async () => {
+    const { call, store } = await setup();
+    expect((await call("notify.config")).result).toEqual({ config: null });
+    writeFileSync(
+      join(store.attachmentDir, "..", "notify.json"),
+      JSON.stringify({ server: "https://ntfy.example:8443/", topic: "monocode-abc" }),
+    );
+    expect((await call("notify.config")).result).toEqual({
+      config: { server: "https://ntfy.example:8443", topic: "monocode-abc" },
+    });
+    expect(
+      (await call("notify.config", {}, { Authorization: "Bearer nope" })).status,
+    ).not.toBe(200);
+  });
+
   it("answers unknown methods and missing sessions as failures, not crashes", async () => {
     const { call } = await setup();
     expect(await call("files.read")).toMatchObject({ status: 200, ok: false });
