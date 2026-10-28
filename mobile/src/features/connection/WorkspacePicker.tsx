@@ -24,6 +24,7 @@ import { Icon } from "@/ui/Icon";
 import { LiquidView } from "@/ui/LiquidView";
 import { withAlpha, radii, themedStyles, useColors } from "@/ui/theme";
 import { useConnection } from "./ConnectionProvider";
+import { useConnectionLabel } from "./useConnectionLabel";
 import { connectionStyleSheet } from "./ConnectScreen";
 import { MONOS_ENABLED, type MobileSelection } from "./selection";
 
@@ -48,6 +49,7 @@ export function WorkspacePicker({
   const colors = useColors();
   const styles = useStyles();
   const connection = useConnection();
+  const where = useConnectionLabel();
   const insets = useSafeAreaInsets();
   const androidHeader = editing && Platform.OS === "android";
   const [draft, setDraft] = useState<MobileSelection>(
@@ -108,6 +110,7 @@ export function WorkspacePicker({
             <Text style={styles.subtitle}>
               Pick the {MONOS_ENABLED ? "projects and monos" : "projects"} you
               want here.{"\n"}You can change this anytime in Settings.
+              {where === "desktop" ? "" : `\nOn ${where}`}
             </Text>
           </>
         )}
@@ -157,7 +160,7 @@ export function WorkspacePicker({
         {empty ? (
           connection.connected ? (
             <Text style={styles.empty}>
-              Open a project or create a mono on your desktop, then refresh.
+              Open a project or create a mono on your computer, then refresh.
             </Text>
           ) : (
             <ActivityIndicator color={colors.content} style={styles.loading} />
@@ -201,12 +204,12 @@ export function WorkspacePicker({
         </LiquidView>
         {!connection.connected || !count ? (
           <Pressable hitSlop={8} onPress={() => void connection.refresh()}>
-            <Text style={styles.link}>Refresh desktop</Text>
+            <Text style={styles.link}>Refresh computer</Text>
           </Pressable>
         ) : null}
         {editing ? null : (
           <Pressable hitSlop={8} onPress={() => void connection.disconnect()}>
-            <Text style={styles.link}>Connect another desktop</Text>
+            <Text style={styles.link}>Connect another computer</Text>
           </Pressable>
         )}
       </View>

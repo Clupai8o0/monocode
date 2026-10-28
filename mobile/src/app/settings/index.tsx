@@ -4,6 +4,7 @@ import { Alert, Linking, StyleSheet, Switch, Text, View } from "react-native";
 
 import { useConnection } from "@/features/connection/ConnectionProvider";
 import { MONOS_ENABLED } from "@/features/connection/selection";
+import { useConnectionLabel } from "@/features/connection/useConnectionLabel";
 import { useNotificationsBlocked } from "@/features/notifications/SessionNotifications";
 import { useAppearancePreference } from "@/features/settings/appearance";
 import { accessMode } from "@/features/models/access";
@@ -46,10 +47,11 @@ export default function SettingsScreen() {
   // Both pages act on the project open under settings.
   const params = project ? { projectId: project.id } : {};
   const connection = useConnection();
+  const where = useConnectionLabel();
   const selected = connection.selection;
   const disconnect = () =>
     Alert.alert(
-      "Disconnect desktop?",
+      "Disconnect computer?",
       "You can pair again by scanning a new code. Your workspace choices will be remembered.",
       [
         { text: "Cancel", style: "cancel" },
@@ -77,11 +79,13 @@ export default function SettingsScreen() {
         />
         <View style={styles.desktopText}>
           <Text style={styles.desktopName} numberOfLines={1}>
-            {connection.pairing?.desktop.name}
+            {connection.pairing?.desktop.host
+              ? where
+              : connection.pairing?.desktop.name}
           </Text>
           <Text style={styles.desktopStatus}>
             {connection.connected
-              ? "Connected to desktop"
+              ? `Connected to ${where}`
               : "Desktop unavailable. Your saved workspace stays here."}
           </Text>
         </View>
@@ -206,7 +210,7 @@ export default function SettingsScreen() {
       <View style={[styles.card, styles.lastCard]}>
         <SettingsRow
           icon="computerOff"
-          label="Disconnect desktop"
+          label="Disconnect computer"
           showChevron={false}
           destructive
           onPress={disconnect}

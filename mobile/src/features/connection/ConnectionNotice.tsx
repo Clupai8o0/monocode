@@ -13,6 +13,7 @@ import { LiquidView } from "@/ui/LiquidView";
 import { withAlpha, themedStyles, useColors } from "@/ui/theme";
 
 import { useConnection } from "./ConnectionProvider";
+import { useConnectionLabel } from "./useConnectionLabel";
 
 /** The desktop can't be reached: a poll failed and none has since succeeded. */
 export function useOffline() {
@@ -50,11 +51,12 @@ export function ReconnectingStatus() {
   const styles = useStyles();
   const offline = useOffline();
   const connection = useConnection();
+  const where = useConnectionLabel();
   if (!offline) return null;
   return (
     // Glass, as the header's buttons are, faintly red.
     <LiquidView
-      accessibilityLabel="Reconnecting to your desktop. Tap to try again now."
+      accessibilityLabel={`Reconnecting to ${where}. Tap to try again now.`}
       // A failed try shows as staying offline.
       onPress={() => void connection.refresh().catch(() => {})}
       pressedScale={1.04}
@@ -63,7 +65,7 @@ export function ReconnectingStatus() {
     >
       <PulsingDot />
       <Text style={styles.statusLabel} numberOfLines={1}>
-        Reconnecting to desktop
+        {`Reconnecting to ${where}`}
       </Text>
     </LiquidView>
   );

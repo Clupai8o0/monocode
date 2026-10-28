@@ -28,6 +28,7 @@ import {
   type Desktop,
   type Identity,
 } from "./nativeLink";
+import type { HostInfo } from "./machineLabel";
 import { normalizeSelection, type MobileSelection } from "./selection";
 
 export type Catalog = {
@@ -35,6 +36,8 @@ export type Catalog = {
   monos: Mono[];
   sessions: SessionSummary[];
   addresses?: Desktop["addresses"];
+  /** The machine answering `workspace.list`; unset from an older desktop. */
+  host?: HostInfo;
   /** A host's name for this version of the catalog, to send back as `since`. */
   etag?: string;
 };

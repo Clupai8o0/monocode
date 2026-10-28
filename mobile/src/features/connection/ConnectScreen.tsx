@@ -104,7 +104,7 @@ export function ConnectScreen() {
             onLayout={colliders.layout("subtitle")}
             onTextLayout={colliders.lines("subtitle")}
           >
-            Pair this phone with Monocode on your desktop to pick up your
+            Pair this phone with Monocode on your computer to pick up your
             sessions on the go.
           </Text>
         </Animated.View>
@@ -122,13 +122,13 @@ export function ConnectScreen() {
             <LiquidView
               onPress={() => void scan()}
               disabled={connection.working}
-              accessibilityLabel="Connect to desktop"
+              accessibilityLabel="Connect to computer"
               pressedScale={1.03}
               tintColor={colors.inverseSurface}
               style={styles.button}
               innerStyle={styles.buttonSurface}
             >
-              <Text style={styles.primaryLabel}>Connect to desktop</Text>
+              <Text style={styles.primaryLabel}>Connect to computer</Text>
             </LiquidView>
           </View>
           <View onLayout={colliders.layout("secondary")}>
@@ -171,7 +171,7 @@ export function ConnectScreen() {
           ) : null}
           <View style={{ padding: 24, paddingBottom: insets.bottom + 24 }}>
             <Text style={[connectionStyles.subtitle, { textAlign: "center" }]}>
-              Scan the code in desktop Settings → Connections
+              Scan the code in Settings → Connections on your computer
             </Text>
             <Pressable onPress={() => setScanning(false)}>
               <Text style={connectionStyles.secondary}>Cancel</Text>
