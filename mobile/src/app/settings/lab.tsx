@@ -1,5 +1,5 @@
 import * as Clipboard from "expo-clipboard";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 
 import {
@@ -9,9 +9,12 @@ import {
   choiceLine,
   fingerprintText,
   rdpAddress,
+  rdpLink,
   rdpOpenUrls,
   relayLine,
   SCOPE_CHOICES,
+  scopeStamp,
+  uresourcedActions,
   uresourcedState,
 } from "@/features/lab/labModel";
 import { useLab } from "@/features/lab/useLab";
@@ -37,19 +40,25 @@ export default function LabScreen() {
   }
   const status = lab.status;
   return (
-    <SettingsPage onRefresh={() => void lab.refresh()} refreshing={lab.refreshing}>
+    <SettingsPage
+      onRefresh={() => void lab.refresh()}
+      refreshing={lab.refreshing}
+    >
       {status ? (
         <>
           <Text style={styles.lead}>{status.machine}</Text>
+          {lab.error ? <Text style={styles.error}>{lab.error}</Text> : null}
           <RemoteControlBlock status={status} lab={lab} />
           <RelayBlock status={status} lab={lab} />
           <UresourcedBlock status={status} lab={lab} />
           <RemoteDesktopBlock status={status} lab={lab} />
         </>
       ) : (
-        <Text style={styles.lead}>The host did not answer.</Text>
+        <>
+          <Text style={styles.lead}>The host did not answer.</Text>
+          {lab.error ? <Text style={styles.error}>{lab.error}</Text> : null}
+        </>
       )}
-      {lab.error ? <Text style={styles.error}>{lab.error}</Text> : null}
     </SettingsPage>
   );
 }
@@ -61,6 +70,17 @@ function RemoteControlBlock({ status, lab }: BlockProps) {
   const colors = useColors();
   const styles = useStyles();
   const scope = status.remoteControl.desired.scope;
+  // Set when the host kept a newer choice than the one tapped.
+  const [overruled, setOverruled] = useState(false);
+  const choose = async (chosen: typeof scope) => {
+    setOverruled(false);
+    const ok = await lab.run(`scope:${chosen}`, "lab.remoteControl.set", {
+      scope: chosen,
+      updatedAt: scopeStamp(status),
+    });
+    if (ok)
+      setOverruled(lab.latest.current?.remoteControl.desired.scope !== chosen);
+  };
   return (
     <>
       <Text style={styles.heading}>Remote Control</Text>
@@ -70,12 +90,11 @@ function RemoteControlBlock({ status, lab }: BlockProps) {
             key={choice.scope}
             label={choice.label}
             showChevron={false}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: choice.scope === scope }}
             onPress={() => {
               if (choice.scope === scope || lab.busy) return;
-              void lab.run(`scope:${choice.scope}`, "lab.remoteControl.set", {
-                scope: choice.scope,
-                updatedAt: Date.now(),
-              });
+              void choose(choice.scope);
             }}
             accessory={
               lab.busy === `scope:${choice.scope}` ? (
@@ -87,6 +106,9 @@ function RemoteControlBlock({ status, lab }: BlockProps) {
           />
         ))}
       </View>
+      {overruled ? (
+        <Text style={styles.warning}>A newer choice was kept.</Text>
+      ) : null}
       <Text style={styles.note}>{choiceLine(status)}</Text>
       <Text style={styles.note}>
         Lab machines keep it on either way. A Mac picks up the choice while
@@ -147,8 +169,10 @@ function RelayBlock({ status, lab }: BlockProps) {
             <View key={peer.id} style={styles.line}>
               <Text style={styles.lineTitle}>{peer.name}</Text>
               <Text style={styles.lineText}>
-                {peer.sessions === 1 ? "1 session" : `${peer.sessions} sessions`},
-                seen {ago(peer.lastSeen)}
+                {peer.sessions === 1
+                  ? "1 session"
+                  : `${peer.sessions} sessions`}
+                , seen {ago(peer.lastSeen)}
               </Text>
             </View>
           ))
@@ -163,7 +187,7 @@ function UresourcedBlock({ status, lab }: BlockProps) {
   const value = status.uresourced;
   if (!value) return null;
   const calls = callsLine(value);
-  const off = value.masked || !value.active;
+  const actions = uresourcedActions(value);
   return (
     <>
       <Text style={styles.heading}>uresourced</Text>
@@ -183,10 +207,12 @@ function UresourcedBlock({ status, lab }: BlockProps) {
             <Button
               label="Check now"
               busy={lab.busy === "probe"}
-              onPress={() => void lab.run("probe", "lab.status", { probe: true })}
+              onPress={() =>
+                void lab.run("probe", "lab.status", { probe: true })
+              }
               disabled={!!lab.busy}
             />
-            {off ? (
+            {actions.on ? (
               <Button
                 label="Turn on"
                 busy={lab.busy === "on"}
@@ -195,29 +221,30 @@ function UresourcedBlock({ status, lab }: BlockProps) {
                 }
                 disabled={!!lab.busy}
               />
-            ) : (
-              <>
-                <Button
-                  label="Restart"
-                  busy={lab.busy === "restart"}
-                  onPress={() =>
-                    void lab.run("restart", "lab.uresourced.set", {
-                      action: "restart",
-                    })
-                  }
-                  disabled={!!lab.busy}
-                />
-                <Button
-                  label="Turn off"
-                  destructive
-                  onPress={() => setConfirm(true)}
-                  disabled={!!lab.busy || confirm}
-                />
-              </>
-            )}
+            ) : null}
+            {actions.restart ? (
+              <Button
+                label="Restart"
+                busy={lab.busy === "restart"}
+                onPress={() =>
+                  void lab.run("restart", "lab.uresourced.set", {
+                    action: "restart",
+                  })
+                }
+                disabled={!!lab.busy}
+              />
+            ) : null}
+            {actions.off ? (
+              <Button
+                label="Turn off"
+                destructive
+                onPress={() => setConfirm(true)}
+                disabled={!!lab.busy || confirm}
+              />
+            ) : null}
           </View>
         ) : null}
-        {confirm && !off ? (
+        {confirm && actions.off ? (
           <View style={styles.confirm}>
             <Text style={styles.lineText}>
               Stop it and keep it from starting again?
@@ -231,7 +258,9 @@ function UresourcedBlock({ status, lab }: BlockProps) {
                 onPress={() =>
                   void lab
                     .run("off", "lab.uresourced.set", { action: "off" })
-                    .then(() => setConfirm(false))
+                    .then((ok) => {
+                      if (ok) setConfirm(false);
+                    })
                 }
               />
               <Button
@@ -252,6 +281,14 @@ function RemoteDesktopBlock({ status, lab }: BlockProps) {
   const styles = useStyles();
   const [copied, setCopied] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
+  const [badLink, setBadLink] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
   const desktop = status.remoteDesktop;
   if (!desktop) return null;
   const address = rdpAddress(status);
@@ -262,10 +299,16 @@ function RemoteDesktopBlock({ status, lab }: BlockProps) {
   const copy = async (which: string, text: string) => {
     await Clipboard.setStringAsync(text);
     setCopied(which);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(null), 1500);
   };
   const open = async () => {
+    // Never the host's own uri: the link is built here from checked parts.
+    const link = rdpLink(desktop);
+    setBadLink(!link);
+    if (!link) return;
     if (address) await Clipboard.setStringAsync(address);
-    setMissing(!(await openFirst(rdpOpenUrls(desktop.uri))));
+    setMissing(!(await openFirst(rdpOpenUrls(link))));
   };
   return (
     <>
@@ -291,12 +334,13 @@ function RemoteDesktopBlock({ status, lab }: BlockProps) {
           />
         </View>
       ) : (
-        <Text style={styles.note}>krdpserver is not installed on the host.</Text>
+        <Text style={styles.note}>
+          krdpserver is not installed on the host.
+        </Text>
       )}
       {desktop.lanExposed ? (
         <Text style={styles.warning}>
-          It can be reached from the local network too, not only over
-          Tailscale.
+          It can be reached from the local network too, not only over Tailscale.
         </Text>
       ) : null}
       {!desktop.address ? (
@@ -306,17 +350,29 @@ function RemoteDesktopBlock({ status, lab }: BlockProps) {
         <View style={[styles.card, styles.gap]}>
           <SettingsRow
             label="Address"
-            value={copied === "address" ? "Copied" : address}
+            value={address}
             showChevron={false}
             onPress={() => void copy("address", address)}
-            accessory={<Icon name="copy" size={18} color={colors.faint} />}
+            accessory={
+              <Icon
+                name={copied === "address" ? "check" : "copy"}
+                size={18}
+                color={copied === "address" ? colors.accent : colors.faint}
+              />
+            }
           />
           <SettingsRow
             label="Username"
-            value={copied === "username" ? "Copied" : desktop.username}
+            value={desktop.username}
             showChevron={false}
             onPress={() => void copy("username", desktop.username)}
-            accessory={<Icon name="copy" size={18} color={colors.faint} />}
+            accessory={
+              <Icon
+                name={copied === "username" ? "check" : "copy"}
+                size={18}
+                color={copied === "username" ? colors.accent : colors.faint}
+              />
+            }
           />
         </View>
       ) : null}
@@ -338,6 +394,13 @@ function RemoteDesktopBlock({ status, lab }: BlockProps) {
           />
         </View>
       ) : null}
+      {desktop.running && address && badLink ? (
+        <Text style={styles.warning}>
+          The host sent an address or username that doesn&apos;t look right, so
+          nothing was opened.
+        </Text>
+      ) : null}
+      {copied ? <Text style={styles.note}>Copied.</Text> : null}
       {desktop.running && address ? (
         <Text style={styles.note}>
           {missing
