@@ -6,6 +6,7 @@
  */
 import {
   chmodSync,
+  constants,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -15,11 +16,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
+import { open, readlink, realpath, stat, type FileHandle } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   SHOW_CHUNK_BYTES,
@@ -95,11 +96,27 @@ export function secretName(name: string): boolean {
   );
 }
 
-/** The default socket: `$XDG_RUNTIME_DIR/monocode-host/show.sock`, else under the data dir. */
-export function showSocketPath(dataDir: string, env: NodeJS.ProcessEnv = process.env): string {
-  return env.XDG_RUNTIME_DIR
-    ? join(env.XDG_RUNTIME_DIR, "monocode-host", "show.sock")
-    : join(dataDir, "run", "show.sock");
+/** The host's default data dir, `~/.monocode-host`. */
+export const defaultHostDataDir = (home: string = homedir()) => join(home, ".monocode-host");
+
+/**
+ * The default socket: `$XDG_RUNTIME_DIR/monocode-host/show.sock` for the
+ * default data dir, `show-<hash>.sock` there for any other, else under the data dir.
+ */
+export function showSocketPath(
+  dataDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  if (!env.XDG_RUNTIME_DIR) {
+    return join(dataDir, "run", "show.sock");
+  }
+  const dir = resolve(dataDir);
+  const name =
+    dir === resolve(defaultHostDataDir(home))
+      ? "show.sock"
+      : `show-${createHash("sha256").update(dir).digest("hex").slice(0, 12)}.sock`;
+  return join(env.XDG_RUNTIME_DIR, "monocode-host", name);
 }
 
 export type HostShowsOptions = {
@@ -337,28 +354,74 @@ export class HostShows {
     if (this.isSecret(real)) {
       return fail(`Not sent: ${name} looks like a secret.`);
     }
-    const info = await stat(real);
+    let info;
+    try {
+      info = await stat(real);
+    } catch {
+      return fail(`Not sent: ${given} was not found.`);
+    }
     if (!info.isFile()) {
       return fail(`Not sent: ${name} is not a file.`);
     }
     if (info.size > SHOW_MAX_FILE_BYTES) {
       return fail(`Not sent: ${name} is larger than ${SHOW_MAX_FILE_BYTES / 1024 / 1024} MB.`);
     }
-    if (!this.takeRate()) {
-      return fail("Not sent: too many at once; try again in a minute.");
+    // Open once, without following a final symlink or blocking on a FIFO,
+    // then check the file that was actually opened.
+    let input: FileHandle;
+    try {
+      input = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch {
+      return fail(`Not sent: ${name} changed while sending.`);
     }
     const id = newId();
     const target = join(this.spoolDir, id);
     let size: number;
     try {
-      size = await copyCapped(real, target, SHOW_MAX_FILE_BYTES);
-    } catch (error) {
-      rmSync(target, { force: true });
-      return fail(
-        error instanceof CapError
-          ? `Not sent: ${name} is larger than ${SHOW_MAX_FILE_BYTES / 1024 / 1024} MB.`
-          : `Not sent: ${name} could not be read.`,
-      );
+      const opened = await input.stat();
+      if (!opened.isFile()) {
+        return fail(`Not sent: ${name} is not a file.`);
+      }
+      if (opened.size > SHOW_MAX_FILE_BYTES) {
+        return fail(`Not sent: ${name} is larger than ${SHOW_MAX_FILE_BYTES / 1024 / 1024} MB.`);
+      }
+      let actual: string | undefined;
+      try {
+        actual = await readlink(`/proc/self/fd/${input.fd}`);
+      } catch {
+        actual = undefined;
+      }
+      if (actual !== undefined && isAbsolute(actual)) {
+        if (this.isSecret(actual)) {
+          return fail(`Not sent: ${cleanName(actual)} looks like a secret.`);
+        }
+        real = actual;
+      } else {
+        let current;
+        try {
+          current = await stat(real);
+        } catch {
+          current = undefined;
+        }
+        if (!current || current.dev !== opened.dev || current.ino !== opened.ino) {
+          return fail(`Not sent: ${name} changed while sending.`);
+        }
+      }
+      if (!this.takeRate()) {
+        return fail("Not sent: too many at once; try again in a minute.");
+      }
+      try {
+        size = await copyCapped(input, target, SHOW_MAX_FILE_BYTES);
+      } catch (error) {
+        rmSync(target, { force: true });
+        return fail(
+          error instanceof CapError
+            ? `Not sent: ${name} is larger than ${SHOW_MAX_FILE_BYTES / 1024 / 1024} MB.`
+            : `Not sent: ${name} could not be read.`,
+        );
+      }
+    } finally {
+      await input.close();
     }
     for (const older of this.index.items.filter((item) => item.kind === "file" && item.sourcePath === real)) {
       this.remove(older);
@@ -427,8 +490,17 @@ export class HostShows {
     if (offset > size) {
       throw new Error("Invalid offset");
     }
-    const handle = await open(join(this.spoolDir, item.id), "r");
+    let handle: FileHandle;
     try {
+      handle = await open(join(this.spoolDir, item.id), constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch {
+      throw new Error("That item is no longer on this machine");
+    }
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size !== size) {
+        throw new Error("That item is no longer on this machine");
+      }
       const buffer = Buffer.alloc(Math.min(SHOW_CHUNK_BYTES, size - offset));
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
       return {
@@ -544,7 +616,12 @@ export class HostShows {
       MONOCODE_SHOW_SOCKET: this.socketPath,
       MONOCODE_SESSION_ID: sessionId,
       BROWSER: join(this.agentBinDir, "xdg-open"),
+      MONOCODE_ORIG_BROWSER: process.env.BROWSER ?? "",
     };
+  }
+
+  get listening(): boolean {
+    return this.server?.listening ?? false;
   }
 
   close(): void {
@@ -564,8 +641,7 @@ export class HostShows {
 
 class CapError extends Error {}
 
-async function copyCapped(source: string, target: string, cap: number): Promise<number> {
-  const input = await open(source, "r");
+async function copyCapped(input: FileHandle, target: string, cap: number): Promise<number> {
   const output = await open(target, "wx", 0o600);
   try {
     const buffer = Buffer.alloc(64 * 1024);
@@ -583,7 +659,6 @@ async function copyCapped(source: string, target: string, cap: number): Promise<
     }
     return total;
   } finally {
-    await input.close();
     await output.close();
   }
 }
@@ -597,18 +672,29 @@ export function agentBinScripts(dir: string, execPath: string, entry: string): R
   shift
   old_ifs=$IFS
   IFS=:
+  set -f
   for dir in $PATH; do
     case "$dir" in
       ""|${shellQuote(dir)}|${shellQuote(dir + "/")}) continue ;;
     esac
     if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
+      set +f
       IFS=$old_ifs
       exec "$dir/$name" "$@"
     fi
   done
+  set +f
   IFS=$old_ifs
   echo "$name: not found" >&2
   exit 127
+}
+restore() {
+  if [ -n "\${MONOCODE_ORIG_BROWSER:-}" ]; then
+    BROWSER=$MONOCODE_ORIG_BROWSER
+    export BROWSER
+  else
+    unset BROWSER
+  fi
 }
 `;
   const head = "#!/bin/sh\n# Written by MonoCode host: sends files and links to MonoCode on the Mac.\n";
@@ -616,12 +702,16 @@ export function agentBinScripts(dir: string, execPath: string, entry: string): R
   return {
     "monocode-show": `${head}exec ${shellQuote(execPath)} ${shellQuote(entry)} show "$@"\n`,
     "xdg-open": `${head}${real}
-if [ "\${MONOCODE_SHOW:-}" = off ] || [ -z "\${MONOCODE_SHOW_SOCKET:-}" ]; then
+if [ -n "\${MONOCODE_SHOW_DEPTH:-}" ] || [ "\${MONOCODE_SHOW:-}" = off ] || [ -z "\${MONOCODE_SHOW_SOCKET:-}" ]; then
+  restore
   real xdg-open "$@"
 fi
+MONOCODE_SHOW_DEPTH=1
+export MONOCODE_SHOW_DEPTH
 ${show} "$@"
 code=$?
 if [ "$code" -eq 2 ]; then
+  restore
   real xdg-open "$@"
 fi
 exit "$code"
@@ -645,16 +735,21 @@ pick() {
   done
   printf '%s' "$target"
 }
-if [ "\${MONOCODE_SHOW:-}" = off ] || [ -z "\${MONOCODE_SHOW_SOCKET:-}" ]; then
+if [ -n "\${MONOCODE_SHOW_DEPTH:-}" ] || [ "\${MONOCODE_SHOW:-}" = off ] || [ -z "\${MONOCODE_SHOW_SOCKET:-}" ]; then
+  restore
   real open "$@"
 fi
+MONOCODE_SHOW_DEPTH=1
+export MONOCODE_SHOW_DEPTH
 target=$(pick "$@")
 if [ -z "$target" ]; then
+  restore
   real open "$@"
 fi
 ${show} "$target"
 code=$?
 if [ "$code" -eq 2 ]; then
+  restore
   real open "$@"
 fi
 exit "$code"
@@ -670,6 +765,11 @@ export function hostShows(options: HostShowsOptions): HostShows {
     active = new HostShows(options);
   }
   return active;
+}
+
+/** True only while the active shows service has a listening socket. */
+export function showsListening(): boolean {
+  return active?.listening ?? false;
 }
 
 /** Agent env for a host-started session; empty when shows are not running. */

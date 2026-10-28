@@ -16,7 +16,7 @@ import { HostEngine } from "./engine";
 import type { HostStore } from "./store";
 import { sendJson } from "./compress";
 import { createMobileHandler } from "./mobile";
-import { hostShows } from "./shows";
+import { hostShows, showsListening } from "./shows";
 import { hostOsName } from "./os-name";
 import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
@@ -382,7 +382,7 @@ export function createHostServer(
                 "sessions.plan",
                 "externalSessions.list",
                 "externalSessions.read",
-                "shows",
+                ...(showsListening() ? ["shows"] : []),
               ],
             };
             break;

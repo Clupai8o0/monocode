@@ -293,6 +293,7 @@ Connect another computer using an SSH forward to the loopback port.`);
   }
   const releaseOwner = await acquireHostOwner(directory);
   const backend = new HostChildBackend();
+  let shows: ReturnType<typeof hostShows> | undefined;
   let cleanup = () => {
     rmSync(statePath, { force: true });
     store.close();
@@ -311,7 +312,7 @@ Connect another computer using an SSH forward to the loopback port.`);
       }
     }
     const engine = new HostEngine(store, hostProviders);
-    const shows = hostShows({
+    shows = hostShows({
       dataDir: dataDirOf(store),
       projects: () => store.projects(),
     });
@@ -361,7 +362,7 @@ Connect another computer using an SSH forward to the loopback port.`);
       stopping = true;
       server.close();
       server.closeAllConnections();
-      shows.close();
+      shows?.close();
       await engine.close();
       await backend.close();
       release();
@@ -394,6 +395,7 @@ Connect another computer using an SSH forward to the loopback port.`);
       releaseOwner();
     };
   } catch (error) {
+    shows?.close();
     await backend.close();
     cleanup();
     throw error;

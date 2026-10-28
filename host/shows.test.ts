@@ -1,5 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFile } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Lets a test swap the file between the path checks and the open.
+const afterRealpath = vi.hoisted(() => ({ hook: undefined as undefined | ((path: string) => void) }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    realpath: async (path: string) => {
+      const result = await actual.realpath(path);
+      afterRealpath.hook?.(result);
+      return result;
+    },
+  };
+});
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   chmodSync,
@@ -9,11 +23,12 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HostShows, agentBinScripts, runShowCommand, secretName } from "./shows";
+import { HostShows, agentBinScripts, runShowCommand, secretName, showSocketPath } from "./shows";
 import { parseOsRelease } from "./os-name";
 import {
   SHOW_CHUNK_BYTES,
@@ -56,6 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  afterRealpath.hook = undefined;
   shows.close();
   rmSync(root, { recursive: true, force: true });
 });
@@ -238,8 +254,122 @@ describe.runIf(posix)("socket and shims", () => {
       MONOCODE_SHOW_SOCKET: join(root, "s.sock"),
       MONOCODE_SESSION_ID: "s",
       BROWSER: join(dir!, "xdg-open"),
+      MONOCODE_ORIG_BROWSER: process.env.BROWSER ?? "",
     });
+    expect(shows.listening).toBe(true);
+    shows.close();
+    expect(shows.listening).toBe(false);
     expect(statSync(join(dir!, "monocode-show")).mode & 0o777).toBe(0o755);
+  });
+});
+
+describe.runIf(posix)("hardening", () => {
+  it("refuses a FIFO without hanging", async () => {
+    const fifo = join(work, "pipe.md");
+    await exec("mkfifo", [fifo]);
+    const result = await shows.add({ v: 1, kind: "file", path: fifo });
+    expect(result).toEqual({ ok: false, error: "Not sent: pipe.md is not a file." });
+  });
+
+  it("refuses a FIFO swapped in after the checks, without hanging", async () => {
+    const path = file("swap.md");
+    afterRealpath.hook = (real) => {
+      afterRealpath.hook = undefined;
+      unlinkSync(real);
+      execFileSync("mkfifo", [real]);
+    };
+    const result = await shows.add({ v: 1, kind: "file", path });
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a symlink swapped in as the final component", async () => {
+    const path = file("swap.md");
+    const other = file("other.md", "other");
+    afterRealpath.hook = (real) => {
+      afterRealpath.hook = undefined;
+      unlinkSync(real);
+      symlinkSync(other, real);
+    };
+    const result = await shows.add({ v: 1, kind: "file", path });
+    expect(result).toEqual({ ok: false, error: "Not sent: swap.md changed while sending." });
+    expect(shows.items()).toEqual([]);
+  });
+
+  it("still sends a normal file", async () => {
+    const result = await shows.add({ v: 1, kind: "file", path: file("ok.md", "hello") });
+    expect(result.ok).toBe(true);
+    expect(shows.items()[0]).toMatchObject({ name: "ok.md", size: 5 });
+  });
+
+  it("will not read a symlink planted in the spool", async () => {
+    const result = await shows.add({ v: 1, kind: "file", path: file("a.md", "hello") });
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    const spooled = join(root, "data", "shows", result.id);
+    unlinkSync(spooled);
+    symlinkSync(file("b.md", "hello"), spooled);
+    await expect(shows.read({ id: result.id, offset: 0 })).rejects.toThrow("That item is no longer on this machine");
+  });
+
+  it("will not read a spool file of the wrong size", async () => {
+    const result = await shows.add({ v: 1, kind: "file", path: file("a.md", "hello") });
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    writeFileSync(join(root, "data", "shows", result.id), "hi");
+    await expect(shows.read({ id: result.id, offset: 0 })).rejects.toThrow("That item is no longer on this machine");
+  });
+
+  it("stops the shims recursing through $BROWSER", async () => {
+    const bin = join(root, "bin");
+    const real = join(root, "real");
+    mkdirSync(bin);
+    mkdirSync(real);
+    for (const [name, content] of Object.entries(agentBinScripts(bin, process.execPath, "/nonexistent.mjs"))) {
+      writeFileSync(join(bin, name), content);
+      chmodSync(join(bin, name), 0o755);
+    }
+    // Like xdg-open on a headless box: hands off to $BROWSER.
+    writeFileSync(
+      join(real, "xdg-open"),
+      `#!/bin/sh\nif [ -n "\${BROWSER:-}" ]; then exec "$BROWSER" "$@"; fi\necho "real $* browser=\${BROWSER-unset}" > ${join(root, "out")}\n`,
+    );
+    chmodSync(join(real, "xdg-open"), 0o755);
+    writeFileSync(join(real, "orig"), `#!/bin/sh\necho "orig $*" > ${join(root, "out")}\n`);
+    chmodSync(join(real, "orig"), 0o755);
+    const base = {
+      PATH: `${bin}:${real}:/usr/bin:/bin`,
+      BROWSER: join(bin, "xdg-open"),
+      MONOCODE_SHOW_SOCKET: join(root, "none.sock"),
+    };
+    writeFileSync(join(bin, "monocode-show"), "#!/bin/sh\nexit 2\n");
+    for (const extra of [{ MONOCODE_SHOW: "off" }, {}]) {
+      await exec(join(bin, "xdg-open"), ["a.pdf"], { env: { ...base, ...extra, MONOCODE_ORIG_BROWSER: "" }, timeout: 5000 });
+      expect(readFileSync(join(root, "out"), "utf8")).toBe("real a.pdf browser=unset\n");
+      await exec(join(bin, "xdg-open"), ["b.pdf"], {
+        env: { ...base, ...extra, MONOCODE_ORIG_BROWSER: join(real, "orig") },
+        timeout: 5000,
+      });
+      expect(readFileSync(join(root, "out"), "utf8")).toBe("orig b.pdf\n");
+    }
+    // Already inside a shim: straight to the real command.
+    await exec(join(bin, "xdg-open"), ["c.pdf"], {
+      env: { ...base, MONOCODE_SHOW_DEPTH: "1", MONOCODE_ORIG_BROWSER: "" },
+      timeout: 5000,
+    });
+    expect(readFileSync(join(root, "out"), "utf8")).toBe("real c.pdf browser=unset\n");
+  });
+});
+
+describe("socket path", () => {
+  it("keeps show.sock for the default data dir and hashes others", () => {
+    const env = { XDG_RUNTIME_DIR: "/run/user/1" };
+    expect(showSocketPath("/h/.monocode-host", env, "/h")).toBe("/run/user/1/monocode-host/show.sock");
+    const other = showSocketPath("/srv/data", env, "/h");
+    expect(other).toMatch(/^\/run\/user\/1\/monocode-host\/show-[0-9a-f]{12}\.sock$/);
+    expect(showSocketPath("/srv/data2", env, "/h")).not.toBe(other);
+    expect(showSocketPath("/srv/data", {}, "/h")).toBe("/srv/data/run/show.sock");
   });
 });
 
