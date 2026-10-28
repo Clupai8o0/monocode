@@ -3,6 +3,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -46,9 +47,9 @@ impl Lines {
     }
 }
 
-/// Reads a connection to its end (or until it stalls past its read timeout),
-/// handing each line on as soon as it is complete.
-pub(crate) fn read_lines(mut stream: impl Read, mut each: impl FnMut(String)) {
+/// Reads a connection to its end (or until it stalls past its read timeout,
+/// or `until` passes), handing each line on as soon as it is complete.
+pub(crate) fn read_lines(mut stream: impl Read, until: Instant, mut each: impl FnMut(String)) {
     let mut lines = Lines::default();
     let mut chunk = vec![0u8; 64 * 1024];
     let mut hand_on = |line: Vec<u8>| {
@@ -56,16 +57,20 @@ pub(crate) fn read_lines(mut stream: impl Read, mut each: impl FnMut(String)) {
             each(line);
         }
     };
-    loop {
+    while Instant::now() < until {
         match stream.read(&mut chunk) {
-            Ok(0) => break,
+            // Only a clean end hands on a last line without its newline; a
+            // stall or the time budget may have cut it short.
+            Ok(0) => {
+                if let Some(line) = lines.finish() {
+                    hand_on(line);
+                }
+                return;
+            }
             Ok(n) => lines.push(&chunk[..n]).into_iter().for_each(&mut hand_on),
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return,
         }
-    }
-    if let Some(line) = lines.finish() {
-        hand_on(line);
     }
 }
 
@@ -117,8 +122,13 @@ mod tests {
     fn reads_every_line_of_a_connection() {
         let input = b"{\"type\":\"auth\",\"token\":\"t\"}\none\n\xff\xfe\nlast".to_vec();
         let mut got = Vec::new();
-        read_lines(&input[..], |line| got.push(line));
+        let later = Instant::now() + std::time::Duration::from_secs(5);
+        read_lines(&input[..], later, |line| got.push(line));
         assert_eq!(got, vec![r#"{"type":"auth","token":"t"}"#, "one", "last"]);
+        // Past its time budget a connection is read no further.
+        let mut late = Vec::new();
+        read_lines(&input[..], Instant::now(), |line| late.push(line));
+        assert!(late.is_empty());
     }
 
     #[test]

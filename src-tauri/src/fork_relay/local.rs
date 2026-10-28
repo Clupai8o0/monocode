@@ -28,7 +28,8 @@ pub(crate) struct Env {
     pub ledger: Option<PathBuf>,
     /// This machine's name, as the others see it.
     pub machine: String,
-    pub alive: fn(i64) -> bool,
+    /// Whether a registry entry's process (pid) and socket are still there.
+    pub alive: fn(i64, &Path) -> bool,
 }
 
 /// A session this machine offers, in the host's shape. No pid and no socket
@@ -60,7 +61,15 @@ pub(crate) struct LocalSession {
 /// `.claude-exec`, and an older `.claude-cx` only where it is still there.
 const ACCOUNTS: [&str; 3] = [".claude", ".claude-exec", ".claude-cx"];
 
-pub(crate) fn pid_alive(pid: i64) -> bool {
+/// The session is still there: its pid is alive and its socket file
+/// exists. A pid alone can be reused by another process; Claude removes its
+/// socket when it exits.
+pub(crate) fn session_alive(pid: i64, socket: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    pid_alive(pid) && std::fs::metadata(socket).is_ok_and(|m| m.file_type().is_socket())
+}
+
+fn pid_alive(pid: i64) -> bool {
     if pid <= 0 || pid >= PROXY_PID_MIN as i64 {
         return false;
     }
@@ -92,7 +101,7 @@ fn text(value: &Value) -> Option<String> {
     value.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-fn parse_session(raw: &str, account: &str, alive: fn(i64) -> bool) -> Option<LocalSession> {
+fn parse_session(raw: &str, account: &str, alive: fn(i64, &Path) -> bool) -> Option<LocalSession> {
     let v: Value = serde_json::from_str(raw).ok()?;
     if is_relay_entry(&v)
         || v["spare"].as_bool() == Some(true)
@@ -102,10 +111,10 @@ fn parse_session(raw: &str, account: &str, alive: fn(i64) -> bool) -> Option<Loc
         return None;
     }
     let pid = v["pid"].as_i64()?;
-    if !alive(pid) {
+    let socket = text(&v["messagingSocketPath"])?;
+    if !alive(pid, Path::new(&socket)) {
         return None;
     }
-    let socket = text(&v["messagingSocketPath"])?;
     Some(LocalSession {
         session: RelaySession {
             session_id: text(&v["sessionId"])?,
@@ -379,7 +388,7 @@ pub(crate) mod tests {
             sock_fallback: PathBuf::from("/tmp/cc-socks"),
             ledger: None,
             machine: "mac".into(),
-            alive: |pid| pid < 100,
+            alive: |pid, _| pid < 100,
         }
     }
 
@@ -476,6 +485,21 @@ pub(crate) mod tests {
             PathBuf::from("/fallback")
         );
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_session_needs_its_process_and_its_socket() {
+        let dir = temp_dir();
+        let socket = dir.join("s.sock");
+        let me = i64::from(std::process::id());
+        assert!(!session_alive(me, &socket));
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        assert!(session_alive(me, &socket));
+        std::fs::write(dir.join("plain.sock"), "").unwrap();
+        assert!(!session_alive(me, &dir.join("plain.sock")));
+        assert!(!session_alive(0, &socket));
+        assert!(!session_alive(1_000_000_001, &socket));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

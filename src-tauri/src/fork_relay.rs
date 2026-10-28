@@ -146,7 +146,7 @@ mod running {
             sock_fallback: PathBuf::from("/tmp/cc-socks"),
             ledger,
             machine: String::new(),
-            alive: local::pid_alive,
+            alive: local::session_alive,
         };
         if env.home.as_os_str().is_empty() {
             return;

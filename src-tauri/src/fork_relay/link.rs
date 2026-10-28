@@ -30,6 +30,8 @@ const SILENT_LIMIT: Duration = Duration::from_secs(45);
 /// Claude's sender closes about 150 ms after writing; the relay does the same.
 const CLOSE_AFTER: Duration = Duration::from_millis(200);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// However it trickles in, one connection is read for no longer than this.
+const CONNECTION_LIFETIME: Duration = Duration::from_secs(30);
 const MAX_CONNECTIONS: usize = 64;
 
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -302,6 +304,11 @@ impl Link {
             }
         }
         let mut state = lock(&self.state);
+        // Checked under the lock shutdown() tears down with, so a sync that
+        // was in flight cannot bring proxies back after it.
+        if self.stopped() {
+            return;
+        }
         let gone: Vec<u32> = state
             .proxies
             .keys()
@@ -545,7 +552,8 @@ impl Drop for Listener {
 /// and anything else that is not from a local socket dropped.
 fn serve(stream: UnixStream, pid: u32, link: Weak<Link>) {
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-    wire::read_lines(&stream, |line| {
+    let until = Instant::now() + CONNECTION_LIFETIME;
+    wire::read_lines(&stream, until, |line| {
         let Some(from) = wire::sender(&line) else {
             return;
         };

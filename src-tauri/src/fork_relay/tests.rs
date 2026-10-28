@@ -174,7 +174,7 @@ fn env(home: &Path, ledger: PathBuf) -> Env {
         sock_fallback: PathBuf::from("/nonexistent/cc-socks"),
         ledger: Some(ledger),
         machine: "mac".into(),
-        alive: local::pid_alive,
+        alive: local::session_alive,
     }
 }
 
