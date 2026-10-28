@@ -67,6 +67,48 @@ export const runCommand: CommandRunner = (command, args, options) =>
     );
   });
 
+/**
+ * A runner whose commands all end by a deadline: each gets the time left,
+ * at most its own timeout, and past the deadline a command does not start.
+ */
+export function runUntil(
+  run: CommandRunner,
+  deadline: number,
+  now: () => number = Date.now,
+): CommandRunner {
+  return (command, args, options) => {
+    const left = deadline - now();
+    if (left <= 0) {
+      return Promise.resolve({
+        code: null,
+        stdout: "",
+        stderr: "Out of time",
+        timedOut: true,
+      });
+    }
+    return run(command, args, {
+      ...options,
+      timeoutMs: Math.min(options.timeoutMs, left),
+    });
+  };
+}
+
+/** Waits for a promise to settle, or ms to pass, ignoring its error. */
+export async function settled(
+  promise: Promise<unknown> | null,
+  ms: number,
+): Promise<void> {
+  if (!promise || ms <= 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    promise.catch(() => undefined),
+    new Promise<void>((done) => {
+      timer = setTimeout(done, ms);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
