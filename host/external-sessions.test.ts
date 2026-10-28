@@ -95,6 +95,30 @@ describe("externalSessions.list", () => {
     expect(sessions.map((s) => [s.id, s.name, s.source])).toEqual([["aaaaaaaa-1", "new", "claude-cx"]]);
   });
 
+  it("skips the session relay's copies", async () => {
+    const { home, project, projects, options } = setup([1, 1_500_000_000, 1_600_000_000]);
+    record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: project, updatedAt: 1 });
+    record(home, ".claude/sessions", "1500000000.json", {
+      pid: 1_500_000_000, sessionId: "bbbbbbbb-2", cwd: project, updatedAt: 2, pidDomain: "relay:mac",
+      monocodeRelay: { machine: "mac", account: ".claude", remoteSessionId: "bbbbbbbb-2" },
+    });
+    record(home, ".claude-exec/sessions", "1600000000.json", { pid: 1_600_000_000, sessionId: "cccccccc-3", cwd: project, updatedAt: 3, pidDomain: "relay:air" });
+    const { sessions } = await listExternalSessions(projects, options);
+    expect(sessions.map((s) => s.id)).toEqual(["aaaaaaaa-1"]);
+  });
+
+  it("reads the second account from .claude-exec on Linux too", async () => {
+    const { home, project, projects, options } = setup([1, 2]);
+    record(home, ".claude-exec/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: project, updatedAt: 2 });
+    record(home, ".claude-cx/sessions", "2.json", { pid: 2, sessionId: "bbbbbbbb-2", cwd: project, updatedAt: 1 });
+    write(join(home, ".claude-exec/projects/x/aaaaaaaa-1.jsonl"), "");
+    const { sessions } = await listExternalSessions(projects, options);
+    expect(sessions.map((s) => [s.id, s.source, s.hasTranscript])).toEqual([
+      ["aaaaaaaa-1", "claude-cx", true],
+      ["bbbbbbbb-2", "claude-cx", false],
+    ]);
+  });
+
   it("keeps the newest record per pid in agent-sessions", async () => {
     const { home, project, projects, options } = setup([7]);
     record(home, ".codex/agent-sessions", "7.json", { pid: 7, sessionId: "stale-session", cwd: project, updatedAt: 1 });
