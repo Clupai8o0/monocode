@@ -33,6 +33,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// However it trickles in, one connection is read for no longer than this.
 const CONNECTION_LIFETIME: Duration = Duration::from_secs(30);
 const MAX_CONNECTIONS: usize = 64;
+/// After a failed accept, the listener waits this long before the next.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -103,7 +105,7 @@ pub(crate) struct HostStatus {
     pub proxies: usize,
     pub last_sync_at: Option<i64>,
     pub last_error: Option<String>,
-    #[serde(skip)]
+    /// Whether this host's relay is on.
     pub enabled: bool,
 }
 
@@ -322,8 +324,17 @@ impl Link {
         }
         let dirs = local::entry_dirs(&self.shared.env.home);
         for (pid, entry) in wanted {
+            // This Mac's socket folder moved: the old listener is no use.
+            let moved = state.proxies.get(&pid).is_some_and(|proxy| {
+                proxy.entry["messagingSocketPath"] != entry["messagingSocketPath"]
+            });
+            if moved {
+                if let Some(proxy) = state.proxies.remove(&pid) {
+                    self.remove_proxy(pid, proxy);
+                }
+            }
             match state.proxies.get_mut(&pid) {
-                Some(proxy) if proxy.entry == *entry => {}
+                Some(proxy) if same_entry(&proxy.entry, entry) => {}
                 Some(proxy) => {
                     // Same proxy, new details (a rename, a status): rewrite
                     // the files; the socket stays.
@@ -486,6 +497,20 @@ fn same_socket(a: &Path, b: &Path) -> bool {
         }
 }
 
+/// The same entry but for its times, which the host bumps on every sync;
+/// rewriting the files for those alone is not worth it.
+fn same_entry(a: &Value, b: &Value) -> bool {
+    let strip = |v: &Value| {
+        let mut v = v.clone();
+        if let Some(map) = v.as_object_mut() {
+            map.remove("updatedAt");
+            map.remove("statusUpdatedAt");
+        }
+        v
+    };
+    a == b || strip(a) == strip(b)
+}
+
 fn write_everywhere(dirs: &[PathBuf], pid: u32, entry: &Value) -> Vec<PathBuf> {
     dirs.iter()
         .filter_map(|dir| local::write_entry(dir, pid, entry).ok())
@@ -519,6 +544,11 @@ impl Listener {
                     break;
                 }
                 let Ok(stream) = stream else {
+                    // A lasting error (out of file handles) would spin.
+                    std::thread::sleep(ACCEPT_RETRY);
+                    if stopping.load(Ordering::SeqCst) {
+                        break;
+                    }
                     continue;
                 };
                 if CONNECTIONS.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {

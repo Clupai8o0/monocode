@@ -109,7 +109,7 @@ fn parse_session(raw: &str, account: &str, alive: fn(i64, &Path) -> bool) -> Opt
     if is_relay_entry(&v)
         || v["spare"].as_bool() == Some(true)
         || !v["parkedJobId"].is_null()
-        || v.get("peerProtocol").is_some_and(|p| p.as_u64() != Some(1))
+        || v["peerProtocol"].as_u64() != Some(1)
     {
         return None;
     }
@@ -418,7 +418,7 @@ pub(crate) mod tests {
         let s = home.join(".claude/sessions");
         let real = |pid: i64, id: &str, updated: i64| {
             json!({
-                "pid": pid, "sessionId": id, "cwd": "/p", "name": "worker",
+                "pid": pid, "sessionId": id, "cwd": "/p", "name": "worker", "peerProtocol": 1,
                 "messagingSocketPath": format!("/tmp/cc-socks/{pid}.sock"),
                 "updatedAt": updated, "kind": "interactive", "bridgeSessionId": "b1",
             })
@@ -445,6 +445,17 @@ pub(crate) mod tests {
             v
         });
         write(&s.join("7.key"), real(7, "key", 5));
+        // A session that does not speak the peer protocol is not offered.
+        write(&s.join("12.json"), {
+            let mut v = real(12, "old", 5);
+            v.as_object_mut().unwrap().remove("peerProtocol");
+            v
+        });
+        write(&s.join("13.json"), {
+            let mut v = real(13, "newer", 5);
+            v["peerProtocol"] = json!(2);
+            v
+        });
         write(&s.join("8.json"), {
             let mut v = real(8, "nosock", 5);
             v["messagingSocketPath"] = Value::Null;
