@@ -31,6 +31,15 @@ it("counts tracked changes against HEAD and untracked lines", async () => {
   expect(await gitDiffStats(repo)).toEqual({ additions: 3, deletions: 1 });
 });
 
+it("counts staged files in a repo with no commit yet", async () => {
+  const repo = temp();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  writeFileSync(join(repo, "staged.txt"), "a\nb\n");
+  execFileSync("git", ["add", "staged.txt"], { cwd: repo });
+  writeFileSync(join(repo, "loose.txt"), "c\n");
+  expect(await gitDiffStats(repo)).toEqual({ additions: 3, deletions: 0 });
+});
+
 it("skips a folder that is not a git repo", async () => {
   expect(await gitDiffStats(temp())).toBeNull();
 });
@@ -84,4 +93,21 @@ it("recounts only recently active projects on its timer", async () => {
   await stats.idle();
   stats.stop();
   expect(count.mock.calls).toEqual([["/new"]]);
+});
+
+it("keeps the last good count when a count fails, and drops it outside git", async () => {
+  let result: () => DiffStats | null = () => ({ additions: 4, deletions: 2 });
+  const onChange = vi.fn();
+  const stats = createDiffStats({ count: async () => result(), onChange });
+  await stats.refresh("a", "/a");
+  result = () => {
+    throw new Error("git timed out");
+  };
+  await stats.refresh("a", "/a");
+  expect(stats.get("a")).toEqual({ additions: 4, deletions: 2 });
+  expect(onChange).toHaveBeenCalledTimes(1);
+  result = () => null;
+  await stats.refresh("a", "/a");
+  expect(stats.get("a")).toEqual({ additions: 0, deletions: 0 });
+  expect(onChange).toHaveBeenCalledTimes(2);
 });

@@ -2,11 +2,22 @@
 export type PushConfig = { server: string; topic: string };
 
 const NTFY_PACKAGE = "io.heckel.ntfy";
-/** The ntfy app's Play Store page: the store app first, then the web. */
-export const NTFY_STORE_URLS = [
-  `market://details?id=${NTFY_PACKAGE}`,
-  `https://play.google.com/store/apps/details?id=${NTFY_PACKAGE}`,
-];
+const NTFY_APP_STORE_URL = "https://apps.apple.com/us/app/ntfy/id1625396347";
+
+/**
+ * The ntfy app's store page for this platform (`Platform.OS`): the App Store on
+ * iOS; on Android the Play Store app first, then the Play web page.
+ */
+export function ntfyStoreUrls(os: string): string[]
+{
+  if (os === "ios") {
+    return [NTFY_APP_STORE_URL];
+  }
+  return [
+    `market://details?id=${NTFY_PACKAGE}`,
+    `https://play.google.com/store/apps/details?id=${NTFY_PACKAGE}`,
+  ];
+}
 
 /**
  * The ntfy app's subscribe link, as ntfy documents it: `ntfy://<host>/<topic>`,

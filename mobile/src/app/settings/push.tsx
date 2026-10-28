@@ -1,9 +1,9 @@
 import * as Clipboard from "expo-clipboard";
 import { useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Text, View } from "react-native";
 
 import {
-  NTFY_STORE_URLS,
+  ntfyStoreUrls,
   ntfySubscribeLink,
 } from "@/features/settings/ntfyLink";
 import { openFirst, usePushConfig } from "@/features/settings/pushSetup";
@@ -73,7 +73,7 @@ export default function PushScreen() {
               icon="add"
               label="Get ntfy"
               showChevron={false}
-              onPress={() => void openFirst(NTFY_STORE_URLS)}
+              onPress={() => void openFirst(ntfyStoreUrls(Platform.OS))}
             />
           </View>
         </>

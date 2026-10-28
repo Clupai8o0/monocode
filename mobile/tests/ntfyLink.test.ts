@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ntfySubscribeLink } from "@/features/settings/ntfyLink";
+import { ntfyStoreUrls, ntfySubscribeLink } from "@/features/settings/ntfyLink";
 
 describe("ntfy subscribe link", () => {
   it.each([
@@ -17,5 +17,13 @@ describe("ntfy subscribe link", () => {
   it("refuses an address that is not http(s)", () => {
     expect(ntfySubscribeLink({ server: "ftp://x", topic: "t" })).toBeNull();
     expect(ntfySubscribeLink({ server: "nope", topic: "t" })).toBeNull();
+  });
+
+  it("opens the App Store on iOS and the Play Store on Android", () => {
+    expect(ntfyStoreUrls("ios")).toEqual(["https://apps.apple.com/us/app/ntfy/id1625396347"]);
+    expect(ntfyStoreUrls("android")).toEqual([
+      "market://details?id=io.heckel.ntfy",
+      "https://play.google.com/store/apps/details?id=io.heckel.ntfy",
+    ]);
   });
 });

@@ -10,7 +10,10 @@ import { promisify } from "node:util";
 
 export type DiffStats = { additions: number; deletions: number };
 
-/** Counts one checkout; null when it is not a git repo or git failed. */
+/**
+ * Counts one checkout; null when it is not a git repo. Throws when git failed
+ * or timed out, so the cache keeps the last good count.
+ */
 export type DiffCounter = (cwd: string) => Promise<DiffStats | null>;
 
 const exec = promisify(execFile);
@@ -37,47 +40,53 @@ export const gitDiffStats: DiffCounter = async (cwd) => {
   try {
     if ((await git(cwd, ["rev-parse", "--is-inside-work-tree"])).trim() !== "true")
       return null;
-  } catch {
-    return null;
+  } catch (error) {
+    // git exits 128 outside a repo; a timeout or a missing git is a failure.
+    const failure = error as { code?: unknown; killed?: boolean };
+    if (failure.code === 128 && !failure.killed) return null;
+    throw error;
   }
+  let additions = 0;
+  let deletions = 0;
+  // A repo with no commit yet has no HEAD; count what is staged instead.
+  let hasHead = true;
   try {
-    let additions = 0;
-    let deletions = 0;
-    // A repo with no commit yet has no HEAD; its files all count as untracked.
-    let numstat = "";
-    try {
-      numstat = await git(cwd, ["diff", "--numstat", "HEAD", "--"]);
-    } catch {
-      numstat = "";
-    }
-    for (const line of numstat.split("\n")) {
-      const [added, removed] = line.split("\t");
-      // Binary files show "-" for both.
-      additions += Number(added) || 0;
-      deletions += Number(removed) || 0;
-    }
-    const untracked = (
-      await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])
-    )
-      .split("\0")
-      .filter(Boolean)
-      .slice(0, MAX_UNTRACKED);
-    // One file at a time, so a count never runs more than one git. `git diff
-    // --no-index` exits 1 when files differ, so its output is read from the
-    // error too.
-    for (const path of untracked) {
-      let out = "";
-      try {
-        out = await git(cwd, ["diff", "--no-index", "--numstat", "--", "/dev/null", path]);
-      } catch (error) {
-        out = String((error as { stdout?: unknown }).stdout ?? "");
-      }
-      additions += Number(out.split("\t")[0]) || 0;
-    }
-    return { additions, deletions };
-  } catch {
-    return null;
+    await git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+  } catch (error) {
+    const failure = error as { code?: unknown; killed?: boolean };
+    if (failure.code !== 1 || failure.killed) throw error;
+    hasHead = false;
   }
+  const numstat = await git(
+    cwd,
+    hasHead ? ["diff", "--numstat", "HEAD", "--"] : ["diff", "--cached", "--numstat", "--"],
+  );
+  for (const line of numstat.split("\n")) {
+    const [added, removed] = line.split("\t");
+    // Binary files show "-" for both.
+    additions += Number(added) || 0;
+    deletions += Number(removed) || 0;
+  }
+  const untracked = (
+    await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])
+  )
+    .split("\0")
+    .filter(Boolean)
+    .slice(0, MAX_UNTRACKED);
+  // One file at a time, so a count never runs more than one git. `git diff
+  // --no-index` exits 1 when files differ, so its output is read from the
+  // error too.
+  for (const path of untracked) {
+    let out = "";
+    try {
+      out = await git(cwd, ["diff", "--no-index", "--numstat", "--", "/dev/null", path]);
+    } catch (error) {
+      if ((error as { killed?: boolean }).killed) throw error;
+      out = String((error as { stdout?: unknown }).stdout ?? "");
+    }
+    additions += Number(out.split("\t")[0]) || 0;
+  }
+  return { additions, deletions };
 };
 
 export type DiffStatsCache = ReturnType<typeof createDiffStats>;
@@ -106,11 +115,12 @@ export function createDiffStats(
   const drain = async () => {
     for (const [id, cwd] of queue) {
       queue.delete(id);
-      let next: DiffStats | null = null;
+      let next: DiffStats | null;
       try {
         next = await count(cwd);
       } catch {
-        next = null;
+        // git failed or timed out: keep the last good count.
+        continue;
       }
       const before = stats.get(id);
       if (!next) {
