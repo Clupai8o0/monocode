@@ -43,9 +43,10 @@ async function hostCall<T>(
   method: string,
   params: object,
   id = makeCommandId(),
+  timeoutMs = HOST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HOST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(`${pairing.desktop.host!.url}/mobile`, {
@@ -76,8 +77,11 @@ export function request<T>(
   method: string,
   params: object = {},
   id = makeCommandId(),
+  /** Host pairings only: how long to wait instead of the default. */
+  timeoutMs?: number,
 ): Promise<T> {
-  if (pairing.desktop.host) return hostCall<T>(pairing, method, params, id);
+  if (pairing.desktop.host)
+    return hostCall<T>(pairing, method, params, id, timeoutMs);
   return nativeCall({
     operation: "exchange",
     identity: pairing.identity,

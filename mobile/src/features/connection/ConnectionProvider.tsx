@@ -64,7 +64,12 @@ type Connection = {
   refresh: () => Promise<void>;
   select: (selection: MobileSelection) => Promise<void>;
   disconnect: () => Promise<void>;
-  command: <T>(method: string, params?: object, id?: string) => Promise<T>;
+  command: <T>(
+    method: string,
+    params?: object,
+    id?: string,
+    timeoutMs?: number,
+  ) => Promise<T>;
 };
 const Context = createContext<Connection | null>(null);
 export function ConnectionProvider({ children }: { children: ReactNode }) {
@@ -302,10 +307,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       method: string,
       params: object = {},
       id?: string,
+      timeoutMs?: number,
     ): Promise<T> => {
       const value = active.current;
       if (!value) throw new Error("Connect your desktop first");
-      return request<T>(value, method, params, id);
+      return request<T>(value, method, params, id, timeoutMs);
     },
     [],
   );

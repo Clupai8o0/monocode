@@ -74,6 +74,8 @@ export function SettingsRow({
   showChevron = true,
   accessory,
   destructive,
+  accessibilityRole = "button",
+  accessibilityState,
 }: {
   icon?: IconName | ReactElement;
   label: string;
@@ -82,13 +84,16 @@ export function SettingsRow({
   showChevron?: boolean;
   accessory?: ReactNode;
   destructive?: boolean;
+  accessibilityRole?: "button" | "radio";
+  accessibilityState?: { checked?: boolean };
 }) {
   const colors = useColors();
   const styles = useStyles();
   const tint = destructive ? colors.deletions : colors.content;
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
+      accessibilityState={accessibilityState}
       accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
