@@ -124,6 +124,8 @@ export class HostRelay {
   private sockDir: string | null = null;
   private readonly peers = new Map<string, Peer>();
   private readonly queues = new Map<string, DeliveryQueue>();
+  /** Peers whose full queue is dropping lines, so the log says it once. */
+  private readonly dropping = new Set<string>();
   /** Proxy pids by target machine: HOST, or a peer's device id. */
   private readonly pids = new Map<string, PidTable>();
   private readonly proxies = new Map<number, Proxy>();
@@ -594,8 +596,13 @@ export class HostRelay {
     const fromPid = this.table(peer.id).pid(HOST, sender.sessionId);
     const rewritten = rewriteFrame(frame, `${peer.sockDir}/${fromPid}.sock`);
     if (!rewritten) return;
-    // Nothing to answer here; a full queue drops the line.
-    this.queue(peer.id).push({ to: target.sessionId, fromPid, line: rewritten });
+    // Nothing to answer here; a full queue drops the line, logged once until it drains.
+    if (this.queue(peer.id).push({ to: target.sessionId, fromPid, line: rewritten })) {
+      this.dropping.delete(peer.id);
+    } else if (!this.dropping.has(peer.id)) {
+      this.dropping.add(peer.id);
+      console.error(`The relay is dropping messages for ${peer.name}: too much is waiting`);
+    }
   }
 
   private localBySocket(socket: string): LocalSession | undefined {

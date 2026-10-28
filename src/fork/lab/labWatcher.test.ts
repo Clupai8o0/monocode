@@ -105,6 +105,41 @@ describe("runLabPass", () => {
     expect(hosts.m2).toMatchObject({ scope: "lab", updatedAt: 300 });
   });
 
+  it("takes the choice a host kept when it refuses the push, so the push does not repeat", async () => {
+    const now = Date.now();
+    // This Mac's stamp is a minute ahead; the host's clock runs an hour ahead, so it keeps its own.
+    const hosts = { m1: { scope: "lab" as const, updatedAt: now + 3_600_000, by: "Pixel" } };
+    const { deps, calls, applied } = fakes({ local: { ...local, updatedAt: now + 60_000 }, hosts });
+    const result = await runLabPass(deps);
+    expect(result.pushed).toEqual([]);
+    expect(result.pulled).toEqual(["m1"]);
+    expect(applied).toEqual([{ scope: "lab", updatedAt: now + 3_600_000, by: "Pixel" }]);
+    const report = calls.find((call) => call.method === "lab.report")?.params as LabParams["lab.report"];
+    expect(report.remoteControl.scope).toBe("lab");
+    calls.length = 0;
+    await runLabPass(deps);
+    expect(calls.map((call) => call.method)).toEqual(["lab.status", "lab.report"]);
+  });
+
+  it("stamps a pulled choice past this Mac's later stamp, so its script keeps it", async () => {
+    const now = Date.now();
+    // Both stamps are far ahead, so both count as now and the host wins the tie.
+    const hosts = { m1: { scope: "lab" as const, updatedAt: now + 600_000, by: "Pixel" } };
+    const { deps, calls, applied } = fakes({ local: { ...local, updatedAt: now + 3_600_000 }, hosts });
+    const apply = deps.applyLocal;
+    // remote_control.py keeps the stored choice when the new one is older.
+    const applyLocal: LabDeps["applyLocal"] = async (choice) => {
+      const current = await deps.readLocal();
+      return choice.updatedAt < current.updatedAt ? { ...current, changed: false } : apply(choice);
+    };
+    const result = await runLabPass({ ...deps, applyLocal });
+    expect(result.pulled).toEqual(["m1"]);
+    expect(applied).toEqual([{ scope: "lab", updatedAt: now + 3_600_001, by: "Pixel" }]);
+    calls.length = 0;
+    await runLabPass({ ...deps, applyLocal });
+    expect(calls.map((call) => call.method)).toEqual(["lab.status", "lab.report"]);
+  });
+
   it("skips machines without the lab capability and leaves this Mac alone", async () => {
     const readLocal = vi.fn();
     const { deps, calls } = fakes({ local, hosts: {}, lab: [] });

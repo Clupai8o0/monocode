@@ -5,10 +5,12 @@ import { remoteRequest } from "../../features/connections/model/connections";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import { IS_LINUX, IS_WIN } from "../../platform/tauri/platform";
 import {
+  adoptChoice,
   buildReport,
   decideSync,
   errorKind,
   hasLabCapability,
+  isScope,
   localMachineName,
   parseLocalRemoteControl,
   type LocalRemoteControl,
@@ -135,10 +137,18 @@ export async function runLabPass(deps: LabDeps): Promise<PassResult> {
     const decision = decideSync(local, status.remoteControl.desired);
     try {
       if (decision.kind === "push") {
-        await deps.request(machine.id, "lab.remoteControl.set", decision.params);
-        result.pushed.push(machine.id);
+        const answer = await deps.request(machine.id, "lab.remoteControl.set", decision.params);
+        const kept = answer?.remoteControl?.desired;
+        if (kept && isScope(kept.scope) && typeof kept.updatedAt === "number" && kept.scope !== decision.params.scope) {
+          // The host kept a choice its clock calls later. Take it here, or the
+          // same push is refused again every pass.
+          local = await deps.applyLocal(adoptChoice(kept, local));
+          result.pulled.push(machine.id);
+        } else {
+          result.pushed.push(machine.id);
+        }
       } else if (decision.kind === "pull") {
-        local = await deps.applyLocal(decision.choice);
+        local = await deps.applyLocal(adoptChoice(decision.choice, local));
         result.pulled.push(machine.id);
       }
     } catch (reason) {

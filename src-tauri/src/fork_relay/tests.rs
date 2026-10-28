@@ -396,6 +396,15 @@ fn rewrites_entries_only_for_real_changes_and_follows_the_socket_folder() {
     assert_eq!(link.sync_once(), Ok(true));
     assert_eq!(read(&copy)["updatedAt"], 1);
 
+    // A copy that went missing, or an account folder made later, is written
+    // again even though the entry did not change.
+    std::fs::remove_file(&copy).unwrap();
+    std::fs::create_dir_all(home.join(".claude-exec")).unwrap();
+    assert_eq!(link.sync_once(), Ok(true));
+    assert!(copy.exists());
+    let cx_copy = home.join(".claude-exec/sessions/1000000003.json");
+    assert_eq!(read(&cx_copy)["sessionId"], read(&copy)["sessionId"]);
+
     // A real change (the status) rewrites them.
     host.with(|s| s.status = Some("busy"));
     assert_eq!(link.sync_once(), Ok(true));
@@ -420,7 +429,7 @@ fn rewrites_entries_only_for_real_changes_and_follows_the_socket_folder() {
     assert_eq!(link.status().proxies, 1);
 
     link.shutdown();
-    assert!(!copy.exists() && !moved.exists());
+    assert!(!copy.exists() && !cx_copy.exists() && !moved.exists());
     let ledger: Value =
         serde_json::from_slice(&std::fs::read(dir.join("ledger.json")).unwrap()).unwrap();
     assert_eq!(ledger["files"], json!([]));

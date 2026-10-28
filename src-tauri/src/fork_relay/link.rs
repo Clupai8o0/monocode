@@ -334,7 +334,7 @@ impl Link {
                 }
             }
             match state.proxies.get_mut(&pid) {
-                Some(proxy) if same_entry(&proxy.entry, entry) => {}
+                Some(proxy) if same_entry(&proxy.entry, entry) && in_every_dir(&dirs, pid) => {}
                 Some(proxy) => {
                     // Same proxy, new details (a rename, a status): rewrite
                     // the files; the socket stays.
@@ -509,6 +509,13 @@ fn same_entry(a: &Value, b: &Value) -> bool {
         v
     };
     a == b || strip(a) == strip(b)
+}
+
+/// Every account folder has a file for this pid, so an unchanged entry needs
+/// no writing; a folder made later, or a file removed, gets it again.
+fn in_every_dir(dirs: &[PathBuf], pid: u32) -> bool {
+    dirs.iter()
+        .all(|dir| dir.join(format!("{pid}.json")).exists())
 }
 
 fn write_everywhere(dirs: &[PathBuf], pid: u32, entry: &Value) -> Vec<PathBuf> {
