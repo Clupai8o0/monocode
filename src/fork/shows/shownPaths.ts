@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -10,6 +10,25 @@ import { invoke } from "@tauri-apps/api/core";
 let root: string | undefined;
 let loading = false;
 const allowed = new Set<string>();
+const listeners = new Set<() => void>();
+let version = 0;
+
+function bump() {
+  version += 1;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/** Calls `listener` when the root loads or a path is allowed. */
+export function subscribeShown(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getVersion(): number {
+  return version;
+}
 
 /** Fetches the cache root once; until then any path with `/shown/` counts. */
 export function loadShownRoot(): void {
@@ -33,7 +52,12 @@ export function loadShownRoot(): void {
 }
 
 export function setShownRoot(value: string | undefined): void {
-  root = value?.replace(/\/+$/, "") || undefined;
+  const next = value?.replace(/\/+$/, "") || undefined;
+  if (next !== root) {
+    root = next;
+    // Gates drawn with the `/shown/` guess check again against the real root.
+    bump();
+  }
 }
 
 export function isShownPath(path: string): boolean {
@@ -44,7 +68,10 @@ export function isShownPath(path: string): boolean {
 }
 
 export function allowShownPath(path: string): void {
-  allowed.add(path);
+  if (!allowed.has(path)) {
+    allowed.add(path);
+    bump();
+  }
 }
 
 export function isShownAllowed(path: string): boolean {
@@ -53,12 +80,13 @@ export function isShownAllowed(path: string): boolean {
 
 /** For a viewer: `blocked` while a shown file waits for the click. */
 export function useShownGate(path: string): { shown: boolean; blocked: boolean; allow: () => void } {
-  loadShownRoot();
+  useSyncExternalStore(subscribeShown, getVersion, getVersion);
+  useEffect(() => {
+    loadShownRoot();
+  }, []);
   const shown = isShownPath(path);
-  const [, setTick] = useState(0);
   const allow = useCallback(() => {
     allowShownPath(path);
-    setTick((value) => value + 1);
   }, [path]);
   return { shown, blocked: shown && !isShownAllowed(path), allow };
 }
