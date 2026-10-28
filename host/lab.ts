@@ -1,5 +1,22 @@
+import { readFile, rename, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir, hostname } from "node:os";
+import { join } from "node:path";
 import type { HostStore } from "./store";
-import type { LabMethod, LabStatus } from "../src/fork/lab/labProtocol";
+import type {
+  LabMethod,
+  LabParams,
+  LabStatus,
+  RemoteControlAccount,
+  RemoteControlChoice,
+  RemoteControlMachine,
+  RemoteControlScope,
+  RelayStatus,
+} from "../src/fork/lab/labProtocol";
+import { hostRelay } from "./relay";
+import { runCommand, type CommandRunner } from "./lab-system";
+import { UresourcedControl } from "./lab-uresourced";
+import { KrdpControl } from "./lab-krdp";
 
 export type LabCaller = {
   /** The device whose credential made the call; null once revoked. */
@@ -7,25 +24,298 @@ export type LabCaller = {
   surface: "rpc" | "mobile";
 };
 
-export type HostLabOptions = { dataDir: string; store: HostStore };
+type Platform = LabStatus["platform"];
+
+/** The relay's switch, as the lab uses it. */
+export type LabRelay = {
+  status(): RelayStatus;
+  setEnabled(enabled: boolean): Promise<RelayStatus>;
+};
+
+export type HostLabOptions = {
+  dataDir: string;
+  store: HostStore;
+  /** Tests replace the machine around the lab. */
+  run?: CommandRunner;
+  platform?: NodeJS.Platform;
+  machine?: string;
+  home?: string;
+  now?: () => number;
+  relay?: LabRelay;
+  uresourced?: UresourcedControl;
+  krdp?: KrdpControl;
+};
+
+/** <dataDir>/lab.json */
+type LabFile = {
+  desired: RemoteControlChoice;
+  machines: Record<string, RemoteControlMachine>;
+};
+
+const DEFAULT_CHOICE: RemoteControlChoice = {
+  scope: "all",
+  updatedAt: 0,
+  by: "default",
+};
+/** The account folders the host reads; it never writes them. */
+const ACCOUNTS = [".claude", ".claude-exec"];
+const MAX_MACHINES = 64;
 
 /**
  * Home lab controls: where Remote Control starts, the relay's switch,
  * uresourced and remote desktop. Every method answers the whole LabStatus.
  */
 export class HostLab {
-  constructor(readonly options: HostLabOptions) {}
+  private readonly run: CommandRunner;
+  private readonly platform: NodeJS.Platform;
+  private readonly machine: string;
+  private readonly home: string;
+  private readonly now: () => number;
+  private readonly uresourced: UresourcedControl;
+  private readonly krdp: KrdpControl;
+  private saving: Promise<unknown> = Promise.resolve();
+
+  constructor(readonly options: HostLabOptions) {
+    this.run = options.run ?? runCommand;
+    this.platform = options.platform ?? process.platform;
+    this.machine = options.machine ?? hostname();
+    this.home = options.home ?? homedir();
+    this.now = options.now ?? Date.now;
+    this.uresourced =
+      options.uresourced ??
+      new UresourcedControl({ run: this.run, now: this.now });
+    this.krdp =
+      options.krdp ?? new KrdpControl({ run: this.run, home: this.home });
+  }
+
+  private get relay(): LabRelay {
+    return (
+      this.options.relay ??
+      hostRelay({ dataDir: this.options.dataDir, store: this.options.store })
+    );
+  }
+
+  private get linux(): boolean {
+    return this.platform === "linux";
+  }
 
   async handle(
     method: LabMethod,
     params: Record<string, unknown>,
     caller: LabCaller,
   ): Promise<LabStatus> {
-    void method;
-    void params;
-    void caller;
-    throw new Error("Home lab controls are not built yet");
+    switch (method) {
+      case "lab.status":
+        if (params.probe === true && this.linux) await this.uresourced.probe();
+        break;
+      case "lab.remoteControl.set":
+        await this.setScope(params, caller);
+        break;
+      case "lab.relay.set":
+        if (typeof params.enabled !== "boolean") {
+          throw new Error("Say on or off");
+        }
+        await this.relay.setEnabled(params.enabled);
+        break;
+      case "lab.uresourced.set": {
+        const action = params.action;
+        if (action !== "off" && action !== "on" && action !== "restart") {
+          throw new Error("Unknown action");
+        }
+        this.linuxOnly();
+        await this.uresourced.set(action);
+        break;
+      }
+      case "lab.remoteDesktop.set":
+        if (typeof params.enabled !== "boolean") {
+          throw new Error("Say on or off");
+        }
+        this.linuxOnly();
+        await this.krdp.set(params.enabled);
+        break;
+      case "lab.report":
+        if (caller.surface !== "rpc") throw new Error("Only desktops report");
+        await this.report(params);
+        break;
+      default:
+        throw new Error("Unknown lab method");
+    }
+    return this.status();
   }
+
+  async status(): Promise<LabStatus> {
+    const [file, self, uresourced, remoteDesktop] = await Promise.all([
+      this.read(),
+      this.self(),
+      this.linux ? this.uresourced.status().catch(() => null) : null,
+      this.linux ? this.krdp.status().catch(() => null) : null,
+    ]);
+    const machines = Object.values(file.machines)
+      .filter((machine) => machine.machine !== this.machine)
+      .concat({ ...self, scope: file.desired.scope })
+      .sort((a, b) => a.machine.localeCompare(b.machine));
+    return {
+      version: 1,
+      machine: this.machine,
+      platform: asPlatform(this.platform),
+      remoteControl: { desired: file.desired, machines },
+      relay: this.relay.status(),
+      uresourced,
+      remoteDesktop,
+    };
+  }
+
+  private linuxOnly(): void {
+    if (!this.linux) throw new Error("Only on Linux");
+  }
+
+  private async setScope(
+    params: Record<string, unknown>,
+    caller: LabCaller,
+  ): Promise<void> {
+    const scope = asScope(params.scope);
+    const updatedAt =
+      params.updatedAt === undefined ? this.now() : asTime(params.updatedAt);
+    await this.update((file) => {
+      // Newest wins; the same moment again changes nothing either.
+      if (updatedAt <= file.desired.updatedAt) return false;
+      file.desired = {
+        scope,
+        updatedAt,
+        by: (caller.device?.name ?? "unknown").slice(0, 80),
+      };
+      return true;
+    });
+  }
+
+  private async report(params: Record<string, unknown>): Promise<void> {
+    const { machine, platform, remoteControl } = params as Partial<
+      LabParams["lab.report"]
+    >;
+    if (
+      typeof machine !== "string" ||
+      !machine.trim() ||
+      machine.length > 128
+    ) {
+      throw new Error("Name the machine");
+    }
+    if (platform !== "linux" && platform !== "darwin" && platform !== "win32") {
+      throw new Error("Unknown platform");
+    }
+    if (!remoteControl || typeof remoteControl !== "object") {
+      throw new Error("Say what Remote Control is");
+    }
+    const scope = asScope(remoteControl.scope);
+    const accounts = Array.isArray(remoteControl.accounts)
+      ? remoteControl.accounts
+          .filter(
+            (account): account is RemoteControlAccount =>
+              typeof account?.account === "string" &&
+              typeof account.enabled === "boolean",
+          )
+          .slice(0, 8)
+          .map(({ account, enabled }) => ({
+            account: account.slice(0, 64),
+            enabled,
+          }))
+      : [];
+    await this.update((file) => {
+      file.machines[machine] = {
+        machine,
+        lab: platform === "linux",
+        scope,
+        accounts,
+        reportedAt: this.now(),
+      };
+      const names = Object.values(file.machines)
+        .sort((a, b) => b.reportedAt - a.reportedAt)
+        .map((entry) => entry.machine);
+      for (const name of names.slice(MAX_MACHINES)) delete file.machines[name];
+      return true;
+    });
+  }
+
+  /** The host machine itself, from its own account settings. */
+  private async self(): Promise<Omit<RemoteControlMachine, "scope">> {
+    const accounts: RemoteControlAccount[] = [];
+    for (const account of ACCOUNTS) {
+      const dir = join(this.home, account);
+      if (!existsSync(dir)) continue;
+      let enabled = false;
+      try {
+        const settings = JSON.parse(
+          await readFile(join(dir, "settings.json"), "utf8"),
+        ) as Record<string, unknown>;
+        enabled = settings.remoteControlAtStartup === true;
+      } catch {
+        // No file or not JSON: Remote Control is off there.
+      }
+      accounts.push({ account, enabled });
+    }
+    return {
+      machine: this.machine,
+      lab: this.linux,
+      accounts,
+      reportedAt: this.now(),
+    };
+  }
+
+  private get file(): string {
+    return join(this.options.dataDir, "lab.json");
+  }
+
+  private async read(): Promise<LabFile> {
+    try {
+      const raw = JSON.parse(
+        await readFile(this.file, "utf8"),
+      ) as Partial<LabFile>;
+      const desired = raw.desired;
+      return {
+        desired:
+          desired &&
+          (desired.scope === "all" || desired.scope === "lab") &&
+          Number.isFinite(desired.updatedAt) &&
+          typeof desired.by === "string"
+            ? desired
+            : { ...DEFAULT_CHOICE },
+        machines:
+          raw.machines && typeof raw.machines === "object" ? raw.machines : {},
+      };
+    } catch {
+      return { desired: { ...DEFAULT_CHOICE }, machines: {} };
+    }
+  }
+
+  /** Read, change and save lab.json one call at a time, atomically. */
+  private update(change: (file: LabFile) => boolean): Promise<void> {
+    const next = this.saving.then(async () => {
+      const file = await this.read();
+      if (!change(file)) return;
+      const temp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(temp, `${JSON.stringify(file, null, 2)}\n`, {
+        mode: 0o600,
+      });
+      await rename(temp, this.file);
+    });
+    this.saving = next.catch(() => undefined);
+    return next;
+  }
+}
+
+function asScope(value: unknown): RemoteControlScope {
+  if (value !== "all" && value !== "lab") throw new Error("Choose all or lab");
+  return value;
+}
+
+function asTime(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error("Bad time");
+  }
+  return Math.floor(value);
+}
+
+function asPlatform(platform: NodeJS.Platform): Platform {
+  return platform === "darwin" || platform === "win32" ? platform : "linux";
 }
 
 let active: HostLab | undefined;
