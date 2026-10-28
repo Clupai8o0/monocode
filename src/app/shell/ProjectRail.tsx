@@ -100,6 +100,7 @@ import {
 } from "../../features/connections/model/connections";
 import { remoteProjectFor } from "../../features/connections/model/remoteProjects";
 import { useProjectMenu } from "./useProjectMenu";
+import { useMachineText } from "../../fork/machines/MachinePill";
 import { MonoRailSection, type MonoRailProps } from "./MonoRailSection";
 
 type Props = {
@@ -969,10 +970,11 @@ function ProjectCard({
         : online
           ? "Connected"
           : "Reconnecting";
+  const where = useMachineText(item.path, true); // Fork: "Vivobook · Linux"
   const cardTitle = projectCardTitle(
     remote
-      ? `${remote.cwd} on ${machine?.name ?? "another machine"} (${connection})`
-      : item.path,
+      ? `${remote.cwd} on ${where ?? machine?.name ?? "another machine"} (${connection})`
+      : where ? `${item.path} on ${where}` : item.path,
     name,
     stats,
     busy,
@@ -1058,7 +1060,7 @@ function ProjectCard({
         <HandoffTag path={item.path} />
         {machine ? (
           <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-content/45">
-            {machine.name}
+            {where ?? machine.name}
           </span>
         ) : null}
         {hasChanges ? (

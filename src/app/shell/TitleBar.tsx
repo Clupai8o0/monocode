@@ -65,6 +65,7 @@ import {
 import type { PaneEdge } from "../../features/workspace/model/layout";
 import { useForkTitle } from "../../fork/alerts/ForkTitle";
 import { NotificationsButton } from "../../fork/notifications/NotificationsButton";
+import { MachinePill, useMachineTitle } from "../../fork/machines/MachinePill";
 import {
   APP_VIEW_LABELS,
   type AppView,
@@ -922,7 +923,7 @@ function TitleBarComponent({
     return "MonoCode";
   }, [activeTab, cwd]);
 
-  const shownTitle = useForkTitle(systemTitle); // Fork: "2 need you · …"
+  const shownTitle = useForkTitle(useMachineTitle(cwd, systemTitle)); // Fork: "2 need you · …", machine name
   useEffect(() => {
     document.title = shownTitle;
     try {
@@ -1226,8 +1227,9 @@ function TitleBarComponent({
         </div>
       ) : null}
       {!inset ? (
-        <div className="flex shrink-0 items-center px-1">
+        <div className="flex shrink-0 items-center gap-1 px-1">
           <NotificationsButton />
+          <MachinePill path={cwd} local status />
         </div>
       ) : null}
       {showProjectButton && onSelectProject ? (

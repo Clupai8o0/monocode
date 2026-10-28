@@ -11,6 +11,7 @@ import {
   StickyNote,
   X,
 } from "../../../shared/ui/icons";
+import { useMachineText } from "../../../fork/machines/MachinePill";
 import {
   useCallback,
   useEffect,
@@ -425,6 +426,8 @@ export function Composer({
   onEditingLastTurnChange,
   children,
 }: Props) {
+  const machineText = useMachineText(cwd); // Fork: remote machine label
+  const machinePlaceholder = machineText ? `Message the agent on ${machineText}` : undefined;
   const ref = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -2129,6 +2132,7 @@ export function Composer({
                       : handoffCard
                         ? "Add context, or send to continue…"
                         : (placeholder ??
+                          machinePlaceholder ??
                           (shell
                             ? "Ask, build, / for commands, @ for references... "
                             : "Ask, build, / for commands, @ for references... "))

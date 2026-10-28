@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { MachineDetailLine } from "../../../fork/machines/MachinePill";
 import { useEffect, useRef, useState } from "react";
 import { Internet, Loader, Plus, Trash2 } from "../../../shared/ui/icons";
 import {
@@ -272,6 +273,7 @@ export function ConnectionsSettings() {
                   <div className="truncate text-[13px] font-medium">
                     {machine.name}
                   </div>
+                  <MachineDetailLine machineId={machine.id} name={machine.name} />
                   <div className="mt-1 truncate text-[12px] text-content/45">
                     {machine.ssh
                       ? `SSH · ${machine.ssh.target}${machine.ssh.port ? ` · port ${machine.ssh.port}` : ""}`

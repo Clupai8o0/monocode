@@ -82,6 +82,7 @@ import { MOD } from "../../../platform/tauri/platform";
 import { applyProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { isRemoteProjectPath } from "../../projects/model/recents";
+import { MachinePill } from "../../../fork/machines/MachinePill";
 
 const GIT_POLL_MS = 2000;
 
@@ -199,6 +200,7 @@ export function GitChangesPanel({
     >
       <PaneHeader compact={compactHeader} role="toolbar" aria-label="Changes">
         <span className="shrink-0">Changes</span>
+        <MachinePill path={cwd} />
         {status ? (
           <span
             role="status"
