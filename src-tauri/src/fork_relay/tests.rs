@@ -22,6 +22,9 @@ struct HostState {
     proxies: Vec<(u64, String)>,
     /// Puts an entry's socket somewhere else, which the Mac must refuse.
     wrong_folder: bool,
+    /// The times and status every entry carries.
+    updated_at: u64,
+    status: Option<&'static str>,
     syncs: Vec<Value>,
     sends: Vec<Value>,
     deliveries: Vec<Value>,
@@ -41,6 +44,10 @@ impl FakeHost {
     }
 
     fn entry(pid: u64, session: &str, sock_dir: &str) -> Value {
+        FakeHost::entry_at(pid, session, sock_dir, 1, "idle")
+    }
+
+    fn entry_at(pid: u64, session: &str, sock_dir: &str, at: u64, status: &str) -> Value {
         json!({
             "pid": pid,
             "sessionId": session,
@@ -55,9 +62,9 @@ impl FakeHost {
             "messagingSocketPath": format!("{sock_dir}/{pid}.sock"),
             "name": "laptop worker",
             "nameSource": "derived",
-            "status": "idle",
-            "updatedAt": 1,
-            "statusUpdatedAt": 1,
+            "status": status,
+            "updatedAt": at,
+            "statusUpdatedAt": at,
             "monocodeRelay": {"machine": "vivobook", "account": ".claude", "remoteSessionId": session},
         })
     }
@@ -92,7 +99,15 @@ impl Rpc for FakeHost {
                 let entries: Vec<Value> = state
                     .proxies
                     .iter()
-                    .map(|(pid, session)| FakeHost::entry(*pid, session, &folder))
+                    .map(|(pid, session)| {
+                        FakeHost::entry_at(
+                            *pid,
+                            session,
+                            &folder,
+                            state.updated_at.max(1),
+                            state.status.unwrap_or("idle"),
+                        )
+                    })
                     .collect();
                 Ok(json!({"enabled": true, "entries": entries, "nextSyncMs": 3000}))
             }
@@ -153,6 +168,7 @@ impl FakeSession {
             "name": format!("mac {id}"),
             "messagingSocketPath": socket,
             "kind": "interactive",
+            "peerProtocol": 1,
             "updatedAt": 1,
         });
         let dir = home.join(account).join("sessions");
@@ -353,6 +369,61 @@ fn refuses_bad_entries_and_cleans_up_on_shutdown() {
     assert!(!copy.exists());
     assert!(!dir.join("1000000009.sock").exists());
     other.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rewrites_entries_only_for_real_changes_and_follows_the_socket_folder() {
+    let dir = temp_dir();
+    let home = dir.join("h");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let _one = FakeSession::start(&home, ".claude", "local-1", &dir.join("s1.sock"));
+    let shared = Arc::new(Shared::new(env(&home, dir.join("ledger.json"))));
+    let host = Arc::new(FakeHost::default());
+    host.with(|s| {
+        s.enabled = true;
+        s.proxies = vec![(1_000_000_003, "remote-3".into())];
+    });
+    let link = Link::new("m1".into(), "vivobook".into(), host.clone(), shared.clone());
+    let copy = home.join(".claude/sessions/1000000003.json");
+    let read =
+        |path: &Path| -> Value { serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap() };
+    assert_eq!(link.sync_once(), Ok(true));
+    assert_eq!(read(&copy)["updatedAt"], 1);
+
+    // Only the times moved: the files stay as they were.
+    host.with(|s| s.updated_at = 50);
+    assert_eq!(link.sync_once(), Ok(true));
+    assert_eq!(read(&copy)["updatedAt"], 1);
+
+    // A real change (the status) rewrites them.
+    host.with(|s| s.status = Some("busy"));
+    assert_eq!(link.sync_once(), Ok(true));
+    assert_eq!(read(&copy)["status"], "busy");
+    assert_eq!(read(&copy)["updatedAt"], 50);
+
+    // The status keeps the host's enabled flag per host.
+    let status = serde_json::to_value(link.status()).unwrap();
+    assert_eq!(status["enabled"], true);
+    assert_eq!(status["proxies"], 1);
+    assert_eq!(status["name"], "vivobook");
+
+    // A newer session listens in another folder: the proxy moves with it.
+    let other = dir.join("o");
+    std::fs::create_dir_all(&other).unwrap();
+    let _two = FakeSession::start(&home, ".claude", "local-22", &other.join("s2.sock"));
+    assert_eq!(link.sync_once(), Ok(true));
+    let moved = other.join("1000000003.sock");
+    assert_eq!(read(&copy)["messagingSocketPath"], moved.to_str().unwrap());
+    assert!(UnixStream::connect(&moved).is_ok());
+    assert!(!dir.join("1000000003.sock").exists());
+    assert_eq!(link.status().proxies, 1);
+
+    link.shutdown();
+    assert!(!copy.exists() && !moved.exists());
+    let ledger: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("ledger.json")).unwrap()).unwrap();
+    assert_eq!(ledger["files"], json!([]));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
