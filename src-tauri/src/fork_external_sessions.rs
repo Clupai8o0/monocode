@@ -93,7 +93,9 @@ pub struct TranscriptPage {
 pub async fn fork_external_sessions_list(projects: Vec<ProjectRef>) -> Result<SessionList, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let env = Env::system();
-        SessionList { sessions: list(&env, &projects) }
+        SessionList {
+            sessions: list(&env, &projects),
+        }
     })
     .await
     .map_err(|e| e.to_string())
@@ -125,6 +127,9 @@ struct Proc {
     args: String,
 }
 
+/// The git common dir of a folder, cached on a real machine.
+type CommonDir = Box<dyn Fn(&Path) -> Option<PathBuf>>;
+
 /// What the rules read from the machine; tests build their own.
 struct Env {
     home: PathBuf,
@@ -132,7 +137,7 @@ struct Env {
     mac: bool,
     /// The process table; None skips the start-time check.
     procs: Option<Vec<Proc>>,
-    common_dir: Box<dyn Fn(&Path) -> Option<PathBuf>>,
+    common_dir: CommonDir,
 }
 
 impl Env {
@@ -214,17 +219,28 @@ fn parse_proc_start(text: &str) -> Option<i64> {
     if parts.len() != 5 {
         return None;
     }
-    const MONTHS: [&str; 12] =
-        ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-    let month = MONTHS.iter().position(|m| parts[1].eq_ignore_ascii_case(m))? as u8 + 1;
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let month = MONTHS
+        .iter()
+        .position(|m| parts[1].eq_ignore_ascii_case(m))? as u8
+        + 1;
     let day: u8 = parts[2].parse().ok()?;
     let year: i32 = parts[4].parse().ok()?;
-    let clock: Vec<u8> = parts[3].split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let clock: Vec<u8> = parts[3]
+        .split(':')
+        .map(|p| p.parse().ok())
+        .collect::<Option<_>>()?;
     if clock.len() != 3 {
         return None;
     }
-    let date = time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
-    let at = date.with_hms(clock[0], clock[1], clock[2]).ok()?.assume_utc();
+    let date =
+        time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
+    let at = date
+        .with_hms(clock[0], clock[1], clock[2])
+        .ok()?
+        .assume_utc();
     Some(at.unix_timestamp() * 1000)
 }
 
@@ -341,7 +357,11 @@ struct Record {
 }
 
 fn registries(mac: bool) -> Vec<(&'static str, &'static str)> {
-    let cx = if mac { ".claude-exec/sessions" } else { ".claude-cx/sessions" };
+    let cx = if mac {
+        ".claude-exec/sessions"
+    } else {
+        ".claude-cx/sessions"
+    };
     vec![
         (".claude/sessions", "claude"),
         (cx, "claude-cx"),
@@ -391,7 +411,11 @@ fn mirror_copies(home: &Path) -> HashSet<PathBuf> {
 
 /// Every registry record, one per session, before the liveness check.
 fn read_records(env: &Env) -> Vec<Record> {
-    let copies = if env.mac { mirror_copies(&env.home) } else { HashSet::new() };
+    let copies = if env.mac {
+        mirror_copies(&env.home)
+    } else {
+        HashSet::new()
+    };
     let mut by_session: HashMap<String, Record> = HashMap::new();
     for (dir, source) in registries(env.mac) {
         let Ok(entries) = std::fs::read_dir(env.home.join(dir)) else {
@@ -404,7 +428,10 @@ fn read_records(env: &Env) -> Vec<Record> {
             if path.extension().and_then(|e| e.to_str()) != Some("json") || copies.contains(&path) {
                 continue;
             }
-            let Some(record) = std::fs::read_to_string(&path).ok().and_then(|raw| parse_record(&raw, source)) else {
+            let Some(record) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| parse_record(&raw, source))
+            else {
                 continue;
             };
             match by_pid.get(&record.pid) {
@@ -430,7 +457,11 @@ fn read_records(env: &Env) -> Vec<Record> {
 
 fn under(path: &str, root: &str) -> bool {
     let root = root.trim_end_matches('/');
-    !root.is_empty() && (path == root || path.strip_prefix(root).is_some_and(|rest| rest.starts_with('/')))
+    !root.is_empty()
+        && (path == root
+            || path
+                .strip_prefix(root)
+                .is_some_and(|rest| rest.starts_with('/')))
 }
 
 /// The project whose folder holds `cwd`, else the first sharing its git repo.
@@ -452,23 +483,41 @@ fn match_project<'a>(env: &Env, projects: &'a [ProjectRef], cwd: &str) -> Option
 
 /// Kimi and OpenCode ids carry underscores ("session_…", "ses_…").
 fn valid_session_id(id: &str) -> bool {
-    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    (8..=64).contains(&id.len())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn valid_handoff_name(name: &str) -> bool {
     name.strip_prefix("handoff")
         .and_then(|rest| rest.strip_suffix(".md"))
-        .is_some_and(|mid| mid.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)))
+        .is_some_and(|mid| {
+            mid.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+        })
 }
 
 fn valid_handoff_rel(path: &str) -> bool {
-    path.strip_prefix(".claude/").is_some_and(valid_handoff_name)
+    path.strip_prefix(".claude/")
+        .is_some_and(valid_handoff_name)
 }
 
 /// A handoff file's path: `.claude/handoff*.md`, maybe in a worktree.
 fn is_handoff_path(path: &str) -> bool {
     let mut parts = path.rsplit('/');
     matches!((parts.next(), parts.next()), (Some(name), Some(".claude")) if valid_handoff_name(name))
+}
+
+/// The same check on a real path, by components, so it also holds where
+/// paths use `\`.
+fn is_handoff_real_path(path: &Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str());
+    let dir = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|n| n.to_str());
+    matches!((name, dir), (Some(name), Some(".claude")) if valid_handoff_name(name))
 }
 
 /// The real path of a project's handoff file, or None when `rel` is not a
@@ -481,7 +530,7 @@ fn handoff_file(project: &str, rel: &str) -> Option<PathBuf> {
     let root = std::fs::canonicalize(project).ok()?;
     let file = std::fs::canonicalize(root.join(rel)).ok()?;
     let inside = file.starts_with(&root) && file != root;
-    (inside && file.to_str().is_some_and(is_handoff_path) && file.is_file()).then_some(file)
+    (inside && is_handoff_real_path(&file) && file.is_file()).then_some(file)
 }
 
 /// The agent a claims name such as "monocode-cx79" belongs to, when it is
@@ -489,7 +538,11 @@ fn handoff_file(project: &str, rel: &str) -> Option<PathBuf> {
 fn agent_of_name(name: Option<&str>) -> Option<&'static str> {
     let (_, tail) = name?.rsplit_once('-')?;
     let tail = tail.as_bytes();
-    if tail.len() != 4 || !tail[2..].iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)) {
+    if tail.len() != 4
+        || !tail[2..]
+            .iter()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c))
+    {
         return None;
     }
     match &tail[..2] {
@@ -503,11 +556,18 @@ fn agent_of_name(name: Option<&str>) -> Option<&'static str> {
 }
 
 fn project_key(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// Where a Claude session's transcript is, and which account holds it.
-fn find_transcript(env: &Env, source: &str, cwd: &str, id: &str) -> Option<(PathBuf, &'static str)> {
+fn find_transcript(
+    env: &Env,
+    source: &str,
+    cwd: &str,
+    id: &str,
+) -> Option<(PathBuf, &'static str)> {
     if !valid_session_id(id) {
         return None;
     }
@@ -519,7 +579,12 @@ fn find_transcript(env: &Env, source: &str, cwd: &str, id: &str) -> Option<(Path
         ordered.reverse();
     }
     if let Some((account, src)) = ordered.first() {
-        let direct = env.home.join(account).join("projects").join(&key).join(&file);
+        let direct = env
+            .home
+            .join(account)
+            .join("projects")
+            .join(&key)
+            .join(&file);
         if direct.is_file() {
             return Some((direct, src));
         }
@@ -562,7 +627,10 @@ fn read_tail(path: &Path, max: u64) -> Option<String> {
     file.take(max).read_to_end(&mut buf).ok()?;
     let mut text = String::from_utf8_lossy(&buf).into_owned();
     if start > 0 {
-        text = text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default();
+        text = text
+            .split_once('\n')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default();
     }
     Some(text)
 }
@@ -666,7 +734,8 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
         let mut source = record.source;
         let mut has_transcript = false;
         if is_claude(source) {
-            if let Some((_, found)) = find_transcript(env, source, &record.cwd, &record.session_id) {
+            if let Some((_, found)) = find_transcript(env, source, &record.cwd, &record.session_id)
+            {
                 source = found;
                 has_transcript = true;
             }
@@ -678,7 +747,11 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
             name: record.name.clone(),
             cwd: record.cwd.clone(),
             branch: None,
-            state: if record.status.as_deref() == Some("idle") { "idle" } else { "running" },
+            state: if record.status.as_deref() == Some("idle") {
+                "idle"
+            } else {
+                "running"
+            },
             started_at: record.started_at,
             updated_at: Some(record.updated_at).filter(|t| *t > 0),
             note: None,
@@ -715,11 +788,20 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
             let cwd = note.worktree.clone().unwrap_or_else(|| project.cwd.clone());
             let owner = match_project(env, projects, &cwd).unwrap_or(project);
             let agent = agent_of_name(note.name.as_deref());
-            let found = if agent.is_some() { None } else { find_transcript(env, "claude", &cwd, &session) };
+            let found = if agent.is_some() {
+                None
+            } else {
+                find_transcript(env, "claude", &cwd, &session)
+            };
             handed.push(ExternalSession {
                 id: session.clone(),
                 project_id: owner.project_id.clone(),
-                source: found.as_ref().map(|f| f.1).or(agent).unwrap_or("claude").to_string(),
+                source: found
+                    .as_ref()
+                    .map(|f| f.1)
+                    .or(agent)
+                    .unwrap_or("claude")
+                    .to_string(),
                 name: note.name.clone(),
                 cwd,
                 branch: note.branch.clone(),
@@ -749,10 +831,10 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
             if !valid_handoff_rel(&rel) || named.contains(&rel) {
                 continue;
             }
-            let Some(mtime) = entry
-                .metadata()
-                .ok()
-                .filter(|m| m.is_file())
+            // Checked the way a read is, so nothing outside the project is
+            // listed (a linked .claude folder, say).
+            let Some(mtime) = handoff_file(&project.cwd, &rel)
+                .and_then(|real| std::fs::metadata(real).ok())
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
@@ -779,8 +861,8 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
         }
     }
 
-    rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    handed.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.updated_at));
+    handed.sort_by_key(|r| std::cmp::Reverse(r.updated_at));
     let mut per_project: HashMap<String, usize> = HashMap::new();
     for row in handed {
         let count = per_project.entry(row.project_id.clone()).or_default();
@@ -825,18 +907,29 @@ fn read(
         .find(|r| r.project_id == project_id && r.id == session_id)
         .ok_or("Session not found")?;
     let handoff = if before.is_none() {
-        row.handoff_path.as_deref().and_then(|rel| read_handoff(&project.cwd, rel))
+        row.handoff_path
+            .as_deref()
+            .and_then(|rel| read_handoff(&project.cwd, rel))
     } else {
         None
     };
     if handoff_only || !row.has_transcript {
-        return Ok(TranscriptPage { turns: Vec::new(), handoff, ..Default::default() });
+        return Ok(TranscriptPage {
+            turns: Vec::new(),
+            handoff,
+            ..Default::default()
+        });
     }
     let Some((path, _)) = find_transcript(env, &row.source, &row.cwd, &row.id) else {
-        return Ok(TranscriptPage { turns: Vec::new(), handoff, ..Default::default() });
+        return Ok(TranscriptPage {
+            turns: Vec::new(),
+            handoff,
+            ..Default::default()
+        });
     };
     let limit = limit.unwrap_or(60).clamp(1, 200) as usize;
-    let mut page = read_page(&path, before, limit).map_err(|e| format!("Could not read the transcript: {e}"))?;
+    let mut page = read_page(&path, before, limit)
+        .map_err(|e| format!("Could not read the transcript: {e}"))?;
     page.handoff = handoff;
     Ok(page)
 }
@@ -844,13 +937,20 @@ fn read(
 fn read_handoff(project: &str, rel: &str) -> Option<Handoff> {
     let file = handoff_file(project, rel)?;
     let mut buf = Vec::new();
-    File::open(&file).ok()?.take(HANDOFF_MAX as u64).read_to_end(&mut buf).ok()?;
+    File::open(&file)
+        .ok()?
+        .take(HANDOFF_MAX as u64)
+        .read_to_end(&mut buf)
+        .ok()?;
     let mut text = String::from_utf8_lossy(&buf).into_owned();
     // A cut may split a character; lossy decoding leaves a replacement mark.
     if buf.len() == HANDOFF_MAX && text.ends_with('\u{FFFD}') {
         text.pop();
     }
-    Some(Handoff { path: rel.to_string(), text })
+    Some(Handoff {
+        path: rel.to_string(),
+        text,
+    })
 }
 
 /// Read backward from `before` (or the end) in chunks, a page of whole lines.
@@ -875,7 +975,11 @@ fn read_page(path: &Path, before: Option<u64>, limit: usize) -> std::io::Result<
         data.extend_from_slice(&tail);
         let mut stop = data.len();
         loop {
-            let body_end = if stop > 0 && data[stop - 1] == b'\n' { stop - 1 } else { stop };
+            let body_end = if stop > 0 && data[stop - 1] == b'\n' {
+                stop - 1
+            } else {
+                stop
+            };
             let line_start = match data[..body_end].iter().rposition(|b| *b == b'\n') {
                 Some(i) => i + 1,
                 None if start == 0 => 0,
@@ -924,7 +1028,9 @@ fn read_page(path: &Path, before: Option<u64>, limit: usize) -> std::io::Result<
         if kept.is_empty() {
             let mut part: Vec<Turn> = Vec::new();
             for turn in turns.into_iter().rev() {
-                if part.len() >= limit || (!part.is_empty() && bytes + turn.text.len() > PAGE_TEXT_MAX) {
+                if part.len() >= limit
+                    || (!part.is_empty() && bytes + turn.text.len() > PAGE_TEXT_MAX)
+                {
                     break;
                 }
                 bytes += turn.text.len();
@@ -941,7 +1047,12 @@ fn read_page(path: &Path, before: Option<u64>, limit: usize) -> std::io::Result<
     }
     let before = oldest.filter(|o| *o > 0);
     let turns = kept.into_iter().rev().flatten().collect();
-    Ok(TranscriptPage { turns, before, handoff: None, truncated: truncated.then_some(true) })
+    Ok(TranscriptPage {
+        turns,
+        before,
+        handoff: None,
+        truncated: truncated.then_some(true),
+    })
 }
 
 fn cut(text: &str, max: usize, truncated: &mut bool) -> String {
@@ -1007,7 +1118,11 @@ fn parse_line(raw: &[u8], truncated: &mut bool) -> Vec<Turn> {
                 "<task-notification>",
             ];
             if !trimmed.is_empty() && !SKIP.iter().any(|p| trimmed.starts_with(p)) {
-                turns.push(Turn { role: "user", text: cut(trimmed, TURN_MAX, truncated), at });
+                turns.push(Turn {
+                    role: "user",
+                    text: cut(trimmed, TURN_MAX, truncated),
+                    at,
+                });
             }
         }
         Some("assistant") => {
@@ -1016,22 +1131,37 @@ fn parse_line(raw: &[u8], truncated: &mut bool) -> Vec<Turn> {
                     Some("text") => {
                         let text = part["text"].as_str().unwrap_or("").trim();
                         if !text.is_empty() {
-                            turns.push(Turn { role: "assistant", text: cut(text, TURN_MAX, truncated), at });
+                            turns.push(Turn {
+                                role: "assistant",
+                                text: cut(text, TURN_MAX, truncated),
+                                at,
+                            });
                         }
                     }
                     Some("tool_use") => {
                         let name = part["name"].as_str().unwrap_or("tool");
                         let input = &part["input"];
-                        let detail = ["command", "file_path", "path", "pattern", "description", "prompt"]
-                            .iter()
-                            .find_map(|key| input[*key].as_str())
-                            .map(|s| s.lines().next().unwrap_or("").to_string());
+                        let detail = [
+                            "command",
+                            "file_path",
+                            "path",
+                            "pattern",
+                            "description",
+                            "prompt",
+                        ]
+                        .iter()
+                        .find_map(|key| input[*key].as_str())
+                        .map(|s| s.lines().next().unwrap_or("").to_string());
                         let line = match detail {
                             Some(d) => format!("{name}: {d}"),
                             None => name.to_string(),
                         };
                         let mut ignored = false;
-                        turns.push(Turn { role: "tool", text: cut(&line, TOOL_MAX, &mut ignored), at });
+                        turns.push(Turn {
+                            role: "tool",
+                            text: cut(&line, TOOL_MAX, &mut ignored),
+                            at,
+                        });
                     }
                     _ => {}
                 }
@@ -1087,7 +1217,11 @@ mod tests {
     }
 
     fn proc(pid: i64) -> Proc {
-        Proc { pid, start_ms: NOW - 60_000, args: "/usr/local/bin/claude --resume".into() }
+        Proc {
+            pid,
+            start_ms: NOW - 60_000,
+            args: "/usr/local/bin/claude --resume".into(),
+        }
     }
 
     fn rec(pid: i64, id: &str, cwd: &Path, updated: i64, extra: &str) -> String {
@@ -1098,7 +1232,10 @@ mod tests {
     }
 
     fn project(id: &str, cwd: &Path) -> ProjectRef {
-        ProjectRef { project_id: id.into(), cwd: cwd.to_string_lossy().into_owned() }
+        ProjectRef {
+            project_id: id.into(),
+            cwd: cwd.to_string_lossy().into_owned(),
+        }
     }
 
     #[test]
@@ -1107,7 +1244,10 @@ mod tests {
         let repo = home.join("repo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         let s = home.join(".claude/sessions");
-        write(&s.join("1.json"), &rec(1, "aaaaaaaa-1", &repo, 10, r#","status":"idle""#));
+        write(
+            &s.join("1.json"),
+            &rec(1, "aaaaaaaa-1", &repo, 10, r#","status":"idle""#),
+        );
         write(&s.join("2.json"), &rec(2, "dead0000-2", &repo, 10, ""));
         write(&s.join("3.json"), "{not json");
         write(&s.join("4.json"), r#"{"pid":4,"cwd":"/x"}"#);
@@ -1115,14 +1255,28 @@ mod tests {
         // Several files for one codex process: the newest wins.
         let c = home.join(".codex/agent-sessions");
         write(&c.join("7.json"), &rec(7, "codexold-7", &repo, 5, ""));
-        write(&c.join("7-a.json"), &rec(7, "codexnew-7", &repo, 50, r#","status":"busy""#));
+        write(
+            &c.join("7-a.json"),
+            &rec(7, "codexnew-7", &repo, 50, r#","status":"busy""#),
+        );
         // The same session in both accounts: newest updatedAt wins.
-        write(&home.join(".claude-exec/sessions/8.json"), &rec(8, "aaaaaaaa-1", &repo, 30, ""));
+        write(
+            &home.join(".claude-exec/sessions/8.json"),
+            &rec(8, "aaaaaaaa-1", &repo, 30, ""),
+        );
         let e = env(&home, vec![proc(1), proc(7), proc(8)]);
         let rows = list(&e, &[project("p", &repo)]);
-        let ids: Vec<(&str, &str, &str)> =
-            rows.iter().map(|r| (r.id.as_str(), r.source.as_str(), r.state)).collect();
-        assert_eq!(ids, vec![("codexnew-7", "codex", "running"), ("aaaaaaaa-1", "claude-cx", "running")]);
+        let ids: Vec<(&str, &str, &str)> = rows
+            .iter()
+            .map(|r| (r.id.as_str(), r.source.as_str(), r.state))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ("codexnew-7", "codex", "running"),
+                ("aaaaaaaa-1", "claude-cx", "running")
+            ]
+        );
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert!(json.get("pid").is_none() && json.get("note").is_none());
         assert_eq!(json["projectId"], "p");
@@ -1144,18 +1298,45 @@ mod tests {
         let started = parse_proc_start(ps).unwrap();
         write(
             &home.join(".claude/sessions/2.json"),
-            &rec(2, "livelive-2", &repo, 1, &format!(r#","procStart":"{ps}""#)),
+            &rec(
+                2,
+                "livelive-2",
+                &repo,
+                1,
+                &format!(r#","procStart":"{ps}""#),
+            ),
         );
         write(
             &home.join(".claude/sessions/3.json"),
-            &rec(3, "reused00-3", &repo, 1, r#","procStart":"Wed Oct 28 08:34:18 2020""#),
+            &rec(
+                3,
+                "reused00-3",
+                &repo,
+                1,
+                r#","procStart":"Wed Oct 28 08:34:18 2020""#,
+            ),
         );
-        let at = |pid: i64| Proc { start_ms: started + 2_000, ..proc(pid) };
+        let at = |pid: i64| Proc {
+            start_ms: started + 2_000,
+            ..proc(pid)
+        };
         let mut other = at(4);
         other.args = "/bin/zsh".into();
-        write(&home.join(".claude/sessions/4.json"), &rec(4, "notagent-4", &repo, 1, &format!(r#","procStart":"{ps}""#)));
+        write(
+            &home.join(".claude/sessions/4.json"),
+            &rec(
+                4,
+                "notagent-4",
+                &repo,
+                1,
+                &format!(r#","procStart":"{ps}""#),
+            ),
+        );
         let e = env(&home, vec![proc(1), at(2), at(3), other]);
-        let ids: Vec<String> = list(&e, &[project("p", &repo)]).into_iter().map(|r| r.id).collect();
+        let ids: Vec<String> = list(&e, &[project("p", &repo)])
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
         assert_eq!(ids, vec!["livelive-2"]);
     }
 
@@ -1165,12 +1346,18 @@ mod tests {
         assert_eq!(parse_etime("1:00:00"), Some(3600));
         assert_eq!(parse_etime("2-01:00:00"), Some(176_400));
         assert_eq!(parse_etime("x"), None);
-        let procs = parse_ps("  12   01:00 /opt/claude --x\n  9 1-00:00:00 codex\n", 1_000_000_000);
+        let procs = parse_ps(
+            "  12   01:00 /opt/claude --x\n  9 1-00:00:00 codex\n",
+            1_000_000_000,
+        );
         assert_eq!(procs[0].pid, 12);
         assert_eq!(procs[0].start_ms, 1_000_000_000 - 60_000);
         assert_eq!(procs[0].args, "/opt/claude --x");
         assert_eq!(procs[1].start_ms, 1_000_000_000 - 86_400_000);
-        assert_eq!(parse_proc_start("Wed Oct 28 08:34:18 2026"), Some(1_793_176_458_000));
+        assert_eq!(
+            parse_proc_start("Wed Oct 28 08:34:18 2026"),
+            Some(1_793_176_458_000)
+        );
         assert!(agent_command("node /usr/bin/claude"));
         assert!(agent_command("grok-macos-arm64 run"));
         assert!(!agent_command("claudette"));
@@ -1188,7 +1375,9 @@ mod tests {
         std::fs::create_dir_all(&wt).unwrap();
         let projects = [project("a", &a), project("ab", &ab)];
         let e = env(&home, vec![]);
-        let at = |p: &Path| match_project(&e, &projects, p.to_str().unwrap()).map(|p| p.project_id.clone());
+        let at = |p: &Path| {
+            match_project(&e, &projects, p.to_str().unwrap()).map(|p| p.project_id.clone())
+        };
         assert_eq!(at(&a.join(".claude/worktrees/x")), Some("a".into()));
         assert_eq!(at(&ab.join("c")), Some("ab".into()));
         assert_eq!(at(&home.join("abc")), None);
@@ -1202,7 +1391,10 @@ mod tests {
             }),
             ..env(&home, vec![])
         };
-        assert_eq!(match_project(&e, &projects, wt.to_str().unwrap()).map(|p| p.project_id.clone()), Some("a".into()));
+        assert_eq!(
+            match_project(&e, &projects, wt.to_str().unwrap()).map(|p| p.project_id.clone()),
+            Some("a".into())
+        );
     }
 
     #[test]
@@ -1211,7 +1403,10 @@ mod tests {
         let repo = home.join("repo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         write(&repo.join(".claude/handoff.md"), "# left to do\n");
-        write(&home.join(".claude/sessions/1.json"), &rec(1, "livelive-1", &repo, 5, ""));
+        write(
+            &home.join(".claude/sessions/1.json"),
+            &rec(1, "livelive-1", &repo, 5, ""),
+        );
         let now = NOW as f64 / 1000.0;
         let line = |at: f64, session: &str, text: &str| {
             format!(
@@ -1233,7 +1428,13 @@ mod tests {
         write(&repo.join(".git/claude-claims-history.jsonl"), &history);
         // gonegone-2's transcript lives under the second account.
         let key = project_key(repo.to_str().unwrap());
-        write(&home.join(".claude-exec/projects").join(&key).join("gonegone-2.jsonl"), "");
+        write(
+            &home
+                .join(".claude-exec/projects")
+                .join(&key)
+                .join("gonegone-2.jsonl"),
+            "",
+        );
         let e = env(&home, vec![proc(1)]);
         let rows = list(&e, &[project("p", &repo)]);
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
@@ -1256,17 +1457,31 @@ mod tests {
         let repo = home.join("repo");
         write(&repo.join(".claude/handoff-ui.md"), "ui work");
         write(&repo.join(".claude/notes.md"), "not a handoff");
-        let e = Env { now_ms: now_ms(), ..env(&home, vec![]) };
+        let e = Env {
+            now_ms: now_ms(),
+            ..env(&home, vec![])
+        };
         let rows = list(&e, &[project("p", &repo)]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "handoff:.claude/handoff-ui.md");
         assert_eq!(rows[0].name.as_deref(), Some("handoff-ui.md"));
         assert!(!rows[0].has_transcript);
-        let page = read(&e, &[project("p", &repo)], "p", "handoff:.claude/handoff-ui.md", None, None).unwrap();
+        let page = read(
+            &e,
+            &[project("p", &repo)],
+            "p",
+            "handoff:.claude/handoff-ui.md",
+            None,
+            None,
+        )
+        .unwrap();
         assert!(page.turns.is_empty());
         assert_eq!(page.handoff.unwrap().text, "ui work");
         // Old files are left out.
-        let e = Env { now_ms: now_ms() + 8 * 86_400_000, ..env(&home, vec![]) };
+        let e = Env {
+            now_ms: now_ms() + 8 * 86_400_000,
+            ..env(&home, vec![])
+        };
         assert!(list(&e, &[project("p", &repo)]).is_empty());
     }
 
@@ -1276,12 +1491,28 @@ mod tests {
         let repo = home.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         write(&home.join("secret.md"), "nope");
-        let e = Env { now_ms: now_ms(), ..env(&home, vec![]) };
+        let e = Env {
+            now_ms: now_ms(),
+            ..env(&home, vec![])
+        };
         let projects = [project("p", &repo)];
-        for id in ["short", "../../etc/passwd", "handoff:../secret.md", "handoff:.claude/../../secret.md", "handoff:.claude/handoff/x.md"] {
-            assert_eq!(read(&e, &projects, "p", id, None, None).unwrap_err(), "Session not found", "{id}");
+        for id in [
+            "short",
+            "../../etc/passwd",
+            "handoff:../secret.md",
+            "handoff:.claude/../../secret.md",
+            "handoff:.claude/handoff/x.md",
+        ] {
+            assert_eq!(
+                read(&e, &projects, "p", id, None, None).unwrap_err(),
+                "Session not found",
+                "{id}"
+            );
         }
-        assert_eq!(read(&e, &projects, "p", "missing0-session", None, None).unwrap_err(), "Session not found");
+        assert_eq!(
+            read(&e, &projects, "p", "missing0-session", None, None).unwrap_err(),
+            "Session not found"
+        );
         assert!(read_handoff(repo.to_str().unwrap(), "../secret.md").is_none());
         assert!(valid_handoff_rel(".claude/handoff.md"));
         assert!(!valid_handoff_rel(".claude/handoff/../x.md"));
@@ -1292,7 +1523,14 @@ mod tests {
         let mut t = false;
         let user = r#"{"type":"user","timestamp":"2026-10-28T08:00:00.000Z","message":{"content":"hi<system-reminder>secret</system-reminder> there"}}"#;
         let turns = parse_line(user.as_bytes(), &mut t);
-        assert_eq!(turns, vec![Turn { role: "user", text: "hi there".into(), at: Some(1_793_174_400_000) }]);
+        assert_eq!(
+            turns,
+            vec![Turn {
+                role: "user",
+                text: "hi there".into(),
+                at: Some(1_793_174_400_000)
+            }]
+        );
         for skip in [
             r#"{"type":"user","message":{"content":"<command-name>/clear</command-name>"}}"#,
             r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
@@ -1309,7 +1547,10 @@ mod tests {
         assert_eq!(turns[1].role, "tool");
         assert_eq!(turns[1].text, "Bash: ls");
         assert!(!t);
-        let long = format!(r#"{{"type":"user","message":{{"content":"{}"}}}}"#, "x".repeat(5000));
+        let long = format!(
+            r#"{{"type":"user","message":{{"content":"{}"}}}}"#,
+            "x".repeat(5000)
+        );
         let turns = parse_line(long.as_bytes(), &mut t);
         assert_eq!(turns[0].text.chars().count(), 4000);
         assert!(turns[0].text.ends_with('…'));
@@ -1335,7 +1576,10 @@ mod tests {
             file.write_all(line.as_bytes()).unwrap();
         }
         // A sidechain line is skipped but still scanned.
-        file.write_all(b"{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"content\":\"x\"}}\n").unwrap();
+        file.write_all(
+            b"{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"content\":\"x\"}}\n",
+        )
+        .unwrap();
         drop(file);
         let mut seen = Vec::new();
         let mut before = None;
@@ -1343,8 +1587,11 @@ mod tests {
         loop {
             let page = read_page(&path, before, 50).unwrap();
             pages += 1;
-            let mut names: Vec<String> =
-                page.turns.iter().map(|t| t.text.split(' ').next().unwrap().to_string()).collect();
+            let mut names: Vec<String> = page
+                .turns
+                .iter()
+                .map(|t| t.text.split(' ').next().unwrap().to_string())
+                .collect();
             names.extend(seen);
             seen = names;
             if let Some(b) = page.before {
@@ -1370,9 +1617,13 @@ mod tests {
         let dir = temp();
         let path = dir.join("t.jsonl");
         let tools = |tag: &str| {
-            let parts: Vec<String> =
-                (1..=3).map(|n| format!(r#"{{"type":"tool_use","name":"{tag}{n}","input":{{}}}}"#)).collect();
-            format!(r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#, parts.join(",")) + "\n"
+            let parts: Vec<String> = (1..=3)
+                .map(|n| format!(r#"{{"type":"tool_use","name":"{tag}{n}","input":{{}}}}"#))
+                .collect();
+            format!(
+                r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#,
+                parts.join(",")
+            ) + "\n"
         };
         write(&path, &(tools("a") + &tools("b")));
         let page = read_page(&path, None, 4).unwrap();
@@ -1388,14 +1639,26 @@ mod tests {
         let parts: Vec<String> = (0..300)
             .map(|i| format!(r#"{{"type":"text","text":"t{i:03} {}"}}"#, "w".repeat(2995)))
             .collect();
-        let big = format!(r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#, parts.join(","));
-        write(&path, &format!("{{\"type\":\"user\",\"message\":{{\"content\":\"hello\"}}}}\n{big}\n"));
+        let big = format!(
+            r#"{{"type":"assistant","message":{{"content":[{}]}}}}"#,
+            parts.join(",")
+        );
+        write(
+            &path,
+            &format!("{{\"type\":\"user\",\"message\":{{\"content\":\"hello\"}}}}\n{big}\n"),
+        );
         let page = read_page(&path, None, 200).unwrap();
         assert_eq!(page.truncated, Some(true));
         assert_eq!(page.turns.len(), PAGE_TEXT_MAX / 3000);
         assert!(page.turns.last().unwrap().text.starts_with("t299 "));
         let next = read_page(&path, page.before, 200).unwrap();
-        assert_eq!(next.turns.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), vec!["hello"]);
+        assert_eq!(
+            next.turns
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["hello"]
+        );
         let few = read_page(&path, None, 5).unwrap();
         let heads: Vec<&str> = few.turns.iter().map(|t| &t.text[..4]).collect();
         assert_eq!(heads, vec!["t295", "t296", "t297", "t298", "t299"]);
@@ -1406,9 +1669,11 @@ mod tests {
         let dir = temp();
         let path = dir.join("t.jsonl");
         let mut file = File::create(&path).unwrap();
-        file.write_all(b"{\"type\":\"user\",\"message\":{\"content\":\"first\"}}\n").unwrap();
+        file.write_all(b"{\"type\":\"user\",\"message\":{\"content\":\"first\"}}\n")
+            .unwrap();
         file.write_all(&vec![b'x'; 17 * 1024 * 1024]).unwrap();
-        file.write_all(b"\n{\"type\":\"user\",\"message\":{\"content\":\"last\"}}\n").unwrap();
+        file.write_all(b"\n{\"type\":\"user\",\"message\":{\"content\":\"last\"}}\n")
+            .unwrap();
         drop(file);
         let mut texts = Vec::new();
         let mut before = None;
@@ -1434,16 +1699,47 @@ mod tests {
         let ps = "Wed Oct 28 08:34:18 2026";
         let started = parse_proc_start(ps).unwrap();
         let utc = format!(r#","procStart":"{ps}""#);
-        write(&home.join(".kimi-code/agent-sessions/21.json"), &rec(21, "session_live-1", &repo, 2, &utc));
-        write(&home.join(".dsh/agent-sessions/22.json"), &rec(22, "session-reused-1", &repo, 1, &utc));
+        write(
+            &home.join(".kimi-code/agent-sessions/21.json"),
+            &rec(21, "session_live-1", &repo, 2, &utc),
+        );
+        write(
+            &home.join(".dsh/agent-sessions/22.json"),
+            &rec(22, "session-reused-1", &repo, 1, &utc),
+        );
         // Clock ticks are checked against /proc, which this pid does not have.
-        write(&home.join(".claude/sessions/23.json"), &rec(23, "cccccccc-3", &repo, 3, r#","procStart":"123456""#));
-        let kimi = Proc { pid: 21, start_ms: started + 1_000, args: "/home/u/.local/bin/kimi".into() };
-        let reused = Proc { pid: 22, start_ms: started + 600_000, args: "kimi".into() };
-        let e = Env { mac: false, ..env(&home, vec![kimi, reused, proc(23)]) };
-        let ids: Vec<String> = list(&e, &[project("p", &repo)]).into_iter().map(|r| r.id).collect();
+        write(
+            &home.join(".claude/sessions/23.json"),
+            &rec(23, "cccccccc-3", &repo, 3, r#","procStart":"123456""#),
+        );
+        let kimi = Proc {
+            pid: 21,
+            start_ms: started + 1_000,
+            args: "/home/u/.local/bin/kimi".into(),
+        };
+        let reused = Proc {
+            pid: 22,
+            start_ms: started + 600_000,
+            args: "kimi".into(),
+        };
+        let e = Env {
+            mac: false,
+            ..env(&home, vec![kimi, reused, proc(23)])
+        };
+        let ids: Vec<String> = list(&e, &[project("p", &repo)])
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
         assert_eq!(ids, vec!["session_live-1"]);
-        assert!(read(&e, &[project("p", &repo)], "p", "session_live-1", None, None).is_ok());
+        assert!(read(
+            &e,
+            &[project("p", &repo)],
+            "p",
+            "session_live-1",
+            None,
+            None
+        )
+        .is_ok());
     }
 
     #[test]
@@ -1462,8 +1758,18 @@ mod tests {
             )
         };
         let history = [
-            line(now - 30.0, "codexsess-1", "repo-cx79", "handed over: .claude/notes.md"),
-            line(now - 20.0, "gonegone-2", "?", "handed over: .claude/handoff-env.md"),
+            line(
+                now - 30.0,
+                "codexsess-1",
+                "repo-cx79",
+                "handed over: .claude/notes.md",
+            ),
+            line(
+                now - 20.0,
+                "gonegone-2",
+                "?",
+                "handed over: .claude/handoff-env.md",
+            ),
             line(now - 10.0, "bad id/x", "n", "handed over: .claude/notes.md"),
         ]
         .join("\n");
@@ -1471,15 +1777,43 @@ mod tests {
         let e = env(&home, vec![]);
         let projects = [project("p", &repo)];
         let rows = list(&e, &projects);
-        let ids: Vec<(&str, Option<&str>, &str)> =
-            rows.iter().map(|r| (r.id.as_str(), r.handoff_path.as_deref(), r.source.as_str())).collect();
-        assert_eq!(ids, vec![("gonegone-2", None, "claude"), ("codexsess-1", None, "codex")]);
+        let ids: Vec<(&str, Option<&str>, &str)> = rows
+            .iter()
+            .map(|r| (r.id.as_str(), r.handoff_path.as_deref(), r.source.as_str()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ("gonegone-2", None, "claude"),
+                ("codexsess-1", None, "codex")
+            ]
+        );
         assert_eq!(rows[0].name, None);
         assert!(read_handoff(repo.to_str().unwrap(), ".claude/handoff-env.md").is_none());
         assert_eq!(
-            read(&e, &projects, "p", "handoff:.claude/handoff-env.md", None, None).unwrap_err(),
+            read(
+                &e,
+                &projects,
+                "p",
+                "handoff:.claude/handoff-env.md",
+                None,
+                None
+            )
+            .unwrap_err(),
             "Session not found"
         );
+        // A .claude folder linked from outside the project lists nothing.
+        let linked = home.join("linked");
+        let outside = home.join("outside");
+        std::fs::create_dir_all(&linked).unwrap();
+        write(&outside.join("handoff.md"), "not this project's");
+        std::os::unix::fs::symlink(&outside, linked.join(".claude")).unwrap();
+        let both = [project("p", &repo), project("q", &linked)];
+        assert!(list(&e, &both).iter().all(|r| r.project_id == "p"));
+        assert!(read_handoff(linked.to_str().unwrap(), ".claude/handoff.md").is_none());
+        assert!(is_handoff_real_path(Path::new("/r/.claude/handoff-x.md")));
+        assert!(!is_handoff_real_path(Path::new("/r/claude/handoff.md")));
+        assert!(!is_handoff_real_path(Path::new("/r/.claude/notes.md")));
         assert_eq!(agent_of_name(Some("monocode-14")), None);
         assert_eq!(agent_of_name(Some("morgue-km93")), Some("kimi"));
         assert_eq!(agent_of_name(Some("x-cé1")), None);
@@ -1490,7 +1824,10 @@ mod tests {
         let home = temp();
         let repo = home.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        write(&home.join(".claude/sessions/1.json"), &rec(1, "livelive-1", &repo, 5, ""));
+        write(
+            &home.join(".claude/sessions/1.json"),
+            &rec(1, "livelive-1", &repo, 5, ""),
+        );
         let key = project_key(repo.to_str().unwrap());
         write(
             &home.join(".claude/projects").join(key).join("livelive-1.jsonl"),
