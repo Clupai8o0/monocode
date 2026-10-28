@@ -20,6 +20,9 @@ describe("Ultracode", () => {
   it("turns it off and keeps the other settings", () => {
     expect(withoutUltracode(on).modelSettings).toEqual({ effort: "xhigh", ultracode: "false" });
     expect(withoutUltracode(off)).toBe(off);
+    const legacy = { ...on, modelSettings: { effort: "ultracode" } };
+    expect(ultracodeOn(legacy)).toBe(true);
+    expect(withoutUltracode(legacy).modelSettings).toEqual({ effort: "xhigh", ultracode: "false" });
   });
 
   it("starts a new session with it off, even when the desktop's default has it on", () => {

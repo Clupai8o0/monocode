@@ -32,7 +32,7 @@ export function TurnMetricsSheet({
   const { highlights, tokens } = turnMetricsSheet(metrics, elapsedMs);
   return (
     <BottomSheet isPresented={isPresented} onDismiss={onDismiss} contentPadding={0}>
-      <RNHostView>
+      <RNHostView matchContents={{ vertical: true }}>
         <View style={styles.body}>
           <View>
             <Text style={styles.title}>Turn metrics</Text>

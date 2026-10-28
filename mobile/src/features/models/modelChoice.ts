@@ -82,15 +82,20 @@ export function settingValue(choice: ModelPick, setting: ModelSetting) {
 // Claude's Ultracode, a toggle beside effort (claudeCatalog.ts's ULTRACODE).
 const ULTRACODE = "ultracode";
 
-/** Whether the choice runs with Ultracode on. */
+/** Whether the choice runs with Ultracode on, as the toggle or the old effort level. */
 export function ultracodeOn(choice: ModelPick | null | undefined) {
-  return choice?.modelSettings[ULTRACODE] === "true";
+  return (
+    choice?.modelSettings[ULTRACODE] === "true" ||
+    choice?.modelSettings.effort === ULTRACODE
+  );
 }
 
-/** The choice with Ultracode off, where it had it on. */
+/** The choice with Ultracode off, where it had it on; the old level becomes Extra High. */
 export function withoutUltracode<T extends ModelPick>(choice: T): T {
   if (!ultracodeOn(choice)) return choice;
-  return { ...choice, modelSettings: { ...choice.modelSettings, [ULTRACODE]: "false" } };
+  const settings: Record<string, string> = { ...choice.modelSettings, [ULTRACODE]: "false" };
+  if (settings.effort === ULTRACODE) settings.effort = "xhigh";
+  return { ...choice, modelSettings: settings };
 }
 
 /**
