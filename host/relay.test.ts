@@ -398,6 +398,60 @@ describe("HostRelay", () => {
     expect((await next(MAC, 0, 20_000)).enabled).toBe(false);
   });
 
+  it("answers the same entries across syncs while nothing changes", async () => {
+    await claude(".claude", 101, S1, "vivo-main");
+    // A host session without its own times.
+    const base = JSON.parse(readFileSync(join(home, ".claude/sessions/101.json"), "utf8"));
+    const { startedAt: _s, updatedAt: _u, statusUpdatedAt: _su, ...bare } = base;
+    write(join(home, ".claude-exec/sessions/102.json"), { ...bare, pid: 102, sessionId: S2, messagingSocketPath: join(socks, "102.sock") });
+    makeRelay([101, 102]);
+    await relay.setEnabled(true);
+    const air = (status: string) => sync(AIR, "air", [{ sessionId: U1, account: ".claude", name: "a", cwd: "/a", status }]);
+    await air("idle");
+    const first = await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
+    expect(first.entries.map((entry) => entry.sessionId).sort()).toEqual([S1, S2, U1].sort());
+    expect(first.entries.find((entry) => entry.sessionId === S1)).toMatchObject({ startedAt: 1, updatedAt: 1, statusUpdatedAt: 1 });
+    const firstAt = clock;
+    clock += 5_000;
+    await relay.sweep();
+    await air("idle");
+    const again = await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
+    expect(again.entries).toEqual(first.entries);
+    expect(again.entries.find((entry) => entry.sessionId === S2)).toMatchObject({ startedAt: firstAt, updatedAt: firstAt, statusUpdatedAt: firstAt });
+    // A status change moves that session's statusUpdatedAt only.
+    clock += 5_000;
+    await air("busy");
+    const changed = await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
+    const u1 = changed.entries.find((entry) => entry.sessionId === U1)!;
+    expect(u1).toMatchObject({ status: "busy", startedAt: firstAt, statusUpdatedAt: clock });
+    expect(changed.entries.filter((entry) => entry.sessionId !== U1)).toEqual(first.entries.filter((entry) => entry.sessionId !== U1));
+  });
+
+  it("refuses a send when too much is waiting for the target peer", async () => {
+    makeRelay([]);
+    await relay.setEnabled(true);
+    await sync(AIR, "air", [{ sessionId: U1, account: ".claude", name: "a", cwd: "/a" }]);
+    const macSync = await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
+    const to = pidOf(macSync.entries, U1);
+    const line = userFrame("/tmp/cc-socks/1.sock", "z".repeat(1024 * 1024 - 1024));
+    let accepted = 0;
+    for (;;) {
+      const answer = await send(MAC, { from: T1, to, line });
+      if (!answer.accepted) {
+        expect(answer).toEqual({ accepted: false, reason: "Too much is waiting" });
+        break;
+      }
+      accepted++;
+      if (accepted > 100) throw new Error("Never refused");
+    }
+    expect(accepted).toBeGreaterThan(20);
+    const first = await next(AIR, 0);
+    expect(first.deliveries.length).toBeGreaterThan(0);
+    expect(first.deliveries.length).toBeLessThan(accepted);
+    const rest = await next(AIR, first.cursor);
+    expect(rest.deliveries.length).toBeGreaterThan(0);
+  });
+
   it("offers only sessions Claude could have written", async () => {
     await claude(".claude", 101, S1, "vivo-main");
     const base = JSON.parse(readFileSync(join(home, ".claude/sessions/101.json"), "utf8"));

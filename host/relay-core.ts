@@ -14,6 +14,11 @@ export const PID_SPAN = 1_000_000_000;
 /** Claude Code's own cap on one NDJSON line. */
 export const LINE_MAX = 1024 * 1024;
 export const QUEUE_MAX = 500;
+/** Bytes of serialised deliveries one relay.next answer carries (always at
+ *  least one); the Mac refuses an answer over 16 MiB. */
+export const NEXT_BYTES_MAX = 8 * 1024 * 1024;
+/** Bytes of serialised deliveries one peer may have waiting. */
+export const QUEUE_BYTES_MAX = 32 * 1024 * 1024;
 export const QUEUE_TTL_MS = 45_000;
 export const NEXT_WAIT_MAX_MS = 25_000;
 /** Sessions one peer may offer. */
@@ -32,7 +37,7 @@ const STATUS = /^[a-z_-]{1,24}$/;
 const SOCK_DIR = /^\/[A-Za-z0-9._/-]+$/;
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 const HAS_CONTROL = /[\u0000-\u001f\u007f]/;
-const WRAPPER = /^\s*<cross-session-message\b[^>]*>[\s\S]*<\/cross-session-message>/;
+const WRAPPER = /^\s*<cross-session-message\b[^>]*>[\s\S]*<\/cross-session-message>\s*$/;
 const WRAPPER_OPEN = /<cross-session-message\b[^>]*>/;
 
 /** A peer's session as the host keeps it; `version` is its Claude version
@@ -228,12 +233,13 @@ export function rewriteLine(line: string, fromSocket: string): string | null {
 }
 
 /**
- * Lines waiting for one peer. Capped at 500 (the oldest go first) and kept
- * 45 s. `next` answers at once when something is past the cursor, else
- * waits for a push, a wake or `waitMs`.
+ * Lines waiting for one peer. Capped at 500 (the oldest go first) and 32 MiB
+ * (a push past it is refused), and kept 45 s. `next` answers at once when
+ * something is past the cursor, else waits for a push, a wake or `waitMs`;
+ * one answer carries about 8 MiB, the rest come on the next poll.
  */
 export class DeliveryQueue {
-  private items: Array<{ seq: number; at: number; delivery: RelayDelivery }> = [];
+  private items: Array<{ seq: number; at: number; bytes: number; delivery: RelayDelivery }> = [];
   private readonly waiters = new Set<() => void>();
   /** The newest poll; an older one still waiting answers empty, so two
    *  overlapping polls never both hand out the same line. */
@@ -245,10 +251,17 @@ export class DeliveryQueue {
     private readonly seq: { next(): number; current(): number },
   ) {}
 
-  push(delivery: RelayDelivery): void {
-    this.items.push({ seq: this.seq.next(), at: this.now(), delivery });
+  /** Queues a delivery; false, queueing nothing, when too much is waiting. */
+  push(delivery: RelayDelivery): boolean {
+    const bytes = Buffer.byteLength(JSON.stringify(delivery), "utf8");
+    const oldest = this.now() - QUEUE_TTL_MS;
+    this.items = this.items.filter((item) => item.at >= oldest);
+    const waiting = this.items.reduce((total, item) => total + item.bytes, 0);
+    if (waiting + bytes > QUEUE_BYTES_MAX) return false;
+    this.items.push({ seq: this.seq.next(), at: this.now(), bytes, delivery });
     if (this.items.length > QUEUE_MAX) this.items.splice(0, this.items.length - QUEUE_MAX);
     this.wake();
+    return true;
   }
 
   /** Ends every wait now. */
@@ -264,14 +277,27 @@ export class DeliveryQueue {
     return this.items.length;
   }
 
-  /** Deliveries past `cursor`; ones at or before it were taken, so go. */
+  /** Deliveries past `cursor`, up to the answer budget; ones at or before
+   *  it were taken, so go. The cursor answered is the last one included. */
   take(cursor: number): { cursor: number; deliveries: RelayDelivery[] } {
     const current = this.seq.current();
     // A cursor from before a restart is ahead of this run's sequence.
     const after = cursor > current ? 0 : cursor;
     const oldest = this.now() - QUEUE_TTL_MS;
     this.items = this.items.filter((item) => item.seq > after && item.at >= oldest);
-    return { cursor: current, deliveries: this.items.map((item) => item.delivery) };
+    let bytes = 0;
+    let count = 0;
+    while (count < this.items.length) {
+      const item = this.items[count];
+      if (count > 0 && bytes + item.bytes > NEXT_BYTES_MAX) break;
+      bytes += item.bytes;
+      count++;
+    }
+    const included = this.items.slice(0, count);
+    return {
+      cursor: count < this.items.length ? included[count - 1].seq : current,
+      deliveries: included.map((item) => item.delivery),
+    };
   }
 
   async next(

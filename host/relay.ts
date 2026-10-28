@@ -76,9 +76,20 @@ type Peer = {
   machine: string;
   sockDir: string;
   sessions: Map<string, PeerSession>;
-  firstSeen: Map<string, number>;
+  seen: Map<string, Seen>;
   lastSeen: number;
 };
+
+/** When a session was first seen and its status last changed, so its entry
+ *  stays the same across syncs while nothing about it changes. */
+type Seen = { firstSeen: number; status: string; statusAt: number };
+
+function track(previous: Seen | undefined, status: string | undefined, now: number): Seen {
+  const current = status ?? "idle";
+  if (!previous) return { firstSeen: now, status: current, statusAt: now };
+  if (previous.status === current) return previous;
+  return { firstSeen: previous.firstSeen, status: current, statusAt: now };
+}
 
 type Proxy = {
   pid: number;
@@ -108,6 +119,7 @@ export class HostRelay {
   private running = false;
   private timer?: NodeJS.Timeout;
   private locals = new Map<string, LocalSession>();
+  private localSeen = new Map<string, Seen>();
   private localsAt = 0;
   private sockDir: string | null = null;
   private readonly peers = new Map<string, Peer>();
@@ -261,6 +273,7 @@ export class HostRelay {
     this.peers.clear();
     this.pids.clear();
     this.locals.clear();
+    this.localSeen.clear();
     this.localsAt = 0;
     for (const queue of this.queues.values()) {
       queue.clear();
@@ -304,6 +317,11 @@ export class HostRelay {
     const sessions = await discoverSessions(this.home, isAlive);
     this.locals = new Map(sessions.map((session) => [session.sessionId, session]));
     this.localsAt = this.now();
+    const seen = new Map<string, Seen>();
+    for (const session of sessions) {
+      seen.set(session.sessionId, track(this.localSeen.get(session.sessionId), session.status, this.localsAt));
+    }
+    this.localSeen = seen;
     this.sockDir =
       this.options.sockDir ??
       (await resolveSockDir(sessions, {
@@ -327,8 +345,8 @@ export class HostRelay {
     }
     const now = this.now();
     const known = this.peers.get(device.id);
-    const firstSeen = new Map<string, number>();
-    for (const id of sessions.keys()) firstSeen.set(id, known?.firstSeen.get(id) ?? now);
+    const seen = new Map<string, Seen>();
+    for (const [id, session] of sessions) seen.set(id, track(known?.seen.get(id), session.status, now));
     if (known && known.sockDir !== sockDir) this.pids.delete(device.id);
     this.peers.set(device.id, {
       id: device.id,
@@ -336,7 +354,7 @@ export class HostRelay {
       machine: cleanMachine(params.machine, cleanMachine(device.name, "peer")),
       sockDir,
       sessions,
-      firstSeen,
+      seen,
       lastSeen: now,
     });
     await this.discover();
@@ -352,16 +370,28 @@ export class HostRelay {
     const entries: RelayRegistryEntry[] = [];
     for (const session of this.locals.values()) {
       const pid = table.pid(HOST, session.sessionId);
+      const seen = this.localSeen.get(session.sessionId);
+      const firstSeen = seen?.firstSeen ?? this.localsAt;
+      const statusAt = seen?.statusAt ?? firstSeen;
       entries.push(
-        this.entry(pid, peer.sockDir, this.machine, session, session.startedAt ?? this.localsAt),
+        this.entry(pid, peer.sockDir, this.machine, session, {
+          startedAt: session.startedAt ?? firstSeen,
+          updatedAt: session.updatedAt ?? statusAt,
+          statusUpdatedAt: session.statusUpdatedAt ?? statusAt,
+        }),
       );
     }
     for (const other of this.peers.values()) {
       if (other.id === peer.id) continue;
       for (const session of other.sessions.values()) {
         const pid = table.pid(other.id, session.sessionId);
+        const seen = other.seen.get(session.sessionId);
         entries.push(
-          this.entry(pid, peer.sockDir, other.machine, session, other.firstSeen.get(session.sessionId) ?? 0),
+          this.entry(pid, peer.sockDir, other.machine, session, {
+            startedAt: seen?.firstSeen ?? 0,
+            updatedAt: seen?.statusAt ?? 0,
+            statusUpdatedAt: seen?.statusAt ?? 0,
+          }),
         );
       }
     }
@@ -378,14 +408,13 @@ export class HostRelay {
     sockDir: string,
     machine: string,
     session: PeerSession | LocalSession,
-    startedAt: number,
+    times: { startedAt: number; updatedAt: number; statusUpdatedAt: number },
   ): RelayRegistryEntry {
-    const now = this.now();
     return {
       pid,
       sessionId: session.sessionId,
       cwd: session.cwd,
-      startedAt,
+      startedAt: times.startedAt,
       version: session.version ?? "relay",
       peerProtocol: 1,
       peerFeatures: [],
@@ -396,8 +425,8 @@ export class HostRelay {
       name: session.name,
       nameSource: "derived",
       status: session.status ?? "idle",
-      updatedAt: now,
-      statusUpdatedAt: now,
+      updatedAt: times.updatedAt,
+      statusUpdatedAt: times.statusUpdatedAt,
       ...(session.bridgeSessionId ? { bridgeSessionId: session.bridgeSessionId } : {}),
       monocodeRelay: { machine, account: session.account, remoteSessionId: session.sessionId },
     };
@@ -449,12 +478,14 @@ export class HostRelay {
       proxy.socket.slice(0, proxy.socket.lastIndexOf("/")),
       peer.machine,
       session,
-      peer.firstSeen.get(session.sessionId) ?? proxy.createdAt,
+      {
+        startedAt: peer.seen.get(session.sessionId)?.firstSeen ?? proxy.createdAt,
+        updatedAt: proxy.updatedAt,
+        statusUpdatedAt: proxy.updatedAt,
+      },
     );
     return {
       ...entry,
-      updatedAt: proxy.updatedAt,
-      statusUpdatedAt: proxy.updatedAt,
       monocodeRelay: { ...entry.monocodeRelay, writer: "host" },
     };
   }
@@ -563,6 +594,7 @@ export class HostRelay {
     const fromPid = this.table(peer.id).pid(HOST, sender.sessionId);
     const rewritten = rewriteFrame(frame, `${peer.sockDir}/${fromPid}.sock`);
     if (!rewritten) return;
+    // Nothing to answer here; a full queue drops the line.
     this.queue(peer.id).push({ to: target.sessionId, fromPid, line: rewritten });
   }
 
@@ -594,7 +626,9 @@ export class HostRelay {
       const fromPid = this.table(other.id).pid(peer.id, sender.sessionId);
       const line = rewriteFrame(frame, `${other.sockDir}/${fromPid}.sock`);
       if (!line) return { accepted: false, reason: "Too long" };
-      this.queue(other.id).push({ to: session.sessionId, fromPid, line });
+      if (!this.queue(other.id).push({ to: session.sessionId, fromPid, line })) {
+        return { accepted: false, reason: "Too much is waiting" };
+      }
       return { accepted: true };
     }
 
