@@ -128,6 +128,70 @@ function inputText(input: HTMLInputElement, value: string) {
 }
 
 describe("model picker", () => {
+  it("marks Ultracode on the chip and shows an accent switch when on", () => {
+    setHarnessModels("claude", [
+      {
+        id: "claude:opus-5-5",
+        harness: "claude",
+        name: "Claude Opus 5.5",
+        settings: [
+          {
+            id: "effort",
+            label: "Effort",
+            kind: "select",
+            value: "medium",
+            options: [
+              { value: "medium", label: "Medium" },
+              { value: "high", label: "High" },
+            ],
+          },
+          {
+            id: "ultracode",
+            label: "Ultracode",
+            kind: "toggle",
+            value: "false",
+            options: [
+              { value: "true", label: "On" },
+              { value: "false", label: "Off" },
+            ],
+          },
+        ],
+      },
+    ]);
+    const render = (ultracode: string) =>
+      act(() =>
+        root.render(
+          createElement(ModelPicker, {
+            harness: "claude",
+            model: "claude:opus-5-5",
+            values: { effort: "medium", ultracode },
+            onChange: vi.fn(),
+            onSettingsChange: vi.fn(),
+          }),
+        ),
+      );
+    const trigger = () =>
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-haspopup="menu"]',
+      )!;
+
+    render("false");
+    expect(trigger().textContent).toBe("Opus 5.5Medium");
+    expect(trigger().querySelector("[data-ultracode-badge]")).toBeNull();
+
+    render("true");
+    expect(trigger().textContent).toBe("Opus 5.5MediumUltracode");
+    expect(trigger().getAttribute("aria-label")).toContain("Ultracode on");
+    act(() => trigger().click());
+    const row = container.querySelector<HTMLElement>(
+      '[role="menuitemcheckbox"][aria-checked="true"]',
+    )!;
+    expect(row.textContent).toContain("Ultracode");
+    expect(row.querySelector("[data-toggle-track]")?.className).toContain(
+      "bg-accent",
+    );
+  });
+
   it("shows the model name and effort in the combined picker", () => {
     const onChange = vi.fn();
     const onSettingsChange = vi.fn();

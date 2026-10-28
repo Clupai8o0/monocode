@@ -115,7 +115,7 @@ function ToggleSetting({
       onClick={() => onChange(on ? "false" : "true")}
       className={`flex h-6.5 items-center gap-1 rounded-md px-1.5 ${
         on
-          ? "bg-selection-emphasis text-content"
+          ? `bg-selection-emphasis ${setting.id === "ultracode" ? "text-accent" : "text-content"}`
           : "bg-selection text-content/50 hover:bg-selection-hover hover:text-content"
       }`}
     >

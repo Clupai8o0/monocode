@@ -1,5 +1,8 @@
 import { useRef, useState, type ReactNode } from "react";
-import type { MarkdownViewMode } from "../../features/sessions/ui/MarkdownModeToggle";
+import {
+  SourceCopyButton,
+  type MarkdownViewMode,
+} from "../../features/sessions/ui/MarkdownModeToggle";
 import { clampSplit, type LatexLayout } from "./latexModel";
 
 const SPLIT_KEY = "fork.latex.split";
@@ -26,12 +29,14 @@ function loadSplit(): number {
 export function LatexViewShell({
   preview,
   source,
+  copySource,
 }: {
   mode: MarkdownViewMode;
   onModeChange: (mode: MarkdownViewMode) => void;
   preview: ReactNode;
   source: ReactNode;
   actions?: ReactNode;
+  copySource?: string;
 }) {
   const [layout, setLayout] = useState<LatexLayout>("split");
   const [split, setSplit] = useState(loadSplit);
@@ -96,11 +101,13 @@ export function LatexViewShell({
           {preview}
         </div>
       </div>
-      <div
-        role="radiogroup"
-        aria-label="LaTeX layout"
-        className="absolute bottom-10 right-3 z-20 flex gap-0.5 rounded-md border border-stroke bg-background-base/90 p-0.5 text-[11px] shadow-sm"
-      >
+      <div className="absolute bottom-10 right-3 z-20 flex items-center gap-1.5">
+        {copySource != null ? <SourceCopyButton text={copySource} /> : null}
+        <div
+          role="radiogroup"
+          aria-label="LaTeX layout"
+          className="flex gap-0.5 rounded-md border border-stroke bg-background-base/90 p-0.5 text-[11px] shadow-sm"
+        >
         {LAYOUTS.map((entry) => (
           <button
             key={entry.id}
@@ -117,6 +124,7 @@ export function LatexViewShell({
             {entry.label}
           </button>
         ))}
+        </div>
       </div>
     </div>
   );

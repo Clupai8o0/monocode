@@ -486,6 +486,7 @@ export function FileEditor({
       {markdown || svg || table || notebook || latex || html ? (
         <ViewShell
           mode={mode}
+          copySource={draft}
           navigationToken={html ? navigation?.token : undefined}
           onModeChange={(next) => {
             setMode(next);

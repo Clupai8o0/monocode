@@ -770,10 +770,37 @@ export function loadLastModelSettings(): Record<string, string> {
   try {
     const raw = localStorage.getItem(LAST_MODEL_SETTINGS_KEY);
     if (!raw) return {};
-    return parseStringRecord(JSON.parse(raw));
+    return withoutUltracode(parseStringRecord(JSON.parse(raw)));
   } catch {
     return {};
   }
+}
+
+/** True when this model offers Ultracode and `values` turn it on. */
+export function isUltracodeOn(
+  model: AgentModel,
+  values?: Record<string, string>,
+): boolean {
+  return (
+    values?.ultracode === "true" &&
+    !!model.settings?.some((setting) => setting.id === "ultracode")
+  );
+}
+
+/**
+ * Ultracode is costly, so a new session never inherits it: only the session
+ * that turns it on (or a launch that asks for it by name) runs with it. A
+ * saved `effort=ultracode` keeps its Extra High level without the toggle.
+ */
+export function withoutUltracode(
+  settings: Record<string, string>,
+): Record<string, string> {
+  if (!("ultracode" in settings) && settings.effort !== "ultracode") {
+    return settings;
+  }
+  const { ultracode: _dropped, ...rest } = settings;
+  void _dropped;
+  return rest.effort === "ultracode" ? { ...rest, effort: "xhigh" } : rest;
 }
 
 export function saveLastModelSettings(
@@ -781,7 +808,7 @@ export function saveLastModelSettings(
   mode: "overwrite" | "fill" = "overwrite",
 ) {
   const prev = loadLastModelSettings();
-  const incoming = parseStringRecord(settings);
+  const incoming = withoutUltracode(parseStringRecord(settings));
   const next =
     mode === "fill" ? { ...incoming, ...prev } : { ...prev, ...incoming };
   try {

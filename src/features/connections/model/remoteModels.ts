@@ -176,9 +176,9 @@ export function remoteModelControls(
   const model = listed ? findRemoteModel(listed, modelId) : undefined;
   // A newly chosen catalog model uses only what the host says it supports.
   if (model && modelId !== savedModelId)
-    return { model, settings: model.settings ?? [] };
+    return { model, settings: (model.settings ?? []).map(ultracodeOffByDefault) };
   if (!model && !savedModelId) return { settings: [] };
-  const settings = [...(model?.settings ?? [])];
+  const settings = (model?.settings ?? []).map(ultracodeOffByDefault);
   let fallback: RemoteModelControls["fallback"];
   if (!model) {
     settings.push(...fallbackSettings(provider, modelId, saved));
@@ -202,6 +202,13 @@ export function remoteModelControls(
     settings: settings.map((setting) => withSaved(setting, saved[setting.id])),
     fallback,
   };
+}
+
+/** A host may report Ultracode on by default; a new session starts it off. */
+function ultracodeOffByDefault(setting: ModelSetting): ModelSetting {
+  return setting.id === "ultracode" && setting.value !== "false"
+    ? { ...setting, value: "false" }
+    : setting;
 }
 
 /** Values for `next` model: keep choices it supports, default the rest. */

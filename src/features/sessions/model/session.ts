@@ -11,6 +11,7 @@ import {
   firstEnabledHarness,
   preferredModelId,
   preferredModelSettings,
+  withoutUltracode,
   resolveModel,
 } from "./models";
 import { loadProjectProviderSettings } from "./projectProviders";
@@ -652,7 +653,10 @@ export function newSessionForProject(
     cwd,
     model,
     seed?.runtimeMode,
-    carriesSeed ? seed?.modelSettings : undefined,
+    // The seed's effort and fast mode carry; its Ultracode does not.
+    carriesSeed && seed?.modelSettings
+      ? withoutUltracode(seed.modelSettings)
+      : undefined,
   );
 }
 

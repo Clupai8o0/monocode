@@ -23,6 +23,7 @@ import {
   getModelSnapshot,
   getPickerVisibilitySnapshot,
   isEffortSettingId,
+  isUltracodeOn,
   loadFavoriteModels,
   loadRecentModelChoices,
   saveFavoriteModels,
@@ -395,6 +396,7 @@ export function ModelPicker({
   const triggerEffortLabel = triggerEffortSetting
     ? settingValueLabel(triggerEffortSetting, values)
     : undefined;
+  const triggerUltracode = !hideSettings && isUltracodeOn(current, values);
   const triggerModelName =
     current.harness === "claude"
       ? current.name.replace(/^Claude /, "")
@@ -404,6 +406,7 @@ export function ModelPicker({
     current.provider?.name,
     current.name,
     triggerEffortLabel,
+    triggerUltracode ? "Ultracode on" : undefined,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -748,7 +751,7 @@ export function ModelPicker({
             current.provider ? `, ${current.provider.name},` : ""
           } ${current.name}${
             triggerEffortLabel ? `, effort ${triggerEffortLabel}` : ""
-          }`
+          }${triggerUltracode ? ", Ultracode on" : ""}`
         }
         aria-keyshortcuts={`${MOD}.`}
         aria-expanded={open || recentMenu != null}
@@ -788,6 +791,14 @@ export function ModelPicker({
             className={`shrink-0 text-content/50 ${variant === "pill" ? "text-[11px]" : ""} ${labelClassName}`}
           >
             {triggerEffortLabel}
+          </span>
+        ) : null}
+        {!triggerLabel && triggerUltracode ? (
+          <span
+            data-ultracode-badge
+            className={`shrink-0 font-medium text-accent ${variant === "pill" ? "text-[11px]" : ""} ${labelClassName}`}
+          >
+            Ultracode
           </span>
         ) : null}
         {variant === "text" ? null : (
@@ -917,12 +928,13 @@ export function ModelPicker({
                   {isToggle ? (
                     <span
                       aria-hidden="true"
+                      data-toggle-track
                       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                        value === "true" ? "bg-content/35" : "bg-content/15"
+                        value === "true" ? "bg-accent" : "bg-content/20"
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 size-4 rounded-full bg-content shadow-sm transition-transform ${
+                        className={`absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform ${
                           value === "true"
                             ? "translate-x-4.5"
                             : "translate-x-0.5"

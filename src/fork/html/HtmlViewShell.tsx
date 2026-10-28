@@ -1,5 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { MarkdownViewMode } from "../../features/sessions/ui/MarkdownModeToggle";
+import {
+  SourceCopyButton,
+  type MarkdownViewMode,
+} from "../../features/sessions/ui/MarkdownModeToggle";
 
 /** Keeps the source editor mounted; hidden previews stop their scripts. */
 export function HtmlViewShell({
@@ -8,12 +11,14 @@ export function HtmlViewShell({
   preview,
   source,
   navigationToken,
+  copySource,
 }: {
   mode: MarkdownViewMode;
   onModeChange: (mode: MarkdownViewMode) => void;
   preview: ReactNode;
   source: ReactNode;
   navigationToken?: number;
+  copySource?: string;
 }) {
   const [split, setSplit] = useState(false);
   useEffect(() => setSplit(false), [navigationToken]);
@@ -23,7 +28,8 @@ export function HtmlViewShell({
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-html-view-shell=""
     >
-      <div className="flex h-8 shrink-0 items-center justify-end border-b border-stroke px-2">
+      <div className="flex h-8 shrink-0 items-center justify-end gap-1.5 border-b border-stroke px-2">
+        {copySource != null ? <SourceCopyButton text={copySource} /> : null}
         <div
           role="tablist"
           aria-label="HTML view"

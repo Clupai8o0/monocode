@@ -9,6 +9,7 @@ import {
   firstEnabledHarness,
   hasLiveCatalog,
   isPickerProviderVisible,
+  isUltracodeOn,
   loadDefaultModels,
   loadHiddenPickerProviders,
   loadLastModelChoice,
@@ -161,6 +162,64 @@ describe("model settings memory", () => {
     expect(
       mergeModelSettings(ultra, { effort: "high", ultracode: "true" }),
     ).toEqual({ effort: "high", fast: "false", ultracode: "true" });
+  });
+
+  describe("Ultracode starts off in a new session", () => {
+    const ultra: AgentModel = {
+      ...opus,
+      settings: [
+        ...(opus.settings ?? []),
+        {
+          id: "ultracode",
+          label: "Ultracode",
+          kind: "toggle",
+          value: "false",
+          options: [
+            { value: "true", label: "On" },
+            { value: "false", label: "Off" },
+          ],
+        },
+      ],
+    };
+
+    it("ignores Ultracode in last-used settings", () => {
+      saveLastModelSettings({ effort: "xhigh", ultracode: "true" });
+      expect(loadLastModelSettings()).toEqual({ effort: "xhigh" });
+      expect(preferredModelSettings(ultra)).toEqual({
+        effort: "xhigh",
+        fast: "false",
+        ultracode: "false",
+      });
+    });
+
+    it("drops Ultracode already stored by an older build", () => {
+      localStorage.setItem(
+        "monocode.lastModelSettings",
+        JSON.stringify({ effort: "ultracode", ultracode: "true" }),
+      );
+      expect(preferredModelSettings(ultra)).toEqual({
+        effort: "xhigh",
+        fast: "false",
+        ultracode: "false",
+      });
+    });
+
+    it("keeps Ultracode on an existing session and an explicit request", () => {
+      saveLastModelSettings({ effort: "high", ultracode: "false" });
+      expect(
+        preferredModelSettings(ultra, { effort: "high", ultracode: "true" }),
+      ).toEqual({ effort: "high", fast: "false", ultracode: "true" });
+      expect(
+        mergeModelSettings(ultra, { effort: "high", ultracode: "true" })
+          .ultracode,
+      ).toBe("true");
+    });
+
+    it("reports whether Ultracode is on for the chip", () => {
+      expect(isUltracodeOn(ultra, { ultracode: "true" })).toBe(true);
+      expect(isUltracodeOn(ultra, { ultracode: "false" })).toBe(false);
+      expect(isUltracodeOn(opus, { ultracode: "true" })).toBe(false);
+    });
   });
 
   it("remembers extra-high and fast across models that support them", () => {
