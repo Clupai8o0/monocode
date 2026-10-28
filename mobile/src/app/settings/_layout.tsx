@@ -52,6 +52,11 @@ export default function SettingsLayout() {
       />
       {/* The provider's models title themselves. */}
       <Stack.Screen name="models" options={{ title: "" }} />
+      {/* Fork: the home lab page. */}
+      <Stack.Screen
+        name="lab"
+        options={{ title: "Home lab", ...androidBackHeader("Home lab") }}
+      />
       <Stack.Screen
         name="workspace"
         options={{
