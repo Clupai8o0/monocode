@@ -23,7 +23,7 @@ import { scheduleOnRN } from "react-native-worklets";
 
 import { useEmptyBackground } from "@/features/background/useEmptyBackground";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
-import { effortLabel } from "@/features/models/modelChoice";
+import { choiceFor, effortLabel, ultracodeOn } from "@/features/models/modelChoice";
 import {
   useForgetChoiceOnLeave,
   useSessionChoice,
@@ -183,7 +183,9 @@ export function ProjectScreen({
     "";
   // The effort shown by the model's name, read from the desktop's models: for
   // a pick here or in Settings, else what the session or project runs with.
-  const effortPick = chosen?.pick ?? catalog?.current;
+  // A new session has Ultracode off until it is turned on for it.
+  const effortPick = choiceFor(chosen?.pick, catalog?.current, !sessionId);
+  const ultracode = ultracodeOn(effortPick);
   const effort = effortPick
     ? effortLabel(
         catalog?.models.find((entry) => entry.id === effortPick.model),
@@ -223,6 +225,10 @@ export function ProjectScreen({
           text,
           {
             ...chosen?.pick,
+            // Unpicked, the desktop's default settings, sent with Ultracode off.
+            ...(!chosen && effortPick
+              ? { modelSettings: effortPick.modelSettings }
+              : {}),
             ...(harness && accounts[harness]
               ? { providerAccountId: accounts[harness] }
               : {}),
@@ -378,6 +384,7 @@ export function ProjectScreen({
           branch={sessionId ? (session?.branch ?? project.branch) : branch}
           model={model}
           effort={effort}
+          ultracode={ultracode}
           harness={harness}
           onModelPress={() =>
             router.push({

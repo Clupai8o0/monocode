@@ -72,6 +72,7 @@ export function Composer({
   branch,
   model,
   effort,
+  ultracode = false,
   harness,
   onSend,
   busy = false,
@@ -86,6 +87,8 @@ export function Composer({
   model: string;
   /** The model's effort, shown dimmer after its name as on desktop. */
   effort?: string;
+  /** Ultracode is on: named in the accent after the effort. */
+  ultracode?: boolean;
   harness?: Harness;
   onSend: (text: string, attachments: Attachment[]) => void | Promise<void>;
   busy?: boolean;
@@ -360,7 +363,7 @@ export function Composer({
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Model: ${model || "Desktop default"}${effort ? `, ${effort} effort` : ""}`}
+          accessibilityLabel={`Model: ${model || "Desktop default"}${effort ? `, ${effort} effort` : ""}${ultracode ? ", Ultracode on" : ""}`}
           accessibilityHint="Choose the model, account, effort and permissions"
           onPress={onModelPress}
           style={({ pressed }) => [styles.modelPill, pressed && styles.pressed]}
@@ -369,6 +372,7 @@ export function Composer({
           <Text style={styles.model} numberOfLines={1}>
             {model || "Desktop default"}
             {effort ? <Text style={styles.effort}> {effort}</Text> : null}
+            {ultracode ? <Text style={styles.ultracode}> Ultracode</Text> : null}
           </Text>
           <Icon name="chevronDown" size={14} color={colors.muted} />
         </Pressable>
@@ -656,6 +660,10 @@ const useStyles = themedStyles((colors) => ({
   effort: {
     color: colors.muted,
     fontWeight: "400",
+  },
+  ultracode: {
+    color: colors.accent,
+    fontWeight: "600",
   },
   round: {
     width: BUTTON,

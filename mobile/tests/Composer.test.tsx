@@ -282,6 +282,20 @@ it("keeps the iOS hit-testing styles unchanged", () => {
   expect(modelTouches()).toBe("");
 });
 
+it("names Ultracode on the model chip only when it is on", () => {
+  act(() =>
+    root.render(
+      <Composer context="Project" branch="main" model="Opus" effort="High" ultracode onSend={send} />,
+    ),
+  );
+  expect(container.textContent).toContain("Ultracode");
+  expect(button("Model: Opus, High effort, Ultracode on")).toBeTruthy();
+  act(() =>
+    root.render(<Composer context="Project" branch="main" model="Opus" effort="High" onSend={send} />),
+  );
+  expect(container.textContent).not.toContain("Ultracode");
+});
+
 it("opens a content-sized attachment menu with safe-area padding and retains both actions", async () => {
   render();
   await act(async () => button("Add photos or files").click());

@@ -78,3 +78,32 @@ export function effortLabel(model: CatalogModel | undefined, choice: ModelPick) 
 export function settingValue(choice: ModelPick, setting: ModelSetting) {
   return choice.modelSettings[setting.id] ?? setting.value;
 }
+
+// Claude's Ultracode, a toggle beside effort (claudeCatalog.ts's ULTRACODE).
+const ULTRACODE = "ultracode";
+
+/** Whether the choice runs with Ultracode on. */
+export function ultracodeOn(choice: ModelPick | null | undefined) {
+  return choice?.modelSettings[ULTRACODE] === "true";
+}
+
+/** The choice with Ultracode off, where it had it on. */
+export function withoutUltracode<T extends ModelPick>(choice: T): T {
+  if (!ultracodeOn(choice)) return choice;
+  return { ...choice, modelSettings: { ...choice.modelSettings, [ULTRACODE]: "false" } };
+}
+
+/**
+ * What a session runs with: the pick made for it, else the desktop's current.
+ * A new session starts with Ultracode off, however the desktop's default is
+ * set, until it is turned on for that session.
+ */
+export function choiceFor<T extends ModelPick>(
+  picked: T | null | undefined,
+  current: T | null | undefined,
+  isNew: boolean,
+): T | null {
+  if (picked) return picked;
+  if (!current) return null;
+  return isNew ? withoutUltracode(current) : current;
+}

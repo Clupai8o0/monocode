@@ -10,6 +10,7 @@ import type { Harness, Project } from "@/features/workspace/types";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
 
 import { DEFAULT_ACCESS } from "./access";
+import { withoutUltracode } from "./modelChoice";
 import type { ModelPick, RuntimeMode } from "./types";
 
 /** What the model picker set for a session, or for a new one in a project. */
@@ -73,8 +74,13 @@ export function useSessionChoice(
     () => picks.get(scope) ?? NOTHING,
   );
 
-  // A new session starts on the phone's default model, if Providers set one.
-  const chosen = picked.model ?? (sessionId ? null : defaultModel);
+  // A new session starts on the phone's default model, if Providers set one,
+  // with Ultracode off until it is turned on for that session.
+  const chosen =
+    picked.model ??
+    (sessionId || !defaultModel
+      ? null
+      : { ...defaultModel, pick: withoutUltracode(defaultModel.pick) });
   const access =
     picked.access ??
     (sessionId

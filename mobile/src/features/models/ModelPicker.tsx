@@ -23,6 +23,7 @@ import { Icon, type IconName } from "@/ui/Icon";
 import { withAlpha, themedStyles, useColors } from "@/ui/theme";
 
 import {
+  choiceFor,
   effortSetting,
   fastSetting,
   otherSettings,
@@ -73,7 +74,7 @@ function useModelPicker(
   const { chosen, access, accounts, pickModel, pickAccess, pickAccount } =
     useSessionChoice(project, sessionId);
 
-  const choice = chosen?.pick ?? catalog?.current ?? null;
+  const choice = choiceFor(chosen?.pick, catalog?.current, !sessionId);
   const model = catalog?.models.find((entry) => entry.id === choice?.model);
   const effort = effortSetting(model);
   const fast = fastSetting(model);
