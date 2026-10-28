@@ -86,6 +86,7 @@ type Proxy = {
   sessionId: string;
   socket: string;
   server: Server;
+  connections: Set<Socket>;
   signature: string;
   createdAt: number;
   updatedAt: number;
@@ -140,6 +141,11 @@ export class HostRelay {
     } catch {
       // Off until someone turns it on.
     }
+  }
+
+  /** Switched on, and not closed. */
+  private get on() {
+    return this.state.enabled && this.running;
   }
 
   private get statePath() {
@@ -222,6 +228,7 @@ export class HostRelay {
       this.peers.delete(peer.id);
       this.pids.delete(peer.id);
       this.queues.get(peer.id)?.clear();
+      this.queues.get(peer.id)?.wake();
     }
     await this.discover(true);
     await this.reconcile();
@@ -309,7 +316,7 @@ export class HostRelay {
     params: Record<string, unknown>,
     device: { id: string; name: string },
   ): Promise<RelaySyncResult> {
-    if (!this.state.enabled) return { enabled: false, entries: [], nextSyncMs: SYNC_OFF_MS };
+    if (!this.on) return { enabled: false, entries: [], nextSyncMs: SYNC_OFF_MS };
     const sockDir = cleanSockDir(params.sockDir);
     if (!sockDir) throw new Error("Give a plain socket folder");
     if (!Array.isArray(params.sessions)) throw new Error("Give the sessions");
@@ -335,7 +342,7 @@ export class HostRelay {
     await this.discover();
     await this.reconcile();
     const peer = this.peers.get(device.id);
-    if (!peer || !this.state.enabled) return { enabled: false, entries: [], nextSyncMs: SYNC_OFF_MS };
+    if (!peer || !this.on) return { enabled: false, entries: [], nextSyncMs: SYNC_OFF_MS };
     return { enabled: true, entries: this.entriesFor(peer), nextSyncMs: SYNC_ON_MS };
   }
 
@@ -464,7 +471,12 @@ export class HostRelay {
     }
     const socket = `${sockDir}/${pid}.sock`;
     await unlink(socket).catch(() => undefined);
-    const server = createServer((connection) => this.accept(connection, pid));
+    const connections = new Set<Socket>();
+    const server = createServer((connection) => {
+      connections.add(connection);
+      connection.on("close", () => connections.delete(connection));
+      this.accept(connection, pid);
+    });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(socket, () => {
@@ -480,6 +492,7 @@ export class HostRelay {
       sessionId: session.sessionId,
       socket,
       server,
+      connections,
       signature,
       createdAt: now,
       updatedAt: now,
@@ -496,7 +509,9 @@ export class HostRelay {
 
   private async closeProxy(proxy: Proxy): Promise<void> {
     this.proxies.delete(proxy.pid);
-    await new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+    const closed = new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+    for (const connection of proxy.connections) connection.destroy();
+    await closed;
     await unlink(proxy.socket).catch(() => undefined);
     await removeEntry(this.home, proxy.pid).catch(() => undefined);
   }
@@ -560,7 +575,7 @@ export class HostRelay {
     params: Record<string, unknown>,
     device: { id: string; name: string },
   ): Promise<RelaySendResult> {
-    if (!this.state.enabled || !this.running) return { accepted: false, reason: "The relay is off" };
+    if (!this.on) return { accepted: false, reason: "The relay is off" };
     const peer = this.peers.get(device.id);
     if (!peer) return { accepted: false, reason: "Sync first" };
     const sender = typeof params.from === "string" ? peer.sessions.get(params.from) : undefined;
@@ -613,13 +628,13 @@ export class HostRelay {
       typeof params.cursor === "number" && Number.isSafeInteger(params.cursor) && params.cursor > 0
         ? params.cursor
         : 0;
-    if (!this.state.enabled) return { cursor, deliveries: [], enabled: false };
+    if (!this.on) return { cursor, deliveries: [], enabled: false };
     const waitMs =
       typeof params.waitMs === "number" && Number.isFinite(params.waitMs) && params.waitMs > 0
         ? Math.min(params.waitMs, NEXT_WAIT_MAX_MS)
         : 0;
     const answer = await this.queue(device.id).next(cursor, waitMs);
-    if (!this.state.enabled) return { cursor, deliveries: [], enabled: false };
+    if (!this.on) return { cursor, deliveries: [], enabled: false };
     return { ...answer, enabled: true };
   }
 }

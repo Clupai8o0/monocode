@@ -35,6 +35,7 @@ export type HostRelayEntry = RelayRegistryEntry & {
 export type Liveness = (pid: number, procStart: string | undefined) => boolean | Promise<boolean>;
 
 const REGISTRY_FILE = /^(\d+)\.json$/;
+const CLAUDE_SOCKET = /^\d+(-[0-9a-f]{8})?\.sock$/;
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -65,7 +66,8 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 /** One real registry entry as a LocalSession, or null when it is a relay
- *  copy, a parked or spare process, or speaks another peer protocol. */
+ *  copy, a parked or spare process, speaks another peer protocol, has no
+ *  process start to check, or names a socket Claude would not make. */
 export function localSession(value: unknown, filePid: number, account: string): LocalSession | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (isRelayEntry(value)) return null;
@@ -75,8 +77,11 @@ export function localSession(value: unknown, filePid: number, account: string): 
   if (raw.peerProtocol !== 1) return null;
   if (typeof raw.sessionId !== "string" || !formats.sessionId(raw.sessionId)) return null;
   if (typeof raw.cwd !== "string" || !raw.cwd) return null;
+  if (raw.procStart === undefined || raw.procStart === null || raw.procStart === "") return null;
+  // Only Claude's own sockets: <pid>.sock or <pid>-<8 hex>.sock in a cc-socks folder.
   const socket = raw.messagingSocketPath;
-  if (typeof socket !== "string" || !isAbsolute(socket) || !socket.endsWith(".sock")) return null;
+  if (typeof socket !== "string" || !isAbsolute(socket)) return null;
+  if (basename(dirname(socket)) !== "cc-socks" || !CLAUDE_SOCKET.test(basename(socket))) return null;
   const session: LocalSession = {
     sessionId: raw.sessionId,
     account,
@@ -124,11 +129,7 @@ export async function discoverSessions(home: string, isAlive: Liveness): Promise
       const session = localSession(raw, pid, account);
       if (!session) continue;
       const record = raw as Record<string, unknown>;
-      const procStart =
-        record.procStart === undefined || record.procStart === null || record.procStart === ""
-          ? undefined
-          : String(record.procStart);
-      if (!(await isAlive(pid, procStart))) continue;
+      if (!(await isAlive(pid, String(record.procStart)))) continue;
       const updatedAt = typeof record.updatedAt === "number" ? record.updatedAt : 0;
       const current = bySession.get(session.sessionId);
       if (!current || updatedAt > current.updatedAt) {

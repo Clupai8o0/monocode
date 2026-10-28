@@ -240,6 +240,15 @@ describe("DeliveryQueue", () => {
     expect((await empty).deliveries).toEqual([]);
   });
 
+  it("hands a line to one of two overlapping polls only", async () => {
+    const { q } = queue();
+    const older = q.next(0, 20_000);
+    const newer = q.next(0, 20_000);
+    expect(await older).toEqual({ cursor: 0, deliveries: [] });
+    q.push(delivery(1));
+    expect((await newer).deliveries.map((d) => d.line)).toEqual(["l1"]);
+  });
+
   it("answers an empty next once waitMs passes", async () => {
     vi.useFakeTimers();
     const { q } = queue();

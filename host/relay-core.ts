@@ -235,6 +235,9 @@ export function rewriteLine(line: string, fromSocket: string): string | null {
 export class DeliveryQueue {
   private items: Array<{ seq: number; at: number; delivery: RelayDelivery }> = [];
   private readonly waiters = new Set<() => void>();
+  /** The newest poll; an older one still waiting answers empty, so two
+   *  overlapping polls never both hand out the same line. */
+  private poll = 0;
 
   constructor(
     private readonly now: () => number,
@@ -275,6 +278,8 @@ export class DeliveryQueue {
     cursor: number,
     waitMs: number,
   ): Promise<{ cursor: number; deliveries: RelayDelivery[] }> {
+    const mine = ++this.poll;
+    this.wake();
     const first = this.take(cursor);
     if (first.deliveries.length || waitMs <= 0) return first;
     await new Promise<void>((done) => {
@@ -287,6 +292,7 @@ export class DeliveryQueue {
       timer = setTimeout(wake, Math.min(waitMs, NEXT_WAIT_MAX_MS));
       this.waiters.add(wake);
     });
+    if (mine !== this.poll) return { cursor, deliveries: [] };
     return this.take(cursor);
   }
 }

@@ -150,7 +150,7 @@ beforeEach(() => {
   // Short: a Mac socket path must fit in 104 bytes.
   root = mkdtempSync("/tmp/mcr-");
   home = join(root, "h");
-  socks = join(root, "s");
+  socks = join(root, "cc-socks");
   mkdirSync(socks, { recursive: true });
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(home, ".claude-exec"), { recursive: true });
@@ -378,16 +378,37 @@ describe("HostRelay", () => {
     expect((await sync(MAC, "mac", [])).entries).toEqual([]);
   });
 
-  it("closes without forgetting the switch, and cleans up again on start", async () => {
+  it("closes at once, keeps the switch, and answers off after closing", async () => {
     await claude(".claude", 101, S1, "vivo-main");
     makeRelay([101]);
     await relay.setEnabled(true);
     await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
     const proxies = () => readdirJson(join(home, ".claude/sessions")).filter((name) => Number(name.split(".")[0]) >= 1e9);
     expect(proxies()).toHaveLength(1);
+    // A connection left open does not hold the proxy up.
+    const held = createConnection(join(socks, proxies()[0].replace(".json", ".sock")));
+    held.on("error", () => undefined);
+    await new Promise<void>((resolve) => held.once("connect", () => resolve()));
+    const started = Date.now();
     await relay.close();
+    expect(Date.now() - started).toBeLessThan(2_000);
     expect(proxies()).toHaveLength(0);
     expect(JSON.parse(readFileSync(join(root, "d/relay.json"), "utf8")).enabled).toBe(true);
+    expect(await sync(MAC, "mac", [])).toEqual({ enabled: false, entries: [], nextSyncMs: 20_000 });
+    expect((await next(MAC, 0, 20_000)).enabled).toBe(false);
+  });
+
+  it("offers only sessions Claude could have written", async () => {
+    await claude(".claude", 101, S1, "vivo-main");
+    const base = JSON.parse(readFileSync(join(home, ".claude/sessions/101.json"), "utf8"));
+    write(join(home, ".claude/sessions/104.json"), { ...base, pid: 104, sessionId: "eeeeeeee-1", messagingSocketPath: "/tmp/evil.sock" });
+    write(join(home, ".claude/sessions/105.json"), { ...base, pid: 105, sessionId: "eeeeeeee-2", procStart: undefined, messagingSocketPath: join(socks, "105.sock") });
+    write(join(home, ".claude/sessions/106.json"), { ...base, pid: 106, sessionId: "eeeeeeee-3", peerProtocol: 2, messagingSocketPath: join(socks, "106.sock") });
+    write(join(home, ".claude/sessions/107.json"), { ...base, pid: 107, sessionId: "eeeeeeee-4", spare: true, messagingSocketPath: join(socks, "107.sock") });
+    write(join(home, ".claude/sessions/108.json"), { ...base, pid: 1, sessionId: "eeeeeeee-5", messagingSocketPath: join(socks, "108.sock") });
+    write(join(home, ".claude/sessions/109.json"), { ...base, pid: 109, sessionId: "eeeeeeee-6", messagingSocketPath: join(socks, "109-0badf00d.sock") });
+    const found = await discoverSessions(home, () => true);
+    expect(found.map((session) => session.sessionId).sort()).toEqual([S1, "eeeeeeee-6"]);
   });
 });
 
