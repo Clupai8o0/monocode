@@ -203,6 +203,22 @@ describe("host lab", () => {
     );
   });
 
+  it("never overwrites a damaged lab.json", async () => {
+    const { lab, dataDir } = setup();
+    writeFileSync(join(dataDir, "lab.json"), "{not json");
+    expect(
+      (await lab.handle("lab.status", {}, phone)).remoteControl.desired.by,
+    ).toBe("default");
+    await expect(
+      lab.handle(
+        "lab.remoteControl.set",
+        { scope: "lab", updatedAt: 5 },
+        phone,
+      ),
+    ).rejects.toThrow("The saved lab settings are damaged");
+    expect(readFileSync(join(dataDir, "lab.json"), "utf8")).toBe("{not json");
+  });
+
   it("switches the relay", async () => {
     const { lab, relay } = setup();
     const status = await lab.handle("lab.relay.set", { enabled: true }, phone);

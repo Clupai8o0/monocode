@@ -264,11 +264,17 @@ export class HostLab {
     return join(this.options.dataDir, "lab.json");
   }
 
-  private async read(): Promise<LabFile> {
+  /** strict: a damaged file throws instead of reading as empty, so an
+   *  update never overwrites saved state it could not read. */
+  private async read(strict = false): Promise<LabFile> {
+    let text: string;
     try {
-      const raw = JSON.parse(
-        await readFile(this.file, "utf8"),
-      ) as Partial<LabFile>;
+      text = await readFile(this.file, "utf8");
+    } catch {
+      return { desired: { ...DEFAULT_CHOICE }, machines: {} };
+    }
+    try {
+      const raw = JSON.parse(text) as Partial<LabFile>;
       const desired = raw.desired;
       return {
         desired:
@@ -282,6 +288,7 @@ export class HostLab {
           raw.machines && typeof raw.machines === "object" ? raw.machines : {},
       };
     } catch {
+      if (strict) throw new Error("The saved lab settings are damaged");
       return { desired: { ...DEFAULT_CHOICE }, machines: {} };
     }
   }
@@ -289,7 +296,7 @@ export class HostLab {
   /** Read, change and save lab.json one call at a time, atomically. */
   private update(change: (file: LabFile) => boolean): Promise<void> {
     const next = this.saving.then(async () => {
-      const file = await this.read();
+      const file = await this.read(true);
       if (!change(file)) return;
       const temp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
       await writeFile(temp, `${JSON.stringify(file, null, 2)}\n`, {

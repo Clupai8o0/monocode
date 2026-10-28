@@ -336,14 +336,16 @@ export class KrdpControl {
   }
 
   private async stop(units: string[]): Promise<void> {
-    // A unit that is not loaded is already off; only a timeout is a failure.
+    // A unit that is not loaded is already off.
     for (const unit of units) {
       const result = await this.options.run(
         "systemctl",
         ["--user", "stop", unit],
         { timeoutMs: 20_000 },
       );
-      if (result.timedOut) throw new Error("Could not stop remote desktop");
+      if (result.code !== 0 && !/not loaded/i.test(result.stderr)) {
+        throw new Error("Could not stop remote desktop");
+      }
     }
   }
 

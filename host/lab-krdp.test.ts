@@ -142,6 +142,11 @@ describe("remote desktop", () => {
         stdout: `Id=monocode-krdp.service\nActiveState=${started ? "active" : "inactive"}\n\nId=app-org.kde.krdpserver.service\nActiveState=active\n`,
       }),
       "systemctl --user stop": {},
+      "systemctl --user stop monocode-krdp.service": {
+        code: 5,
+        stderr:
+          "Failed to stop monocode-krdp.service: Unit monocode-krdp.service not loaded.",
+      },
       "tailscale ip -4": { stdout: `${IP}\n` },
       "ss -ltnH": () => ({ stdout: started ? ON_TAILSCALE : SS }),
       kwriteconfig6: {},
@@ -218,6 +223,16 @@ describe("remote desktop", () => {
     });
     await expect(control.set(true)).rejects.toThrow(
       "Remote desktop did not start",
+    );
+  });
+
+  it("fails when a stop really fails", async () => {
+    const { run } = fakeRunner({
+      "systemctl --user stop": { code: 1, stderr: "Access denied" },
+    });
+    const control = new KrdpControl({ run, exists: () => true });
+    await expect(control.set(false)).rejects.toThrow(
+      "Could not stop remote desktop",
     );
   });
 
