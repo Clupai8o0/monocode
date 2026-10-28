@@ -98,6 +98,15 @@ async function setup() {
 }
 
 describe("phone endpoint", () => {
+  it("answers the external sessions methods", async () => {
+    const { call, project } = await setup();
+    const listed = await call("externalSessions.list", { projectId: project.id });
+    expect(listed.result).toEqual({ sessions: [] });
+    const read = await call("externalSessions.read", { projectId: project.id, sessionId: "zzzzzzzz-9" });
+    expect(read.ok).toBe(false);
+    expect(read.error).toBe("Session not found");
+  });
+
   it("refuses calls without the device credential or from a browser", async () => {
     const { call, device } = await setup();
     expect((await call("workspace.list", {}, {})).status).not.toBe(200);

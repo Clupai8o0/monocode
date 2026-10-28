@@ -117,6 +117,18 @@ async function setup(providers: RemoteProvider[] = ["codex"]) {
 }
 
 describe("remote host API", () => {
+  it("answers the external sessions methods", async () => {
+    const s = await setup();
+    const listed = await s.call("externalSessions.list", { projectId: s.project.id });
+    expect(listed.value.result).toEqual({ sessions: [] });
+    expect((await s.call("externalSessions.list")).value.result.sessions).toBeInstanceOf(Array);
+    expect((await s.call("externalSessions.read", { projectId: s.project.id, sessionId: "zzzzzzzz-9" })).value.error)
+      .toBe("Session not found");
+    expect((await s.call("externalSessions.read", { projectId: s.project.id, sessionId: "handoff:../../x" })).value.error)
+      .toBe("Invalid session id");
+    expect((await s.call("environment.describe")).value.result.capabilities).toContain("externalSessions.read");
+  });
+
   it("rejects a credential revoked while its request body is arriving", async () => {
     const s = await setup();
     const authenticated = vi.spyOn(s.store, "authenticated");

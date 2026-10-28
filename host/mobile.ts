@@ -11,6 +11,7 @@ import { createDiffStats } from "./git-diff-stats";
 import { readNotifyConfig, startNotifications } from "./notify";
 import { createMobileTerminals } from "./mobile-terminal";
 import { createMobileUsage } from "./mobile-usage";
+import { externalSessionsOptions, listExternalSessions, readExternalSession } from "./external-sessions";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../src/features/providers/model/providerAccounts";
 import { createMobileWorkspace, once, type Job } from "./mobile-workspace";
 import {
@@ -546,6 +547,10 @@ export function createMobileHandler(
         // The topic is what keeps others off the ntfy server; this route is
         // only reached with a device credential. Null until set up.
         return { config: readNotifyConfig(dataDirOf(engine.store)) };
+      case "externalSessions.list":
+        return listExternalSessions(...externalSessionsOptions(engine.store), params);
+      case "externalSessions.read":
+        return readExternalSession(...externalSessionsOptions(engine.store), params);
       case "device.leave":
         return { revoked: engine.store.revokeToken(token) };
       case "models.list":

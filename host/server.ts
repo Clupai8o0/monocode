@@ -44,6 +44,7 @@ import {
   writeHostFile,
 } from "./workspace";
 import { WorkspaceCommands } from "./workspace-commands";
+import { externalSessionsOptions, listExternalSessions, readExternalSession } from "./external-sessions";
 import { discoverCodexModels } from "../src/integrations/harness/providers/codex/codexCatalog";
 import { discoverClaudeModels } from "../src/integrations/harness/providers/claude/claudeCatalog";
 import { discoverCursorModels } from "../src/integrations/harness/providers/cursor/cursorCatalog";
@@ -375,6 +376,8 @@ export function createHostServer(
                 "attachments.read",
                 "sessions.draft",
                 "sessions.plan",
+                "externalSessions.list",
+                "externalSessions.read",
               ],
             };
             break;
@@ -410,6 +413,14 @@ export function createHostServer(
             }));
             break;
           }
+          case "externalSessions.list":
+            result = await listExternalSessions(
+              ...externalSessionsOptions(engine.store), params);
+            break;
+          case "externalSessions.read":
+            result = await readExternalSession(
+              ...externalSessionsOptions(engine.store), params);
+            break;
           case "sessions.update": {
             const sessionId = String(params.sessionId ?? "");
             const current = engine.store.session(sessionId);
