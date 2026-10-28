@@ -42,12 +42,30 @@ export function connectionLabel(
   return host.platform === "darwin" ? "Mac" : machineLabel(host.name, host.platform);
 }
 
-/** A project's own machine, when the Mac relays one from a remote machine. */
-export function projectMachineLabel(project: {
-  machineName?: string;
-  machinePlatform?: string;
-}): string | undefined {
+/**
+ * The label for a whole connection's projects: the host's connection label
+ * when the phone talks to a machine's host (not the Mac), else undefined.
+ */
+export function hostProjectsLabel(
+  host: HostInfo | undefined,
+  label: string,
+): string | undefined {
+  return host && host.platform !== "darwin" ? label : undefined;
+}
+
+/**
+ * A project's own machine, when the Mac relays one from a remote machine;
+ * otherwise `fallback` (see hostProjectsLabel), so a host's projects still
+ * say which computer they are on.
+ */
+export function projectMachineLabel(
+  project: {
+    machineName?: string;
+    machinePlatform?: string;
+  },
+  fallback?: string,
+): string | undefined {
   return project.machineName
     ? machineLabel(project.machineName, project.machinePlatform)
-    : undefined;
+    : fallback;
 }

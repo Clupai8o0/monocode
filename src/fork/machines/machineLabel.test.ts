@@ -6,6 +6,7 @@ import {
   machineDetail,
   machineLabel,
   osLabel,
+  staleMachineIds,
   whereOf,
 } from "./machineLabel";
 import { parseShowItem, showableUrl } from "../shows/showsModel";
@@ -106,5 +107,17 @@ describe("show items", () => {
     expect(showableUrl("javascript:alert(1)")).toBeUndefined();
     expect(showableUrl("ftp://x")).toBeUndefined();
     expect(showableUrl("not a url")).toBeUndefined();
+  });
+});
+
+describe("staleMachineIds", () => {
+  it("picks machines with no info or info older than the limit", () => {
+    const infos: Record<string, { checkedAt: number }> = {
+      fresh: { checkedAt: 9_000 },
+      old: { checkedAt: 1_000 },
+    };
+    expect(
+      staleMachineIds(["fresh", "old", "none"], (id) => infos[id], 10_000, 5_000),
+    ).toEqual(["old", "none"]);
   });
 });

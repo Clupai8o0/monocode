@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   connectionLabel,
   machineLabel,
+  hostProjectsLabel,
   osLabel,
   projectMachineLabel,
 } from "@/features/connection/machineLabel";
@@ -32,5 +33,18 @@ describe("machine labels", () => {
       projectMachineLabel({ machineName: "Vivobook", machinePlatform: "linux" }),
     ).toBe("Vivobook · Linux");
     expect(projectMachineLabel({})).toBeUndefined();
+  });
+  it("labels a host's own projects with the connection label", () => {
+    const host = { name: "Vivobook", platform: "linux" };
+    const label = connectionLabel(true, host);
+    const fallback = hostProjectsLabel(host, label);
+    expect(projectMachineLabel({}, fallback)).toBe("Vivobook · Linux");
+    expect(
+      projectMachineLabel({ machineName: "Pi", machinePlatform: "linux" }, fallback),
+    ).toBe("Pi · Linux");
+    const mac = { name: "Mac", platform: "darwin" };
+    expect(hostProjectsLabel(mac, connectionLabel(false, mac))).toBeUndefined();
+    expect(hostProjectsLabel(undefined, "desktop")).toBeUndefined();
+    expect(projectMachineLabel({}, undefined)).toBeUndefined();
   });
 });

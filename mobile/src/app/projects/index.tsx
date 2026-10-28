@@ -3,7 +3,12 @@ import { Fragment, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { formatCount } from "@/features/changes/diffTheme";
-import { projectMachineLabel } from "@/features/connection/machineLabel";
+import { useConnection } from "@/features/connection/ConnectionProvider";
+import {
+  hostProjectsLabel,
+  projectMachineLabel,
+} from "@/features/connection/machineLabel";
+import { useConnectionLabel } from "@/features/connection/useConnectionLabel";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
@@ -25,6 +30,8 @@ export default function ProjectsScreen() {
   const { current } = useLocalSearchParams<{ current?: string }>();
   const { projects, monos } = useWorkspace();
   const selected = projectForRoute(projects, current);
+  const { catalog } = useConnection();
+  const hostLabel = hostProjectsLabel(catalog?.host, useConnectionLabel());
   const [switching, setSwitching] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -87,9 +94,9 @@ export default function ProjectsScreen() {
               label={project.name}
               accessory={
                 <View style={styles.trailing}>
-                  {project.machineName ? (
+                  {projectMachineLabel(project, hostLabel) ? (
                     <Text style={styles.machine} numberOfLines={1}>
-                      {projectMachineLabel(project)}
+                      {projectMachineLabel(project, hostLabel)}
                     </Text>
                   ) : null}
                   {project.additions || project.deletions ? (
