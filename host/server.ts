@@ -16,6 +16,9 @@ import { HostEngine } from "./engine";
 import type { HostStore } from "./store";
 import { sendJson } from "./compress";
 import { createMobileHandler } from "./mobile";
+import { hostShows } from "./shows";
+import { hostOsName } from "./os-name";
+import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
 import type { LinkedWorkItem } from "../src/features/sessions/model/session";
 import { parseGithubWorkItemUrl } from "../src/features/sessions/model/sessionWorkItem";
@@ -343,6 +346,7 @@ export function createHostServer(
               environmentId: engine.store.environmentId,
               name: hostname(),
               platform: process.platform,
+              osName: hostOsName(),
               // Older clients validate this list against Codex and Claude only.
               providers: providers.filter((provider) =>
                 Array.isArray(params.supportedProviders)
@@ -378,6 +382,7 @@ export function createHostServer(
                 "sessions.plan",
                 "externalSessions.list",
                 "externalSessions.read",
+                "shows",
               ],
             };
             break;
@@ -715,6 +720,18 @@ export function createHostServer(
                   params.content,
                 ),
               )) ?? null;
+            break;
+          }
+          case "shows.next":
+          case "shows.read": {
+            const shows = hostShows({
+              dataDir: dataDirOf(engine.store),
+              projects: () => engine.store.projects(),
+            });
+            result =
+              input.method === "shows.next"
+                ? await shows.next(params)
+                : await shows.read(params);
             break;
           }
           default:

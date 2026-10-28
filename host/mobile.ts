@@ -5,6 +5,7 @@ import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
+import { hostOsName } from "./os-name";
 import { createMobileMonos } from "./mobile-monos";
 import { headBranch } from "./git-head";
 import { createDiffStats } from "./git-diff-stats";
@@ -541,7 +542,11 @@ export function createMobileHandler(
           .slice(0, 22);
         if (typeof params.since === "string" && params.since === etag)
           return { unchanged: true, etag };
-        return { ...value, etag };
+        return {
+          ...value,
+          etag,
+          host: { name: machine, platform: process.platform, osName: hostOsName() },
+        };
       }
       case "notify.config":
         // The topic is what keeps others off the ntfy server; this route is
