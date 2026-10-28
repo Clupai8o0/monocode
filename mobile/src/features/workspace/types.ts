@@ -197,3 +197,40 @@ export type TurnMetrics = {
   cacheWriteTokens?: number;
   cacheHitPercent?: number;
 };
+
+// "Elsewhere": sessions MonoCode did not start, as the desktop's
+// src/fork/externalSessions/externalSessionsModel.ts gives them.
+export type ExternalSessionState = "running" | "idle" | "handed-over";
+
+export type ExternalSession = {
+  /** The agent's session id, or `handoff:<path>` for a handoff file alone. */
+  id: string;
+  projectId: string;
+  /** "claude", "claude-cx", "codex", "opencode", "dsh", "kimi" or "grok". */
+  source: string;
+  name?: string;
+  cwd: string;
+  branch?: string;
+  state: ExternalSessionState;
+  startedAt?: number;
+  updatedAt?: number;
+  note?: string;
+  /** Relative to the project folder. */
+  handoffPath?: string;
+  hasTranscript: boolean;
+};
+
+export type ExternalTurn = {
+  role: "user" | "assistant" | "tool";
+  text: string;
+  at?: number;
+};
+
+export type ExternalTranscriptPage = {
+  /** Oldest first. */
+  turns: ExternalTurn[];
+  /** Pass back as `before` for older turns; absent at the start. */
+  before?: number;
+  handoff?: { path: string; text: string };
+  truncated?: boolean;
+};

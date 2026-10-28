@@ -17,6 +17,7 @@ import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
 import { GradualBlur } from "@/ui/GradualBlur";
 import { themedStyles, useColors } from "@/ui/theme";
 
+import { ElsewhereSessions, useExternalSessions } from "./ElsewhereSessions";
 import { SessionCard } from "./SessionCard";
 import {
   filterSessions,
@@ -60,6 +61,7 @@ export function SessionsPage({
   const needle = query.trim().toLowerCase();
   const recent = sessions.filter((session) => session.projectId === projectId);
   const pages = useSessionPages(projectId, needle, active);
+  const elsewhere = useExternalSessions(projectId, active);
   const listed = visibleSessions(pages, recent, needle, edited).filter((session) =>
     inWorktree(session, worktree),
   );
@@ -136,7 +138,12 @@ export function SessionsPage({
             ) : null
           }
           ListFooterComponent={
-            pages?.loadingMore ? <ActivityIndicator style={styles.more} color={colors.muted} /> : null
+            <>
+              {pages?.loadingMore ? (
+                <ActivityIndicator style={styles.more} color={colors.muted} />
+              ) : null}
+              <ElsewhereSessions sessions={elsewhere} />
+            </>
           }
           onScrollBeginDrag={closeOpenRow}
           onEndReached={pages?.loadMore}

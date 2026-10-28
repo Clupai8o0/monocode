@@ -158,6 +158,10 @@ function LinkedWorkspace() {
               name="project/[projectId]/session/[sessionId]"
               options={screens.session}
             />
+            <Stack.Screen
+              name="project/[projectId]/elsewhere/[sessionId]"
+              options={screens.code}
+            />
             <Stack.Screen name="projects" options={screens.modal} />
             <Stack.Screen name="settings" options={screens.modal} />
             <Stack.Screen name="models" options={screens.modal} />
