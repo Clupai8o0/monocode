@@ -26,6 +26,7 @@ import { acquireHostOwner } from "./owner";
 import { HostEngine } from "./engine";
 import { hostProviders } from "./providers";
 import { createHostServer } from "./server";
+import { hostRelay } from "./relay";
 import {
   REMOTE_PROVIDERS,
   type RemoteProvider,
@@ -324,6 +325,14 @@ Connect another computer using an SSH forward to the loopback port.`);
         `Show on the Mac is off: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    const relay = hostRelay({ dataDir: dataDirOf(store), store });
+    try {
+      await relay.start();
+    } catch (error) {
+      console.error(
+        `The session relay is off: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const secret = randomBytes(32).toString("base64url");
     let stopping = false;
     let stop: () => Promise<void>;
@@ -363,6 +372,7 @@ Connect another computer using an SSH forward to the loopback port.`);
       server.close();
       server.closeAllConnections();
       shows?.close();
+      await relay.close().catch(() => undefined);
       await engine.close();
       await backend.close();
       release();

@@ -526,6 +526,13 @@ fn supported_remote_method(method: &str) -> bool {
             | "git.action"
             | "externalSessions.list"
             | "externalSessions.read"
+            // Fork: home lab controls. relay.* stays out: only the Rust relay sends it.
+            | "lab.status"
+            | "lab.remoteControl.set"
+            | "lab.relay.set"
+            | "lab.uresourced.set"
+            | "lab.remoteDesktop.set"
+            | "lab.report"
     )
 }
 

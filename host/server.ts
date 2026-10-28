@@ -17,6 +17,9 @@ import type { HostStore } from "./store";
 import { sendJson } from "./compress";
 import { createMobileHandler } from "./mobile";
 import { hostShows, showsListening } from "./shows";
+import { hostLab } from "./lab";
+import { hostRelay } from "./relay";
+import { LAB_CAPABILITY, RELAY_CAPABILITY } from "../src/fork/lab/labProtocol";
 import { hostOsName } from "./os-name";
 import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
@@ -383,6 +386,8 @@ export function createHostServer(
                 "externalSessions.list",
                 "externalSessions.read",
                 ...(showsListening() ? ["shows"] : []),
+                LAB_CAPABILITY,
+                RELAY_CAPABILITY,
               ],
             };
             break;
@@ -734,6 +739,28 @@ export function createHostServer(
                 : await shows.read(params);
             break;
           }
+          case "lab.status":
+          case "lab.remoteControl.set":
+          case "lab.relay.set":
+          case "lab.uresourced.set":
+          case "lab.remoteDesktop.set":
+          case "lab.report":
+            result = await hostLab({
+              dataDir: dataDirOf(engine.store),
+              store: engine.store,
+            }).handle(input.method, params, {
+              device: engine.store.device(token),
+              surface: "rpc",
+            });
+            break;
+          case "relay.sync":
+          case "relay.send":
+          case "relay.next":
+            result = await hostRelay({
+              dataDir: dataDirOf(engine.store),
+              store: engine.store,
+            }).handle(input.method, params, engine.store.device(token));
+            break;
           default:
             throw new Error("Unsupported host method");
         }

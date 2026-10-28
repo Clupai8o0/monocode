@@ -5,6 +5,7 @@ import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
+import { hostLab } from "./lab";
 import { hostOsName } from "./os-name";
 import { createMobileMonos } from "./mobile-monos";
 import { headBranch } from "./git-head";
@@ -724,6 +725,18 @@ export function createMobileHandler(
         engine.store.deleteSession(value.session.id);
         return { sessionId: value.session.id };
       }
+      case "lab.status":
+      case "lab.remoteControl.set":
+      case "lab.relay.set":
+      case "lab.uresourced.set":
+      case "lab.remoteDesktop.set":
+        return hostLab({
+          dataDir: dataDirOf(engine.store),
+          store: engine.store,
+        }).handle(method, params, {
+          device: engine.store.device(token),
+          surface: "mobile",
+        });
       default:
         throw new Error("Not available on this machine yet");
     }

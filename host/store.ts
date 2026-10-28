@@ -336,6 +336,14 @@ export class HostStore {
       .get(this.hash(token));
   }
 
+  /** The device a token belongs to, for features that act per device. */
+  device(token: string): { id: string; name: string } | null {
+    const row = this.db
+      .prepare("SELECT id, name FROM devices WHERE hash=?")
+      .get(this.hash(token)) as { id: string; name: string } | undefined;
+    return row ? { id: row.id, name: row.name } : null;
+  }
+
   private hash(token: string): string {
     return createHash("sha256").update(token).digest("hex");
   }
