@@ -13,6 +13,8 @@ import {
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
 import { HostEngine } from "./engine";
+import type { HostStore } from "./store";
+import { sendJson } from "./compress";
 import { createMobileHandler } from "./mobile";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
 import type { LinkedWorkItem } from "../src/features/sessions/model/session";
@@ -86,6 +88,12 @@ const resolveBinary: Record<RemoteProvider, () => Promise<{ path: string }>> = {
 // A 1 MiB text file can expand to 6 MiB when JSON escapes control characters.
 // Existing files.write sends both the original and replacement contents.
 const MAX_BODY = 16 * 1024 * 1024;
+// Longest a sessions.sync long poll holds a request.
+const SYNC_WAIT_MAX_MS = 25_000;
+// Tailscale Serve's Go proxy keeps idle upstream connections for 90 s by
+// default. Outlasting it means the proxy, not Node, ends an idle connection,
+// so a POST is never written onto a socket Node is closing at that moment.
+const KEEP_ALIVE_MS = 95_000;
 const discoverModels: Record<RemoteProvider, (cwd: string) => Promise<AgentModel[]>> = {
   codex: discoverCodexModels,
   claude: discoverClaudeModels,
@@ -114,6 +122,44 @@ async function body(
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid request");
   return value as Record<string, unknown>;
+}
+
+/**
+ * Resolves once session `id` moves off `revision` (or is deleted), `waitMs`
+ * passes, or the client goes away. Listener and timer are released either way.
+ */
+function sessionChange(
+  store: HostStore,
+  id: string,
+  revision: number,
+  waitMs: number,
+  response: ServerResponse,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unwatch();
+      response.off("close", finish);
+      resolve();
+    };
+    // Saves notify inside their transaction; look once it has settled.
+    const check = () => {
+      if (done) return;
+      try {
+        if (store.session(id).revision === revision) return;
+      } catch {
+        // Deleted: the caller's sync reports it, as an immediate call would.
+      }
+      finish();
+    };
+    const unwatch = store.watch(id, () => queueMicrotask(check));
+    const timer = setTimeout(finish, waitMs);
+    response.on("close", finish);
+    if (response.destroyed) finish();
+  });
 }
 
 /** Identifies each installed provider CLI. An update changes its real path or
@@ -194,7 +240,12 @@ export function createHostServer(
   };
   const mobile = createMobileHandler(engine, providers, models);
   return createServer(
-    { requestTimeout: 20_000, headersTimeout: 10_000, maxHeaderSize: 8192 },
+    {
+      requestTimeout: 20_000,
+      headersTimeout: 10_000,
+      keepAliveTimeout: KEEP_ALIVE_MS,
+      maxHeaderSize: 8192,
+    },
     async (request, response) => {
       if (request.url === "/lifecycle" && lifecycle) {
         lifecycle(request, response);
@@ -254,9 +305,11 @@ export function createHostServer(
               },
               token,
             );
-            response.end(JSON.stringify({ ok: true, result }));
+            await sendJson(request, response, JSON.stringify({ ok: true, result }));
           } catch (error) {
-            response.end(
+            await sendJson(
+              request,
+              response,
               JSON.stringify({
                 ok: false,
                 error:
@@ -405,14 +458,25 @@ export function createHostServer(
           }
           case "sessions.sync": {
             const sessionId = String(params.sessionId ?? "");
+            const revision = Number.isSafeInteger(params.revision)
+              ? Number(params.revision)
+              : undefined;
+            // Optional long poll: an up-to-date client waits here for the
+            // next change instead of asking again over a slow link.
+            const waitMs = Number.isSafeInteger(params.waitMs)
+              ? Math.min(Number(params.waitMs), SYNC_WAIT_MAX_MS)
+              : 0;
+            if (
+              waitMs > 0 &&
+              revision !== undefined &&
+              engine.store.session(sessionId).revision === revision
+            ) {
+              await sessionChange(engine.store, sessionId, revision, waitMs, response);
+              if (response.destroyed) return;
+            }
             result = transfers.respond(
               sessionId,
-              engine.store.sync(
-                sessionId,
-                Number.isSafeInteger(params.revision)
-                  ? Number(params.revision)
-                  : undefined,
-              ),
+              engine.store.sync(sessionId, revision),
             );
             break;
           }
@@ -645,14 +709,17 @@ export function createHostServer(
           default:
             throw new Error("Unsupported host method");
         }
-        response.end(JSON.stringify({ result }));
+        await sendJson(request, response, JSON.stringify({ result }));
       } catch (error) {
         if (!response.destroyed)
-          response.writeHead(400).end(
+          await sendJson(
+            request,
+            response,
             JSON.stringify({
               error:
                 error instanceof Error ? error.message : "Host request failed",
             }),
+            400,
           );
       }
     },

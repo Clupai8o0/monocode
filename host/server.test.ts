@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { request } from "node:http";
+import { gunzipSync } from "node:zlib";
 import { HostEngine } from "./engine";
 import { HostStore } from "./store";
 import { createHostServer } from "./server";
@@ -744,5 +745,142 @@ describe("remote host API", () => {
     expect(
       (await s.call("git.index", { projectId: project.id })).value.result.files,
     ).toEqual([]);
+  });
+});
+
+/** One raw /rpc call, so tests see the bytes and headers on the wire. */
+function rawCall(
+  s: Awaited<ReturnType<typeof setup>>,
+  method: string,
+  params: unknown,
+  headers: Record<string, string> = {},
+) {
+  const body = JSON.stringify({
+    version: 1, environmentId: s.store.environmentId, method, params,
+  });
+  return new Promise<{ status?: number; headers: Record<string, unknown>; body: Buffer }>(
+    (resolve, reject) => {
+      const req = request(s.url, { method: "POST", headers: {
+        Authorization: `Bearer ${s.first.token}`, ...headers,
+      } }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => resolve({
+          status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks),
+        }));
+      });
+      req.on("error", reject);
+      req.end(body);
+    },
+  );
+}
+
+async function createSession(s: Awaited<ReturnType<typeof setup>>, commandId: string) {
+  const created = await s.call("commands.dispatch", { type: "create", commandId,
+    projectId: s.project.id, harness: "codex", model: "codex:test", runtimeMode: "supervised" });
+  return String(created.value.result.sessionId);
+}
+
+describe("slow link replies", () => {
+  it("gzips large replies for clients that accept it, and only those", async () => {
+    const s = await setup();
+    const content = "a line of text that compresses well\n".repeat(200);
+    writeFileSync(join(s.project.cwd, "big.txt"), content);
+    const params = { projectId: s.project.id, path: "big.txt" };
+    const plain = await rawCall(s, "files.read", params);
+    expect(plain.headers["content-encoding"]).toBeUndefined();
+    const expected = JSON.parse(plain.body.toString("utf8"));
+    expect(JSON.stringify(expected)).toContain("compresses well");
+
+    const zipped = await rawCall(s, "files.read", params, { "Accept-Encoding": "gzip, deflate" });
+    expect(zipped.status).toBe(200);
+    expect(zipped.headers["content-encoding"]).toBe("gzip");
+    expect(zipped.headers.vary).toBe("Accept-Encoding");
+    expect(zipped.headers["content-type"]).toBe("application/json");
+    expect(zipped.headers["cache-control"]).toBe("no-store");
+    expect(zipped.body.length).toBeLessThan(plain.body.length / 4);
+    expect(JSON.parse(gunzipSync(zipped.body).toString("utf8"))).toEqual(expected);
+
+    const small = await rawCall(s, "projects.list", {}, { "Accept-Encoding": "gzip" });
+    expect(small.headers["content-encoding"]).toBeUndefined();
+    expect(small.headers.vary).toBeUndefined();
+    expect(JSON.parse(small.body.toString("utf8")).result[0].id).toBe(s.project.id);
+
+    const refused = await rawCall(s, "files.read", params, { "Accept-Encoding": "gzip;q=0" });
+    expect(refused.headers["content-encoding"]).toBeUndefined();
+    expect(JSON.parse(refused.body.toString("utf8"))).toEqual(expected);
+
+    const failed = await rawCall(s, "files.read", { ...params, path: "../escape" },
+      { "Accept-Encoding": "gzip" });
+    expect(failed.status).toBe(400);
+  });
+
+  it("answers a sessions.sync long poll at once when the client is behind", async () => {
+    const s = await setup();
+    const sessionId = await createSession(s, "poll-stale");
+    const revision = s.store.session(sessionId).revision;
+    const started = Date.now();
+    const stale = await s.call("sessions.sync", { sessionId, revision: revision - 1, waitMs: 20_000 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(stale.value.result.kind).not.toBe("unchanged");
+    const ignored = await s.call("sessions.sync", { sessionId, revision, waitMs: "soon" });
+    expect(ignored.value.result).toEqual({ kind: "unchanged", revision });
+  });
+
+  it("holds an up-to-date sessions.sync until the session changes", async () => {
+    const s = await setup();
+    const sessionId = await createSession(s, "poll-change");
+    const revision = s.store.session(sessionId).revision;
+    let answered = false;
+    const held = s.call("sessions.sync", { sessionId, revision, waitMs: 20_000 })
+      .then((reply) => {
+        answered = true;
+        return reply;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(answered).toBe(false);
+    const started = Date.now();
+    await s.call("sessions.update", { projectId: s.project.id, sessionId, title: "Renamed" });
+    const reply = await held;
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(reply.value.result.kind).toBe("delta");
+    expect(reply.value.result.value.revision).toBe(revision + 1);
+    expect(reply.value.result.value.session.title).toBe("Renamed");
+  });
+
+  it("answers an unchanged session once waitMs passes", async () => {
+    const s = await setup();
+    const sessionId = await createSession(s, "poll-timeout");
+    const revision = s.store.session(sessionId).revision;
+    const started = Date.now();
+    const reply = await s.call("sessions.sync", { sessionId, revision, waitMs: 400 });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+    expect(reply.value.result).toEqual({ kind: "unchanged", revision });
+  });
+
+  it("stops waiting and releases its listener when the client disconnects", async () => {
+    const s = await setup();
+    const sessionId = await createSession(s, "poll-disconnect");
+    const revision = s.store.session(sessionId).revision;
+    let active = 0;
+    const watch = s.store.watch.bind(s.store);
+    vi.spyOn(s.store, "watch").mockImplementation((id, listener) => {
+      active += 1;
+      const unwatch = watch(id, listener);
+      return () => {
+        active -= 1;
+        unwatch();
+      };
+    });
+    const body = JSON.stringify({ version: 1, environmentId: s.store.environmentId,
+      method: "sessions.sync", params: { sessionId, revision, waitMs: 20_000 } });
+    const req = request(s.url, { method: "POST", headers: {
+      Authorization: `Bearer ${s.first.token}`,
+    } });
+    req.on("error", () => {});
+    req.end(body);
+    await vi.waitFor(() => expect(active).toBe(1));
+    req.destroy();
+    await vi.waitFor(() => expect(active).toBe(0), { timeout: 2_000 });
   });
 });

@@ -22,6 +22,7 @@ export class HostStore {
   // served from memory instead of re-parsing whole transcripts. Callers must
   // treat returned values as immutable.
   private cache = new Map<string, HostSession>();
+  private listeners = new Map<string, Set<() => void>>();
 
   constructor(path: string) {
     this.attachmentDir = join(dirname(path), "attachments");
@@ -102,6 +103,30 @@ export class HostStore {
     return row
       ? this.remember(JSON.parse(String(row.snapshot)) as HostSession)
       : undefined;
+  }
+
+  /**
+   * Calls `listener` after each save or delete of a session, possibly inside
+   * a transaction that has not committed yet. Returns the unsubscribe.
+   */
+  watch(id: string, listener: () => void): () => void {
+    let set = this.listeners.get(id);
+    if (!set) this.listeners.set(id, (set = new Set()));
+    set.add(listener);
+    return () => {
+      set.delete(listener);
+      if (!set.size && this.listeners.get(id) === set) this.listeners.delete(id);
+    };
+  }
+
+  private changed(id: string): void {
+    for (const listener of [...(this.listeners.get(id) ?? [])]) {
+      try {
+        listener();
+      } catch (error) {
+        console.error("Session change listener failed:", error);
+      }
+    }
   }
 
   session(id: string): HostSession {
@@ -193,7 +218,9 @@ export class HostStore {
     this.db
       .prepare("DELETE FROM events WHERE session_id=? AND revision<?")
       .run(value.session.id, value.revision - 2_000);
-    return this.remember(value);
+    this.remember(value);
+    this.changed(value.session.id);
+    return value;
   }
 
   updateSession(
@@ -232,6 +259,7 @@ export class HostStore {
       this.db.prepare("DELETE FROM events WHERE session_id=?").run(id);
       this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
       this.cache.delete(id);
+      this.changed(id);
     });
   }
 
