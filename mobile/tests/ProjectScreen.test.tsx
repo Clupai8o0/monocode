@@ -106,6 +106,10 @@ vi.mock("expo-router", () => ({
   },
   useIsFocused: () => true,
 }));
+vi.mock("@/features/connection/ConnectionProvider", () => ({
+  useConnection: () => ({ pairing: undefined }),
+}));
+vi.mock("@/features/sessions/ApprovalBar", () => ({ ApprovalBar: () => null }));
 vi.mock("@/features/connection/ConnectionNotice", () => ({
   useOffline: () => desktop.offline,
   ConnectionNotice: () => null,

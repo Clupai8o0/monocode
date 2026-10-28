@@ -13,6 +13,7 @@ export default defineConfig({
     },
   },
   esbuild: { jsx: "automatic" },
+  server: { fs: { strict: false } },
   test: {
     environment: "happy-dom",
     // Protocol round trips need both the desktop and mobile dependency trees.
