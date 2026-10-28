@@ -137,13 +137,12 @@ export function SessionsPage({
               </Text>
             ) : null
           }
+          // Above MonoCode's own sessions, so a long list doesn't bury it.
+          ListHeaderComponent={<ElsewhereSessions sessions={elsewhere} />}
           ListFooterComponent={
-            <>
-              {pages?.loadingMore ? (
-                <ActivityIndicator style={styles.more} color={colors.muted} />
-              ) : null}
-              <ElsewhereSessions sessions={elsewhere} />
-            </>
+            pages?.loadingMore ? (
+              <ActivityIndicator style={styles.more} color={colors.muted} />
+            ) : null
           }
           onScrollBeginDrag={closeOpenRow}
           onEndReached={pages?.loadMore}

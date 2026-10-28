@@ -1,6 +1,13 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { remoteRequest } from "../../features/connections/model/connections";
+import { listMonos } from "../../features/monos/model/mono";
+import {
+  loadPinnedProjects,
+  loadRecents,
+} from "../../features/projects/model/recents";
+import { listSessionsByProject } from "../../features/sessions/data/sessionStore";
+import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
 import type {
   ExternalSession,
   ExternalSessionsTarget,
@@ -52,6 +59,50 @@ export function withoutOwnSessions(
   own: ReadonlySet<string>,
 ): ExternalSession[] {
   return sessions.filter((session) => !own.has(session.id));
+}
+
+/**
+ * Sessions MonoCode started in these folders, from the session store every
+ * window shares, so one window does not list another window's sessions.
+ */
+export async function storedSessionIds(
+  cwds: readonly string[],
+): Promise<Set<string>> {
+  const lists = await Promise.all(
+    [...new Set(cwds)].map((cwd) => listSessionsByProject(cwd)),
+  );
+  return ownSessionIds(lists.flat());
+}
+
+/** Every project folder this Mac knows about. */
+export function knownLocalProjectPaths(): string[] {
+  return [
+    ...loadRecents().map((project) => project.path),
+    ...loadPinnedProjects(),
+    ...listMonos().flatMap((mono) => mono.projects),
+  ];
+}
+
+/**
+ * The asked-for projects plus every other known local folder, so the matcher
+ * files a session under the deepest project (/a/b, not /a). Callers keep only
+ * the rows of the projects they asked for.
+ */
+export function matchProjects(
+  asked: readonly { projectId: string; cwd: string }[],
+  known: readonly string[],
+  idFor: (path: string) => string = (path) => path,
+): { projectId: string; cwd: string }[] {
+  const out = [...asked];
+  const cwds = new Set(asked.map((project) => project.cwd));
+  for (const path of known) {
+    if (!path || path === "~" || path.startsWith(REMOTE_PATH_PREFIX) || cwds.has(path)) {
+      continue;
+    }
+    cwds.add(path);
+    out.push({ projectId: idFor(path), cwd: path });
+  }
+  return out;
 }
 
 /** Rows by project id. */
@@ -108,6 +159,8 @@ type Machine = {
   /** Local project id -> folder, with a count of hooks asking. */
   projects: Map<string, { cwd?: string; count: number }>;
   rows: ExternalSession[];
+  /** Local only: sessions any MonoCode window started in these projects. */
+  stored: Set<string>;
   loaded: boolean;
   loading: boolean;
   error?: string;
@@ -145,6 +198,9 @@ function refreshMachine(machine: Machine) {
     machine.loading = true;
     bump();
   }
+  const asked = [...machine.projects]
+    .map(([projectId, { cwd }]) => ({ projectId, cwd: cwd ?? "" }))
+    .filter((project) => project.cwd);
   const request = machine.machineId
     ? remoteRequest<{ sessions?: ExternalSession[] }>(
         machine.machineId,
@@ -152,14 +208,19 @@ function refreshMachine(machine: Machine) {
         {},
       )
     : invoke<{ sessions?: ExternalSession[] }>("fork_external_sessions_list", {
-        projects: [...machine.projects].map(([projectId, { cwd }]) => ({
-          projectId,
-          cwd,
-        })),
+        projects: matchProjects(asked, knownLocalProjectPaths()),
+        // Rows and history of just these; the rest only place sessions.
+        only: asked.map((project) => project.projectId),
       });
   request
-    .then((result) => {
-      machine.rows = Array.isArray(result?.sessions) ? result.sessions : [];
+    .then(async (result) => {
+      const rows = Array.isArray(result?.sessions) ? result.sessions : [];
+      if (!machine.machineId && rows.length > 0) {
+        machine.stored = await storedSessionIds(
+          asked.map((project) => project.cwd),
+        ).catch(() => machine.stored);
+      }
+      machine.rows = rows;
       machine.supported = true;
       machine.error = undefined;
     })
@@ -227,6 +288,7 @@ function addTarget(target: ExternalSessionsTarget) {
       machineId: target.kind === "remote" ? target.machineId : undefined,
       projects: new Map(),
       rows: [],
+      stored: new Set(),
       loaded: false,
       loading: false,
       supported: true,
@@ -315,8 +377,11 @@ export function useExternalSessions(
     return { sessions: EMPTY, loading: false, supported: on, refresh };
   }
   const rows = withoutOwnSessions(
-    groupByProject(machine.rows).get(target.projectId) ?? EMPTY,
-    own,
+    withoutOwnSessions(
+      groupByProject(machine.rows).get(target.projectId) ?? EMPTY,
+      own,
+    ),
+    machine.stored,
   );
   return {
     sessions: rows,
@@ -335,7 +400,10 @@ export async function readExternalSession(
 ): Promise<ExternalTranscriptPage> {
   if (target.kind === "local") {
     return invoke<ExternalTranscriptPage>("fork_external_sessions_read", {
-      projects: [{ projectId: target.projectId, cwd: target.cwd }],
+      projects: matchProjects(
+        [{ projectId: target.projectId, cwd: target.cwd }],
+        knownLocalProjectPaths(),
+      ),
       projectId: target.projectId,
       sessionId,
       before: before ?? null,

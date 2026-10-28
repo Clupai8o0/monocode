@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useState } from "react";
 import { AgentMarkdown } from "../../features/sessions/ui/AgentMarkdown";
 import { copyText } from "../../platform/tauri/clipboard";
 import { Modal } from "../../shared/ui/Modal";
@@ -69,6 +69,7 @@ export function ExternalSessionViewer({
   const [tab, setTab] = useState<Tab>(
     session.handoffPath ? "handoff" : "transcript",
   );
+  const ids = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -123,14 +124,34 @@ export function ExternalSessionViewer({
     session.cwd,
   ].filter(Boolean);
 
+  const tabs: Tab[] = hasHandoff ? ["handoff", "transcript"] : ["transcript"];
+  const shownTab: Tab =
+    tab === "handoff" && hasHandoff ? "handoff" : "transcript";
+  const tabId = (id: Tab) => `${ids}-tab-${id}`;
+  const panelId = `${ids}-panel`;
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    const next =
+      tabs[(tabs.indexOf(shownTab) + step + tabs.length) % tabs.length];
+    setTab(next);
+    document.getElementById(tabId(next))?.focus();
+  };
+
   const tabButton = (id: Tab, label: string) => (
     <button
       type="button"
       role="tab"
-      aria-selected={tab === id}
+      id={tabId(id)}
+      aria-selected={shownTab === id}
+      aria-controls={panelId}
+      tabIndex={shownTab === id ? 0 : -1}
       onClick={() => setTab(id)}
       className={`rounded-md px-2 py-0.5 text-[12px] font-medium ${
-        tab === id
+        shownTab === id
           ? "bg-content/10 text-content"
           : "text-content/50 hover:bg-content/5 hover:text-content/80"
       }`}
@@ -151,9 +172,15 @@ export function ExternalSessionViewer({
         data-fork-external-viewer=""
         className="flex min-h-full flex-col gap-3 px-4 pb-4 pt-3"
       >
-        <div className="flex items-center gap-1" role="tablist">
-          {hasHandoff ? tabButton("handoff", "Handoff") : null}
-          {tabButton("transcript", "Transcript")}
+        <div className="flex items-center gap-1">
+          <div
+            role="tablist"
+            className="flex items-center gap-1"
+            onKeyDown={onTabKey}
+          >
+            {hasHandoff ? tabButton("handoff", "Handoff") : null}
+            {tabButton("transcript", "Transcript")}
+          </div>
           <span className="ml-auto flex items-center gap-1.5">
             {hasHandoff ? (
               <button
@@ -179,46 +206,53 @@ export function ExternalSessionViewer({
             </button>
           </span>
         </div>
-        {error ? (
-          <p className="text-[12px] text-content/50">
-            Could not read this session. {error}
-          </p>
-        ) : null}
-        {tab === "handoff" && hasHandoff ? (
-          handoff ? (
-            <AgentMarkdown text={handoff.text} className="text-[13px]" />
-          ) : loading ? null : (
-            <p className="text-[12px] text-content/45">{handoffPath}</p>
-          )
-        ) : (
-          <div className="flex flex-col gap-3">
-            {before != null ? (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => void loadOlder()}
-                className="self-center rounded-md px-2 py-0.5 text-[12px] text-content/50 hover:bg-content/5 hover:text-content/80"
-              >
-                Load older
-              </button>
-            ) : null}
-            {turns.map((turn, index) => (
-              <TurnView key={index} turn={turn} />
-            ))}
-            {!loading && turns.length === 0 && !error ? (
-              <p className="text-[12px] text-content/45">
-                {session.hasTranscript
-                  ? "No turns yet."
-                  : "This session's transcript is not readable."}
-              </p>
-            ) : null}
-            {truncated ? (
-              <p className="text-[11px] text-content/40">
-                Some long text was shortened.
-              </p>
-            ) : null}
-          </div>
-        )}
+        <div
+          role="tabpanel"
+          id={panelId}
+          aria-labelledby={tabId(shownTab)}
+          className="flex flex-col gap-3"
+        >
+          {error ? (
+            <p className="text-[12px] text-content/50">
+              Could not read this session. {error}
+            </p>
+          ) : null}
+          {shownTab === "handoff" ? (
+            handoff ? (
+              <AgentMarkdown text={handoff.text} className="text-[13px]" />
+            ) : loading ? null : (
+              <p className="text-[12px] text-content/45">{handoffPath}</p>
+            )
+          ) : (
+            <div className="flex flex-col gap-3">
+              {before != null ? (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void loadOlder()}
+                  className="self-center rounded-md px-2 py-0.5 text-[12px] text-content/50 hover:bg-content/5 hover:text-content/80"
+                >
+                  Load older
+                </button>
+              ) : null}
+              {turns.map((turn, index) => (
+                <TurnView key={index} turn={turn} />
+              ))}
+              {!loading && turns.length === 0 && !error ? (
+                <p className="text-[12px] text-content/45">
+                  {session.hasTranscript
+                    ? "No turns yet."
+                    : "This session's transcript is not readable."}
+                </p>
+              ) : null}
+              {truncated ? (
+                <p className="text-[11px] text-content/40">
+                  Some long text was shortened.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   );

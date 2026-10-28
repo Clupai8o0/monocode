@@ -1,6 +1,7 @@
 import { useLocalSearchParams } from "expo-router";
 
 import { ElsewhereScreen } from "@/features/sessions/ElsewhereScreen";
+import { sessionIdFromRoute } from "@/features/sessions/externalSessions";
 import { projectForRoute } from "@/features/workspace/routing";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
 
@@ -19,7 +20,8 @@ export default function ElsewhereRoute() {
   return (
     <ElsewhereScreen
       projectId={project?.id ?? projectId}
-      sessionId={sessionId}
+      // Pushed in a route-safe form (see sessionIdToRoute).
+      sessionId={sessionIdFromRoute(sessionId)}
       name={name}
       source={source}
       state={state}

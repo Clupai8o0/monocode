@@ -66,7 +66,9 @@ import {
 import { isHarnessAvailable } from "../../../integrations/harness/core/availability";
 import { mobileTranscript } from "./mobileTranscript";
 import {
+  matchProjects,
   ownSessionIds,
+  storedSessionIds,
   withoutOwnSessions,
 } from "../../../fork/externalSessions/externalSessionsStore";
 import type { ExternalSession } from "../../../fork/externalSessions/externalSessionsModel";
@@ -466,14 +468,24 @@ export async function mobileExternalSessions(
   const projectId = String(params.projectId ?? "");
   const cwd = mobileProjectPaths().find((path) => mobileProjectId(path) === projectId);
   if (!cwd) throw new Error("Project is no longer available");
-  const projects = [{ projectId, cwd }];
+  // Every known folder, so a session in a nested project is filed there.
+  const projects = matchProjects([{ projectId, cwd }], mobileProjectPaths(), mobileProjectId);
+  // This window's sessions, plus any other window's from the shared store.
   const own = ownSessionIds(sessions);
+  for (const id of await storedSessionIds([cwd]).catch(() => new Set<string>())) {
+    own.add(id);
+  }
   if (method === "externalSessions.list") {
     const result = await invoke<{ sessions: ExternalSession[] }>(
       "fork_external_sessions_list",
-      { projects },
+      { projects, only: [projectId] },
     );
-    return { sessions: withoutOwnSessions(result.sessions, own) };
+    return {
+      sessions: withoutOwnSessions(
+        result.sessions.filter((session) => session.projectId === projectId),
+        own,
+      ),
+    };
   }
   const sessionId = String(params.sessionId ?? "");
   if (own.has(sessionId)) throw new Error("Session not found");

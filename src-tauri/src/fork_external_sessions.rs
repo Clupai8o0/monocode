@@ -88,13 +88,18 @@ pub struct TranscriptPage {
     truncated: Option<bool>,
 }
 
-/// Every external session on these projects, on this Mac.
+/// Every external session on these projects, on this Mac; with `only`, the
+/// rows of just those project ids, still matched against every project.
 #[tauri::command]
-pub async fn fork_external_sessions_list(projects: Vec<ProjectRef>) -> Result<SessionList, String> {
+pub async fn fork_external_sessions_list(
+    projects: Vec<ProjectRef>,
+    only: Option<Vec<String>>,
+) -> Result<SessionList, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let env = Env::system();
+        let only: Option<HashSet<String>> = only.map(|ids| ids.into_iter().collect());
         SessionList {
-            sessions: list(&env, &projects),
+            sessions: list(&env, &projects, only.as_ref()),
         }
     })
     .await
@@ -715,7 +720,15 @@ fn note_handoff(env: &Env, note: &Note, project: &str) -> Option<String> {
 
 // ---- list ----
 
-fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
+/// The rows of every project, or of the ids in `only`. Sessions are matched
+/// against all `projects`, so a nested project keeps its own, but only the
+/// wanted projects' history and handoff files are read.
+fn list(
+    env: &Env,
+    projects: &[ProjectRef],
+    only: Option<&HashSet<String>>,
+) -> Vec<ExternalSession> {
+    let wanted = |id: &str| only.is_none_or(|ids| ids.contains(id));
     let records = read_records(env);
     let live: Vec<Record> = records
         .into_iter()
@@ -731,6 +744,9 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
         let Some(project) = match_project(env, projects, &record.cwd) else {
             continue;
         };
+        if !wanted(&project.project_id) {
+            continue;
+        }
         let mut source = record.source;
         let mut has_transcript = false;
         if is_claude(source) {
@@ -763,7 +779,7 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
     // Notes and hand-overs, one history file per repo.
     let mut seen_common: HashSet<PathBuf> = HashSet::new();
     let mut handed: Vec<ExternalSession> = Vec::new();
-    for project in projects {
+    for project in projects.iter().filter(|p| wanted(&p.project_id)) {
         let Some(common) = (env.common_dir)(Path::new(&project.cwd)) else {
             continue;
         };
@@ -787,6 +803,9 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
             }
             let cwd = note.worktree.clone().unwrap_or_else(|| project.cwd.clone());
             let owner = match_project(env, projects, &cwd).unwrap_or(project);
+            if !wanted(&owner.project_id) {
+                continue;
+            }
             let agent = agent_of_name(note.name.as_deref());
             let found = if agent.is_some() {
                 None
@@ -816,7 +835,7 @@ fn list(env: &Env, projects: &[ProjectRef]) -> Vec<ExternalSession> {
     }
 
     // Handoff files no row names yet.
-    for project in projects {
+    for project in projects.iter().filter(|p| wanted(&p.project_id)) {
         let named: HashSet<String> = handed
             .iter()
             .filter(|r| r.project_id == project.project_id)
@@ -902,10 +921,14 @@ fn read(
         .iter()
         .find(|p| p.project_id == project_id)
         .ok_or("Session not found")?;
-    let row = list(env, projects)
-        .into_iter()
-        .find(|r| r.project_id == project_id && r.id == session_id)
-        .ok_or("Session not found")?;
+    let row = list(
+        env,
+        projects,
+        Some(&HashSet::from([project_id.to_string()])),
+    )
+    .into_iter()
+    .find(|r| r.project_id == project_id && r.id == session_id)
+    .ok_or("Session not found")?;
     let handoff = if before.is_none() {
         row.handoff_path
             .as_deref()
@@ -1265,7 +1288,7 @@ mod tests {
             &rec(8, "aaaaaaaa-1", &repo, 30, ""),
         );
         let e = env(&home, vec![proc(1), proc(7), proc(8)]);
-        let rows = list(&e, &[project("p", &repo)]);
+        let rows = list(&e, &[project("p", &repo)], None);
         let ids: Vec<(&str, &str, &str)> = rows
             .iter()
             .map(|r| (r.id.as_str(), r.source.as_str(), r.state))
@@ -1333,7 +1356,7 @@ mod tests {
             ),
         );
         let e = env(&home, vec![proc(1), at(2), at(3), other]);
-        let ids: Vec<String> = list(&e, &[project("p", &repo)])
+        let ids: Vec<String> = list(&e, &[project("p", &repo)], None)
             .into_iter()
             .map(|r| r.id)
             .collect();
@@ -1362,6 +1385,52 @@ mod tests {
         assert!(agent_command("grok-macos-arm64 run"));
         assert!(!agent_command("claudette"));
         assert!(!agent_command("/bin/zsh"));
+    }
+
+    #[test]
+    fn lists_only_the_asked_projects() {
+        let home = temp();
+        let a = home.join("a");
+        let ab = home.join("a/b");
+        std::fs::create_dir_all(a.join(".git")).unwrap();
+        std::fs::create_dir_all(&ab).unwrap();
+        write(
+            &home.join(".claude/sessions/31.json"),
+            &rec(31, "aaaaaaaa-31", &a, 1, ""),
+        );
+        write(
+            &home.join(".claude/sessions/32.json"),
+            &rec(32, "bbbbbbbb-32", &ab, 2, ""),
+        );
+        write(&ab.join(".claude/handoff.md"), "b's handoff");
+        let e = Env {
+            now_ms: now_ms(),
+            ..env(&home, vec![proc(31), proc(32)])
+        };
+        let projects = [project("a", &a), project("ab", &ab)];
+        let rows = |only: Option<&HashSet<String>>| -> Vec<String> {
+            let mut rows: Vec<String> = list(&e, &projects, only)
+                .into_iter()
+                .map(|r| format!("{} {}", r.project_id, r.id))
+                .collect();
+            rows.sort();
+            rows
+        };
+        // The nested project's session stays its own, so "a" shows only its.
+        assert_eq!(
+            rows(Some(&HashSet::from(["a".to_string()]))),
+            vec!["a aaaaaaaa-31"]
+        );
+        assert_eq!(
+            rows(None),
+            vec![
+                "a aaaaaaaa-31",
+                "ab bbbbbbbb-32",
+                "ab handoff:.claude/handoff.md"
+            ]
+        );
+        assert!(read(&e, &projects, "a", "bbbbbbbb-32", None, None).is_err());
+        assert!(read(&e, &projects, "ab", "bbbbbbbb-32", None, None).is_ok());
     }
 
     #[test]
@@ -1436,7 +1505,7 @@ mod tests {
             "",
         );
         let e = env(&home, vec![proc(1)]);
-        let rows = list(&e, &[project("p", &repo)]);
+        let rows = list(&e, &[project("p", &repo)], None);
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, vec!["livelive-1", "gonegone-5", "gonegone-2"]);
         assert_eq!(rows[0].note.as_deref(), Some("doing tests"));
@@ -1461,7 +1530,7 @@ mod tests {
             now_ms: now_ms(),
             ..env(&home, vec![])
         };
-        let rows = list(&e, &[project("p", &repo)]);
+        let rows = list(&e, &[project("p", &repo)], None);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "handoff:.claude/handoff-ui.md");
         assert_eq!(rows[0].name.as_deref(), Some("handoff-ui.md"));
@@ -1482,7 +1551,7 @@ mod tests {
             now_ms: now_ms() + 8 * 86_400_000,
             ..env(&home, vec![])
         };
-        assert!(list(&e, &[project("p", &repo)]).is_empty());
+        assert!(list(&e, &[project("p", &repo)], None).is_empty());
     }
 
     #[test]
@@ -1726,7 +1795,7 @@ mod tests {
             mac: false,
             ..env(&home, vec![kimi, reused, proc(23)])
         };
-        let ids: Vec<String> = list(&e, &[project("p", &repo)])
+        let ids: Vec<String> = list(&e, &[project("p", &repo)], None)
             .into_iter()
             .map(|r| r.id)
             .collect();
@@ -1776,7 +1845,7 @@ mod tests {
         write(&repo.join(".git/claude-claims-history.jsonl"), &history);
         let e = env(&home, vec![]);
         let projects = [project("p", &repo)];
-        let rows = list(&e, &projects);
+        let rows = list(&e, &projects, None);
         let ids: Vec<(&str, Option<&str>, &str)> = rows
             .iter()
             .map(|r| (r.id.as_str(), r.handoff_path.as_deref(), r.source.as_str()))
@@ -1802,14 +1871,25 @@ mod tests {
             .unwrap_err(),
             "Session not found"
         );
-        // A .claude folder linked from outside the project lists nothing.
+        // A .claude folder linked from outside the project lists nothing,
+        // while a real one does (a clock of now, so neither is a week old).
         let linked = home.join("linked");
         let outside = home.join("outside");
         std::fs::create_dir_all(&linked).unwrap();
         write(&outside.join("handoff.md"), "not this project's");
         std::os::unix::fs::symlink(&outside, linked.join(".claude")).unwrap();
+        write(&repo.join(".claude/handoff-real.md"), "this project's");
+        let fresh = Env {
+            now_ms: now_ms(),
+            ..env(&home, vec![])
+        };
         let both = [project("p", &repo), project("q", &linked)];
-        assert!(list(&e, &both).iter().all(|r| r.project_id == "p"));
+        let listed: Vec<String> = list(&fresh, &both, None)
+            .into_iter()
+            .map(|r| format!("{} {}", r.project_id, r.id))
+            .collect();
+        assert!(listed.contains(&"p handoff:.claude/handoff-real.md".to_string()));
+        assert!(listed.iter().all(|r| r.starts_with("p ")));
         assert!(read_handoff(linked.to_str().unwrap(), ".claude/handoff.md").is_none());
         assert!(is_handoff_real_path(Path::new("/r/.claude/handoff-x.md")));
         assert!(!is_handoff_real_path(Path::new("/r/claude/handoff.md")));
@@ -1835,7 +1915,7 @@ mod tests {
         );
         let e = env(&home, vec![proc(1)]);
         let projects = [project("p", &repo)];
-        let rows = list(&e, &projects);
+        let rows = list(&e, &projects, None);
         assert!(rows[0].has_transcript);
         let page = read(&e, &projects, "p", "livelive-1", None, Some(1)).unwrap();
         assert_eq!(page.turns[0].text, "two");

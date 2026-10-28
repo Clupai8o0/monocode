@@ -64,6 +64,22 @@ export function sessionLabel(session: ExternalSession): string {
   return `${sourceLabel(session.source)} ${id}`;
 }
 
+export type ViewingFor = { key: string; session: ExternalSession } | null;
+
+/**
+ * Whether the open viewer still fits: same project, with the group still
+ * shown. A session that leaves a list that still shows stays open, since
+ * its turns are already read. Once it does not fit, the caller clears it
+ * for good, so the viewer never comes back by itself.
+ */
+export function viewerStillOpen(
+  viewingFor: ViewingFor,
+  key: string,
+  sessions: readonly ExternalSession[],
+): boolean {
+  return !!viewingFor && viewingFor.key === key && sessions.length > 0;
+}
+
 function StateMark({ state }: { state: ExternalSession["state"] }) {
   if (state === "handed-over") {
     return (
@@ -147,12 +163,16 @@ export function ElsewhereGroup({
     : "";
   const [openFor, setOpenFor] = useState<{ key: string; open: boolean }>();
   const open = openFor?.key === key ? openFor.open : readOpen(key);
-  // Tied to the project, so switching projects closes the viewer.
-  const [viewingFor, setViewing] = useState<{
-    key: string;
-    session: ExternalSession;
-  } | null>(null);
-  const viewing = viewingFor?.key === key ? viewingFor.session : null;
+  // Tied to the project and the group: switching projects or the list
+  // emptying closes the viewer, and it stays closed.
+  const [viewingFor, setViewing] = useState<ViewingFor>(null);
+  const shown = !!target && supported ? sessions : [];
+  const stillOpen = viewerStillOpen(viewingFor, key, shown);
+  if (viewingFor && !stillOpen) {
+    // Adjusting state while rendering, as React documents; not an effect.
+    setViewing(null);
+  }
+  const viewing = stillOpen && viewingFor ? viewingFor.session : null;
 
   if (!target || !supported || sessions.length === 0) {
     return null;

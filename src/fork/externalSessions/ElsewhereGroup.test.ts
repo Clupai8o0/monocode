@@ -8,7 +8,12 @@ import type {
 } from "./externalSessionsModel";
 import { useExternalSessions, readExternalSession } from "./externalSessionsStore";
 import { continueFromHandoff } from "../handoff/handoffStore";
-import { ElsewhereGroup, elsewhereTarget, sessionLabel } from "./ElsewhereGroup";
+import {
+  ElsewhereGroup,
+  elsewhereTarget,
+  sessionLabel,
+  viewerStillOpen,
+} from "./ElsewhereGroup";
 import { ExternalSessionViewer } from "./ExternalSessionViewer";
 
 vi.mock("./externalSessionsStore", () => ({
@@ -119,6 +124,44 @@ describe("ElsewhereGroup", () => {
     expect(localStorage.getItem("monocode.fork.elsewhereOpen")).toContain("/p");
   });
 
+  it("keeps the viewer only for the same project while the group shows", () => {
+    const open = { key: "/p", session: running };
+    expect(viewerStillOpen(open, "/p", [running, handed])).toBe(true);
+    expect(viewerStillOpen(open, "/q", [running])).toBe(false);
+    // A session that ended stays open; its turns are already read.
+    expect(viewerStillOpen(open, "/p", [handed])).toBe(true);
+    expect(viewerStillOpen(open, "/p", [])).toBe(false);
+    expect(viewerStillOpen(null, "/p", [running])).toBe(false);
+  });
+
+  it("closes the viewer for good when the list empties", async () => {
+    vi.mocked(readExternalSession).mockReturnValue(new Promise(() => {}));
+    localStorage.setItem("monocode.fork.elsewhereOpen", JSON.stringify({ "/p": true }));
+    mockList([running]);
+    await render(createElement(ElsewhereGroup, { target, cwd: "/p" }));
+    click(document.querySelector("[data-fork-elsewhere-row]"));
+    expect(document.querySelector("[data-fork-external-viewer]")).not.toBeNull();
+    mockList([]);
+    await render(createElement(ElsewhereGroup, { target, cwd: "/p" }));
+    expect(document.querySelector("[data-fork-external-viewer]")).toBeNull();
+    mockList([running]);
+    await render(createElement(ElsewhereGroup, { target, cwd: "/p" }));
+    expect(document.querySelector("[data-fork-external-viewer]")).toBeNull();
+  });
+
+  it("closes the viewer for good when the project changes", async () => {
+    vi.mocked(readExternalSession).mockReturnValue(new Promise(() => {}));
+    localStorage.setItem("monocode.fork.elsewhereOpen", JSON.stringify({ "/p": true }));
+    mockList([running]);
+    await render(createElement(ElsewhereGroup, { target, cwd: "/p" }));
+    click(document.querySelector("[data-fork-elsewhere-row]"));
+    const other = { kind: "local" as const, projectId: "/q", cwd: "/q" };
+    await render(createElement(ElsewhereGroup, { target: other, cwd: "/q" }));
+    expect(document.querySelector("[data-fork-external-viewer]")).toBeNull();
+    await render(createElement(ElsewhereGroup, { target, cwd: "/p" }));
+    expect(document.querySelector("[data-fork-external-viewer]")).toBeNull();
+  });
+
   it("labels sessions without a name", () => {
     expect(sessionLabel(running)).toBe("cx abcdef12");
     expect(
@@ -210,5 +253,34 @@ describe("ExternalSessionViewer", () => {
       "Transcript",
     ]);
     expect(document.querySelector("[data-fork-external-continue]")).toBeNull();
+  });
+
+  it("keeps actions out of the tablist and moves tabs with arrow keys", async () => {
+    vi.mocked(readExternalSession).mockResolvedValue({ turns: [] });
+    await render(
+      createElement(ExternalSessionViewer, {
+        target,
+        session: handed,
+        cwd: "/p",
+        onClose: () => {},
+      }),
+    );
+    const list = document.querySelector("[role=tablist]")!;
+    expect([...list.querySelectorAll("button")].every((b) => b.role === "tab")).toBe(true);
+    const tabs = [...list.querySelectorAll<HTMLElement>("[role=tab]")];
+    const panel = document.querySelector("[role=tabpanel]")!;
+    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1]);
+    expect(tabs.every((t) => t.getAttribute("aria-controls") === panel.id)).toBe(true);
+    expect(panel.getAttribute("aria-labelledby")).toBe(tabs[0].id);
+    act(() => {
+      tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(tabs.map((t) => t.tabIndex)).toEqual([-1, 0]);
+    expect(panel.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+    expect(document.activeElement).toBe(tabs[1]);
+    act(() => {
+      tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1]);
   });
 });

@@ -1,7 +1,8 @@
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { router, useIsFocused } from "expo-router";
+import { use, useEffect, useState } from "react";
+import { AppState, Pressable, Text, View } from "react-native";
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
@@ -18,9 +19,11 @@ import {
   ExternalUnsupported,
   listExternalSessions,
   metaParts,
+  sessionIdToRoute,
   sessionTitle,
   stateLabel,
 } from "./externalSessions";
+import { SpinnersPaused } from "./TerminalSpinner";
 
 const POLL_MS = 20_000;
 const PULSE_MS = 1600;
@@ -34,8 +37,9 @@ export function useConnectionKey() {
 
 /**
  * The project's sessions MonoCode did not start, read when the page comes
- * into view and every 20 s while it stays. The last good list stays on an
- * error; an older desktop or host hides the section.
+ * into view and every 20 s while it stays (and the screen is focused and the
+ * app in the foreground). The last good list stays on an error; an older
+ * desktop or host hides the section.
  */
 export function useExternalSessions(projectId: string, active: boolean) {
   const { command } = useConnection();
@@ -44,8 +48,17 @@ export function useExternalSessions(projectId: string, active: boolean) {
   const scope = `${connection}\n${projectId}`;
   const [listed, setListed] = useState<{ scope: string; sessions: ExternalSession[] }>();
   const setSessions = (sessions: ExternalSession[]) => setListed({ scope, sessions });
+  const focused = useIsFocused();
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
   useEffect(() => {
-    if (!active) return;
+    const subscription = AppState.addEventListener("change", (state) =>
+      setForeground(state === "active"),
+    );
+    return () => subscription.remove();
+  }, []);
+  const polling = active && focused && foreground;
+  useEffect(() => {
+    if (!polling) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
@@ -66,7 +79,7 @@ export function useExternalSessions(projectId: string, active: boolean) {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [command, connection, projectId, active]);
+  }, [command, connection, projectId, polling]);
   return listed?.scope === scope ? listed.sessions : NONE;
 }
 
@@ -97,7 +110,7 @@ function ElsewhereRow({ session }: { session: ExternalSession }) {
           pathname: "/project/[projectId]/elsewhere/[sessionId]",
           params: {
             projectId: session.projectId,
-            sessionId: session.id,
+            sessionId: sessionIdToRoute(session.id),
             name: title,
             source: session.source,
             state: session.state,
@@ -140,8 +153,15 @@ export function StateMark({ state }: { state: ExternalSession["state"] }) {
 function PulsingDot() {
   const styles = useStyles();
   const colors = useColors();
+  const paused = use(SpinnersPaused);
   const pulse = useSharedValue(0);
   useEffect(() => {
+    if (paused) {
+      cancelAnimation(pulse);
+      pulse.set(1);
+      return;
+    }
+    pulse.set(0);
     pulse.set(
       withRepeat(
         withTiming(1, { duration: PULSE_MS, easing: Easing.inOut(Easing.sin) }),
@@ -149,7 +169,8 @@ function PulsingDot() {
         true,
       ),
     );
-  }, [pulse]);
+    return () => cancelAnimation(pulse);
+  }, [pulse, paused]);
   const style = useAnimatedStyle(() => ({
     opacity: 0.45 + 0.55 * pulse.get(),
     transform: [{ scale: 0.85 + 0.15 * pulse.get() }],
@@ -159,7 +180,7 @@ function PulsingDot() {
 
 const useStyles = themedStyles((colors) => ({
   section: {
-    paddingTop: 28,
+    paddingBottom: 20,
   },
   heading: {
     paddingHorizontal: 14,

@@ -1,12 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { listSessionsByProject } from "../../features/sessions/data/sessionStore";
 import type { ExternalSession } from "./externalSessionsModel";
 import {
   groupByProject,
   isUnsupportedError,
   machineKey,
+  matchProjects,
   ownSessionIds,
+  storedSessionIds,
   withoutOwnSessions,
 } from "./externalSessionsStore";
+
+vi.mock("../../features/sessions/data/sessionStore", () => ({
+  listSessionsByProject: vi.fn(),
+}));
 
 const row = (id: string, projectId: string): ExternalSession => ({
   id,
@@ -50,5 +57,33 @@ describe("external sessions store", () => {
       machineKey({ kind: "local", projectId: "b", cwd: "/b" }),
     );
     expect(machineKey({ kind: "remote", machineId: "m", projectId: "a" })).toBe("remote:m");
+  });
+
+  it("passes every known local folder so nested projects match deepest", () => {
+    const projects = matchProjects(
+      [{ projectId: "/a", cwd: "/a" }],
+      ["/a", "/a/b", "~", "", "remote://m/x", "/a/b"],
+    );
+    expect(projects).toEqual([
+      { projectId: "/a", cwd: "/a" },
+      { projectId: "/a/b", cwd: "/a/b" },
+    ]);
+    expect(
+      matchProjects([{ projectId: "id-a", cwd: "/a" }], ["/c"], (path) => `id${path}`),
+    ).toEqual([
+      { projectId: "id-a", cwd: "/a" },
+      { projectId: "id/c", cwd: "/c" },
+    ]);
+  });
+
+  it("reads sessions other windows started from the shared store", async () => {
+    vi.mocked(listSessionsByProject).mockImplementation(async (cwd) =>
+      cwd === "/a"
+        ? ([{ providerSessionId: "w2" }, {}] as never)
+        : ([{ providerSessionId: "w3" }] as never),
+    );
+    const ids = await storedSessionIds(["/a", "/b", "/a"]);
+    expect([...ids].sort()).toEqual(["w2", "w3"]);
+    expect(listSessionsByProject).toHaveBeenCalledTimes(2);
   });
 });

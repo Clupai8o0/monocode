@@ -128,3 +128,23 @@ export function metaParts(session: ExternalSession, now = Date.now()) {
   if (session.updatedAt) parts.push(relativeTime(session.updatedAt, now));
   return parts;
 }
+
+/**
+ * A session id made safe for a route param. Expo Router decodes a pushed
+ * param once reading the path and again in useLocalSearchParams, so an id
+ * holding "%" or "/" would not come back intact. This leaves no "%" or "/":
+ * percent-encode, escape "~", then write each "%" as "~". Plain ids pass
+ * through unchanged.
+ */
+export function sessionIdToRoute(id: string) {
+  return encodeURIComponent(id).replace(/~/g, "%7E").replace(/%/g, "~");
+}
+
+/** The session id back from its route param (see sessionIdToRoute). */
+export function sessionIdFromRoute(param: string) {
+  try {
+    return decodeURIComponent(param.replace(/~/g, "%"));
+  } catch {
+    return param;
+  }
+}

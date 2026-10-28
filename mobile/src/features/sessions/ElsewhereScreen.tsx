@@ -55,7 +55,11 @@ export function ElsewhereScreen({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const alive = useRef(true);
+  // Bumped by each load, so an older page asked for before it is dropped.
+  const generation = useRef(0);
+  const loading = useRef(false);
   useEffect(
     () => () => {
       alive.current = false;
@@ -64,6 +68,9 @@ export function ElsewhereScreen({
   );
 
   const load = useCallback(async () => {
+    generation.current += 1;
+    loading.current = true;
+    const mine = generation.current;
     try {
       const page = await readExternalSession(command, connection, projectId, sessionId);
       if (!alive.current) return;
@@ -76,6 +83,8 @@ export function ElsewhereScreen({
       setError(null);
     } catch (reason) {
       if (alive.current) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (generation.current === mine) loading.current = false;
     }
   }, [command, connection, projectId, sessionId]);
 
@@ -91,8 +100,17 @@ export function ElsewhereScreen({
     if (alive.current) setRefreshing(false);
   };
 
+  const retry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    await load();
+    if (alive.current) setRetrying(false);
+  };
+
   const loadOlder = async () => {
-    if (!shown || shown.before === undefined || loadingOlder) return;
+    if (!shown || shown.before === undefined || loadingOlder || loading.current) return;
+    const before = shown.before;
+    const mine = generation.current;
     setLoadingOlder(true);
     try {
       const page = await readExternalSession(
@@ -100,21 +118,26 @@ export function ElsewhereScreen({
         connection,
         projectId,
         sessionId,
-        shown.before,
+        before,
       );
       if (!alive.current) return;
+      // A refresh since replaced the turns; this page no longer joins them.
+      if (generation.current !== mine) return;
       setShown((current) =>
-        current && {
-          ...current,
-          turns: [...page.turns, ...current.turns],
-          before: page.before,
-          truncated: current.truncated || !!page.truncated,
-        },
+        current && current.before === before
+          ? {
+              ...current,
+              turns: [...page.turns, ...current.turns],
+              before: page.before,
+              truncated: current.truncated || !!page.truncated,
+            }
+          : current,
       );
     } catch {
       // The button stays; another tap tries again.
+    } finally {
+      if (alive.current) setLoadingOlder(false);
     }
-    if (alive.current) setLoadingOlder(false);
   };
 
   const sub = [sourceLabel(source ?? "claude") ?? "claude", state && stateLabel(state as ExternalSessionState)]
@@ -140,6 +163,11 @@ export function ElsewhereScreen({
             <RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />
           }
         >
+          {error ? (
+            <Text style={styles.note} numberOfLines={2}>
+              {error}
+            </Text>
+          ) : null}
           {shown.before !== undefined ? (
             <Pressable
               accessibilityRole="button"
@@ -170,8 +198,20 @@ export function ElsewhereScreen({
           ) : null}
         </ScrollView>
       ) : error ? (
-        <View style={styles.center}>
+        <View style={[styles.center, styles.failed]}>
           <Text style={styles.note}>{error}</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={retrying}
+            onPress={() => void retry()}
+            style={({ pressed }) => [styles.older, pressed && styles.pressed]}
+          >
+            {retrying ? (
+              <ActivityIndicator color={colors.muted} />
+            ) : (
+              <Text style={styles.olderLabel}>Try again</Text>
+            )}
+          </Pressable>
         </View>
       ) : (
         <View style={styles.center}>
@@ -215,6 +255,9 @@ const useStyles = themedStyles((colors) => ({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 20,
+  },
+  failed: {
+    gap: 14,
   },
   content: {
     paddingHorizontal: 20,
