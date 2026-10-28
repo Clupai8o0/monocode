@@ -81,6 +81,24 @@ it("rejects malformed catalogs and never restores a forgotten machine's", async 
     { models: { claude: [null] }, errors: {} },
     { models: { claude: [{ id: "claude:x" }] }, errors: {} },
     { models: { claude: [{ id: "claude:x", name: "X", settings: {} }] }, errors: {} },
+    {
+      models: {
+        claude: [{ id: "claude:x", name: "X", settings: [{ id: "effort", label: "Effort", kind: "select", value: "high" }] }],
+      },
+      errors: {},
+    },
+    {
+      models: {
+        claude: [
+          {
+            id: "claude:x",
+            name: "X",
+            settings: [{ id: "effort", label: "Effort", kind: "select", value: "high", options: ["high"] }],
+          },
+        ],
+      },
+      errors: {},
+    },
     { models: {}, errors: { claude: { message: "down" } } },
   ]) {
     await expect(

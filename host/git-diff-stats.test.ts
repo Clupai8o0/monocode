@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -38,6 +38,15 @@ it("counts staged files in a repo with no commit yet", async () => {
   execFileSync("git", ["add", "staged.txt"], { cwd: repo });
   writeFileSync(join(repo, "loose.txt"), "c\n");
   expect(await gitDiffStats(repo)).toEqual({ additions: 3, deletions: 0 });
+});
+
+// Root can read any file, so the failure only shows for a normal user.
+it.skipIf(process.getuid?.() === 0)("fails the count when an untracked file cannot be read", async () => {
+  const repo = temp();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  writeFileSync(join(repo, "locked.txt"), "a\n");
+  chmodSync(join(repo, "locked.txt"), 0o000);
+  await expect(gitDiffStats(repo)).rejects.toThrow();
 });
 
 it("skips a folder that is not a git repo", async () => {

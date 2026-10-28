@@ -23,10 +23,18 @@ let generation = 0;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
+const isChoice = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.value === "string" &&
+  typeof value.label === "string";
 const isSetting = (value: unknown) =>
   isRecord(value) &&
   typeof value.id === "string" &&
-  (value.options === undefined || Array.isArray(value.options));
+  typeof value.label === "string" &&
+  (value.kind === "select" || value.kind === "toggle") &&
+  typeof value.value === "string" &&
+  Array.isArray(value.options) &&
+  value.options.every(isChoice);
 const isModel = (value: unknown) =>
   isRecord(value) &&
   typeof value.id === "string" &&

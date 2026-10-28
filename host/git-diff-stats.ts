@@ -75,13 +75,14 @@ export const gitDiffStats: DiffCounter = async (cwd) => {
     .slice(0, MAX_UNTRACKED);
   // One file at a time, so a count never runs more than one git. `git diff
   // --no-index` exits 1 when files differ, so its output is read from the
-  // error too.
+  // error too. Any other failure (a timeout, an unreadable file) fails the
+  // count, which keeps the last good one.
   for (const path of untracked) {
     let out = "";
     try {
       out = await git(cwd, ["diff", "--no-index", "--numstat", "--", "/dev/null", path]);
     } catch (error) {
-      if ((error as { killed?: boolean }).killed) throw error;
+      if ((error as { code?: unknown }).code !== 1) throw error;
       out = String((error as { stdout?: unknown }).stdout ?? "");
     }
     additions += Number(out.split("\t")[0]) || 0;
