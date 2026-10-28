@@ -5,6 +5,7 @@ import { Alert, Linking, StyleSheet, Switch, Text, View } from "react-native";
 import { useConnection } from "@/features/connection/ConnectionProvider";
 import { MONOS_ENABLED } from "@/features/connection/selection";
 import { useConnectionLabel } from "@/features/connection/useConnectionLabel";
+import { useLabAvailable } from "@/features/lab/useLab"; // Fork
 import { useNotificationsBlocked } from "@/features/notifications/SessionNotifications";
 import { useAppearancePreference } from "@/features/settings/appearance";
 import { accessMode } from "@/features/models/access";
@@ -49,6 +50,8 @@ export default function SettingsScreen() {
   const connection = useConnection();
   const where = useConnectionLabel();
   const selected = connection.selection;
+  // Fork: the Home lab row, only for a host that answers lab.status.
+  const lab = useLabAvailable();
   const disconnect = () =>
     Alert.alert(
       "Disconnect computer?",
@@ -206,6 +209,17 @@ export default function SettingsScreen() {
           onPress={() => void connection.refresh()}
         />
       </View>
+      {/* Fork: its own card, set apart by space rather than a line. */}
+      {lab ? (
+        <View style={[styles.card, styles.pushCard]}>
+          <SettingsRow
+            icon="computer"
+            label="Home lab"
+            value={lab.machine}
+            onPress={() => router.push("/settings/lab")}
+          />
+        </View>
+      ) : null}
 
       <View style={[styles.card, styles.lastCard]}>
         <SettingsRow
