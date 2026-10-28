@@ -225,6 +225,12 @@ describe("remote desktop", () => {
       "systemctl --user is-enabled app-org.kde.krdpserver.service",
     ]);
     expect(calls.some((call) => / (enable|disable) /.test(call))).toBe(false);
+    const runtime = fakeRunner({
+      "systemctl --user is-enabled": { stdout: "enabled-runtime\n" },
+    });
+    await expect(
+      new KrdpControl({ run: runtime.run, exists: () => true }).set(true),
+    ).rejects.toThrow("KDE's own remote desktop starts at login");
   });
 
   it("turns off cleanly when the portal grant is already gone", async () => {

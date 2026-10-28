@@ -249,7 +249,10 @@ describe("host lab", () => {
       JSON.stringify({
         desired: { scope: "all", updatedAt: 0, by: "default" },
         machines: {
-          vivobook: good,
+          vivobook: {
+            ...good,
+            accounts: [null, 3, { account: ".claude", enabled: true }],
+          },
           a: null,
           b: 7,
           c: { ...good, machine: 1 },
@@ -264,6 +267,9 @@ describe("host lab", () => {
     expect(status.remoteControl.machines.map((m) => m.machine)).toEqual([
       "clupai",
       "vivobook",
+    ]);
+    expect(status.remoteControl.machines[1]?.accounts).toEqual([
+      { account: ".claude", enabled: true },
     ]);
   });
 

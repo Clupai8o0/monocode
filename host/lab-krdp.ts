@@ -218,7 +218,8 @@ export class KrdpControl {
     const startup = await run("systemctl", ["--user", "is-enabled", KDE_UNIT], {
       timeoutMs: 5000,
     });
-    if (startup.stdout.trim() === "enabled") {
+    // enabled-runtime starts it at login too, until the next boot.
+    if (["enabled", "enabled-runtime"].includes(startup.stdout.trim())) {
       throw new Error(
         "KDE's own remote desktop starts at login; turn that off in System Settings first",
       );

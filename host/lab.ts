@@ -288,7 +288,15 @@ export class HostLab {
       const machines: Record<string, RemoteControlMachine> = {};
       if (raw.machines && typeof raw.machines === "object") {
         for (const [name, entry] of Object.entries(raw.machines)) {
-          if (validMachine(entry)) machines[name] = entry;
+          if (!validMachine(entry)) continue;
+          machines[name] = {
+            ...entry,
+            accounts: entry.accounts.filter(
+              (account) =>
+                typeof account?.account === "string" &&
+                typeof account.enabled === "boolean",
+            ),
+          };
         }
       }
       return {
