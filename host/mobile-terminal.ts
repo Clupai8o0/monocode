@@ -107,6 +107,7 @@ export function terminalEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     EDITOR: "ed",
     VISUAL: "ed",
     GIT_EDITOR: "ed",
+    GIT_SEQUENCE_EDITOR: "ed",
   };
   delete env.NO_COLOR;
   return env;
