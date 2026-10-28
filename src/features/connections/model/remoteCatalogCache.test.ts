@@ -70,6 +70,24 @@ it("asks the host once for concurrent reads, and a failure keeps the cache", asy
   expect(cache.cachedRemoteCatalog("machine", "project")?.catalog).toEqual(catalog("new"));
 });
 
+it("rejects malformed catalogs and never restores a forgotten machine's", async () => {
+  await expect(
+    cache.fetchRemoteCatalog("machine", "project", () =>
+      Promise.resolve({ models: [], errors: [] } as unknown as HostModelCatalog),
+    ),
+  ).rejects.toThrow("Invalid model catalog");
+  let finish!: (value: HostModelCatalog) => void;
+  const late = cache.fetchRemoteCatalog(
+    "machine",
+    "project",
+    () => new Promise<HostModelCatalog>((resolve) => { finish = resolve; }),
+  );
+  cache.forgetRemoteCatalogs("machine");
+  finish(catalog("late"));
+  await late;
+  expect(cache.cachedRemoteCatalog("machine", "project")).toBeUndefined();
+});
+
 it("survives storage that throws", () => {
   const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new Error("quota");

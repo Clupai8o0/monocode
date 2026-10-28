@@ -17,13 +17,16 @@ const loading = new Map<string, Promise<HostModelCatalog>>();
 const keyOf = (machineId: string, projectId: string) =>
   JSON.stringify([machineId, projectId]);
 
+/** Bumped when catalogs are forgotten, so a request already in flight cannot
+ * bring back a disconnected machine's catalog. */
+let generation = 0;
+
+const isRecord = (value: unknown) =>
+  !!value && typeof value === "object" && !Array.isArray(value);
 const isCatalog = (value: unknown): value is HostModelCatalog =>
-  !!value &&
-  typeof value === "object" &&
-  typeof (value as HostModelCatalog).models === "object" &&
-  !!(value as HostModelCatalog).models &&
-  typeof (value as HostModelCatalog).errors === "object" &&
-  !!(value as HostModelCatalog).errors;
+  isRecord(value) &&
+  isRecord((value as HostModelCatalog).models) &&
+  isRecord((value as HostModelCatalog).errors);
 
 function readIndex(): { key: string; at: number }[] {
   try {
@@ -107,6 +110,8 @@ export function rememberRemoteCatalog(
 export function forgetRemoteCatalogs(machineId?: string) {
   const mine = (key: string) =>
     machineId === undefined || (JSON.parse(key) as string[])[0] === machineId;
+  generation++;
+  for (const key of [...loading.keys()]) if (mine(key)) loading.delete(key);
   for (const key of [...memory.keys()]) if (mine(key)) memory.delete(key);
   try {
     const index = readIndex();
@@ -131,14 +136,18 @@ export function fetchRemoteCatalog(
   const key = keyOf(machineId, projectId);
   const pending = loading.get(key);
   if (pending) return pending;
+  const started = generation;
   const next = request()
     .then((catalog) => {
       // A malformed reply must never replace a good cached copy.
       if (!isCatalog(catalog)) throw new Error("Invalid model catalog");
-      rememberRemoteCatalog(machineId, projectId, catalog);
+      if (started === generation)
+        rememberRemoteCatalog(machineId, projectId, catalog);
       return catalog;
     })
-    .finally(() => loading.delete(key));
+    .finally(() => {
+      if (loading.get(key) === next) loading.delete(key);
+    });
   loading.set(key, next);
   return next;
 }
