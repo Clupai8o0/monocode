@@ -168,6 +168,8 @@ export type RelaySession = {
   status?: string;
   /** Its Remote Control id, so a Remote Control row folds into the relayed one. */
   bridgeSessionId?: string;
+  /** Its Claude version; the copy on the other machine uses "relay" without it. */
+  version?: string;
 };
 
 /** A registry entry the host builds for a session elsewhere; the receiving

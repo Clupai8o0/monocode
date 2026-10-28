@@ -47,6 +47,9 @@ pub(crate) struct RelaySession {
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bridge_session_id: Option<String>,
+    /// Its Claude version, so the copy the other machine writes matches it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// One live local session, with where it listens.
@@ -124,6 +127,7 @@ fn parse_session(raw: &str, account: &str, alive: fn(i64, &Path) -> bool) -> Opt
             kind: text(&v["kind"]),
             status: text(&v["status"]),
             bridge_session_id: text(&v["bridgeSessionId"]),
+            version: text(&v["version"]),
         },
         socket: PathBuf::from(socket),
         updated_at: v["updatedAt"].as_i64().unwrap_or(0),

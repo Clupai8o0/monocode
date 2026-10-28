@@ -26,7 +26,7 @@ const MISSING: &str = "The vault's remote_control.py was not found";
 /// What `remote_control.py status --json` printed.
 #[tauri::command]
 pub async fn fork_lab_rc_status() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || rc_status(&script_path()?))
+    tauri::async_runtime::spawn_blocking(move || rc_status(&script_path()?).map(with_machine))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -39,9 +39,11 @@ pub async fn fork_lab_rc_apply(
     by: String,
 ) -> Result<Value, String> {
     check_apply(&scope, &by)?;
-    tauri::async_runtime::spawn_blocking(move || rc_apply(&script_path()?, &scope, updated_at, &by))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        rc_apply(&script_path()?, &scope, updated_at, &by).map(with_machine)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Writes the RDP file under the app's data folder and opens it.
@@ -58,6 +60,19 @@ pub async fn fork_lab_open_rdp(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Adds this Mac's name, as the lab machines see it, for the settings page.
+fn with_machine(mut status: Value) -> Value {
+    if let Value::Object(map) = &mut status {
+        let name = crate::remote_ssh::device_name();
+        let name = name
+            .strip_prefix("MonoCode on ")
+            .unwrap_or(&name)
+            .to_string();
+        map.insert("machine".into(), Value::String(name));
+    }
+    status
 }
 
 fn script_path() -> Result<PathBuf, String> {
