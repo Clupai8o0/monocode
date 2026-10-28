@@ -28,6 +28,7 @@ import { displayPath } from "../../../shared/lib/paths";
 import { IS_MAC, IS_WIN } from "../../../platform/tauri/platform";
 import { releaseNotesTitle } from "../../../app/model/releaseNotes";
 import { terminalTabLabel } from "../../terminal/model/terminalTab";
+import { terminalMachineTooltip } from "../../../fork/machines/MachinePill";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { useAnimatedReorder } from "../../../shared/hooks/useAnimatedReorder";
 import { useTabCloseMotion } from "../hooks/useTabCloseMotion";
@@ -179,7 +180,7 @@ export function surfaceTabPresentation(
     tooltip: isPlanTab(file)
       ? name
       : terminal
-        ? `${name} — ${file.cwd}`
+        ? (terminalMachineTooltip(file.cwd) ?? `${name} — ${file.cwd}`)
         : review
           ? `${file.path} (Working Tree)`
           : file.path,

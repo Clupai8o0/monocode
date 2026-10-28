@@ -16,6 +16,7 @@ import {
   type FsEntry,
 } from "../../../platform/tauri/fs";
 import { generateCommitMessage, generatePrContent } from "../../../integrations/harness";
+import { catalogMachineFields } from "../../../fork/machines/MachinePill";
 import { remotePrContent } from "../../source-control/ui/GitChangesPanel";
 import {
   loadProjectFiles,
@@ -116,6 +117,7 @@ export async function mobileCatalog(
       path,
       name: projectName(path),
       machine: "Desktop",
+      ...catalogMachineFields(path), // Fork: machineName, machinePlatform
       branch: "",
       color: resolveTabGroupColor(path, colors),
       mascot: resolveTabGroupMascot(path, mascots),

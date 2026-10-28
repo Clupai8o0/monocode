@@ -7,6 +7,7 @@ import type {
 } from "./externalSessionsModel";
 import { useExternalSessions } from "./externalSessionsStore";
 import { ExternalSessionViewer } from "./ExternalSessionViewer";
+import { MachinePill } from "../machines/MachinePill";
 
 const OPEN_KEY = "monocode.fork.elsewhereOpen";
 
@@ -196,6 +197,7 @@ export function ElsewhereGroup({
         />
         <span>Elsewhere</span>
         <span className="tabular-nums text-content/35">{sessions.length}</span>
+        <MachinePill path={cwd} local className="ml-auto" />
       </button>
       {open ? (
         <ul className="flex flex-col gap-px">

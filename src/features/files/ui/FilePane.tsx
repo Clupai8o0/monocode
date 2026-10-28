@@ -6,6 +6,7 @@ import {
   useMarkdownMode,
 } from "../../sessions/ui/MarkdownModeToggle";
 import { SurfaceTabs } from "../../workspace/ui/SurfaceTabs";
+import { MachinePill } from "../../../fork/machines/MachinePill";
 import {
   isAgentTab,
   isChangesTab,
@@ -137,6 +138,7 @@ function FilePaneComponent({
           onPinFile={onPinFile}
           onReorder={(ids) => onReorderFiles(pane.id, ids)}
           onPaneDragStart={onPaneDragStart}
+          trailing={<MachinePill path={pane.files.find((f) => f.id === pane.activeFileId)?.cwd} className="mr-2" />}
         />
       ) : null}
       <div data-pane-body="" className="relative min-h-0 flex-1">
