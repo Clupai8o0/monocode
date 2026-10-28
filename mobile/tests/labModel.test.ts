@@ -218,6 +218,21 @@ describe("review fixes", () => {
     ).toBe(false);
     expect(bad({ uresourced: { installed: true } })).toBe(false);
     expect(bad({ remoteDesktop: "on" })).toBe(false);
+    expect(
+      bad({
+        relay: { enabled: true, updatedAt: 0, peers: [null], sessions: 0 },
+      }),
+    ).toBe(false);
+    expect(
+      bad({
+        remoteControl: {
+          desired: { scope: "all", updatedAt: 0, by: "" },
+          machines: [
+            { machine: "x", lab: true, reportedAt: 0, accounts: [null] },
+          ],
+        },
+      }),
+    ).toBe(false);
     expect(bad({ remoteDesktop: { ...desktop, certificate: null } })).toBe(
       false,
     );

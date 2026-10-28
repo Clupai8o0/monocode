@@ -112,12 +112,21 @@ export function isLabStatus(value: unknown): value is LabStatus {
     !isObject(desired) ||
     (desired.scope !== "all" && desired.scope !== "lab") ||
     typeof desired.updatedAt !== "number" ||
+    typeof desired.by !== "string" ||
     !Array.isArray(remoteControl.machines) ||
     !remoteControl.machines.every(
       (machine) =>
         isObject(machine) &&
         typeof machine.machine === "string" &&
-        Array.isArray(machine.accounts),
+        typeof machine.lab === "boolean" &&
+        typeof machine.reportedAt === "number" &&
+        Array.isArray(machine.accounts) &&
+        machine.accounts.every(
+          (item) =>
+            isObject(item) &&
+            typeof item.account === "string" &&
+            typeof item.enabled === "boolean",
+        ),
     )
   ) {
     return false;
@@ -125,6 +134,14 @@ export function isLabStatus(value: unknown): value is LabStatus {
   if (
     typeof relay.enabled !== "boolean" ||
     !Array.isArray(relay.peers) ||
+    !relay.peers.every(
+      (peer) =>
+        isObject(peer) &&
+        typeof peer.id === "string" &&
+        typeof peer.name === "string" &&
+        typeof peer.sessions === "number" &&
+        typeof peer.lastSeen === "number",
+    ) ||
     typeof relay.sessions !== "number"
   ) {
     return false;
