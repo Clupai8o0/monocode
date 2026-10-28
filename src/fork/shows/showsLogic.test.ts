@@ -1,8 +1,17 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  LOOPBACK_UNKNOWN_NOTE,
+  PENDING_PER_MACHINE,
+  PRIVATE_NOTE,
   RateLimit,
   backoffMs,
+  capItems,
+  idlePauseMs,
+  isInside,
+  isLoopback,
+  isPrivateHost,
+  withPending,
   base64Bytes,
   decideShow,
   groupToasts,
@@ -144,5 +153,64 @@ describe("helpers", () => {
     expect([1, 2, 3, 6, 10].map(backoffMs)).toEqual([3000, 6000, 12000, 60000, 60000]);
     expect(isUnknownMethod(new Error("Unknown method: shows.next"))).toBe(true);
     expect(isUnknownMethod("timeout")).toBe(false);
+  });
+});
+
+describe("review fixes", () => {
+  const noAddress = { endpoint: "http://127.0.0.1:41000", ssh: null };
+  it("counts every loopback form", () => {
+    for (const host of [
+      "localhost", "app.localhost", "127.0.0.1", "127.8.9.10", "0.0.0.0", "[::1]", "::", "[::]",
+      "::ffff:127.0.0.1", "[::ffff:7f00:1]", "LOCALHOST.",
+    ]) {
+      expect(isLoopback(host), host).toBe(true);
+    }
+    for (const host of ["128.0.0.1", "10.0.0.1", "example.com", "::2", "mylocalhost"]) {
+      expect(isLoopback(host), host).toBe(false);
+    }
+  });
+  it("refuses loopback links when the address is unknown", () => {
+    for (const url of ["http://localhost:3000/", "http://127.0.0.2/", "http://[::ffff:127.0.0.1]/", "http://x.localhost/"]) {
+      expect(rewriteLink(url, noAddress)).toEqual({ note: LOOPBACK_UNKNOWN_NOTE });
+    }
+  });
+  it("opens private links unchanged with a note", () => {
+    for (const host of ["10.1.2.3", "172.16.0.1", "172.31.9.9", "192.168.1.5", "169.254.1.1", "[fd00::1]", "[fe80::1]", "printer.local"]) {
+      const url = `http://${host}/`;
+      expect(rewriteLink(url, noAddress), host).toEqual({ url: new URL(url).href, note: PRIVATE_NOTE });
+    }
+    expect(isPrivateHost("172.32.0.1")).toBe(false);
+    expect(isPrivateHost("8.8.8.8")).toBe(false);
+  });
+  it("shows the real file name next to a title", () => {
+    const toast = groupToasts([{ machineId: "m", label: "Box", item: item({ title: "Report", name: "r.docx" }) }]);
+    expect(toastText(toast[0])).toBe("Box sent Report (r.docx)");
+    const same = groupToasts([{ machineId: "m", label: "Box", item: item({ title: "r.md", name: "r.md" }) }]);
+    expect(toastText(same[0])).toBe("Box sent r.md");
+  });
+  it("spots old hosts that say unsupported", () => {
+    expect(isUnknownMethod(new Error("Unsupported host method: shows.next"))).toBe(true);
+    expect(isUnknownMethod("UNKNOWN METHOD")).toBe(true);
+  });
+  it("gives a root project no auto-open", () => {
+    expect(isInside("/home/sam", "/")).toBe(false);
+    expect(isInside("/home/sam/a", "/home/sam/")).toBe(true);
+    expect(decideShow(item(), { ...base, activeProject: "remote://env1/" })).toBe("toast");
+  });
+  it("limits floods", () => {
+    const many = Array.from({ length: 60 }, (_, i) => i);
+    expect(capItems(many, 50)).toEqual(many.slice(10));
+    expect(capItems([1, 2], 50)).toEqual([1, 2]);
+    let pending: PendingShow[] = [{ machineId: "other", label: "O", item: item({ id: "o" }) }];
+    for (let i = 0; i < 25; i += 1) {
+      pending = withPending(pending, { machineId: "m", label: "M", item: item({ id: `i${i}` }) });
+    }
+    const mine = pending.filter((row) => row.machineId === "m");
+    expect(mine).toHaveLength(PENDING_PER_MACHINE);
+    expect(mine[0].item.id).toBe("i5");
+    expect(pending.some((row) => row.machineId === "other")).toBe(true);
+    expect(idlePauseMs(0, 200)).toBe(1000);
+    expect(idlePauseMs(0, 5000)).toBe(0);
+    expect(idlePauseMs(3, 200)).toBe(0);
   });
 });

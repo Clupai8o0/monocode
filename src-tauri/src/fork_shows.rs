@@ -42,10 +42,14 @@ fn clean_name(name: &str) -> String {
     }
 }
 
+fn shown_root_in(cache: &Path) -> PathBuf {
+    cache.join("shown")
+}
+
 fn shown_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_cache_dir()
-        .map(|dir| dir.join("shown"))
+        .map(|dir| shown_root_in(&dir))
         .map_err(|e| e.to_string())
 }
 
@@ -153,6 +157,13 @@ pub fn fork_shows_cache_write(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// The folder shown files are cached in, so the desktop can tell them apart
+/// from the user's own files.
+#[tauri::command]
+pub fn fork_shows_cache_root(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(shown_root(&app)?.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn fork_shows_cache_prune(app: tauri::AppHandle) -> Result<(), String> {
     let root = shown_root(&app)?;
@@ -178,6 +189,16 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn root_is_the_shown_folder_chunks_are_written_under() {
+        let cache = temp_root("root");
+        let root = shown_root_in(&cache);
+        assert_eq!(root, cache.join("shown"));
+        let path = write_chunk(&root, "m", "i", "a.tex", 0, b"x").unwrap();
+        assert!(path.starts_with(&root));
+        fs::remove_dir_all(&cache).unwrap();
     }
 
     #[test]

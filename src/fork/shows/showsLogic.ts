@@ -2,6 +2,7 @@ import type { RemoteMachine } from "../../features/connections/model/protocol";
 import { parseRemotePath } from "../../features/connections/model/remoteProjects";
 import {
   SHOW_FRESH_MS,
+  SHOW_SPOOL_MAX_ITEMS,
   SHOWS_WAIT_MAX_MS,
   parseShowItem,
   showableUrl,
@@ -19,6 +20,10 @@ import {
 export const AUTO_OPEN_PER_MINUTE = 5;
 /** More waiting toasts than this from one machine fold into one. */
 export const TOAST_GROUP_AFTER = 3;
+/** Waiting toasts kept per machine; older ones drop. */
+export const PENDING_PER_MACHINE = 20;
+/** An empty `shows.next` answer faster than this waits before the next poll. */
+export const FAST_EMPTY_MS = 1_000;
 
 const PASSIVE_EXTENSIONS = new Set([
   // Markdown and text
@@ -47,9 +52,13 @@ export function isPassiveShow(item: Pick<ShowItem, "kind" | "name">): boolean {
   return item.kind === "file" && PASSIVE_EXTENSIONS.has(extensionOf(item.name));
 }
 
-function isInside(child: string, parent: string): boolean {
+export function isInside(child: string, parent: string): boolean {
   const base = parent.replace(/\/+$/, "");
-  return child === base || child.startsWith(`${base}/`) || base === "";
+  // A project at "/" would hold every path: no auto-open there.
+  if (base === "") {
+    return false;
+  }
+  return child === base || child.startsWith(`${base}/`);
 }
 
 export type OpenContext = {
@@ -133,7 +142,13 @@ export function toastText(toast: ShowToast): string {
     return `${toast.label} sent ${toast.entries.length} items`;
   }
   const item = toast.entry.item;
-  const what = item.kind === "url" ? (item.title ?? item.url ?? item.name) : (item.title ?? item.name);
+  // A file's real name stays visible: its extension picks the viewer.
+  const what =
+    item.kind === "url"
+      ? (item.title ?? item.url ?? item.name)
+      : item.title && item.title !== item.name
+        ? `${item.title} (${item.name})`
+        : item.name;
   return `${toast.label} sent ${what}`;
 }
 
@@ -154,26 +169,88 @@ export function machineAddress(
   }
 }
 
-function isLoopback(host: string): boolean {
-  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1";
+function cleanHost(host: string): string {
+  return host.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
 }
 
-/** A link to the sending machine's localhost, pointed at its address. */
+function ipv4Parts(host: string): number[] | undefined {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!match) {
+    return undefined;
+  }
+  const parts = match.slice(1).map(Number);
+  return parts.every((part) => part <= 255) ? parts : undefined;
+}
+
+/** The IPv4 address inside an IPv4-mapped IPv6 one (`::ffff:7f00:1`). */
+function mappedIpv4(host: string): number[] | undefined {
+  const dotted = /^(?:0{0,4}:){0,5}:?ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
+  if (dotted) {
+    return ipv4Parts(dotted[1]);
+  }
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (!hex) {
+    return undefined;
+  }
+  const high = parseInt(hex[1], 16);
+  const low = parseInt(hex[2], 16);
+  return [high >> 8, high & 255, low >> 8, low & 255];
+}
+
+function v4Of(host: string): number[] | undefined {
+  return ipv4Parts(host) ?? mappedIpv4(host);
+}
+
+/** The machine's own localhost: 127.0.0.0/8, ::1, ::, 0.0.0.0, mapped
+ * loopback, localhost and *.localhost. */
+export function isLoopback(rawHost: string): boolean {
+  const host = cleanHost(rawHost);
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1" || host === "::") {
+    return true;
+  }
+  const v4 = v4Of(host);
+  return !!v4 && (v4[0] === 127 || v4.every((part) => part === 0));
+}
+
+/** A private network address: it means a different machine on each LAN. */
+export function isPrivateHost(rawHost: string): boolean {
+  const host = cleanHost(rawHost);
+  if (host.endsWith(".local")) {
+    return true;
+  }
+  const v4 = v4Of(host);
+  if (v4) {
+    const [a, b] = v4;
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  }
+  if (!host.includes(":")) {
+    return false;
+  }
+  const first = parseInt(host.split(":")[0] || "0", 16);
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+
+export const LOOPBACK_UNKNOWN_NOTE =
+  "Not opened: a link to the other machine's localhost, and its address is unknown.";
+export const PRIVATE_NOTE = "A private address; it opens on this Mac's network.";
+
+/** A link to the sending machine's localhost, pointed at its address. No
+ * `url` means refused, with the reason in `note`. */
 export function rewriteLink(
   url: string,
   machine: Pick<RemoteMachine, "endpoint" | "ssh">,
-): { url: string; note?: string } | undefined {
+): { url?: string; note?: string } | undefined {
   const safe = showableUrl(url);
   if (!safe) {
     return undefined;
   }
   const parsed = new URL(safe);
-  if (!isLoopback(parsed.hostname.replace(/^\[|\]$/g, ""))) {
-    return { url: safe };
+  if (!isLoopback(parsed.hostname)) {
+    return isPrivateHost(parsed.hostname) ? { url: safe, note: PRIVATE_NOTE } : { url: safe };
   }
   const address = machineAddress(machine);
   if (!address) {
-    return { url: safe };
+    return { note: LOOPBACK_UNKNOWN_NOTE };
   }
   parsed.hostname = address.includes(":") ? `[${address}]` : address;
   return {
@@ -258,7 +335,38 @@ export async function nextRound(
 
 /** True for a host from before shows. */
 export function isUnknownMethod(error: unknown): boolean {
-  return /unknown method/i.test(String(error instanceof Error ? error.message : error));
+  return /unknown method|unsupported host method/i.test(String(error instanceof Error ? error.message : error));
+}
+
+/** The newest `max` items of one answer (items are sorted oldest first). */
+export function capItems<T>(items: readonly T[], max = SHOW_SPOOL_MAX_ITEMS): T[] {
+  return items.length > max ? items.slice(items.length - max) : [...items];
+}
+
+/** Adds one waiting toast, replacing the same item and dropping the
+ * machine's oldest past `max`. */
+export function withPending(
+  pending: readonly PendingShow[],
+  entry: PendingShow,
+  max = PENDING_PER_MACHINE,
+): PendingShow[] {
+  const next = [
+    ...pending.filter((row) => !(row.machineId === entry.machineId && row.item.id === entry.item.id)),
+    entry,
+  ];
+  let extra = next.filter((row) => row.machineId === entry.machineId).length - max;
+  return next.filter((row) => {
+    if (extra > 0 && row.machineId === entry.machineId) {
+      extra -= 1;
+      return false;
+    }
+    return true;
+  });
+}
+
+/** Pause before the next poll: a fast empty answer waits a second. */
+export function idlePauseMs(itemCount: number, elapsedMs: number): number {
+  return itemCount === 0 && elapsedMs < FAST_EMPTY_MS ? FAST_EMPTY_MS : 0;
 }
 
 /** 3 s doubling to 60 s. */

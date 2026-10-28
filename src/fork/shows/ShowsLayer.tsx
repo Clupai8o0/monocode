@@ -8,6 +8,7 @@ import {
 } from "../../features/connections/model/connections";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import { machineLabel, useMachineInfo } from "../machines/machineLabel";
+import { loadShownRoot } from "./shownPaths";
 import { groupToasts, toastText, type PendingShow, type ShowToast } from "./showsLogic";
 import {
   dismissShow,
@@ -31,6 +32,7 @@ export function ShowsWatcher({ topOffset = 12 }: { topOffset?: number })
   const { machines } = useRemoteMachines(FORK_SHOWS);
   useEffect(() => {
     if (FORK_SHOWS) {
+      loadShownRoot();
       pruneShowsCacheOnce();
     }
   }, []);
@@ -133,7 +135,9 @@ function Toast({ toast }: { toast: ShowToast })
                 onClick={() => void open(entry)}
                 className="w-full truncate rounded px-1.5 py-1 text-left text-[12px] text-content/75 hover:bg-content/5"
               >
-                {entry.item.title ?? entry.item.name}
+                {entry.item.title && entry.item.title !== entry.item.name
+                  ? `${entry.item.title} (${entry.item.name})`
+                  : entry.item.name}
               </button>
             </li>
           ))}
