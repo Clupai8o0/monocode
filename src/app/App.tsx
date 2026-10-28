@@ -608,6 +608,9 @@ import { seedStarterMonos } from "../fork/starterMonos/starterMono";
 import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
 import { MONO_MAKER } from "../fork/starterMonos/makerMono";
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
+import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
+import type { FileOpenOptions } from "../features/search/model/search"; // Fork
+import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
 import {
   canCloseForMemory,
   planSessionClose,
@@ -7052,8 +7055,10 @@ function Workspace({
     (path, navigation, options) => {
       closeMonoView();
       void (async () => {
-        const fileCwd = gitCwdRef.current;
-        const fileProjectCwd = sidebarCwdRef.current;
+        // Fork: a shown file opens from the local cache, even in a remote project.
+        const localCwd = (options as { forkLocalCwd?: string } | undefined)?.forkLocalCwd;
+        const fileCwd = localCwd ?? gitCwdRef.current;
+        const fileProjectCwd = localCwd ?? sidebarCwdRef.current;
         const resolved = await resolveFileOpenRequest(fileCwd, path, options);
         rememberOpenedFile(fileCwd, resolved);
         const tab = tabsRef.current.find(
@@ -7129,6 +7134,20 @@ function Workspace({
     },
     [activateTab, insertBesideActive, closeMonoView],
   );
+
+  // Fork: shown files open as local tabs from the cache folder they landed in.
+  useEffect(() => {
+    setShowsOpener({
+      openLocalFile: (path) =>
+        onOpenFile(path, undefined, {
+          exact: true,
+          pin: true,
+          forkLocalCwd: path.slice(0, path.lastIndexOf("/")) || "/",
+        } as FileOpenOptions),
+      activeProject: () => sidebarCwdRef.current,
+    });
+    return () => setShowsOpener(null);
+  }, [onOpenFile]);
 
   const onOpenPlan = useCallback(
     (sessionId: string, blockId: string) => {
@@ -15032,6 +15051,8 @@ function Workspace({
             chipHost={pressureChipHost}
             insetChip={insetLayout}
           />
+          {/* Fork: files and links sent from other machines' agents. */}
+          <ShowsWatcher />
           {/* Fork: each new event pops up briefly, then lives in the bell. */}
           <NotificationPopups
             topOffset={
