@@ -12,6 +12,8 @@ import {
 } from "./protocol";
 import { remoteProjectFor } from "./remoteProjects";
 import { withRemoteAttachmentPreviews } from "./remoteAttachmentPreviews";
+import { SYNC_WAIT_TIMEOUT_MS } from "./remoteSync";
+import { forgetRemoteCatalogs } from "./remoteCatalogCache";
 
 const CHANGE = "monocode:remote-machines";
 export const REMOTE_HISTORY_CHANGE = "monocode:remote-history";
@@ -154,20 +156,32 @@ export function remoteRequest<T>(
   machineId: string,
   method: string,
   params: unknown = {},
+  /** Raises the desktop's 30 s request timeout, for a request the host holds. */
+  timeoutMs?: number,
 ): Promise<T> {
-  return invoke<T>("remote_request", { machineId, method, params });
+  return invoke<T>(
+    "remote_request",
+    timeoutMs === undefined
+      ? { machineId, method, params }
+      : { machineId, method, params, timeoutMs },
+  );
 }
 
-/** Reads one sync, assembling it from bounded pieces when the host chunks it. */
+/** Reads one sync, assembling it from bounded pieces when the host chunks it.
+ * With `waitMs`, a host that supports it holds the reply while `revision` is
+ * current; older hosts ignore it and answer at once. */
 async function syncRemoteSession(
   machineId: string,
   sessionId: string,
   revision?: number,
+  waitMs?: number,
 ): Promise<SessionSync> {
+  const held = waitMs !== undefined && revision !== undefined;
   const response = await remoteRequest<SessionSyncResponse>(
     machineId,
     "sessions.sync",
-    { sessionId, revision },
+    held ? { sessionId, revision, waitMs } : { sessionId, revision },
+    held ? SYNC_WAIT_TIMEOUT_MS : undefined,
   );
   if (response.kind !== "chunked") return response;
   const pieces: string[] = [];
@@ -187,15 +201,17 @@ async function syncRemoteSession(
   return JSON.parse(pieces.join("")) as SessionSync;
 }
 
-/** Fetches only what changed since `known`; falls back to a full snapshot. */
+/** Fetches only what changed since `known`; falls back to a full snapshot.
+ * `waitMs` lets the host hold the first request until something changes. */
 export async function loadRemoteSession(
   machineId: string,
   sessionId: string,
   known?: HostSession,
+  waitMs?: number,
 ): Promise<HostSession> {
-  const sync = (revision?: number) =>
-    syncRemoteSession(machineId, sessionId, revision);
-  const update = await sync(known?.revision);
+  const sync = (revision?: number, wait?: number) =>
+    syncRemoteSession(machineId, sessionId, revision, wait);
+  const update = await sync(known?.revision, waitMs);
   let snapshot: HostSession;
   try {
     snapshot = applySessionSync(known, update);
@@ -246,6 +262,7 @@ export async function connectMachine(
 
 export async function disconnectMachine(machineId: string): Promise<void> {
   await invoke("remote_disconnect", { machineId });
+  forgetRemoteCatalogs(machineId);
   cachedMachines = cachedMachines.filter((entry) => entry.id !== machineId);
   window.dispatchEvent(new Event(CHANGE));
 }

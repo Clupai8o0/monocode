@@ -8,7 +8,10 @@ import {
   remoteRequest,
   useRemoteMachines,
 } from "../model/connections";
-import { rememberRemoteProject } from "../model/remoteProjects";
+import {
+  rememberRemoteProject,
+  unaddedHostProjects,
+} from "../model/remoteProjects";
 import type { HostDirectory, HostProject } from "../model/protocol";
 
 /** Adds a project whose folder is on a connected machine. Sessions in it run
@@ -84,6 +87,32 @@ export function AddRemoteProjectDialog({
     setPath("");
     if (machine) void browse();
   }, [machine?.id]);
+
+  // Projects the host already knows open in one click, without browsing.
+  // The list is a shortcut: if it fails, the folder browser still works.
+  const [hostProjects, setHostProjects] = useState<HostProject[]>([]);
+  useEffect(() => {
+    setHostProjects([]);
+    if (!machine) return;
+    let current = true;
+    void remoteRequest<HostProject[]>(machine.id, "projects.list")
+      .then((value) => {
+        if (current && alive.current && Array.isArray(value))
+          setHostProjects(value);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [machine?.id]);
+  const quickProjects = machine
+    ? unaddedHostProjects(machine.environmentId, hostProjects)
+    : [];
+  const openKnown = (project: HostProject) => {
+    if (!machine || opening) return;
+    requestVersion.current++;
+    onOpen(rememberRemoteProject(machine.environmentId, project).key);
+  };
 
   const open = async () => {
     if (!machine || !path.trim() || opening) return;
@@ -178,6 +207,29 @@ export function AddRemoteProjectDialog({
                 On <span className="text-content/80">{machine.name}</span>
               </p>
             )}
+            {quickProjects.length ? (
+              <div className="flex shrink-0 flex-col gap-1">
+                <p className="text-[11px] font-medium text-content/45">
+                  Projects on {machine.name}
+                </p>
+                <div
+                  aria-label={`Projects on ${machine.name}`}
+                  className="-mx-1 max-h-36 overflow-y-auto overscroll-contain"
+                >
+                  {quickProjects.map((project) => (
+                    <ProjectRow
+                      key={project.id}
+                      project={project}
+                      disabled={opening}
+                      onOpen={() => openKnown(project)}
+                    />
+                  ))}
+                </div>
+                <p className="pt-1 text-[11px] font-medium text-content/45">
+                  Or open another folder
+                </p>
+              </div>
+            ) : null}
             <input
               aria-label="Folder path on the machine"
               className="h-8 shrink-0 rounded-md border border-content/10 bg-content/3 px-2.5 font-mono text-[12px] text-content outline-none focus:border-content/25"
@@ -248,6 +300,33 @@ export function AddRemoteProjectDialog({
       </form>
     </div>,
     document.body,
+  );
+}
+
+function ProjectRow({
+  project,
+  disabled,
+  onOpen,
+}: {
+  project: HostProject;
+  disabled: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      disabled={disabled}
+      title={project.cwd}
+      className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-transform duration-150 ease-out hover:bg-content/8 active:scale-[0.98] disabled:opacity-40"
+    >
+      <span className="w-full truncate text-[12px] text-content/85">
+        {project.name}
+      </span>
+      <span className="w-full truncate font-mono text-[11px] text-content/45">
+        {project.cwd}
+      </span>
+    </button>
   );
 }
 

@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AddRemoteProjectDialog } from "./AddRemoteProjectDialog";
-import { remoteProjectFor } from "../model/remoteProjects";
+import { rememberRemoteProject, remoteProjectFor } from "../model/remoteProjects";
 import { isLocalProject, looksLikeProject } from "../../projects/model/recents";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -111,6 +111,39 @@ it("browses a machine's folders and adds the chosen one as a project", async () 
   // It is a rail project, but never a folder on this computer.
   expect(looksLikeProject(opened[0])).toBe(true);
   expect(isLocalProject(opened[0])).toBe(false);
+});
+
+it("opens a project the host already knows in one click, leaving out added ones", async () => {
+  rememberRemoteProject("env", { id: "added", cwd: "/srv/added", name: "Added" });
+  const original = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, input) => {
+    if ((input as { method?: string } | undefined)?.method === "projects.list")
+      return Promise.resolve([
+        { id: "added", cwd: "/srv/added", name: "Added" },
+        { id: "known", cwd: "/srv/known", name: "Known" },
+      ]);
+    return original(command, input);
+  });
+  await render();
+  const list = document.body.querySelector('[aria-label="Projects on Home server"]')!;
+  expect(list.textContent).toContain("/srv/known");
+  expect(list.textContent).not.toContain("Added");
+  // The folder browser and path field stay available below.
+  expect(button("code")).toBeTruthy();
+  await act(async () => button("Known").click());
+  expect(opened).toEqual(["remote://env/srv/known"]);
+  expect(remoteProjectFor(opened[0])?.projectId).toBe("known");
+  expect(
+    vi.mocked(invoke).mock.calls.some(
+      ([, input]) => (input as { method?: string } | undefined)?.method === "projects.open",
+    ),
+  ).toBe(false);
+});
+
+it("hides the shortcut when the host cannot list its projects", async () => {
+  await render();
+  expect(document.body.textContent).not.toContain("Projects on");
+  expect(button("code")).toBeTruthy();
 });
 
 it("points to Settings when no machine is connected", async () => {

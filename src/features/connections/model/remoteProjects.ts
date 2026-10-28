@@ -119,3 +119,21 @@ export function remoteProjectsOn(environmentId: string): RemoteProject[] {
     (project) => project.environmentId === environmentId,
   );
 }
+
+/** A host's registered projects that are not yet in this computer's rail,
+ * matched by the host's project ID or by folder. */
+export function unaddedHostProjects(
+  environmentId: string,
+  hostProjects: HostProject[],
+  added: RemoteProject[] = remoteProjectsOn(environmentId),
+): HostProject[] {
+  const ids = new Set(added.map((project) => project.projectId));
+  const keys = new Set(
+    added.map((project) => remoteProjectKey(project.environmentId, project.cwd)),
+  );
+  return hostProjects.filter(
+    (project) =>
+      !ids.has(project.id) &&
+      !keys.has(remoteProjectKey(environmentId, project.cwd)),
+  );
+}

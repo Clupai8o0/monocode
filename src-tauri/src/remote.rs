@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -131,6 +132,82 @@ fn write(path: &Path, machines: &[StoredMachine]) -> Result<(), String> {
 /// (`host/sync-transfer.ts`), so it bounds memory without limiting transcripts.
 const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Ceiling for a caller's longer timeout, such as a held `sessions.sync`.
+const MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// A pool left idle past this is dropped before the next request. After the
+/// Mac sleeps or changes network its sockets are likely dead, and a request
+/// sent on one could stall until it times out.
+const POOL_IDLE_RESET: Duration = Duration::from_secs(45);
+
+/// One agent for every host request, so calls reuse kept-alive connections
+/// instead of paying a fresh TCP and TLS handshake each time.
+struct Pool {
+    agent: ureq::Agent,
+    generation: u64,
+    /// Wall-clock time, not `Instant`: on macOS `Instant` stops while the
+    /// machine sleeps, which is exactly the idle time that matters here.
+    last_used: SystemTime,
+}
+
+static POOL: Mutex<Option<Pool>> = Mutex::new(None);
+
+fn new_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(Duration::from_secs(5))
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+}
+
+/// A clock that went backwards says nothing about the sockets, so it resets too.
+fn pool_is_stale(last_used: SystemTime, now: SystemTime) -> bool {
+    now.duration_since(last_used)
+        .map_or(true, |idle| idle > POOL_IDLE_RESET)
+}
+
+/// The shared agent and its generation, building a new one first when there
+/// is none or it has been idle too long.
+fn checkout(
+    slot: &mut Option<Pool>,
+    now: SystemTime,
+    build: impl FnOnce() -> ureq::Agent,
+) -> (ureq::Agent, u64) {
+    let pool = match slot {
+        Some(pool) if !pool_is_stale(pool.last_used, now) => pool,
+        _ => {
+            let generation = slot.as_ref().map_or(0, |pool| pool.generation + 1);
+            slot.insert(Pool {
+                agent: build(),
+                generation,
+                last_used: now,
+            })
+        }
+    };
+    pool.last_used = now;
+    (pool.agent.clone(), pool.generation)
+}
+
+/// Marks the pool used again when a request ends, so a long request is not
+/// counted as idle time. A broken transport drops the pool, so the retry the
+/// user is offered starts on a fresh connection. A newer pool is left alone.
+fn checkin(slot: &mut Option<Pool>, generation: u64, now: SystemTime, broken: bool) {
+    if slot
+        .as_ref()
+        .is_some_and(|pool| pool.generation == generation)
+    {
+        if broken {
+            *slot = None;
+        } else if let Some(pool) = slot.as_mut() {
+            pool.last_used = now;
+        }
+    }
+}
+
+fn pool() -> std::sync::MutexGuard<'static, Option<Pool>> {
+    POOL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn rpc(
     endpoint: &str,
     token: &str,
@@ -138,14 +215,63 @@ fn rpc(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let agent = ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout_connect(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(30))
-        .build();
+    rpc_with_timeout(endpoint, token, environment_id, method, params, None)
+}
+
+fn rpc_with_timeout(
+    endpoint: &str,
+    token: &str,
+    environment_id: Option<&str>,
+    method: &str,
+    params: Value,
+    timeout: Option<Duration>,
+) -> Result<Value, String> {
+    let (agent, generation) = checkout(&mut pool(), SystemTime::now(), new_agent);
+    let result = send_rpc(
+        &agent,
+        endpoint,
+        token,
+        environment_id,
+        method,
+        params,
+        timeout,
+    );
+    checkin(
+        &mut pool(),
+        generation,
+        SystemTime::now(),
+        matches!(result, Err(RpcFailure::Transport(_))),
+    );
+    result.map_err(|failure| match failure {
+        RpcFailure::Transport(message) | RpcFailure::Reply(message) => message,
+    })
+}
+
+enum RpcFailure {
+    /// The connection failed; its socket may be dead.
+    Transport(String),
+    /// The host answered, but not with a result.
+    Reply(String),
+}
+
+fn send_rpc(
+    agent: &ureq::Agent,
+    endpoint: &str,
+    token: &str,
+    environment_id: Option<&str>,
+    method: &str,
+    params: Value,
+    timeout: Option<Duration>,
+) -> Result<Value, RpcFailure> {
+    use RpcFailure::{Reply, Transport};
     let payload = json!({ "version": 1, "environmentId": environment_id, "method": method, "params": params });
     let response = agent
         .post(&format!("{endpoint}/rpc"))
+        .timeout(
+            timeout
+                .unwrap_or(REQUEST_TIMEOUT)
+                .clamp(REQUEST_TIMEOUT, MAX_REQUEST_TIMEOUT),
+        )
         .set("Authorization", &format!("Bearer {token}"))
         .set("Content-Type", "application/json")
         .send_string(&payload.to_string());
@@ -153,12 +279,14 @@ fn rpc(
         Ok(response) => response,
         Err(ureq::Error::Status(_, response)) => response,
         Err(ureq::Error::Transport(error)) if connection_refused(&error) => {
-            return Err(
+            return Err(Transport(
                 "Machine is unreachable. Check the host and SSH tunnel, then reconnect.".into(),
-            )
+            ))
         }
         Err(_) => {
-            return Err("The host request did not complete. Retry to confirm its result.".into())
+            return Err(Transport(
+                "The host request did not complete. Retry to confirm its result.".into(),
+            ))
         }
     };
     let status = response.status();
@@ -167,21 +295,22 @@ fn rpc(
         .into_reader()
         .take(MAX_RESPONSE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Transport(e.to_string()))?;
     if bytes.len() as u64 > MAX_RESPONSE_BYTES {
-        return Err("Host response is too large".into());
+        return Err(Reply("Host response is too large".into()));
     }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "Invalid host response")?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| Reply("Invalid host response".into()))?;
     if let Some(error) = value.get("error").and_then(Value::as_str) {
-        return Err(format!("Host rejected request: {error}"));
+        return Err(Reply(format!("Host rejected request: {error}")));
     }
     if status != 200 {
-        return Err(format!("Host returned HTTP {status}"));
+        return Err(Reply(format!("Host returned HTTP {status}")));
     }
     value
         .get("result")
         .cloned()
-        .ok_or_else(|| "Invalid host response".into())
+        .ok_or_else(|| Reply("Invalid host response".into()))
 }
 
 // Only a refused connection proves the local forwarding listener is gone.
@@ -308,6 +437,7 @@ pub fn remote_request(
     machine_id: String,
     method: String,
     params: Value,
+    timeout_ms: Option<u64>,
 ) -> Result<Value, String> {
     if !supported_remote_method(&method) {
         return Err("Unsupported remote operation".into());
@@ -331,12 +461,13 @@ pub fn remote_request(
         .as_ref()
         .map(|lease| lease.endpoint.as_str())
         .unwrap_or(&machine.endpoint);
-    let response = rpc(
+    let response = rpc_with_timeout(
         endpoint,
         &machine.token,
         Some(&machine.environment_id),
         &method,
         params,
+        timeout_ms.map(Duration::from_millis),
     );
     if response
         .as_ref()
@@ -650,6 +781,36 @@ pub fn remote_ssh_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_shared_pool_resets_after_idling_or_a_broken_connection() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let mut slot = None;
+        let (_, first) = checkout(&mut slot, start, new_agent);
+        // Used again within the idle window: the same agent is reused.
+        let (_, reused) = checkout(&mut slot, start + Duration::from_secs(40), new_agent);
+        assert_eq!(reused, first);
+        // A long request ending counts as use, so idling starts from there.
+        checkin(&mut slot, first, start + Duration::from_secs(80), false);
+        let (_, after_long) = checkout(&mut slot, start + Duration::from_secs(120), new_agent);
+        assert_eq!(after_long, first);
+        // Idle past the limit, as after the Mac sleeps: a new agent.
+        let (_, idle) = checkout(&mut slot, start + Duration::from_secs(166), new_agent);
+        assert_ne!(idle, first);
+        // A clock that went backwards resets too.
+        let (_, backwards) = checkout(&mut slot, start, new_agent);
+        assert_ne!(backwards, idle);
+        // A stale request's failure leaves the newer pool alone...
+        checkin(&mut slot, idle, start, true);
+        assert!(slot.is_some());
+        // ...and the current pool's failure drops it.
+        checkin(&mut slot, backwards, start, true);
+        assert!(slot.is_none());
+        assert!(!pool_is_stale(start, start + POOL_IDLE_RESET));
+        assert!(pool_is_stale(
+            start,
+            start + POOL_IDLE_RESET + Duration::from_millis(1)
+        ));
+    }
     #[test]
     fn a_slow_host_does_not_look_like_a_dead_tunnel() {
         use std::{net::TcpListener, thread, time::Duration};

@@ -11,6 +11,7 @@ import type { Block, Session } from "../../sessions/model/session";
 import type { AgentModel } from "../../sessions/model/models";
 import { rememberRemoteProject } from "../model/remoteProjects";
 import { preloadRemoteSession } from "./RemoteSession";
+import { forgetRemoteCatalogs } from "../model/remoteCatalogCache";
 import { rememberRemoteSession, remoteSessionFor } from "../model/connections";
 import "../model/remoteCommands";
 import type {
@@ -713,6 +714,25 @@ it("removes a draft-only conversation with its draft, as a local one", async () 
   expect(container.textContent).toContain("What should we work on");
 });
 
+it("long-polls the open session once a sync has worked", async () => {
+  await render();
+  await send("First");
+  const syncs = () =>
+    vi.mocked(invoke).mock.calls
+      .map(([, input]) => input as { method?: string; params?: { waitMs?: number }; timeoutMs?: number })
+      .filter((input) => input?.method === "sessions.sync");
+  // The first sync after binding is a plain one.
+  expect(syncs()[0]?.params?.waitMs).toBeUndefined();
+  await vi.waitFor(
+    () =>
+      expect(syncs().find((input) => input.params?.waitMs)).toMatchObject({
+        params: { waitMs: 20_000 },
+        timeoutMs: 35_000,
+      }),
+    { timeout: 5_000 },
+  );
+});
+
 it("keeps a sent message visible until the host sync confirms it", async () => {
   await render();
   await send("First");
@@ -967,6 +987,8 @@ it("keeps a saved model's effort editable when the host catalog fails", async ()
   await render();
   await send("First");
   catalog = new Error("Codex CLI is not authenticated");
+  // Without a cached catalog to fall back on, as on a first start.
+  forgetRemoteCatalogs();
   await act(async () => root.unmount());
   root = createRoot(container);
   await render();

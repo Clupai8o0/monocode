@@ -4,7 +4,26 @@ import {
   remotePath,
   remoteProjectFor,
   remoteSessionGitCwd,
+  unaddedHostProjects,
 } from "./remoteProjects";
+
+it("offers only host projects not yet added on this machine", () => {
+  const added = [
+    { key: "remote://env/srv/a", environmentId: "env", projectId: "a", cwd: "/srv/a" },
+    { key: "remote://env/srv/b", environmentId: "env", projectId: "old-b", cwd: "/srv/b/" },
+  ];
+  expect(
+    unaddedHostProjects(
+      "env",
+      [
+        { id: "a", cwd: "/srv/a-moved", name: "a" },
+        { id: "b", cwd: "/srv/b", name: "b" },
+        { id: "c", cwd: "/srv/c", name: "c" },
+      ],
+      added,
+    ).map((project) => project.id),
+  ).toEqual(["c"]);
+});
 
 it("finds a saved UNC project through its corrected remote path", () => {
   const legacyKey = "remote://env/server/share/repo";

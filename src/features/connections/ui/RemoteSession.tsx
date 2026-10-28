@@ -38,6 +38,12 @@ import {
   useRemoteMachines,
 } from "../model/connections";
 import { parseRemotePath, remotePath, remoteProjectFor, type RemoteProject } from "../model/remoteProjects";
+import { nextSyncDelay, syncWaitMs } from "../model/remoteSync";
+import {
+  cachedRemoteCatalog,
+  catalogNeedsRefresh,
+  fetchRemoteCatalog,
+} from "../model/remoteCatalogCache";
 import {
   carryModelSettings,
   findRemoteModel,
@@ -89,11 +95,8 @@ type OptimisticTurn = {
 const noop = () => {};
 const cachedSessionSnapshots = new Map<string, HostSession>();
 const cachedDescriptors = new Map<string, HostDescriptor>();
-const cachedCatalogs = new Map<string, HostModelCatalog>();
 const snapshotKey = (machineId: string, sessionId: string) =>
   `${machineId}:${sessionId}`;
-const catalogKey = (machineId: string, projectId: string) =>
-  JSON.stringify([machineId, projectId]);
 function rememberSessionSnapshot(key: string, snapshot: HostSession) {
   cachedSessionSnapshots.delete(key);
   cachedSessionSnapshots.set(key, snapshot);
@@ -237,10 +240,16 @@ function ConnectedRemoteSession({
   snapshotRef.current = snapshot;
   const [refresh, setRefresh] = useState(0);
   const [catalog, setCatalog] = useState<HostModelCatalog | undefined>(() =>
-    cachedCatalogs.get(catalogKey(machine.id, project.projectId)),
+    cachedRemoteCatalog(machine.id, project.projectId)?.catalog,
   );
   const [catalogError, setCatalogError] = useState("");
   const [catalogRefresh, setCatalogRefresh] = useState(0);
+  // Set by a reconnect or the Retry action: refresh even a recent catalog.
+  const forceCatalog = useRef(false);
+  const reloadCatalog = (force: boolean) => {
+    if (force) forceCatalog.current = true;
+    setCatalogRefresh((value) => value + 1);
+  };
   const [selectedCwd, setSelectedCwd] = useState(
     () => remotePendingWorktree(shell.id) ?? project.cwd,
   );
@@ -360,8 +369,13 @@ function ConnectedRemoteSession({
     // Every request carries the expected host identity; describe again only
     // after a failure, when the host may have been replaced.
     let described = false;
+    // A visible session long-polls once a sync has worked: the host holds the
+    // request until the session changes, so updates arrive in one round trip.
+    let synced = false;
     const poll = async () => {
       let active = false;
+      let waitMs: number | undefined;
+      const started = Date.now();
       try {
         if (!described) {
           const host = requireHostDescriptor(
@@ -384,8 +398,11 @@ function ConnectedRemoteSession({
           snapshotRef.current?.session.id === sessionId
             ? snapshotRef.current
             : undefined;
+        // Only a known revision can be held; without one the host always
+        // answers with the full session.
+        waitMs = known ? syncWaitMs(visible, synced && !failed) : undefined;
         const next = sessionId
-          ? await loadRemoteSession(machine.id, sessionId, known)
+          ? await loadRemoteSession(machine.id, sessionId, known, waitMs)
           : undefined;
         if (stale()) return;
         if (next && next.projectId !== project.projectId)
@@ -393,13 +410,14 @@ function ConnectedRemoteSession({
         setOnline(true);
         reportRemoteMachineStatus(machine.id, true);
         // A catalog request that failed while offline is retried on recovery.
-        if (failed) setCatalogRefresh((value) => value + 1);
+        if (failed) reloadCatalog(true);
         failed = 0;
         if (next && sessionId)
           rememberSessionSnapshot(snapshotKey(machine.id, sessionId), next);
         setSnapshot(next);
         if (next) onSnapshot?.(shell.id, next);
         active = !!next?.session.busy;
+        synced = true;
       } catch (reason) {
         if (stale()) return;
         setOnline(false);
@@ -410,13 +428,13 @@ function ConnectedRemoteSession({
       if (!disposed)
         timer = setTimeout(
           () => void poll(),
-          failed
-            ? Math.min(10_000, 750 * 2 ** Math.min(failed, 4))
-            : active
-              ? 750
-              : visible
-                ? 3_000
-                : 10_000,
+          nextSyncDelay({
+            failed,
+            active,
+            visible,
+            waited: waitMs !== undefined,
+            elapsedMs: Date.now() - started,
+          }),
         );
     };
     void poll();
@@ -435,19 +453,26 @@ function ConnectedRemoteSession({
   ]);
 
   useEffect(() => {
-    if (!descriptor) return;
+    // The cached catalog shows at once; the host is asked again only when it
+    // is old, or on a reconnect or Retry.
+    const cached = cachedRemoteCatalog(machine.id, project.projectId);
+    if (cached) setCatalog(cached.catalog);    if (!descriptor) return;
+    if (!catalogNeedsRefresh(cached, Date.now(), forceCatalog.current)) return;
+    forceCatalog.current = false;
     let disposed = false;
-    void remoteRequest<HostModelCatalog>(machine.id, "models.list", {
-      projectId: project.projectId,
-    })
+    void fetchRemoteCatalog(machine.id, project.projectId, () =>
+      remoteRequest<HostModelCatalog>(machine.id, "models.list", {
+        projectId: project.projectId,
+      }),
+    )
       .then((value) => {
         if (disposed) return;
-        cachedCatalogs.set(catalogKey(machine.id, project.projectId), value);
         setCatalog(value);
         setCatalogError("");
       })
       .catch((reason) => {
-        if (!disposed) setCatalogError(String(reason));
+        // A failed refresh keeps showing the cached catalog.
+        if (!disposed && !cached) setCatalogError(String(reason));
       });
     return () => {
       disposed = true;
@@ -941,9 +966,9 @@ function ConnectedRemoteSession({
         providers.includes(harness as RemoteProvider) &&
         (!hostSession || hostSession.harness === harness),
       probed: () => !!descriptor,
-      // The host re-probes when a provider CLI changes or its catalog ages,
-      // so each picker opening asks again.
-      refresh: () => setCatalogRefresh((value) => value + 1),
+      // Each picker opening asks again, but the catalog is reread from the
+      // host only once the cached copy is ten minutes old.
+      refresh: () => reloadCatalog(false),
     };
   }, [
     catalog,
@@ -1074,7 +1099,7 @@ function ConnectedRemoteSession({
                 detail: catalogProblem,
                 action: {
                   label: "Retry",
-                  run: () => setCatalogRefresh((value) => value + 1),
+                  run: () => reloadCatalog(true),
                 },
               }
             : undefined;
