@@ -693,6 +693,7 @@ pub fn run() {
             fork_html::fork_html_preview_remove, // Fork
             fork_shows::fork_shows_cache_write, // Fork
             fork_shows::fork_shows_cache_prune, // Fork
+            fork_shows::fork_shows_cache_root,  // Fork
             fork_workspaces::fork_workspace_list,           // Fork
             fork_workspaces::fork_workspace_create,         // Fork
             fork_workspaces::fork_workspace_open,           // Fork

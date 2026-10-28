@@ -6,6 +6,7 @@ import { openPathWithDefaultApp } from "../../platform/tauri/fs";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
 import { PdfView } from "../pdf/PdfView";
 import { formatMillis } from "../latex/latexModel";
+import { useShownGate } from "../shows/shownPaths";
 import type { OfficeResult } from "./officeModel";
 
 const ENABLED = import.meta.env.MODE !== "test";
@@ -25,9 +26,12 @@ export function OfficeView({ path, cwd }: { path: string; cwd: string }) {
   const pending = useRef(false);
   const alive = useRef(true);
   const remote = path.startsWith(REMOTE_PATH_PREFIX);
+  // A file sent from another machine converts only after a click.
+  const gate = useShownGate(path);
+  const blocked = remote || gate.blocked;
 
   const convert = useCallback(async () => {
-    if (!ENABLED || remote) {
+    if (!ENABLED || blocked) {
       return;
     }
     if (running.current) {
@@ -63,7 +67,7 @@ export function OfficeView({ path, cwd }: { path: string; cwd: string }) {
         setBusy(false);
       }
     }
-  }, [path, remote]);
+  }, [path, blocked]);
 
   useEffect(() => {
     alive.current = true;
@@ -74,7 +78,7 @@ export function OfficeView({ path, cwd }: { path: string; cwd: string }) {
   }, [convert]);
 
   useEffect(() => {
-    if (!ENABLED || remote) {
+    if (!ENABLED || blocked) {
       return;
     }
     let timer = 0;
@@ -86,10 +90,24 @@ export function OfficeView({ path, cwd }: { path: string; cwd: string }) {
       window.clearTimeout(timer);
       stop();
     };
-  }, [path, remote, convert]);
+  }, [path, blocked, convert]);
 
   if (remote) {
     return <Message>Office previews work for files on this Mac only.</Message>;
+  }
+  if (gate.blocked) {
+    return (
+      <Message>
+        Sent from another machine. Converting runs LibreOffice on this Mac.
+        <button
+          type="button"
+          onClick={gate.allow}
+          className="mx-auto mt-3 block rounded-md bg-content/10 px-2 py-1 text-[12px] text-content/80 hover:bg-content/15"
+        >
+          Convert on this Mac
+        </button>
+      </Message>
+    );
   }
   if (result?.status === "no-office") {
     return (

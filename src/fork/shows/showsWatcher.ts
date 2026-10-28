@@ -7,12 +7,15 @@ import {
   RateLimit,
   backoffMs,
   base64Bytes,
+  capItems,
   decideShow,
+  idlePauseMs,
   isUnknownMethod,
   loadCursor,
   nextRound,
   rewriteLink,
   saveCursor,
+  withPending,
   type PendingShow,
 } from "./showsLogic";
 import { SHOW_MAX_FILE_BYTES, SHOWS_WAIT_MAX_MS, type ShowItem, type ShowsReadResult } from "./showsModel";
@@ -56,10 +59,7 @@ export function showNote(key: string): string | undefined {
 }
 
 function addPending(entry: PendingShow) {
-  pending = [
-    ...pending.filter((row) => !(row.machineId === entry.machineId && row.item.id === entry.item.id)),
-    entry,
-  ];
+  pending = withPending(pending, entry);
   emit();
 }
 
@@ -127,6 +127,9 @@ export async function openShow(entry: PendingShow): Promise<void> {
     if (!link) {
       return;
     }
+    if (!link.url) {
+      throw new Error(link.note ?? "Not opened.");
+    }
     if (link.note) {
       notes.set(`${machineId}:${item.id}`, link.note);
     }
@@ -184,6 +187,7 @@ async function loop(machine: RemoteMachine, label: () => string, signal: AbortSi
   let failures = 0;
   while (!signal.aborted) {
     try {
+      const started = Date.now();
       const round = await nextRound(
         (params) => remoteRequest(machine.id, "shows.next", params, NEXT_TIMEOUT_MS),
         state,
@@ -192,11 +196,16 @@ async function loop(machine: RemoteMachine, label: () => string, signal: AbortSi
       if (signal.aborted) {
         return;
       }
-      for (const item of round.items) {
+      // The cursor moves past every item, but a flood shows only the newest.
+      for (const item of capItems(round.items)) {
         await handle(machine, label(), item, round.now);
       }
       state = round.state;
       saveCursor(machine.id, state);
+      const pause = idlePauseMs(round.items.length, Date.now() - started);
+      if (pause) {
+        await sleep(pause, signal);
+      }
     } catch (error) {
       if (signal.aborted) {
         return;

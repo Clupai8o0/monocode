@@ -54,14 +54,23 @@ pub struct LatexResult {
 }
 
 #[tauri::command]
-pub async fn fork_latex_compile(path: String, cwd: String) -> Result<LatexResult, String> {
-    tauri::async_runtime::spawn_blocking(move || compile(Path::new(&path), Path::new(&cwd)))
-        .await
-        .map_err(|e| e.to_string())?
+pub async fn fork_latex_compile(
+    path: String,
+    cwd: String,
+    paranoid: Option<bool>,
+) -> Result<LatexResult, String> {
+    let paranoid = paranoid.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        compile(Path::new(&path), Path::new(&cwd), paranoid)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// `cwd` is the project folder: a `% !TEX root` may not point outside it.
-fn compile(path: &Path, cwd: &Path) -> Result<LatexResult, String> {
+/// `paranoid` (a file sent from another machine) also stops TeX reading
+/// files outside the document's folder.
+fn compile(path: &Path, cwd: &Path, paranoid: bool) -> Result<LatexResult, String> {
     let started = Instant::now();
     if !path.is_absolute() || !is_tex(path) || !path.is_file() {
         return Err("Not a .tex file".into());
@@ -132,7 +141,7 @@ fn compile(path: &Path, cwd: &Path) -> Result<LatexResult, String> {
             &out_flag,
         ])
         .arg(&file_name);
-        if !run_tool(cmd, &root_dir, &out)? {
+        if !run_tool(cmd, &root_dir, &out, paranoid)? {
             result.notes.push(format!("{engine} took over {} s and was stopped.", RUN_TIMEOUT.as_secs()));
             break;
         }
@@ -147,7 +156,7 @@ fn compile(path: &Path, cwd: &Path) -> Result<LatexResult, String> {
                 let mut cmd = Command::new(bibtex);
                 cmd.arg(out.join(&stem));
                 ran_bibtex = true;
-                again = run_tool(cmd, &root_dir, &out)? || again;
+                again = run_tool(cmd, &root_dir, &out, paranoid)? || again;
             }
         }
         if run == 0 && out.join(format!("{stem}.bcf")).is_file() && !Path::new(TEXBIN).join("biber").is_file() {
@@ -270,7 +279,10 @@ fn mirror_dirs(from: &Path, to: &Path, depth: usize) {
 }
 
 /// Runs a TeX tool; false when it ran past the timeout and was stopped.
-fn run_tool(mut cmd: Command, cwd: &Path, out: &Path) -> Result<bool, String> {
+fn run_tool(mut cmd: Command, cwd: &Path, out: &Path, paranoid: bool) -> Result<bool, String> {
+    if paranoid {
+        cmd.env("openin_any", "p");
+    }
     cmd.current_dir(cwd)
         .env("PATH", format!("{TEXBIN}:/usr/bin:/bin"))
         .env("TEXMFOUTPUT", out)
@@ -448,7 +460,7 @@ Package hyperref Warning: Token not allowed.
         std::fs::write(base.join("outside.tex"), "\\documentclass{article}").unwrap();
         let part = project.join("part.tex");
         std::fs::write(&part, "% !TEX root = ../outside.tex\n").unwrap();
-        let err = compile(&part, &project).unwrap_err();
+        let err = compile(&part, &project, false).unwrap_err();
         assert!(err.contains("inside the project"), "{err}");
 
         let big = project.join("big.tex");
@@ -469,20 +481,20 @@ Package hyperref Warning: Token not allowed.
         std::fs::write(&main, "\\documentclass{article}\n\\begin{document}\nHi \\ref{a}.\n\\include{ch/one}\n\\end{document}\n").unwrap();
         std::fs::write(dir.join("ch/one.tex"), "% !TEX root = ../main.tex\n\\section{One}\\label{a}\n").unwrap();
 
-        let ok = compile(&dir.join("ch/one.tex"), &dir).unwrap();
+        let ok = compile(&dir.join("ch/one.tex"), &dir, false).unwrap();
         assert_eq!(ok.status, "ok", "{ok:?}");
         assert!(ok.root.ends_with("main.tex"));
         assert!(Path::new(ok.pdf.as_deref().unwrap()).is_file());
         assert!(!dir.join("main.aux").exists(), "output must go to the cache folder");
 
         std::fs::write(&main, "\\documentclass{article}\n\\begin{document}\n\\nosuchmacro\n\\end{document}\n").unwrap();
-        let bad = compile(&main, &dir).unwrap();
+        let bad = compile(&main, &dir, false).unwrap();
         assert_eq!(bad.status, "errors");
         assert_eq!(bad.errors[0].line, Some(3));
         assert!(bad.errors[0].message.starts_with("Undefined control sequence"));
 
         std::fs::write(&main, "\\section{no class}").unwrap();
-        assert_eq!(compile(&main, &dir).unwrap().status, "not-root");
+        assert_eq!(compile(&main, &dir, false).unwrap().status, "not-root");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(output_dir(&main.canonicalize().unwrap_or(main)).unwrap());
     }

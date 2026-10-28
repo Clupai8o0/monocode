@@ -5,6 +5,7 @@ import { watchFile } from "../../features/files/model/fileWatch";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
 import type { OpenFileFn } from "../../features/search/model/search";
 import { PdfView } from "../pdf/PdfView";
+import { useShownGate } from "../shows/shownPaths";
 import { formatMillis, issueLabel, type LatexResult } from "./latexModel";
 
 const ENABLED = import.meta.env.MODE !== "test";
@@ -34,9 +35,14 @@ export function LatexPreview({
   const pending = useRef(false);
   const alive = useRef(true);
   const remote = path.startsWith(REMOTE_PATH_PREFIX);
+  // A file sent from another machine compiles only after a click, and then
+  // TeX may not read or write outside its folder.
+  const gate = useShownGate(path);
+  const shown = gate.shown;
+  const blocked = remote || gate.blocked;
 
   const build = useCallback(async () => {
-    if (!ENABLED || remote) {
+    if (!ENABLED || blocked) {
       return;
     }
     if (running.current) {
@@ -52,6 +58,7 @@ export function LatexPreview({
           const next = await invoke<LatexResult>("fork_latex_compile", {
             path,
             cwd,
+            ...(shown ? { paranoid: true } : {}),
           });
           if (!alive.current) {
             return;
@@ -73,7 +80,7 @@ export function LatexPreview({
         setBuilding(false);
       }
     }
-  }, [path, cwd, remote]);
+  }, [path, cwd, blocked, shown]);
 
   useEffect(() => {
     alive.current = true;
@@ -86,7 +93,7 @@ export function LatexPreview({
   // Rebuild when this file or its root is saved.
   const root = result?.root;
   useEffect(() => {
-    if (!ENABLED || remote) {
+    if (!ENABLED || blocked) {
       return;
     }
     let timer = 0;
@@ -104,11 +111,27 @@ export function LatexPreview({
         stop();
       }
     };
-  }, [path, root, remote, build]);
+  }, [path, root, blocked, build]);
 
   if (remote) {
     return (
       <Message>The LaTeX preview works for files on this Mac only.</Message>
+    );
+  }
+  if (gate.blocked) {
+    return (
+      <div className="grid h-full place-items-center p-6">
+        <div className="max-w-sm text-center text-[12px] leading-5 text-content/60">
+          Sent from another machine. Compiling runs LaTeX on this Mac.
+          <button
+            type="button"
+            onClick={gate.allow}
+            className="mx-auto mt-3 block rounded-md bg-content/10 px-2 py-1 text-[12px] text-content/80 hover:bg-content/15"
+          >
+            Compile on this Mac
+          </button>
+        </div>
+      </div>
     );
   }
   if (result?.status === "no-tex") {
