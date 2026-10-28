@@ -186,6 +186,15 @@ fn addresses(inner: &Inner) -> Vec<Address> {
     result.truncate(16);
     result
 }
+/// Fork: Node-style platform name for the `workspace.list` host field.
+fn host_platform() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    }
+}
+
 fn name() -> String {
     hostname::get()
         .unwrap_or_default()
@@ -730,6 +739,7 @@ async fn handle(
             let mut catalog = merged_catalog(app, &mut inner);
             catalog["sessions"] = json!(recent_sessions(&catalog["sessions"]));
             catalog["addresses"] = json!(addresses(&inner));
+            catalog["host"] = json!({"name": name(), "platform": host_platform()}); // Fork
             return Ok(catalog);
         }
         if method == "sessions.list" {

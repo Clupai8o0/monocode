@@ -13,6 +13,7 @@ mod fork_claims;
 mod fork_external_sessions;
 mod fork_latex;
 mod fork_office;
+mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
@@ -690,6 +691,8 @@ pub fn run() {
             fork_office::fork_office_convert, // Fork
             fork_html::fork_html_preview_create, // Fork
             fork_html::fork_html_preview_remove, // Fork
+            fork_shows::fork_shows_cache_write, // Fork
+            fork_shows::fork_shows_cache_prune, // Fork
             fork_workspaces::fork_workspace_list,           // Fork
             fork_workspaces::fork_workspace_create,         // Fork
             fork_workspaces::fork_workspace_open,           // Fork

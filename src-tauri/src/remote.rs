@@ -508,6 +508,8 @@ fn supported_remote_method(method: &str) -> bool {
             | "git.diff"
             | "git.branches"
             | "git.switch"
+            | "shows.next"
+            | "shows.read"
             | "git.createBranch"
             | "git.worktrees"
             | "git.worktreeCreate"
