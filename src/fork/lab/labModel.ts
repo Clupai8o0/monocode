@@ -20,7 +20,8 @@ export type LocalRemoteControl = RemoteControlChoice & {
   lab: boolean;
   /** What remoteControlAtStartup should be here. */
   wanted: boolean;
-  accounts: { account: string; enabled: boolean }[];
+  /** dir: the account's folder name (".claude", ".claude-exec"), when the script tells it. */
+  accounts: { account: string; enabled: boolean; dir?: string }[];
   /** Only from fork_lab_rc_apply: the choice was saved. */
   changed?: boolean;
   /** This machine's name, when the native side tells it. */
@@ -34,6 +35,8 @@ export type RelayHostStatus = {
   proxies: number;
   lastSyncAt: number | null;
   lastError: string | null;
+  /** The relay is on for this host; false when the field is missing. */
+  enabled: boolean;
 };
 
 /** fork_relay_status: this Mac's side of the relay. */
@@ -81,7 +84,13 @@ export function parseLocalRemoteControl(value: unknown): LocalRemoteControl | un
         }
         const item = entry as Record<string, unknown>;
         return typeof item.account === "string"
-          ? [{ account: item.account, enabled: item.enabled === true }]
+          ? [
+              {
+                account: item.account,
+                enabled: item.enabled === true,
+                ...(typeof item.dir === "string" && item.dir ? { dir: item.dir } : {}),
+              },
+            ]
           : [];
       })
     : [];
@@ -107,19 +116,28 @@ export type SyncDecision =
   /** The host has the later choice: apply it here. */
   | { kind: "pull"; choice: RemoteControlChoice };
 
-/** Newest wins. On a tie with different scopes the host's choice wins, so
- * both sides settle on one. */
+/** A stamp more than this far past the clock counts as the clock. */
+export const FUTURE_SLACK_MS = 5 * 60_000;
+
+function clampStamp(at: number, now: number): number
+{
+  return at > now + FUTURE_SLACK_MS ? now : at;
+}
+
+/** Same scope: nothing to do. Otherwise newest wins, a stamp far in the future
+ * counting as now; on a tie the host's choice wins, so both sides settle on one. */
 export function decideSync(
   local: RemoteControlChoice,
   host: RemoteControlChoice,
+  now = Date.now(),
 ): SyncDecision {
-  if (local.updatedAt > host.updatedAt) {
+  if (local.scope === host.scope) {
+    return { kind: "none" };
+  }
+  if (clampStamp(local.updatedAt, now) > clampStamp(host.updatedAt, now)) {
     return { kind: "push", params: { scope: local.scope, updatedAt: local.updatedAt } };
   }
-  if (host.updatedAt > local.updatedAt || host.scope !== local.scope) {
-    return { kind: "pull", choice: { scope: host.scope, updatedAt: host.updatedAt, by: host.by } };
-  }
-  return { kind: "none" };
+  return { kind: "pull", choice: { scope: host.scope, updatedAt: host.updatedAt, by: host.by } };
 }
 
 /** The account folder name the protocol uses, from the script's short name. */
@@ -156,7 +174,7 @@ export function buildReport(
   local: LocalRemoteControl,
 ): LabParams["lab.report"] {
   const accounts: RemoteControlAccount[] = local.accounts.map((entry) => ({
-    account: accountFolder(entry.account),
+    account: entry.dir || accountFolder(entry.account),
     enabled: entry.enabled,
   }));
   return {
@@ -380,6 +398,9 @@ export function localRelayLine(
   if (!host) {
     return local.enabled ? "This Mac is not linked to it yet." : null;
   }
+  if (!host.enabled) {
+    return "The relay is off there.";
+  }
   if (host.lastError) {
     return `This Mac couldn't reach it: ${host.lastError}`;
   }
@@ -412,6 +433,7 @@ export function parseLocalRelay(value: unknown): LocalRelayStatus | undefined {
             proxies: typeof item.proxies === "number" ? item.proxies : 0,
             lastSyncAt: typeof item.lastSyncAt === "number" ? item.lastSyncAt : null,
             lastError: typeof item.lastError === "string" ? item.lastError : null,
+            enabled: item.enabled === true,
           },
         ];
       })
