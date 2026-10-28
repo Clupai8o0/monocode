@@ -18,6 +18,7 @@ import {
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
 import { accountEnv, hostAccount } from "./accounts";
+import { showsAgentEnv } from "./shows";
 import { providerLaunch, resolveProvider } from "./process";
 
 const exec = promisify(execFile);
@@ -100,6 +101,12 @@ function loopbackUrl(value: unknown): string {
 }
 
 /** Native process implementation for the headless execution proof. */
+/** Points the agent's `xdg-open`, `open` and `$BROWSER` at show-on-Mac. */
+const withShowsEnv = (env: NodeJS.ProcessEnv, sessionId: string) => ({
+  ...env,
+  ...showsAgentEnv(sessionId, env.PATH),
+});
+
 export class HostChildBackend implements ChildBackend {
   private events = new EventEmitter();
   private children = new Map<string, ChildProcessWithoutNullStreams>();
@@ -362,10 +369,10 @@ export class HostChildBackend implements ChildBackend {
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         detached: process.platform !== "win32",
         windowsHide: true,
-        env: {
-          ...(account ? accountEnv(account, process.env) : process.env),
-          MONOCODE_HOST: "1",
-        },
+        env: withShowsEnv(
+          { ...(account ? accountEnv(account, process.env) : process.env), MONOCODE_HOST: "1" },
+          id,
+        ),
       },
     );
     this.children.set(id, child);

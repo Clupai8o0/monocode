@@ -33,7 +33,8 @@ import {
 import { connectionInfo, installService, uninstallService } from "./service";
 import { version } from "../package.json";
 import { protectWindowsDirectory } from "./windows";
-import { importDesktop } from "./desktop-import";
+import { dataDirOf, importDesktop } from "./desktop-import";
+import { hostShows, runShowCommand, showSocketPath } from "./shows";
 import { writeNotifyConfig } from "./notify";
 
 process.umask(0o077);
@@ -92,6 +93,8 @@ async function main() {
   pair --qr --url <https-url> [--link]
                         Issue a phone credential as a QR code to scan
   project add <folder>  List a folder as a project for the phone
+  show <file|url>... [--title T]
+                        Open a file or link in MonoCode on the Mac
   import-desktop <dir>  Bring a desktop export's projects, looks and Monos here
   notify <server> [topic]
                         Push turn results to an ntfy server (random topic)
@@ -99,6 +102,15 @@ async function main() {
   revoke <device-id>    Revoke a device credential
 Options: --data-dir <directory> --port <port> (default 3774)
 Connect another computer using an SSH forward to the loopback port.`);
+    return;
+  }
+  if (command === "show") {
+    process.exitCode = await runShowCommand(args.slice(1), {
+      cwd: process.cwd(),
+      env: process.env,
+      socketPath: process.env.MONOCODE_SHOW_SOCKET || showSocketPath(directory),
+      print: (line) => console.log(line),
+    });
     return;
   }
   if (!Number.isInteger(port) || port < 1 || port > 65535)
@@ -299,6 +311,18 @@ Connect another computer using an SSH forward to the loopback port.`);
       }
     }
     const engine = new HostEngine(store, hostProviders);
+    const shows = hostShows({
+      dataDir: dataDirOf(store),
+      projects: () => store.projects(),
+    });
+    try {
+      shows.installAgentBin(process.execPath, fileURLToPath(import.meta.url));
+      await shows.listen();
+    } catch (error) {
+      console.error(
+        `Show on the Mac is off: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const secret = randomBytes(32).toString("base64url");
     let stopping = false;
     let stop: () => Promise<void>;
@@ -337,6 +361,7 @@ Connect another computer using an SSH forward to the loopback port.`);
       stopping = true;
       server.close();
       server.closeAllConnections();
+      shows.close();
       await engine.close();
       await backend.close();
       release();
