@@ -83,11 +83,12 @@ export function settledPush(
       tags: ["warning"],
       priority: 4,
     };
+  // ntfy's Android app pops a push up over the screen only from priority 4.
   return {
     title: `Done: ${title}`,
     message: "The turn finished.",
     tags: ["white_check_mark"],
-    priority: 3,
+    priority: 4,
   };
 }
 

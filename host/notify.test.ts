@@ -23,7 +23,7 @@ const temp = () => {
 
 it("pushes how a turn ended", () => {
   const done = { cancelled: false, interrupted: false };
-  expect(settledPush("Fix", done).title).toBe("Done: Fix");
+  expect(settledPush("Fix", done)).toMatchObject({ title: "Done: Fix", priority: 4 });
   expect(settledPush("Fix", { ...done, cancelled: true }).title).toBe("Stopped: Fix");
   expect(settledPush("Fix", { ...done, error: "boom" })).toMatchObject({
     title: "Failed: Fix",

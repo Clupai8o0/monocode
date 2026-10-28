@@ -27,7 +27,11 @@ Notifications.setNotificationHandler({
 
 type Seen = Pick<SessionSummary, "busy" | "waiting">;
 type Data = { projectId: string; sessionId: string };
-const SESSION_CHANNEL = "sessions";
+// Android never lets an app raise a channel's importance once made, so alerts
+// that pop up need a new channel; the old one, which only filled the shade,
+// is removed.
+const SESSION_CHANNEL = "session-alerts";
+const OLD_SESSION_CHANNEL = "sessions";
 
 /**
  * Local notifications for the desktop's sessions, after its own: an agent
@@ -58,8 +62,12 @@ export function SessionNotifications() {
       if (Platform.OS === "android") {
         await Notifications.setNotificationChannelAsync(SESSION_CHANNEL, {
           name: "Session alerts",
-          importance: Notifications.AndroidImportance.DEFAULT,
+          // HIGH pops the alert up over the screen, not only into the shade.
+          importance: Notifications.AndroidImportance.HIGH,
         });
+        await Notifications.deleteNotificationChannelAsync(
+          OLD_SESSION_CHANNEL,
+        ).catch(() => undefined);
       }
       const settings = await Notifications.getPermissionsAsync();
       const shouldRequest =

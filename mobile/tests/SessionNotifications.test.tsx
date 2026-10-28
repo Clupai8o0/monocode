@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   getPermissions: vi.fn(),
   requestPermissions: vi.fn(),
   setChannel: vi.fn(),
+  deleteChannel: vi.fn(),
   schedule: vi.fn(),
 }));
 
@@ -40,10 +41,11 @@ vi.mock("expo-notifications", () => ({
   getPermissionsAsync: state.getPermissions,
   requestPermissionsAsync: state.requestPermissions,
   setNotificationChannelAsync: state.setChannel,
+  deleteNotificationChannelAsync: state.deleteChannel,
   scheduleNotificationAsync: state.schedule,
   useLastNotificationResponse: () => null,
   DEFAULT_ACTION_IDENTIFIER: "default",
-  AndroidImportance: { DEFAULT: 3 },
+  AndroidImportance: { DEFAULT: 5, HIGH: 6 },
   IosAuthorizationStatus: { NOT_DETERMINED: 0 },
 }));
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
@@ -77,6 +79,7 @@ beforeEach(() => {
   state.getPermissions.mockImplementation(async () => state.settings);
   state.requestPermissions.mockResolvedValue({ status: "granted" });
   state.setChannel.mockResolvedValue(null);
+  state.deleteChannel.mockResolvedValue(undefined);
   state.schedule.mockResolvedValue("notification");
   root = createRoot(document.createElement("div"));
 });
@@ -86,13 +89,27 @@ it("creates the Android channel before requesting notification permission", asyn
   // Expo may report denied before the first Android prompt, with canAskAgain true.
   state.settings.status = "denied";
   await render();
-  expect(state.setChannel).toHaveBeenCalledWith("sessions", {
-    name: "Session alerts", importance: 3,
+  expect(state.setChannel).toHaveBeenCalledWith("session-alerts", {
+    name: "Session alerts", importance: 6,
   });
   expect(state.requestPermissions).toHaveBeenCalledOnce();
   expect(state.setChannel.mock.invocationCallOrder[0]).toBeLessThan(
     state.requestPermissions.mock.invocationCallOrder[0],
   );
+});
+
+it("moves alerts to a channel that pops up and drops the old quiet one", async () => {
+  await render();
+  expect(state.deleteChannel).toHaveBeenCalledWith("sessions");
+  expect(state.setChannel.mock.invocationCallOrder[0]).toBeLessThan(
+    state.deleteChannel.mock.invocationCallOrder[0],
+  );
+});
+
+it("still asks for permission when the old channel cannot be removed", async () => {
+  state.deleteChannel.mockRejectedValue(new Error("gone"));
+  await render();
+  expect(state.requestPermissions).toHaveBeenCalledOnce();
 });
 
 it.each([
@@ -139,7 +156,7 @@ it.each(["android", "ios"])("routes immediate session alerts on %s", async (os) 
   await render();
   expect(state.schedule).toHaveBeenCalledWith(expect.objectContaining({
     content: expect.objectContaining({ body: "Finished" }),
-    trigger: os === "android" ? { channelId: "sessions" } : null,
+    trigger: os === "android" ? { channelId: "session-alerts" } : null,
   }));
 });
 
