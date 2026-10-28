@@ -14,6 +14,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { open, readlink, realpath, stat, type FileHandle } from "node:fs/promises";
@@ -100,15 +101,38 @@ export function secretName(name: string): boolean {
 export const defaultHostDataDir = (home: string = homedir()) => join(home, ".monocode-host");
 
 /**
+ * systemd's runtime dir for this user, `/run/user/<uid>`, when it exists and
+ * only this user can enter it. An SSH shell without a login session (a `peer`
+ * job) lacks `XDG_RUNTIME_DIR` while the host, run by systemd, has it.
+ */
+export function userRuntimeDir(): string | undefined {
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (uid === undefined) {
+    return undefined;
+  }
+  const dir = `/run/user/${uid}`;
+  try {
+    const info = statSync(dir);
+    return info.isDirectory() && info.uid === uid && (info.mode & 0o077) === 0 ? dir : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The default socket: `$XDG_RUNTIME_DIR/monocode-host/show.sock` for the
- * default data dir, `show-<hash>.sock` there for any other, else under the data dir.
+ * default data dir, `show-<hash>.sock` there for any other. Without
+ * `XDG_RUNTIME_DIR`, systemd's `/run/user/<uid>` stands in, so the host and a
+ * command from a bare SSH shell agree; else it sits under the data dir.
  */
 export function showSocketPath(
   dataDir: string,
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
+  fallbackRuntimeDir: () => string | undefined = userRuntimeDir,
 ): string {
-  if (!env.XDG_RUNTIME_DIR) {
+  const runtime = env.XDG_RUNTIME_DIR || fallbackRuntimeDir();
+  if (!runtime) {
     return join(dataDir, "run", "show.sock");
   }
   const dir = resolve(dataDir);
@@ -116,7 +140,7 @@ export function showSocketPath(
     dir === resolve(defaultHostDataDir(home))
       ? "show.sock"
       : `show-${createHash("sha256").update(dir).digest("hex").slice(0, 12)}.sock`;
-  return join(env.XDG_RUNTIME_DIR, "monocode-host", name);
+  return join(runtime, "monocode-host", name);
 }
 
 export type HostShowsOptions = {

@@ -369,7 +369,15 @@ describe("socket path", () => {
     const other = showSocketPath("/srv/data", env, "/h");
     expect(other).toMatch(/^\/run\/user\/1\/monocode-host\/show-[0-9a-f]{12}\.sock$/);
     expect(showSocketPath("/srv/data2", env, "/h")).not.toBe(other);
-    expect(showSocketPath("/srv/data", {}, "/h")).toBe("/srv/data/run/show.sock");
+    expect(showSocketPath("/srv/data", {}, "/h", () => undefined)).toBe("/srv/data/run/show.sock");
+  });
+
+  it("falls back to systemd's runtime dir when the shell lacks XDG_RUNTIME_DIR", () => {
+    const viaEnv = showSocketPath("/h/.monocode-host", { XDG_RUNTIME_DIR: "/run/user/7" }, "/h");
+    expect(showSocketPath("/h/.monocode-host", {}, "/h", () => "/run/user/7")).toBe(viaEnv);
+    expect(
+      showSocketPath("/h/.monocode-host", { XDG_RUNTIME_DIR: "/x" }, "/h", () => "/run/user/7"),
+    ).toBe("/x/monocode-host/show.sock");
   });
 });
 
