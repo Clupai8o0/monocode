@@ -127,6 +127,8 @@ describe("remote host API", () => {
     expect((await s.call("externalSessions.read", { projectId: s.project.id, sessionId: "handoff:../../x" })).value.error)
       .toBe("Invalid session id");
     expect((await s.call("environment.describe")).value.result.capabilities).toContain("externalSessions.read");
+    // No shows socket is listening in this test host.
+    expect((await s.call("environment.describe")).value.result.capabilities).not.toContain("shows");
   });
 
   it("rejects a credential revoked while its request body is arriving", async () => {

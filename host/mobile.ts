@@ -536,17 +536,14 @@ export function createMobileHandler(
         // A phone that names the catalog it has gets a short answer when
         // nothing changed; one that doesn't (v1) always gets the whole list.
         const value = catalog();
+        const host = { name: machine, platform: process.platform, osName: hostOsName() };
         const etag = createHash("sha256")
-          .update(JSON.stringify(value))
+          .update(JSON.stringify({ catalog: value, host }))
           .digest("base64url")
           .slice(0, 22);
         if (typeof params.since === "string" && params.since === etag)
           return { unchanged: true, etag };
-        return {
-          ...value,
-          etag,
-          host: { name: machine, platform: process.platform, osName: hostOsName() },
-        };
+        return { ...value, etag, host };
       }
       case "notify.config":
         // The topic is what keeps others off the ntfy server; this route is
