@@ -60,6 +60,8 @@ export type Where =
 const KEY = "monocode.fork.machineInfo.v1";
 /** How old a machine's info may get while a label using it is on screen. */
 const STALE_MS = 10 * 60_000;
+/** How often mounted labels check whether their machine's info is stale. */
+const CHECK_MS = 60_000;
 
 // ---- pure helpers ----
 
@@ -128,6 +130,23 @@ export function describeToInfo(value: unknown, now: number): MachineInfo {
       Array.isArray(record.capabilities) && record.capabilities.includes("shows"),
     checkedAt: now,
   };
+}
+
+/** The machines whose info is missing or older than `staleMs`. */
+export function staleMachineIds(
+  machineIds: Iterable<string>,
+  infoFor: (machineId: string) => MachineInfo | undefined,
+  now: number,
+  staleMs = STALE_MS,
+): string[] {
+  const stale: string[] = [];
+  for (const id of machineIds) {
+    const info = infoFor(id);
+    if (!info || now - info.checkedAt > staleMs) {
+      stale.push(id);
+    }
+  }
+  return stale;
 }
 
 /** Where a path lives, from the connected machines and their cached info. */
@@ -288,17 +307,58 @@ function getVersion(): number {
   return version;
 }
 
-/** A machine's info, asked for when missing or older than ten minutes. */
+// ---- keeping mounted labels fresh: one timer and one set of listeners ----
+
+const watched = new Map<string, number>();
+let checkTimer: ReturnType<typeof setInterval> | undefined;
+
+function refreshStale() {
+  for (const id of staleMachineIds(watched.keys(), machineInfo, Date.now())) {
+    void refreshMachineInfo(id);
+  }
+}
+
+function onVisible() {
+  if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+    refreshStale();
+  }
+}
+
+function watchMachine(machineId: string): () => void {
+  watched.set(machineId, (watched.get(machineId) ?? 0) + 1);
+  if (!checkTimer && typeof window !== "undefined") {
+    checkTimer = setInterval(refreshStale, CHECK_MS);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+  }
+  return () => {
+    const count = (watched.get(machineId) ?? 1) - 1;
+    if (count > 0) {
+      watched.set(machineId, count);
+    } else {
+      watched.delete(machineId);
+    }
+    if (watched.size === 0 && checkTimer) {
+      clearInterval(checkTimer);
+      checkTimer = undefined;
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    }
+  };
+}
+
+/** A machine's info, asked for when missing or older than ten minutes, and
+ * again whenever it goes stale while mounted. */
 export function useMachineInfo(machineId: string | undefined): MachineInfo | undefined {
   useSyncExternalStore(subscribe, getVersion, getVersion);
   useEffect(() => {
     if (!FORK_MACHINE_LABELS || !machineId) {
       return;
     }
-    const info = machineInfo(machineId);
-    if (!info || Date.now() - info.checkedAt > STALE_MS) {
+    if (staleMachineIds([machineId], machineInfo, Date.now()).length > 0) {
       void refreshMachineInfo(machineId);
     }
+    return watchMachine(machineId);
   }, [machineId]);
   return machineInfo(machineId);
 }
