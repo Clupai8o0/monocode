@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -13,7 +13,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MONO } from "@/features/changes/diffTheme";
 import { Icon } from "@/ui/Icon";
-import { themedStyles, useColors } from "@/ui/theme";
+import { themedStyles, useColors, useScheme } from "@/ui/theme";
+
+import {
+  runTextStyle,
+  TERMINAL_PALETTES,
+  type TerminalRun,
+} from "./terminalText";
 
 import { useTerminal } from "./useTerminal";
 
@@ -32,6 +38,32 @@ const KEYS = [
   { label: "Ctrl-D", data: "\x04", hint: "End input" },
 ];
 
+/** One line's runs as spans; unchanged lines keep their array and skip render. */
+const Line = memo(function Line({
+  runs,
+  palette,
+  content,
+  background,
+}: {
+  runs: TerminalRun[];
+  palette: readonly string[];
+  content: string;
+  background: string;
+}) {
+  return runs.map((run, index) =>
+    run.style ? (
+      <Text
+        key={index}
+        style={runTextStyle(run.style, palette, { content, background })}
+      >
+        {run.text}
+      </Text>
+    ) : (
+      run.text
+    ),
+  );
+});
+
 export function TerminalView({
   projectId,
   worktreePath,
@@ -45,6 +77,7 @@ export function TerminalView({
   const colors = useColors();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const palette = TERMINAL_PALETTES[useScheme()];
   const { width, height } = useWindowDimensions();
   const cols = Math.max(20, Math.floor((width - PADDING * 2) / CHAR_WIDTH));
   const rows = Math.max(10, Math.floor(height / (FONT_SIZE * 1.4)));
@@ -88,8 +121,21 @@ export function TerminalView({
         }}
         keyboardShouldPersistTaps="handled"
       >
+        <Text style={styles.note}>
+          Full-screen programs like vim don&apos;t work here.
+        </Text>
         <Text selectable style={styles.text}>
-          {text.lines.join("\n")}
+          {text.runs.map((runs, index) => (
+            <Text key={index}>
+              {index ? "\n" : null}
+              <Line
+                runs={runs}
+                palette={palette}
+                content={colors.content}
+                background={colors.background}
+              />
+            </Text>
+          ))}
         </Text>
         {started && !alive ? (
           <Text style={styles.status}>
@@ -184,6 +230,11 @@ const useStyles = themedStyles((colors) => ({
     fontSize: FONT_SIZE,
     lineHeight: FONT_SIZE * 1.4,
     color: colors.content,
+  },
+  note: {
+    marginBottom: 8,
+    fontSize: 12,
+    color: colors.faint,
   },
   status: {
     marginTop: 12,

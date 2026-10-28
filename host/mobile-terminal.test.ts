@@ -2,7 +2,23 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createMobileTerminals, terminalCommand } from "./mobile-terminal";
+import {
+  createMobileTerminals,
+  terminalCommand,
+  terminalEnv,
+} from "./mobile-terminal";
+
+it("gives the shell a colour terminal with no pager or full-screen editor", () => {
+  const env = terminalEnv({ PATH: "/bin", NO_COLOR: "1", TERM: "dumb" });
+  expect(env).toMatchObject({
+    PATH: "/bin",
+    TERM: "xterm-256color",
+    PAGER: "cat",
+    GIT_PAGER: "cat",
+    EDITOR: "ed",
+  });
+  expect(env.NO_COLOR).toBeUndefined();
+});
 
 const directories: string[] = [];
 afterEach(() => {

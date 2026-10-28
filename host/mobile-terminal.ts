@@ -11,9 +11,9 @@ import { StringDecoder } from "node:string_decoder";
  * long-polls for more, as it does for watches.
  *
  * There is no node-pty in the bundle (it is native), so `script` or Python
- * gives the shell a real terminal. The shell is bash with TERM=dumb: the phone shows
- * text, not a screen, and a plain prompt reads better there than whatever a
- * login shell's theme draws.
+ * gives the shell a real terminal. The shell is bash with TERM=xterm-256color:
+ * the phone renders colours and readline's line editing, though not a full
+ * screen, so pagers are `cat` (see `terminalEnv`).
  */
 
 /** Output kept per terminal; older output is dropped from the front. */
@@ -87,6 +87,29 @@ export function terminalCommand(
       args: ["-c", PYTHON_PTY, "/bin/sh", "-c", inner],
     };
   throw new Error("The terminal needs `script` or `python3` on this host");
+}
+
+/**
+ * The shell's environment: a colour terminal, so `ls`, git and test runners
+ * print colours the phone renders, with every pager turned into `cat` and
+ * no editor that takes the whole screen, since the phone has no screen.
+ */
+export function terminalEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...base,
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    PAGER: "cat",
+    GIT_PAGER: "cat",
+    MANPAGER: "cat",
+    SYSTEMD_PAGER: "cat",
+    LESS: "-FRX",
+    EDITOR: "ed",
+    VISUAL: "ed",
+    GIT_EDITOR: "ed",
+  };
+  delete env.NO_COLOR;
+  return env;
 }
 
 const size = (value: unknown, fallback: number, max: number) =>
@@ -223,7 +246,7 @@ export function createMobileTerminals(platform = process.platform) {
       cwd,
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, TERM: "dumb", NO_COLOR: "1", PAGER: "cat" },
+      env: terminalEnv(process.env),
     });
     const terminal: Terminal = {
       // Unique across restarts, so a phone still holding an old id never
