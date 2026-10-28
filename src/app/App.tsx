@@ -611,6 +611,7 @@ import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
 import type { FileOpenOptions } from "../features/search/model/search"; // Fork
 import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
+import { LabWatcher } from "../fork/lab/labWatcher"; // Fork
 import {
   canCloseForMemory,
   planSessionClose,
@@ -15053,6 +15054,8 @@ function Workspace({
           />
           {/* Fork: files and links sent from other machines' agents. */}
           <ShowsWatcher />
+          {/* Fork: keeps the home lab's Remote Control scope in step. */}
+          <LabWatcher />
           {/* Fork: each new event pops up briefly, then lives in the bell. */}
           <NotificationPopups
             topOffset={

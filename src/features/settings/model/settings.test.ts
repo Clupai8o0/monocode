@@ -622,6 +622,7 @@ describe("settings navigation", () => {
     expect(groups.flatMap((group) => group.sections.map((s) => s.id))).toEqual([
       "general",
       "connections",
+      "lab", // Fork: Home lab
       "appearance",
       "keybindings",
       "chat",

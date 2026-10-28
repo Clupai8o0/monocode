@@ -12,6 +12,7 @@ import {
   Palette,
   SlidersHorizontal,
   Sparkles,
+  Container, // Fork: Home lab
   type IconComponent,
 } from "../../shared/ui/icons";
 import { useLockOverscroll } from "../../shared/hooks/useLockOverscroll";
@@ -23,6 +24,7 @@ import {
 const SECTION_ICONS: Record<SettingsSectionId, IconComponent> = {
   general: SlidersHorizontal,
   connections: Internet,
+  lab: Container, // Fork: Home lab
   appearance: Palette,
   keybindings: Keyboard,
   chat: MessageSquare,
