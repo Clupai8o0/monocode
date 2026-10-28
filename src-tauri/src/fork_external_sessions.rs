@@ -157,15 +157,12 @@ impl Env {
             common_dir: Box::new(cached_common_dir),
         }
     }
-
-    fn cx_account(&self) -> &'static str {
-        if self.mac {
-            ".claude-exec"
-        } else {
-            ".claude-cx"
-        }
-    }
 }
+
+/// The second account's folders: `.claude-exec` on every machine, plus an
+/// older `.claude-cx` where one is still there (a missing folder reads as
+/// empty).
+const CX_ACCOUNTS: [&str; 2] = [".claude-exec", ".claude-cx"];
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -361,15 +358,11 @@ struct Record {
     source: &'static str,
 }
 
-fn registries(mac: bool) -> Vec<(&'static str, &'static str)> {
-    let cx = if mac {
-        ".claude-exec/sessions"
-    } else {
-        ".claude-cx/sessions"
-    };
+fn registries() -> Vec<(&'static str, &'static str)> {
     vec![
         (".claude/sessions", "claude"),
-        (cx, "claude-cx"),
+        (".claude-exec/sessions", "claude-cx"),
+        (".claude-cx/sessions", "claude-cx"),
         (".codex/agent-sessions", "codex"),
         (".local/state/opencode/agent-sessions", "opencode"),
         (".dsh/agent-sessions", "dsh"),
@@ -388,6 +381,10 @@ fn text(value: &Value) -> Option<String> {
 
 fn parse_record(raw: &str, source: &'static str) -> Option<Record> {
     let v: Value = serde_json::from_str(raw).ok()?;
+    // The relay's copies of sessions on other machines are not local sessions.
+    if crate::fork_relay::is_relay_entry(&v) {
+        return None;
+    }
     let proc_start = match &v["procStart"] {
         Value::String(s) if !s.is_empty() => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -422,7 +419,7 @@ fn read_records(env: &Env) -> Vec<Record> {
         HashSet::new()
     };
     let mut by_session: HashMap<String, Record> = HashMap::new();
-    for (dir, source) in registries(env.mac) {
+    for (dir, source) in registries() {
         let Ok(entries) = std::fs::read_dir(env.home.join(dir)) else {
             continue;
         };
@@ -576,12 +573,14 @@ fn find_transcript(
     if !valid_session_id(id) {
         return None;
     }
-    let accounts = [(".claude", "claude"), (env.cx_account(), "claude-cx")];
+    let cx = CX_ACCOUNTS.map(|account| (account, "claude-cx"));
     let file = format!("{id}.jsonl");
     let key = project_key(cwd);
-    let mut ordered = accounts.to_vec();
+    let mut ordered = vec![(".claude", "claude")];
     if source == "claude-cx" {
-        ordered.reverse();
+        ordered.splice(0..0, cx);
+    } else {
+        ordered.extend(cx);
     }
     if let Some((account, src)) = ordered.first() {
         let direct = env
@@ -1758,6 +1757,60 @@ mod tests {
         }
         assert_eq!(texts, vec!["last", "first"]);
         assert!(before.is_none() && cut);
+    }
+
+    #[test]
+    fn skips_relay_copies_and_reads_both_cx_folders() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        // Copies the relay writes for sessions on other machines.
+        write(
+            &home.join(".claude/sessions/1000000001.json"),
+            &rec(
+                1,
+                "relayrelay-1",
+                &repo,
+                9,
+                r#","pidDomain":"relay:vivobook","monocodeRelay":{"machine":"vivobook"}"#,
+            ),
+        );
+        write(
+            &home.join(".claude/sessions/2.json"),
+            &rec(
+                2,
+                "relaydomain-2",
+                &repo,
+                9,
+                r#","pidDomain":"relay:lenovo""#,
+            ),
+        );
+        // The cx account is .claude-exec off the Mac too, and an old
+        // .claude-cx folder is still read.
+        write(
+            &home.join(".claude-exec/sessions/3.json"),
+            &rec(3, "execexec-3", &repo, 3, ""),
+        );
+        write(
+            &home.join(".claude-cx/sessions/4.json"),
+            &rec(4, "oldcxold-4", &repo, 4, ""),
+        );
+        let e = Env {
+            mac: false,
+            ..env(&home, vec![proc(1), proc(2), proc(3), proc(4)])
+        };
+        let mut rows: Vec<(String, String)> = list(&e, &[project("p", &repo)], None)
+            .into_iter()
+            .map(|r| (r.id, r.source))
+            .collect();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                ("execexec-3".to_string(), "claude-cx".to_string()),
+                ("oldcxold-4".to_string(), "claude-cx".to_string())
+            ]
+        );
     }
 
     #[test]

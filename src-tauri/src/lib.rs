@@ -11,6 +11,8 @@ mod fork_poll_cache; // Fork: share short-lived helper reads across windows.
 mod fork_claims;
 // Fork: agent sessions MonoCode did not start ("Elsewhere"), read-only.
 mod fork_external_sessions;
+// Fork: the relay, so Claude sessions on other machines can message ours.
+mod fork_relay;
 mod fork_latex;
 mod fork_office;
 mod fork_shows; // Fork: cache files a remote machine shows on this computer.
@@ -314,6 +316,8 @@ pub fn run() {
             checkpoint::init(app.handle())?;
             menu::install(app.handle())?;
             fork_workspaces::init(app.handle()); // Fork
+            #[cfg(unix)]
+            fork_relay::start(app.handle()); // Fork
             #[cfg(target_os = "windows")]
             tray::install(app.handle())?;
             #[cfg(target_os = "macos")]
@@ -687,6 +691,7 @@ pub fn run() {
             fork_claims::fork_claims_list,    // Fork
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork
+            fork_relay::fork_relay_status,    // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
             fork_html::fork_html_preview_create, // Fork
@@ -776,6 +781,8 @@ pub fn run() {
         tauri::RunEvent::Exit => {
             #[cfg(target_os = "macos")]
             fork_update::on_quit(); // Fork
+            #[cfg(unix)]
+            fork_relay::stop(); // Fork
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
         }

@@ -13,8 +13,8 @@ use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
 pub struct RemoteConnections {
-    store: Mutex<()>,
-    tunnels: Tunnels,
+    pub(crate) store: Mutex<()>, // Fork: the relay reads the machine store (fork_relay.rs).
+    pub(crate) tunnels: Tunnels, // Fork
     jobs: Mutex<HashMap<String, Arc<Job>>>,
 }
 
@@ -37,16 +37,17 @@ impl RemoteConnections {
     }
 }
 
+// Fork: pub(crate) so the relay (fork_relay.rs) can reach paired hosts.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredMachine {
-    id: String,
-    name: String,
-    endpoint: String,
-    environment_id: String,
-    token: String,
+pub(crate) struct StoredMachine {
+    pub(crate) id: String,             // Fork
+    pub(crate) name: String,           // Fork
+    pub(crate) endpoint: String,       // Fork
+    pub(crate) environment_id: String, // Fork
+    pub(crate) token: String,          // Fork
     #[serde(default)]
-    ssh: Option<SshTarget>,
+    pub(crate) ssh: Option<SshTarget>, // Fork
 }
 
 #[derive(Clone, Serialize)]
@@ -93,7 +94,8 @@ fn endpoint(value: &str) -> Result<String, String> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
-fn read(path: &Path) -> Result<Vec<StoredMachine>, String> {
+// Fork: pub(crate), for the relay.
+pub(crate) fn read(path: &Path) -> Result<Vec<StoredMachine>, String> {
     match std::fs::read(path) {
         Ok(bytes) => {
             serde_json::from_slice(&bytes).map_err(|_| "Remote connection store is invalid".into())
@@ -218,7 +220,8 @@ fn rpc(
     rpc_with_timeout(endpoint, token, environment_id, method, params, None)
 }
 
-fn rpc_with_timeout(
+// Fork: pub(crate), for the relay.
+pub(crate) fn rpc_with_timeout(
     endpoint: &str,
     token: &str,
     environment_id: Option<&str>,
@@ -329,7 +332,8 @@ fn connection_refused(error: &ureq::Transport) -> bool {
     false
 }
 
-fn store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+// Fork: pub(crate), for the relay.
+pub(crate) fn store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(app
         .path()
         .app_data_dir()
