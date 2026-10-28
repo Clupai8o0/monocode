@@ -216,9 +216,11 @@ function refreshMachine(machine: Machine) {
     .then(async (result) => {
       const rows = Array.isArray(result?.sessions) ? result.sessions : [];
       if (!machine.machineId && rows.length > 0) {
+        // A failed lookup lands in the catch below and keeps the last good
+        // rows, so another window's session never shows as outside.
         machine.stored = await storedSessionIds(
           asked.map((project) => project.cwd),
-        ).catch(() => machine.stored);
+        );
       }
       machine.rows = rows;
       machine.supported = true;

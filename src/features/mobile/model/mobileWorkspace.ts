@@ -471,8 +471,9 @@ export async function mobileExternalSessions(
   // Every known folder, so a session in a nested project is filed there.
   const projects = matchProjects([{ projectId, cwd }], mobileProjectPaths(), mobileProjectId);
   // This window's sessions, plus any other window's from the shared store.
+  // A failed lookup fails the call, so another window's session never shows.
   const own = ownSessionIds(sessions);
-  for (const id of await storedSessionIds([cwd]).catch(() => new Set<string>())) {
+  for (const id of await storedSessionIds([cwd])) {
     own.add(id);
   }
   if (method === "externalSessions.list") {

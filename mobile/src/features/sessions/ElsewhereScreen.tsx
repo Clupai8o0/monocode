@@ -73,7 +73,8 @@ export function ElsewhereScreen({
     const mine = generation.current;
     try {
       const page = await readExternalSession(command, connection, projectId, sessionId);
-      if (!alive.current) return;
+      // A newer load has started; its answer wins.
+      if (!alive.current || generation.current !== mine) return;
       setShown({
         turns: page.turns,
         before: page.before,
@@ -82,7 +83,9 @@ export function ElsewhereScreen({
       });
       setError(null);
     } catch (reason) {
-      if (alive.current) setError(reason instanceof Error ? reason.message : String(reason));
+      if (alive.current && generation.current === mine) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
       if (generation.current === mine) loading.current = false;
     }
