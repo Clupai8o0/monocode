@@ -1,5 +1,5 @@
 import { BottomSheet } from "@expo/ui";
-import { Divider, HStack, Spacer, Text, VStack } from "@expo/ui/swift-ui";
+import { HStack, Spacer, Text, VStack } from "@expo/ui/swift-ui";
 import {
   background,
   font,
@@ -8,7 +8,6 @@ import {
   padding,
   shapes,
 } from "@expo/ui/swift-ui/modifiers";
-import { Fragment } from "react";
 
 import type { TurnMetrics } from "@/features/workspace/types";
 import { withAlpha, useColors } from "@/ui/theme";
@@ -87,23 +86,18 @@ function StatGroup({ title, stats }: { title?: string; stats: MetricStat[] }) {
         </Text>
       ) : null}
       <VStack spacing={0} modifiers={[background(withAlpha(colors.content, 0.07), CARD_SHAPE)]}>
-        {stats.map((stat, index) => (
-          <Fragment key={stat.label}>
-            {index > 0 ? (
-              <Divider modifiers={[padding({ leading: 16 })]} />
-            ) : null}
-            <HStack modifiers={[padding({ horizontal: 16, vertical: 13 })]}>
-              <Text modifiers={[SECONDARY]}>{stat.label}</Text>
-              <Spacer />
-              <Text modifiers={[font({ weight: "medium" }), monospacedDigit()]}>
-                {stat.unit === "%"
-                  ? `${stat.value}%`
-                  : stat.unit
-                    ? `${stat.value} ${stat.unit}`
-                    : stat.value}
-              </Text>
-            </HStack>
-          </Fragment>
+        {stats.map((stat) => (
+          <HStack key={stat.label} modifiers={[padding({ horizontal: 16, vertical: 13 })]}>
+            <Text modifiers={[SECONDARY]}>{stat.label}</Text>
+            <Spacer />
+            <Text modifiers={[font({ weight: "medium" }), monospacedDigit()]}>
+              {stat.unit === "%"
+                ? `${stat.value}%`
+                : stat.unit
+                  ? `${stat.value} ${stat.unit}`
+                  : stat.value}
+            </Text>
+          </HStack>
         ))}
       </VStack>
     </VStack>

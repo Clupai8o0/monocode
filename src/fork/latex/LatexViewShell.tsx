@@ -108,22 +108,22 @@ export function LatexViewShell({
           aria-label="LaTeX layout"
           className="flex gap-0.5 rounded-md border border-stroke bg-background-base/90 p-0.5 text-[11px] shadow-sm"
         >
-        {LAYOUTS.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            role="radio"
-            aria-checked={layout === entry.id}
-            onClick={() => setLayout(entry.id)}
-            className={`rounded px-2 py-0.5 ${
-              layout === entry.id
-                ? "bg-content/10 text-content"
-                : "text-content/50 hover:text-content"
-            }`}
-          >
-            {entry.label}
-          </button>
-        ))}
+          {LAYOUTS.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="radio"
+              aria-checked={layout === entry.id}
+              onClick={() => setLayout(entry.id)}
+              className={`rounded px-2 py-0.5 ${
+                layout === entry.id
+                  ? "bg-content/10 text-content"
+                  : "text-content/50 hover:text-content"
+              }`}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
       </div>
     </div>
