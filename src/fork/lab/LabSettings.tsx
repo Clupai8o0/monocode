@@ -40,46 +40,44 @@ const button =
   "rounded-lg bg-selection px-3 py-1.5 text-[12px] font-medium hover:bg-selection-hover disabled:opacity-40";
 const quiet = "text-[12px] leading-relaxed text-content/50";
 /** uresourced and remote desktop changes wait on systemd and a probe. */
-const SLOW_MS = 45_000;
+const SLOW_MS = 60_000;
 
-type LabHosts = { hosts: RemoteMachine[]; checking: boolean };
+type LabHosts = { hosts: RemoteMachine[]; checking: boolean; recheck: () => void };
 
+/** Each machine's answer shows as it arrives; checking stays true only while
+ * no lab host has answered and some machine is still being asked. */
 function useLabHosts(machines: RemoteMachine[]): LabHosts
 {
   const [lab, setLab] = useState<Record<string, boolean>>({});
-  const [checking, setChecking] = useState(true);
+  const [round, setRound] = useState(0);
   const ids = machines.map((machine) => machine.id).join("\n");
   useEffect(() => {
     let disposed = false;
-    setChecking(true);
-    void Promise.all(
-      machines.map(async (machine) => {
-        try {
-          const describe = await remoteRequest<unknown>(machine.id, "environment.describe", {});
-          return [machine.id, hasLabCapability(describe)] as const;
-        } catch {
-          return [machine.id, false] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (!disposed) {
-        setLab(Object.fromEntries(entries));
-        setChecking(false);
-      }
-    });
+    setLab({});
+    for (const machine of machines) {
+      void remoteRequest<unknown>(machine.id, "environment.describe", {})
+        .then(hasLabCapability, () => false)
+        .then((isLab) => {
+          if (!disposed) {
+            setLab((current) => ({ ...current, [machine.id]: isLab }));
+          }
+        });
+    }
     return () => {
       disposed = true;
     };
     // The id list stands for the machines.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids]);
-  return { hosts: machines.filter((machine) => lab[machine.id]), checking };
+  }, [ids, round]);
+  const hosts = machines.filter((machine) => lab[machine.id]);
+  const recheck = useCallback(() => setRound((value) => value + 1), []);
+  return { hosts, checking: hosts.length === 0 && machines.some((machine) => !(machine.id in lab)), recheck };
 }
 
 export function LabSettings()
 {
   const { machines, loaded } = useRemoteMachines();
-  const { hosts, checking } = useLabHosts(machines);
+  const { hosts, checking, recheck } = useLabHosts(machines);
   const [local, setLocal] = useState<LocalRemoteControl>();
   const [localError, setLocalError] = useState("");
   const [relay, setRelay] = useState<LocalRelayStatus>();
@@ -120,6 +118,11 @@ export function LabSettings()
           Connect a machine running an up-to-date host under Connections, and its
           controls show up here.
         </p>
+        <div>
+          <button className={button} onClick={recheck}>
+            Check again
+          </button>
+        </div>
       </div>
     );
   }
@@ -204,7 +207,12 @@ function HostPanel({
   }, [call]);
 
   const choose = async (scope: RemoteControlScope) => {
-    const choice = { scope, updatedAt: Date.now(), by: localMachineName(local) };
+    const updatedAt = Math.max(
+      Date.now(),
+      (status?.remoteControl.desired.updatedAt ?? 0) + 1,
+      (local?.updatedAt ?? 0) + 1,
+    );
+    const choice = { scope, updatedAt, by: localMachineName(local) };
     setBusy("scope");
     let localFailure = "";
     try {
@@ -212,9 +220,11 @@ function HostPanel({
     } catch (reason) {
       localFailure = errorText(reason, "Changing it on this Mac");
     }
-    await call("scope", "lab.remoteControl.set", { scope, updatedAt: choice.updatedAt });
-    if (localFailure && alive.current) {
-      setError(localFailure);
+    const next = await call("scope", "lab.remoteControl.set", { scope, updatedAt: choice.updatedAt });
+    const kept = next && next.remoteControl.desired.scope !== scope ? "A newer choice was kept." : "";
+    const message = [localFailure, kept].filter(Boolean).join(" ");
+    if (message && alive.current) {
+      setError(message);
     }
     notifyLabChanged();
   };

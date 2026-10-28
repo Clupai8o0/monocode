@@ -84,7 +84,7 @@ describe("parseLocalRemoteControl", () => {
         by: "me",
         lab: false,
         wanted: false,
-        accounts: [{ account: "main", enabled: false }, { nope: 1 }],
+        accounts: [{ account: "main", enabled: false }, { account: "cx", enabled: true, dir: ".claude-cx" }, { nope: 1 }],
         changed: true,
       }),
     ).toEqual({
@@ -93,7 +93,10 @@ describe("parseLocalRemoteControl", () => {
       by: "me",
       lab: false,
       wanted: false,
-      accounts: [{ account: "main", enabled: false }],
+      accounts: [
+        { account: "main", enabled: false },
+        { account: "cx", enabled: true, dir: ".claude-cx" },
+      ],
       changed: true,
       machine: undefined,
     });
@@ -108,27 +111,44 @@ describe("parseLocalRemoteControl", () => {
 
 describe("decideSync", () => {
   const at = (scope: "all" | "lab", updatedAt: number) => ({ scope, updatedAt, by: "x" });
+  const T = 1_000_000_000;
 
   it("pushes a newer local choice", () => {
-    expect(decideSync(at("lab", 10), at("all", 5))).toEqual({
+    expect(decideSync(at("lab", 10), at("all", 5), T)).toEqual({
       kind: "push",
       params: { scope: "lab", updatedAt: 10 },
     });
   });
 
   it("pulls a newer host choice", () => {
-    expect(decideSync(at("lab", 5), { scope: "all", updatedAt: 10, by: "Pixel" })).toEqual({
+    expect(decideSync(at("lab", 5), { scope: "all", updatedAt: 10, by: "Pixel" }, T)).toEqual({
       kind: "pull",
       choice: { scope: "all", updatedAt: 10, by: "Pixel" },
     });
   });
 
   it("does nothing when both agree", () => {
-    expect(decideSync(at("all", 10), at("all", 10))).toEqual({ kind: "none" });
+    expect(decideSync(at("all", 10), at("all", 10), T)).toEqual({ kind: "none" });
+  });
+
+  it("does nothing when the scopes match, whatever the stamps", () => {
+    expect(decideSync(at("all", 10), at("all", T * 2), T)).toEqual({ kind: "none" });
+    expect(decideSync(at("lab", T * 2), at("lab", 10), T)).toEqual({ kind: "none" });
+  });
+
+  it("counts a stamp far in the future as now", () => {
+    // The host's stamp is a day ahead, the local one a minute old.
+    expect(decideSync(at("lab", T - 60_000), at("all", T + 86_400_000), T).kind).toBe("pull");
+    // The local stamp is a day ahead; the host chose a minute ago, local counts as now.
+    expect(decideSync(at("lab", T + 86_400_000), at("all", T - 60_000), T).kind).toBe("push");
+    // Both far ahead: both count as now, the host wins the tie.
+    expect(decideSync(at("lab", T + 86_400_000), at("all", T + 60 * 60_000), T).kind).toBe("pull");
+    // Within five minutes a stamp counts as it is.
+    expect(decideSync(at("lab", T + 4 * 60_000), at("all", T), T).kind).toBe("push");
   });
 
   it("lets the host win a tie with different scopes", () => {
-    expect(decideSync(at("all", 10), at("lab", 10)).kind).toBe("pull");
+    expect(decideSync(at("all", 10), at("lab", 10), T).kind).toBe("pull");
   });
 });
 
@@ -164,6 +184,20 @@ describe("buildReport", () => {
         ],
       },
     });
+  });
+
+  it("uses the folder the script names when it gives one", () => {
+    const withDirs = {
+      ...local,
+      accounts: [
+        { account: "main", enabled: true, dir: ".claude" },
+        { account: "cx", enabled: false, dir: ".claude-cx" },
+      ],
+    };
+    expect(buildReport("Sams-Mac", "darwin", withDirs).remoteControl.accounts).toEqual([
+      { account: ".claude", enabled: true },
+      { account: ".claude-cx", enabled: false },
+    ]);
   });
 });
 
@@ -298,9 +332,15 @@ describe("relay", () => {
   it("reads this Mac's side", () => {
     const parsed = parseLocalRelay({
       enabled: true,
-      hosts: [{ machineId: "m1", name: "vivobook", connected: true, proxies: 2, lastSyncAt: NOW, lastError: null }, 5],
+      hosts: [
+        { machineId: "m1", name: "vivobook", connected: true, proxies: 2, lastSyncAt: NOW, lastError: null, enabled: true },
+        { machineId: "m3", name: "pi", connected: false, proxies: 0, lastSyncAt: null, lastError: null },
+        5,
+      ],
     });
-    expect(parsed?.hosts).toHaveLength(1);
+    expect(parsed?.hosts).toHaveLength(2);
+    expect(parsed?.hosts[1].enabled).toBe(false);
+    expect(localRelayLine(parsed, "m3", NOW)).toBe("The relay is off there.");
     expect(localRelayLine(parsed, "m1", NOW)).toBe("This Mac is linked, 2 sessions from elsewhere · synced just now");
     expect(localRelayLine(parsed, "m2", NOW)).toBe("This Mac is not linked to it yet.");
     expect(localRelayLine(undefined, "m1", NOW)).toBeNull();
