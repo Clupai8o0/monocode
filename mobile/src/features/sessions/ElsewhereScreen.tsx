@@ -87,7 +87,14 @@ export function ElsewhereScreen({
         setError(reason instanceof Error ? reason.message : String(reason));
       }
     } finally {
-      if (generation.current === mine) loading.current = false;
+      // Only the newest load ends the spinners; an older one would end them early.
+      if (generation.current === mine) {
+        loading.current = false;
+        if (alive.current) {
+          setRefreshing(false);
+          setRetrying(false);
+        }
+      }
     }
   }, [command, connection, projectId, sessionId]);
 
@@ -97,17 +104,15 @@ export function ElsewhereScreen({
     void load();
   }, [load]);
 
-  const refresh = async () => {
+  const refresh = () => {
     setRefreshing(true);
-    await load();
-    if (alive.current) setRefreshing(false);
+    void load();
   };
 
-  const retry = async () => {
+  const retry = () => {
     if (retrying) return;
     setRetrying(true);
-    await load();
-    if (alive.current) setRetrying(false);
+    void load();
   };
 
   const loadOlder = async () => {
@@ -163,7 +168,7 @@ export function ElsewhereScreen({
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
           }
         >
           {error ? (
@@ -206,7 +211,7 @@ export function ElsewhereScreen({
           <Pressable
             accessibilityRole="button"
             disabled={retrying}
-            onPress={() => void retry()}
+            onPress={retry}
             style={({ pressed }) => [styles.older, pressed && styles.pressed]}
           >
             {retrying ? (
