@@ -7,6 +7,7 @@ import type {
   ExternalTranscriptPage,
   ExternalTurn,
 } from "../src/fork/externalSessions/externalSessionsModel";
+import { isRelayEntry } from "../src/fork/lab/labProtocol";
 
 /**
  * "Elsewhere": agent sessions on this machine's projects that MonoCode did
@@ -88,14 +89,16 @@ const SKIPPED_USER = [
   "<task-notification>",
 ];
 
-function cxAccount(platform: NodeJS.Platform) {
-  return platform === "darwin" ? ".claude-exec" : ".claude-cx";
+/** The second Claude account's folders: ~/.claude-exec everywhere, and on
+ *  Linux also an older ~/.claude-cx (missing folders are skipped). */
+function cxAccounts(platform: NodeJS.Platform) {
+  return platform === "darwin" ? [".claude-exec"] : [".claude-exec", ".claude-cx"];
 }
 
 function registries(platform: NodeJS.Platform): Array<[string, string]> {
   return [
     [".claude/sessions", "claude"],
-    [`${cxAccount(platform)}/sessions`, "claude-cx"],
+    ...cxAccounts(platform).map((account): [string, string] => [`${account}/sessions`, "claude-cx"]),
     [".codex/agent-sessions", "codex"],
     [".local/state/opencode/agent-sessions", "opencode"],
     [".dsh/agent-sessions", "dsh"],
@@ -225,6 +228,15 @@ function makeLiveness(
   };
 }
 
+/** Whether a registry entry's process is still the one that wrote it. Each
+ *  call reads the process table afresh, at most once. */
+export function sessionLiveness(
+  platform: NodeJS.Platform = process.platform,
+  now: () => number = Date.now,
+): (pid: number, procStart: string | undefined) => Promise<boolean> {
+  return makeLiveness(platform, now, defaultProcessTable, defaultReadProcStat);
+}
+
 async function readJson(path: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(path, "utf8"));
@@ -277,7 +289,10 @@ async function readRegistries(home: string, platform: NodeJS.Platform) {
       if (!name.endsWith(".json")) continue;
       const path = join(folder, name);
       if (copies.has(resolve(path))) continue;
-      const record = toRecord(await readJson(path), source);
+      const raw = await readJson(path);
+      // The session relay's copies of sessions on other machines.
+      if (isRelayEntry(raw)) continue;
+      const record = toRecord(raw, source);
       if (record) records.push(record);
     }
     let kept = records;
@@ -376,11 +391,11 @@ async function locateTranscript(
 ): Promise<{ path: string; source: string } | null> {
   const accounts: Array<[string, string]> = [
     [".claude", "claude"],
-    [cxAccount(platform), "claude-cx"],
+    ...cxAccounts(platform).map((account): [string, string] => [account, "claude-cx"]),
   ];
-  const own = accounts.find(([, name]) => name === source);
-  if (own) {
-    const path = join(home, own[0], "projects", sanitize(cwd), `${sessionId}.jsonl`);
+  for (const [account, name] of accounts) {
+    if (name !== source) continue;
+    const path = join(home, account, "projects", sanitize(cwd), `${sessionId}.jsonl`);
     if (await exists(path)) return { path, source };
   }
   for (const [account, name] of accounts) {
