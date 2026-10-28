@@ -147,7 +147,12 @@ export function ElsewhereGroup({
     : "";
   const [openFor, setOpenFor] = useState<{ key: string; open: boolean }>();
   const open = openFor?.key === key ? openFor.open : readOpen(key);
-  const [viewing, setViewing] = useState<ExternalSession | null>(null);
+  // Tied to the project, so switching projects closes the viewer.
+  const [viewingFor, setViewing] = useState<{
+    key: string;
+    session: ExternalSession;
+  } | null>(null);
+  const viewing = viewingFor?.key === key ? viewingFor.session : null;
 
   if (!target || !supported || sessions.length === 0) {
     return null;
@@ -179,7 +184,7 @@ export function ElsewhereGroup({
               key={session.id}
               session={session}
               now={now}
-              onOpen={() => setViewing(session)}
+              onOpen={() => setViewing({ key, session })}
             />
           ))}
         </ul>
