@@ -5,7 +5,6 @@ import { remoteRequest } from "../../features/connections/model/connections";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import { IS_LINUX, IS_WIN } from "../../platform/tauri/platform";
 import {
-  adoptChoice,
   buildReport,
   decideSync,
   errorKind,
@@ -51,12 +50,22 @@ export async function readLocalRemoteControl(): Promise<LocalRemoteControl> {
   return parsed;
 }
 
-export async function applyLocalRemoteControl(choice: RemoteControlChoice): Promise<LocalRemoteControl> {
+/** The choice this Mac had when it read, for a guarded replace. */
+export type ReadChoice = Pick<RemoteControlChoice, "scope" | "updatedAt">;
+
+/** `over`: when mirroring a host's choice, the choice this Mac had when it
+ * read; the host's older stamp may replace only that, never a choice saved
+ * since. */
+export async function applyLocalRemoteControl(
+  choice: RemoteControlChoice,
+  over?: ReadChoice,
+): Promise<LocalRemoteControl> {
   const parsed = parseLocalRemoteControl(
     await invoke<unknown>("fork_lab_rc_apply", {
       scope: choice.scope,
       updatedAt: Math.max(0, Math.floor(choice.updatedAt)),
       by: (choice.by || "unknown").slice(0, 80),
+      ...(over ? { over: { scope: over.scope, updatedAt: Math.max(0, Math.floor(over.updatedAt)) } } : {}),
     }),
   );
   if (!parsed) {
@@ -81,7 +90,7 @@ export type LabDeps = {
   describe: (machineId: string) => Promise<unknown>;
   request: <M extends keyof LabParams>(machineId: string, method: M, params: LabParams[M]) => Promise<LabStatus>;
   readLocal: () => Promise<LocalRemoteControl>;
-  applyLocal: (choice: RemoteControlChoice) => Promise<LocalRemoteControl>;
+  applyLocal: (choice: RemoteControlChoice, over?: ReadChoice) => Promise<LocalRemoteControl>;
   platform: LabPlatform;
   /** Called on each failure; the default logs each kind once. */
   fail: (step: string, reason: unknown) => void;
@@ -140,15 +149,16 @@ export async function runLabPass(deps: LabDeps): Promise<PassResult> {
         const answer = await deps.request(machine.id, "lab.remoteControl.set", decision.params);
         const kept = answer?.remoteControl?.desired;
         if (kept && isScope(kept.scope) && typeof kept.updatedAt === "number" && kept.scope !== decision.params.scope) {
-          // The host kept a choice its clock calls later. Take it here, or the
-          // same push is refused again every pass.
-          local = await deps.applyLocal(adoptChoice(kept, local));
+          // The host kept a choice its clock calls later. Take it here, with
+          // the host's own stamp, or the same push is refused again every pass.
+          local = await deps.applyLocal({ scope: kept.scope, updatedAt: kept.updatedAt, by: kept.by }, local);
           result.pulled.push(machine.id);
         } else {
           result.pushed.push(machine.id);
         }
       } else if (decision.kind === "pull") {
-        local = await deps.applyLocal(adoptChoice(decision.choice, local));
+        // Mirror the host's stamp, even when this Mac's own ran ahead of it.
+        local = await deps.applyLocal(decision.choice, local);
         result.pulled.push(machine.id);
       }
     } catch (reason) {

@@ -437,6 +437,64 @@ fn rewrites_entries_only_for_real_changes_and_follows_the_socket_folder() {
 }
 
 #[test]
+fn a_copy_that_cannot_be_written_is_tried_alone_and_still_cleared() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir();
+    let home = dir.join("h");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(home.join(".claude-exec")).unwrap();
+    let _one = FakeSession::start(&home, ".claude", "local-1", &dir.join("s1.sock"));
+    let shared = Arc::new(Shared::new(env(&home, dir.join("ledger.json"))));
+    let host = Arc::new(FakeHost::default());
+    host.with(|s| {
+        s.enabled = true;
+        s.proxies = vec![(1_000_000_003, "remote-3".into())];
+    });
+    let link = Link::new("m1".into(), "vivobook".into(), host.clone(), shared.clone());
+    let copy = home.join(".claude/sessions/1000000003.json");
+    let cx_sessions = home.join(".claude-exec/sessions");
+    let cx_copy = cx_sessions.join("1000000003.json");
+    let read =
+        |path: &Path| -> Value { serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap() };
+    let mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+    };
+    let modified = |path: &Path| std::fs::metadata(path).unwrap().modified().unwrap();
+    assert_eq!(link.sync_once(), Ok(true));
+    assert!(copy.exists() && cx_copy.exists());
+
+    // Nothing changed, and one copy is missing where it cannot be written:
+    // only that one is tried, and the other is not rewritten.
+    std::fs::remove_file(&cx_copy).unwrap();
+    mode(&cx_sessions, 0o500);
+    let before = modified(&copy);
+    host.with(|s| s.updated_at = 60);
+    assert_eq!(link.sync_once(), Ok(true));
+    assert!(!cx_copy.exists());
+    assert_eq!(modified(&copy), before);
+
+    // Writable again: the missing copy comes back.
+    mode(&cx_sessions, 0o700);
+    assert_eq!(link.sync_once(), Ok(true));
+    assert!(cx_copy.exists());
+
+    // A real change that one folder refuses: its old copy stays listed, so
+    // the proxy's removal still clears it.
+    mode(&cx_sessions, 0o500);
+    host.with(|s| s.status = Some("busy"));
+    assert_eq!(link.sync_once(), Ok(true));
+    assert_eq!(read(&copy)["status"], "busy");
+    assert_ne!(read(&cx_copy)["status"], "busy");
+    mode(&cx_sessions, 0o700);
+    link.shutdown();
+    assert!(!copy.exists() && !cx_copy.exists());
+    let ledger: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("ledger.json")).unwrap()).unwrap();
+    assert_eq!(ledger["files"], json!([]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_failed_sync_shows_its_error() {
     struct Down;
     impl Rpc for Down {

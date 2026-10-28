@@ -334,14 +334,28 @@ impl Link {
                 }
             }
             match state.proxies.get_mut(&pid) {
-                Some(proxy) if same_entry(&proxy.entry, entry) && in_every_dir(&dirs, pid) => {}
+                Some(proxy) if same_entry(&proxy.entry, entry) => {
+                    // Unchanged: only a missing copy is written (a folder
+                    // made later, a file removed); the others stay as they are.
+                    let missing: Vec<PathBuf> = dirs
+                        .iter()
+                        .filter(|dir| !dir.join(format!("{pid}.json")).exists())
+                        .cloned()
+                        .collect();
+                    if !missing.is_empty() {
+                        // What the other copies hold, so all stay the same.
+                        let files = write_everywhere(&missing, pid, &proxy.entry);
+                        lock(&self.shared.ledger).add(&files);
+                        track(&mut proxy.files, files);
+                    }
+                }
                 Some(proxy) => {
                     // Same proxy, new details (a rename, a status): rewrite
                     // the files; the socket stays.
                     let files = write_everywhere(&dirs, pid, entry);
                     lock(&self.shared.ledger).add(&files);
                     proxy.entry = entry.clone();
-                    proxy.files = files;
+                    track(&mut proxy.files, files);
                 }
                 None => {
                     if let Some(proxy) = self.add_proxy(&dirs, pid, entry, sock_dir) {
@@ -511,11 +525,15 @@ fn same_entry(a: &Value, b: &Value) -> bool {
     a == b || strip(a) == strip(b)
 }
 
-/// Every account folder has a file for this pid, so an unchanged entry needs
-/// no writing; a folder made later, or a file removed, gets it again.
-fn in_every_dir(dirs: &[PathBuf], pid: u32) -> bool {
-    dirs.iter()
-        .all(|dir| dir.join(format!("{pid}.json")).exists())
+/// Adds newly written files to a proxy's list. Files already listed stay,
+/// even when this write failed for them, so removing the proxy still clears
+/// a copy left from an earlier write.
+fn track(files: &mut Vec<PathBuf>, written: Vec<PathBuf>) {
+    for file in written {
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
 }
 
 fn write_everywhere(dirs: &[PathBuf], pid: u32, entry: &Value) -> Vec<PathBuf> {

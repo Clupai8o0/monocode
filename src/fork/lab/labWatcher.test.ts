@@ -121,23 +121,44 @@ describe("runLabPass", () => {
     expect(calls.map((call) => call.method)).toEqual(["lab.status", "lab.report"]);
   });
 
-  it("stamps a pulled choice past this Mac's later stamp, so its script keeps it", async () => {
+  it("mirrors a pulled choice with the host's own stamp, even past this Mac's later one", async () => {
     const now = Date.now();
     // Both stamps are far ahead, so both count as now and the host wins the tie.
     const hosts = { m1: { scope: "lab" as const, updatedAt: now + 600_000, by: "Pixel" } };
     const { deps, calls, applied } = fakes({ local: { ...local, updatedAt: now + 3_600_000 }, hosts });
     const apply = deps.applyLocal;
-    // remote_control.py keeps the stored choice when the new one is older.
-    const applyLocal: LabDeps["applyLocal"] = async (choice) => {
+    // remote_control.py keeps the stored choice when the new one is older,
+    // unless the caller names the stored choice it read (over).
+    const applyLocal: LabDeps["applyLocal"] = async (choice, over) => {
       const current = await deps.readLocal();
-      return choice.updatedAt < current.updatedAt ? { ...current, changed: false } : apply(choice);
+      const same = over?.scope === current.scope && over?.updatedAt === current.updatedAt;
+      return choice.updatedAt < current.updatedAt && !same ? { ...current, changed: false } : apply(choice);
     };
     const result = await runLabPass({ ...deps, applyLocal });
     expect(result.pulled).toEqual(["m1"]);
-    expect(applied).toEqual([{ scope: "lab", updatedAt: now + 3_600_001, by: "Pixel" }]);
+    expect(applied).toEqual([{ scope: "lab", updatedAt: now + 600_000, by: "Pixel" }]);
     calls.length = 0;
     await runLabPass({ ...deps, applyLocal });
     expect(calls.map((call) => call.method)).toEqual(["lab.status", "lab.report"]);
+  });
+
+  it("leaves a choice saved here mid-pass in place of the host's older one", async () => {
+    const hosts = { m1: { scope: "lab" as const, updatedAt: 200, by: "Pixel" } };
+    const { deps, calls, applied } = fakes({ local, hosts });
+    // Settings saved this after the pass read "all" at 100.
+    const saved: LocalRemoteControl = { ...local, scope: "all", updatedAt: 300, by: "Mac" };
+    const overs: unknown[] = [];
+    const apply = deps.applyLocal;
+    const applyLocal: LabDeps["applyLocal"] = async (choice, over) => {
+      overs.push(over);
+      const same = over?.scope === saved.scope && over?.updatedAt === saved.updatedAt;
+      return choice.updatedAt < saved.updatedAt && !same ? { ...saved, changed: false } : apply(choice);
+    };
+    await runLabPass({ ...deps, applyLocal });
+    expect(overs).toEqual([expect.objectContaining({ scope: "all", updatedAt: 100 })]);
+    expect(applied).toEqual([]);
+    const report = calls.find((call) => call.method === "lab.report")?.params as LabParams["lab.report"];
+    expect(report.remoteControl).toMatchObject({ scope: "all", updatedAt: 300 });
   });
 
   it("skips machines without the lab capability and leaves this Mac alone", async () => {

@@ -5,6 +5,7 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import type { HostStore } from "./store";
 import type {
+  RelayDelivery,
   RelayNextResult,
   RelayRegistryEntry,
   RelaySendResult,
@@ -311,6 +312,20 @@ export class HostRelay {
     return queue;
   }
 
+  /** Queues a line for a peer. A full queue drops it, logged once until a
+   *  line fits again. */
+  private enqueue(peer: Peer, delivery: RelayDelivery): boolean {
+    if (this.queue(peer.id).push(delivery)) {
+      this.dropping.delete(peer.id);
+      return true;
+    }
+    if (!this.dropping.has(peer.id)) {
+      this.dropping.add(peer.id);
+      console.error(`The relay is dropping messages for ${peer.name}: too much is waiting`);
+    }
+    return false;
+  }
+
   /** Reads this machine's live sessions again, unless that was just done. */
   private async discover(force = false): Promise<void> {
     if (!this.running) return;
@@ -596,13 +611,8 @@ export class HostRelay {
     const fromPid = this.table(peer.id).pid(HOST, sender.sessionId);
     const rewritten = rewriteFrame(frame, `${peer.sockDir}/${fromPid}.sock`);
     if (!rewritten) return;
-    // Nothing to answer here; a full queue drops the line, logged once until it drains.
-    if (this.queue(peer.id).push({ to: target.sessionId, fromPid, line: rewritten })) {
-      this.dropping.delete(peer.id);
-    } else if (!this.dropping.has(peer.id)) {
-      this.dropping.add(peer.id);
-      console.error(`The relay is dropping messages for ${peer.name}: too much is waiting`);
-    }
+    // Nothing to answer here.
+    this.enqueue(peer, { to: target.sessionId, fromPid, line: rewritten });
   }
 
   private localBySocket(socket: string): LocalSession | undefined {
@@ -633,7 +643,7 @@ export class HostRelay {
       const fromPid = this.table(other.id).pid(peer.id, sender.sessionId);
       const line = rewriteFrame(frame, `${other.sockDir}/${fromPid}.sock`);
       if (!line) return { accepted: false, reason: "Too long" };
-      if (!this.queue(other.id).push({ to: session.sessionId, fromPid, line })) {
+      if (!this.enqueue(other, { to: session.sessionId, fromPid, line })) {
         return { accepted: false, reason: "Too much is waiting" };
       }
       return { accepted: true };

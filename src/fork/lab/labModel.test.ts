@@ -3,7 +3,6 @@ import {
   accountFolder,
   accountLabel,
   accountsLine,
-  adoptChoice,
   buildReport,
   choiceLine,
   decideSync,
@@ -107,14 +106,6 @@ describe("parseLocalRemoteControl", () => {
     expect(parseLocalRemoteControl({ error: "boom" })).toBeUndefined();
     expect(parseLocalRemoteControl({ scope: "some", updatedAt: 1 })).toBeUndefined();
     expect(parseLocalRemoteControl("x")).toBeUndefined();
-  });
-});
-
-describe("adoptChoice", () => {
-  it("keeps the host's stamp unless this Mac's is later, then goes one past it", () => {
-    const host = { scope: "lab" as const, updatedAt: 200, by: "Pixel" };
-    expect(adoptChoice(host, { scope: "all", updatedAt: 100, by: "Mac" })).toEqual(host);
-    expect(adoptChoice(host, { scope: "all", updatedAt: 500, by: "Mac" })).toEqual({ ...host, updatedAt: 501 });
   });
 });
 

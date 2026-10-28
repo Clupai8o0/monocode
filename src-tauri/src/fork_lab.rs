@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use serde_json::Value;
 use tauri::Manager;
 
@@ -32,16 +33,25 @@ pub async fn fork_lab_rc_status() -> Result<Value, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// The choice this Mac had when the watcher read it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadChoice {
+    scope: String,
+    updated_at: u64,
+}
+
 /// Sets the scope with the time and name it came with, then applies it.
 #[tauri::command]
 pub async fn fork_lab_rc_apply(
     scope: String,
     updated_at: u64,
     by: String,
+    over: Option<ReadChoice>,
 ) -> Result<Value, String> {
     check_apply(&scope, &by)?;
     tauri::async_runtime::spawn_blocking(move || {
-        rc_apply(&script_path()?, &scope, updated_at, &by).map(with_machine)
+        rc_apply(&script_path()?, &scope, updated_at, &by, over.as_ref()).map(with_machine)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -87,16 +97,41 @@ fn rc_status(script: &Path) -> Result<Value, String> {
     call(script, &["status", "--json"])
 }
 
-fn rc_apply(script: &Path, scope: &str, updated_at: u64, by: &str) -> Result<Value, String> {
+/// `over`: mirroring a host's choice, whose older stamp may replace this
+/// Mac's only while the stored choice is still the one read (scope and stamp).
+fn rc_apply(
+    script: &Path,
+    scope: &str,
+    updated_at: u64,
+    by: &str,
+    over: Option<&ReadChoice>,
+) -> Result<Value, String> {
     check_apply(scope, by)?;
     let at = updated_at.to_string();
-    call(script, &["set", scope, "--at", &at, "--by", by, "--json"])
+    let over = match over {
+        Some(read) => {
+            check_scope(&read.scope)?;
+            Some(format!("{}@{}", read.scope, read.updated_at))
+        }
+        None => None,
+    };
+    let mut args = vec!["set", scope, "--at", &at, "--by", by];
+    if let Some(over) = &over {
+        args.extend(["--over", over.as_str()]);
+    }
+    args.push("--json");
+    call(script, &args)
 }
 
-fn check_apply(scope: &str, by: &str) -> Result<(), String> {
+fn check_scope(scope: &str) -> Result<(), String> {
     if !matches!(scope, "all" | "lab") {
         return Err("scope must be all or lab".into());
     }
+    Ok(())
+}
+
+fn check_apply(scope: &str, by: &str) -> Result<(), String> {
+    check_scope(scope)?;
     if by.chars().count() > MAX_BY {
         return Err("name is too long".into());
     }
@@ -433,12 +468,24 @@ print(json.dumps(out))
         assert_eq!(status["scope"], "lab");
         assert_eq!(status["args"], serde_json::json!(["status", "--json"]));
 
-        let applied = rc_apply(&script, "all", 1_700_000_000_000, "phone").unwrap();
+        let applied = rc_apply(&script, "all", 1_700_000_000_000, "phone", None).unwrap();
         assert_eq!(applied["scope"], "all");
         assert_eq!(applied["updatedAt"], 1_700_000_000_000u64);
         assert_eq!(applied["by"], "phone");
         assert_eq!(applied["changed"], true);
-        assert!(rc_apply(&script, "bad", 1, "phone").is_err());
+        assert!(rc_apply(&script, "bad", 1, "phone", None).is_err());
+        let read = |scope: &str| ReadChoice {
+            scope: scope.into(),
+            updated_at: 9,
+        };
+        let mirrored = rc_apply(&script, "lab", 7, "vivobook", Some(&read("all"))).unwrap();
+        assert_eq!(
+            mirrored["args"],
+            serde_json::json!([
+                "set", "lab", "--at", "7", "--by", "vivobook", "--over", "all@9", "--json"
+            ])
+        );
+        assert!(rc_apply(&script, "lab", 7, "vivobook", Some(&read("bad"))).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -447,11 +494,11 @@ print(json.dumps(out))
         let dir = temp_dir();
         let script = fake_script(&dir);
         assert_eq!(
-            rc_apply(&script, "all", 1, "boom").unwrap_err(),
+            rc_apply(&script, "all", 1, "boom", None).unwrap_err(),
             "lock is held"
         );
         assert_eq!(
-            rc_apply(&script, "all", 1, "crash").unwrap_err(),
+            rc_apply(&script, "all", 1, "crash", None).unwrap_err(),
             "Traceback last line"
         );
         assert_eq!(rc_status(&dir.join("missing.py")).unwrap_err(), MISSING);

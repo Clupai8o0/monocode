@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -427,29 +427,43 @@ describe("HostRelay", () => {
     expect(changed.entries.filter((entry) => entry.sessionId !== U1)).toEqual(first.entries.filter((entry) => entry.sessionId !== U1));
   });
 
-  it("refuses a send when too much is waiting for the target peer", async () => {
+  it("refuses a send when too much is waiting for the target peer, and logs the drop once", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const drops = () => errors.mock.calls.filter(([text]) => String(text).includes("dropping messages")).length;
     makeRelay([]);
     await relay.setEnabled(true);
     await sync(AIR, "air", [{ sessionId: U1, account: ".claude", name: "a", cwd: "/a" }]);
     const macSync = await sync(MAC, "mac", [{ sessionId: T1, account: ".claude", name: "w", cwd: "/p" }]);
     const to = pidOf(macSync.entries, U1);
     const line = userFrame("/tmp/cc-socks/1.sock", "z".repeat(1024 * 1024 - 1024));
-    let accepted = 0;
-    for (;;) {
-      const answer = await send(MAC, { from: T1, to, line });
-      if (!answer.accepted) {
-        expect(answer).toEqual({ accepted: false, reason: "Too much is waiting" });
-        break;
+    const fill = async () => {
+      let accepted = 0;
+      for (;;) {
+        const answer = await send(MAC, { from: T1, to, line });
+        if (!answer.accepted) {
+          expect(answer).toEqual({ accepted: false, reason: "Too much is waiting" });
+          return accepted;
+        }
+        accepted++;
+        if (accepted > 100) throw new Error("Never refused");
       }
-      accepted++;
-      if (accepted > 100) throw new Error("Never refused");
+    };
+    try {
+      const accepted = await fill();
+      expect(accepted).toBeGreaterThan(20);
+      expect((await send(MAC, { from: T1, to, line })).accepted).toBe(false);
+      expect(drops()).toBe(1);
+      const first = await next(AIR, 0);
+      expect(first.deliveries.length).toBeGreaterThan(0);
+      expect(first.deliveries.length).toBeLessThan(accepted);
+      const rest = await next(AIR, first.cursor);
+      expect(rest.deliveries.length).toBeGreaterThan(0);
+      // Once a line fits again, the next drop is logged again.
+      expect(await fill()).toBeGreaterThan(0);
+      expect(drops()).toBe(2);
+    } finally {
+      errors.mockRestore();
     }
-    expect(accepted).toBeGreaterThan(20);
-    const first = await next(AIR, 0);
-    expect(first.deliveries.length).toBeGreaterThan(0);
-    expect(first.deliveries.length).toBeLessThan(accepted);
-    const rest = await next(AIR, first.cursor);
-    expect(rest.deliveries.length).toBeGreaterThan(0);
   });
 
   it("offers only sessions Claude could have written", async () => {

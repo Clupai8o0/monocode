@@ -140,13 +140,6 @@ export function decideSync(
   return { kind: "pull", choice: { scope: host.scope, updatedAt: host.updatedAt, by: host.by } };
 }
 
-/** A host's choice to apply here, stamped past this Mac's own stamp, so the
- * vault script (which keeps a later stored choice) takes it even when this
- * Mac's stamp ran ahead of the host's clock. */
-export function adoptChoice(choice: RemoteControlChoice, local: RemoteControlChoice): RemoteControlChoice {
-  return { scope: choice.scope, updatedAt: Math.max(choice.updatedAt, local.updatedAt + 1), by: choice.by };
-}
-
 /** The account folder name the protocol uses, from the script's short name. */
 export function accountFolder(account: string): string {
   if (account === "main") {
