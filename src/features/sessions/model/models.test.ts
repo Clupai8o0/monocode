@@ -10,6 +10,7 @@ import {
   hasLiveCatalog,
   isPickerProviderVisible,
   isUltracodeOn,
+  withUltracodeToggle,
   loadDefaultModels,
   loadHiddenPickerProviders,
   loadLastModelChoice,
@@ -219,6 +220,17 @@ describe("model settings memory", () => {
       expect(isUltracodeOn(ultra, { ultracode: "true" })).toBe(true);
       expect(isUltracodeOn(ultra, { ultracode: "false" })).toBe(false);
       expect(isUltracodeOn(opus, { ultracode: "true" })).toBe(false);
+    });
+
+    it("shows a session saved with the old Ultracode level as on", () => {
+      expect(isUltracodeOn(ultra, { effort: "ultracode" })).toBe(true);
+      expect(withUltracodeToggle(ultra, { effort: "ultracode" })).toEqual({
+        effort: "xhigh",
+        ultracode: "true",
+      });
+      const plain = { effort: "high" };
+      expect(withUltracodeToggle(ultra, plain)).toBe(plain);
+      expect(isUltracodeOn(opus, { effort: "ultracode" })).toBe(false);
     });
   });
 

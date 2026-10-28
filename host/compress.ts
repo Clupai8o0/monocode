@@ -8,7 +8,11 @@ export const GZIP_MIN_BYTES = 1024;
 // Fast enough for 265 KB snapshots, and most of the size win of level 9.
 const GZIP_LEVEL = 5;
 
-/** Whether an Accept-Encoding header allows gzip (`gzip`, `x-gzip` or `*`, q > 0). */
+// RFC 9110 qvalue: 0 to 1 with at most three decimals.
+const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
+
+/** Whether an Accept-Encoding header allows gzip (`gzip`, `x-gzip` or `*`, q > 0).
+ * A malformed q-value refuses the coding rather than counting as absent. */
 export function acceptsGzip(header: string | string[] | undefined): boolean {
   const value = Array.isArray(header) ? header.join(",") : header;
   if (!value) return false;
@@ -17,9 +21,9 @@ export function acceptsGzip(header: string | string[] | undefined): boolean {
     const [token, ...options] = part.toLowerCase().split(";");
     const name = token.trim();
     const q = options
-      .map((option) => option.trim().match(/^q=([0-9.]+)$/)?.[1])
-      .find((match) => match !== undefined);
-    const allowed = q === undefined || Number(q) > 0;
+      .map((option) => option.split("=").map((piece) => piece.trim()))
+      .find(([key]) => key === "q");
+    const allowed = !q || (q.length === 2 && QVALUE.test(q[1]) && Number(q[1]) > 0);
     if (name === "gzip" || name === "x-gzip") return allowed;
     if (name === "*") wildcard = allowed;
   }

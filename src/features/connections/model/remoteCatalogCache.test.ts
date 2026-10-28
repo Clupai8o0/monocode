@@ -76,6 +76,24 @@ it("rejects malformed catalogs and never restores a forgotten machine's", async 
       Promise.resolve({ models: [], errors: [] } as unknown as HostModelCatalog),
     ),
   ).rejects.toThrow("Invalid model catalog");
+  for (const bad of [
+    { models: { claude: "bad" }, errors: {} },
+    { models: { claude: [null] }, errors: {} },
+    { models: { claude: [{ id: "claude:x" }] }, errors: {} },
+    { models: { claude: [{ id: "claude:x", name: "X", settings: {} }] }, errors: {} },
+    { models: {}, errors: { claude: { message: "down" } } },
+  ]) {
+    await expect(
+      cache.fetchRemoteCatalog("machine", "project", () =>
+        Promise.resolve(bad as unknown as HostModelCatalog),
+      ),
+    ).rejects.toThrow("Invalid model catalog");
+  }
+  localStorage.setItem(
+    "monocode.remote-catalog.v1:" + JSON.stringify(["machine", "project"]),
+    JSON.stringify({ at: 1, catalog: { models: { claude: "bad" }, errors: {} } }),
+  );
+  expect(cache.cachedRemoteCatalog("machine", "project")).toBeUndefined();
   let finish!: (value: HostModelCatalog) => void;
   const late = cache.fetchRemoteCatalog(
     "machine",

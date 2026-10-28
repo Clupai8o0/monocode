@@ -30,6 +30,7 @@ import {
   showProviderInModelPicker,
   subscribeModels,
   subscribePickerVisibility,
+  withUltracodeToggle,
   type AgentModel,
   type ModelPickerTab,
   type ModelSetting,
@@ -314,7 +315,7 @@ function modelGroups(tab: ModelPickerTab, models: AgentModel[]): ModelGroup[] {
 export function ModelPicker({
   harness,
   model,
-  values,
+  values: savedValues,
   project,
   hideSettings = false,
   allowedHarnesses,
@@ -373,6 +374,9 @@ export function ModelPicker({
 
   const current = source.resolve(harness, model);
   currentRef.current = current;
+  // A session saved with the old Ultracode effort level shows as Extra High
+  // with the toggle on, as it launches.
+  const values = withUltracodeToggle(current, savedValues);
   const settings = useMemo(() => {
     void catalogVersion;
     // In beside-picker mode every option row renders as a toolbar pill, so the
@@ -1102,7 +1106,7 @@ export function ModelPicker({
 export function ModelControlPills({
   harness,
   model,
-  values,
+  values: savedValues,
   variant = "pill",
   labelClassName,
   onSettingsChange,
@@ -1124,6 +1128,7 @@ export function ModelControlPills({
   );
   void catalogVersion;
   const current = useModelSource().resolve(harness, model);
+  const values = withUltracodeToggle(current, savedValues);
   const pills = pillSettings(current);
   const effort = pills.find(
     (setting) => setting.kind === "select" && isEffortSetting(setting),
@@ -1200,7 +1205,7 @@ function controlClass(variant: Variant, open = false): string {
 export function ModelSettingRows({
   harness,
   model,
-  values,
+  values: savedValues,
   side = "top",
   onSettingsChange,
   row,
@@ -1218,6 +1223,7 @@ export function ModelSettingRows({
   );
   void catalogVersion;
   const current = useModelSource().resolve(harness, model);
+  const values = withUltracodeToggle(current, savedValues);
   return (
     <>
       {pillSettings(current).map((setting) => (

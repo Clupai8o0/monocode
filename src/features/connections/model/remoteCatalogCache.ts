@@ -21,12 +21,28 @@ const keyOf = (machineId: string, projectId: string) =>
  * bring back a disconnected machine's catalog. */
 let generation = 0;
 
-const isRecord = (value: unknown) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
+const isSetting = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.id === "string" &&
+  (value.options === undefined || Array.isArray(value.options));
+const isModel = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.id === "string" &&
+  typeof value.name === "string" &&
+  (value.settings === undefined ||
+    (Array.isArray(value.settings) && value.settings.every(isSetting)));
+/** Checks every list and entry, not just the outline: a cached copy is read
+ * back untyped, and one malformed list would crash the session pane. */
 const isCatalog = (value: unknown): value is HostModelCatalog =>
   isRecord(value) &&
-  isRecord((value as HostModelCatalog).models) &&
-  isRecord((value as HostModelCatalog).errors);
+  isRecord(value.models) &&
+  Object.values(value.models).every(
+    (list) => Array.isArray(list) && list.every(isModel),
+  ) &&
+  isRecord(value.errors) &&
+  Object.values(value.errors).every((error) => typeof error === "string");
 
 function readIndex(): { key: string; at: number }[] {
   try {

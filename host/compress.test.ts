@@ -16,4 +16,15 @@ describe("Accept-Encoding", () => {
     expect(acceptsGzip("*;q=0")).toBe(false);
     expect(acceptsGzip(["br", "gzip"])).toBe(true);
   });
+
+  it("refuses gzip when its weight is malformed or out of range", () => {
+    expect(acceptsGzip("gzip;q=1.000")).toBe(true);
+    expect(acceptsGzip("gzip;q=-1")).toBe(false);
+    expect(acceptsGzip("gzip;q=invalid")).toBe(false);
+    expect(acceptsGzip("gzip;q=")).toBe(false);
+    expect(acceptsGzip("gzip;q")).toBe(false);
+    expect(acceptsGzip("gzip;q=2")).toBe(false);
+    expect(acceptsGzip("gzip;q=0.0001")).toBe(false);
+    expect(acceptsGzip("*;q=nan")).toBe(false);
+  });
 });

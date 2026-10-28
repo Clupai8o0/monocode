@@ -705,7 +705,7 @@ export function mergeModelSettings(
  * now a toggle beside Reasoning, so a saved `effort=ultracode` becomes
  * Extra High with the toggle on.
  */
-function withUltracodeToggle(
+export function withUltracodeToggle(
   model: AgentModel,
   current: Record<string, string>,
 ): Record<string, string> {
@@ -776,13 +776,15 @@ export function loadLastModelSettings(): Record<string, string> {
   }
 }
 
-/** True when this model offers Ultracode and `values` turn it on. */
+/** True when this model offers Ultracode and `values` turn it on, including
+ * a session saved with the old `effort=ultracode` level. */
 export function isUltracodeOn(
   model: AgentModel,
   values?: Record<string, string>,
 ): boolean {
   return (
-    values?.ultracode === "true" &&
+    !!values &&
+    withUltracodeToggle(model, values).ultracode === "true" &&
     !!model.settings?.some((setting) => setting.id === "ultracode")
   );
 }
