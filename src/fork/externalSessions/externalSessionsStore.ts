@@ -216,16 +216,12 @@ function refreshMachine(machine: Machine) {
     .then(async (result) => {
       const rows = Array.isArray(result?.sessions) ? result.sessions : [];
       if (!machine.machineId && rows.length > 0) {
-        try {
-          machine.stored = await storedSessionIds(
-            asked.map((project) => project.cwd),
-          );
-        } catch (error) {
-          // Which rows other windows started is unknown, so show none
-          // rather than list another window's session as outside.
-          machine.rows = [];
-          throw error;
-        }
+        // A failed lookup lands in the catch below, which keeps the last good
+        // list. Rows and the owned set only change together, after a good
+        // lookup, so that list never holds a session started since.
+        machine.stored = await storedSessionIds(
+          asked.map((project) => project.cwd),
+        );
       }
       machine.rows = rows;
       machine.supported = true;
