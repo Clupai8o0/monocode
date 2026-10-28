@@ -843,7 +843,7 @@ mod tests {
         let config = places(vec![place("Home", -37.8, 145.1, 150.0)]);
         let now = SystemTime::now();
         let home = decide(&config, Some(fix(-37.8005, 145.1, 30.0, 0)), now);
-        assert_eq!(home.ring, true);
+        assert!(home.ring);
         assert_eq!(home.place.as_deref(), Some("Home"));
         let away = decide(&config, Some(fix(-37.81, 145.1, 30.0, 0)), now);
         assert_eq!((away.ring, away.reason), (false, "away"));
