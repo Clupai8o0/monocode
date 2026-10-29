@@ -135,7 +135,7 @@ describe("UsageFooter account per project", () => {
 
     await renderFooter(session);
     await openAccountPicker();
-    expect(button("Personal").getAttribute("aria-pressed")).toBe("true");
+    expect(button("Personal · main (~/.claude)").getAttribute("aria-pressed")).toBe("true");
     expect(button("Work").getAttribute("aria-pressed")).toBe("false");
   });
 });

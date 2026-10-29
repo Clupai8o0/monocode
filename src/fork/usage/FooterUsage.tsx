@@ -7,6 +7,7 @@ import {
 } from "../../features/providers/model/rateLimits";
 import type { ProviderAccount } from "../../features/providers/model/providerAccounts";
 import { barClass } from "../../features/providers/ui/ProviderAccountUsage";
+import { accountRole } from "../accounts/accountHomes";
 
 /**
  * Fork feature: the footer names the default Claude login after its config
@@ -20,6 +21,10 @@ export function footerAccountLabel(account: ProviderAccount): string {
     account.label === "Default account"
   ) {
     return "main";
+  }
+  // An account whose folder links to ~/.claude-exec is the "cx" login.
+  if (accountRole(account) === "cx") {
+    return "cx";
   }
   return account.label;
 }

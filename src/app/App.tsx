@@ -490,7 +490,9 @@ import {
 } from "../features/sessions/model/quoteDraft";
 import { createSessionRemover } from "../features/sessions/model/sessionRemoval";
 import { shouldGenerateSessionTitle } from "../features/sessions/model/sessionTitle";
+import "../fork/accounts/autoResolver"; // Fork: resolves the Auto account choice at spawn.
 import {
+  AUTO_PROVIDER_ACCOUNT_ID, // Fork
   DEFAULT_PROVIDER_ACCOUNT_ID,
   providerAccountExists,
   sameProviderAccountId,
@@ -2979,6 +2981,21 @@ function Workspace({
         (session) => session.id === active?.id,
       );
       if (!current || current.harness !== provider) return;
+      // Fork: Auto applies to new sessions only. An unsent draft forgets an
+      // account it was given so it picks at send; running ones never move.
+      if (accountId === AUTO_PROVIDER_ACCOUNT_ID) {
+        pendingAccountMovesRef.current.delete(current.id);
+        if (current.blocks.length === 0 && !current.busy && current.providerAccountId) {
+          updateSessionState(sessionsRef, setSessions, (sessions) =>
+            sessions.map((session) =>
+              session.id === current.id
+                ? { ...session, providerAccountId: undefined }
+                : session,
+            ),
+          );
+        }
+        return;
+      }
 
       const action = accountPickAction(
         current,

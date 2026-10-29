@@ -24,6 +24,7 @@ mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
 mod fork_location; // Fork
+mod fork_account_homes; // Fork: which Claude login (main or cx) each account runs on.
 // Fork: installs a staged personal build on quit, however MonoCode was opened.
 #[cfg(target_os = "macos")]
 mod fork_update;
@@ -723,6 +724,8 @@ pub fn run() {
             fork_workspaces::fork_window_sessions_set,      // Fork
             fork_workspaces::fork_claim_session,            // Fork
             fork_workspaces::fork_workspace_chrome,         // Fork
+            fork_account_homes::fork_account_homes,         // Fork
+            fork_account_homes::fork_add_cx_account,        // Fork
             fork_location::fork_location_status,            // Fork
             fork_location::fork_location_set_mode,          // Fork
             fork_location::fork_place_add,                  // Fork

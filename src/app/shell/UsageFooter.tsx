@@ -51,12 +51,17 @@ import { RingButton } from "../../fork/location/RingButton"; // Fork
 import { LabButton } from "../../fork/lab/LabButton"; // Fork
 import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
+import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
+import { useAutoAccountUsage } from "../../fork/accounts/autoResolver"; // Fork
+import { accountStatus } from "../../features/providers/model/accountUsage"; // Fork
 import {
   ProviderSignInPanel,
   type ProviderSignInState,
 } from "../../features/sessions/ui/ProviderSignInPanel";
 import {
+  AUTO_PROVIDER_ACCOUNT_ID, // Fork
   newProviderAccount,
+  providerAccountChoice, // Fork
   providerAccountExists,
   providerAccounts,
   saveProviderAccount,
@@ -274,6 +279,12 @@ export function UsageChips({
     claudeAccountId,
   );
   const codexAccountAvailable = providerAccountExists("codex", codexAccountId);
+  // Fork: the project's choice may be Auto, which claudeAccountId resolved.
+  const claudeAuto =
+    providerAccountChoice("claude", project) === AUTO_PROVIDER_ACCOUNT_ID;
+  const claudePinned =
+    session?.harness === "claude" ? session.providerAccountId : undefined;
+  useAutoAccountUsage("claude", wantClaude && claudeAuto && !claudePinned);
   const cachedClaude = useCachedRateLimits("claude", claudeAccountId);
   const cachedCodex = useCachedRateLimits("codex", codexAccountId);
   const opencode = useCachedRateLimits("opencode");
@@ -498,6 +509,8 @@ export function UsageChips({
     ? {
         accounts: claudeAccounts,
         accountId: claudeAccountId,
+        autoChoice: claudeAuto, // Fork
+        onSelectAuto: () => selectAccount("claude", AUTO_PROVIDER_ACCOUNT_ID), // Fork
         onSelectAccount: (accountId: string) =>
           selectAccount("claude", accountId),
         onAddAccount: (label: string) => addAccount("claude", label),
@@ -540,6 +553,15 @@ export function UsageChips({
           {...claudeAccountProps}
           onReconnect={reconnectClaude}
           onOpen={() => openUsage("claude", claudeAccountId, claudeAccountAvailable)}
+        />
+      ) : null}
+      {/* Fork: one tap off an exhausted account; never automatic. */}
+      {wantClaude && claudePinned && accountPicker && onSelectAccount ? (
+        <ExhaustedSwitch
+          provider="claude"
+          accountId={claudePinned}
+          exhausted={accountStatus(claude, now).tone === "exhausted"}
+          onSwitch={(accountId) => onSelectAccount("claude", accountId)}
         />
       ) : null}
       {wantCodex ? (
