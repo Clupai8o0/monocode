@@ -20,6 +20,11 @@ it("gives the shell a colour terminal with no pager or full-screen editor", () =
   expect(env.NO_COLOR).toBeUndefined();
 });
 
+it("sets TZ only when an agent time zone is stored", () => {
+  expect(terminalEnv({ PATH: "/bin" }).TZ).toBeUndefined();
+  expect(terminalEnv({ PATH: "/bin" }, "Asia/Kolkata").TZ).toBe("Asia/Kolkata");
+});
+
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0))

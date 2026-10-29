@@ -94,7 +94,10 @@ export function terminalCommand(
  * print colours the phone renders, with every pager turned into `cat` and
  * no editor that takes the whole screen, since the phone has no screen.
  */
-export function terminalEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function terminalEnv(
+  base: NodeJS.ProcessEnv,
+  zone: string | null = null,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...base,
     TERM: "xterm-256color",
@@ -110,6 +113,8 @@ export function terminalEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     GIT_SEQUENCE_EDITOR: "ed",
   };
   delete env.NO_COLOR;
+  // Fork: the agent time zone picked in the home lab settings.
+  if (zone) env.TZ = zone;
   return env;
 }
 
@@ -147,7 +152,10 @@ export function descendants(root: number): number[] {
   return found;
 }
 
-export function createMobileTerminals(platform = process.platform) {
+export function createMobileTerminals(
+  platform = process.platform,
+  timeZone: () => string | null = () => null,
+) {
   const terminals = new Map<string, Terminal>();
   /** Shells hung up and waiting out their grace before the kill. */
   const closing = new Set<() => void>();
@@ -247,7 +255,7 @@ export function createMobileTerminals(platform = process.platform) {
       cwd,
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: terminalEnv(process.env),
+      env: terminalEnv(process.env, timeZone()),
     });
     const terminal: Terminal = {
       // Unique across restarts, so a phone still holding an old id never

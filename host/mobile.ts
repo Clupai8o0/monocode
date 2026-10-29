@@ -5,7 +5,7 @@ import type { HostEngine } from "./engine";
 import { discardAttachments, stageInlineAttachments } from "./attachments";
 import { hostAccount, hostAccounts } from "./accounts";
 import { dataDirOf, readLooks } from "./desktop-import";
-import { hostLab } from "./lab";
+import { agentTimeZone, hostLab } from "./lab";
 import { hostOsName } from "./os-name";
 import { createMobileMonos } from "./mobile-monos";
 import { headBranch } from "./git-head";
@@ -98,7 +98,10 @@ export function createMobileHandler(
   const machine = hostname();
   const workspace = createMobileWorkspace(engine);
   const usage = createMobileUsage();
-  const terminals = createMobileTerminals();
+  // Fork: shells start in the agent time zone stored in lab.json.
+  const terminals = createMobileTerminals(process.platform, () =>
+    agentTimeZone(dataDirOf(engine.store)),
+  );
   /** The desktop's default model for a provider, once imported. */
   const defaultModel = (harness: HarnessId) =>
     resolveModel(harness, readLooks(dataDirOf(engine.store)).defaultModels[harness]);
@@ -730,6 +733,7 @@ export function createMobileHandler(
       case "lab.relay.set":
       case "lab.uresourced.set":
       case "lab.remoteDesktop.set":
+      case "lab.timeZone.set":
         return hostLab({
           dataDir: dataDirOf(engine.store),
           store: engine.store,

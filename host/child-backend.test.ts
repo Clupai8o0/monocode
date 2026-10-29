@@ -1,11 +1,11 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { HostChildBackend } from "./child-backend";
+import { HostChildBackend, withTimeZone } from "./child-backend";
 import { REMOTE_PROVIDERS } from "../src/features/connections/model/protocol";
 
 it("resolves every provider and runs only allowed provider commands", async () => {
@@ -375,4 +375,14 @@ it("runs an agent with the named account's directory, and refuses an unknown one
     else process.env.HOME = previous;
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+describe("agent time zone", () => {
+  it("sets TZ only when a zone is stored", () => {
+    expect(withTimeZone({ PATH: "/bin" }, null)).toEqual({ PATH: "/bin" });
+    expect(withTimeZone({ PATH: "/bin", TZ: "UTC" }, "Asia/Kolkata")).toEqual({
+      PATH: "/bin",
+      TZ: "Asia/Kolkata",
+    });
+  });
 });

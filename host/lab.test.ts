@@ -11,7 +11,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RelayStatus } from "../src/fork/lab/labProtocol";
 import { fakeRunner } from "./lab-fake";
-import { HostLab, type LabCaller, type LabRelay } from "./lab";
+import {
+  HostLab,
+  agentTimeZone,
+  validZoneName,
+  type LabCaller,
+  type LabRelay,
+} from "./lab";
 import type { HostStore } from "./store";
 
 const dirs: string[] = [];
@@ -54,6 +60,10 @@ function setup(platform: NodeJS.Platform = "darwin", table = {}) {
   const dataDir = join(root, "data");
   const home = join(root, "home");
   mkdirSync(dataDir);
+  const zoneInfo = join(root, "zoneinfo");
+  mkdirSync(join(zoneInfo, "Asia"), { recursive: true });
+  mkdirSync(join(zoneInfo, "Australia", "Sydney"), { recursive: true });
+  writeFileSync(join(zoneInfo, "Asia", "Kolkata"), "TZif");
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(home, ".claude-exec"), { recursive: true });
   writeFileSync(
@@ -72,8 +82,10 @@ function setup(platform: NodeJS.Platform = "darwin", table = {}) {
     home,
     now: () => clock,
     relay,
+    zoneInfo,
+    hostZone: () => "Australia/Melbourne",
   });
-  return { lab, relay, dataDir, calls, tick: (ms: number) => (clock += ms) };
+  return { lab, relay, dataDir, zoneInfo, calls, tick: (ms: number) => (clock += ms) };
 }
 
 describe("host lab", () => {
@@ -101,6 +113,7 @@ describe("host lab", () => {
       relay: { enabled: false, updatedAt: 0, peers: [], sessions: 0 },
       uresourced: null,
       remoteDesktop: null,
+      timeZone: { zone: null, updatedAt: 0, hostZone: "Australia/Melbourne" },
     });
   });
 
@@ -370,5 +383,72 @@ describe("host lab", () => {
       loop: { callsPerSecond: 0, fromUresourced: 0, sampledAt: 1000 },
       looping: false,
     });
+  });
+
+  it("stores the agent time zone, from a desktop or a phone", async () => {
+    const { lab, dataDir, zoneInfo, tick } = setup();
+    let status = await lab.handle("lab.timeZone.set", { zone: "Asia/Kolkata" }, mac);
+    expect(status.timeZone).toEqual({
+      zone: "Asia/Kolkata",
+      updatedAt: 1000,
+      hostZone: "Australia/Melbourne",
+    });
+    expect(agentTimeZone(dataDir, zoneInfo)).toBe("Asia/Kolkata");
+    tick(5);
+    status = await lab.handle("lab.timeZone.set", { zone: null }, phone);
+    expect(status.timeZone).toMatchObject({ zone: null, updatedAt: 1005 });
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
+  });
+
+  it("keeps the time zone when other settings are saved", async () => {
+    const { lab, dataDir } = setup();
+    await lab.handle("lab.timeZone.set", { zone: "Asia/Kolkata" }, mac);
+    await lab.handle("lab.remoteControl.set", { scope: "lab" }, mac);
+    const saved = JSON.parse(readFileSync(join(dataDir, "lab.json"), "utf8"));
+    expect(saved.timeZone).toEqual({ zone: "Asia/Kolkata", updatedAt: 1000 });
+  });
+
+  it("refuses bad or missing zones and saves nothing", async () => {
+    const { lab, dataDir } = setup();
+    for (const zone of ["../etc/passwd", "Asia/", "Asia//Kolkata", "a.b", "", 7, "x".repeat(65)]) {
+      await expect(lab.handle("lab.timeZone.set", { zone }, mac)).rejects.toThrow();
+    }
+    await expect(
+      lab.handle("lab.timeZone.set", { zone: "Foo/Bar" }, mac),
+    ).rejects.toThrow("Unknown time zone: Foo/Bar");
+    // A folder is not a zone file.
+    await expect(
+      lab.handle("lab.timeZone.set", { zone: "Australia/Sydney" }, mac),
+    ).rejects.toThrow("Unknown time zone");
+    expect(readdirSync(dataDir)).toEqual([]);
+  });
+
+  it("reads an older lab.json with no time zone", async () => {
+    const { lab, dataDir } = setup();
+    writeFileSync(
+      join(dataDir, "lab.json"),
+      JSON.stringify({
+        desired: { scope: "lab", updatedAt: 5, by: "Mac" },
+        machines: {},
+      }),
+    );
+    expect((await lab.status()).timeZone).toEqual({
+      zone: null,
+      updatedAt: 0,
+      hostZone: "Australia/Melbourne",
+    });
+  });
+
+  it("gives spawns no zone once it is uninstalled or the file is bad", () => {
+    const { dataDir, zoneInfo } = setup();
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
+    writeFileSync(join(dataDir, "lab.json"), "{bad");
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
+    writeFileSync(
+      join(dataDir, "lab.json"),
+      JSON.stringify({ timeZone: { zone: "Europe/Gone", updatedAt: 1 } }),
+    );
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
+    expect(validZoneName("Etc/GMT+5")).toBe(true);
   });
 });
