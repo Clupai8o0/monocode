@@ -183,4 +183,70 @@ describe("messageLogStore", () => {
     await vi.advanceTimersByTimeAsync(SLOW_MS * 2);
     expect(count("fork_message_log")).toBe(idle);
   });
+
+  it("keeps the view when an incremental answer brings nothing new", async () => {
+    await __pollMessageLogForTests();
+    const before = __messageLogStateForTests().view;
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "fork_message_log") {
+        return answer("mac-dev", { full: false, cursor: 2 });
+      }
+      if (cmd === "fork_relay_traffic") {
+        return hops("mac-dev");
+      }
+      return [{ id: "m-vivo", name: "Vivobook", endpoint: "", environmentId: "env" }];
+    });
+    remoteRequest.mockImplementation(async (_id: string, method: string) =>
+      method === "messages.list" ? answer("vivobook", { sessions: [], full: false, cursor: 2 }) : hops("vivobook"),
+    );
+    await __pollMessageLogForTests();
+    expect(__messageLogStateForTests().view).toBe(before);
+    // Times in the view get old: a poll rebuilds it every 30 s regardless.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 30_000);
+    await __pollMessageLogForTests();
+    const aged = __messageLogStateForTests().view;
+    expect(aged).not.toBe(before);
+    await __pollMessageLogForTests();
+    expect(__messageLogStateForTests().view).toBe(aged);
+    remoteRequest.mockImplementation(async (_id: string, method: string) =>
+      method === "messages.list" ? answer("vivobook", { full: false, cursor: 3 }) : hops("vivobook"),
+    );
+    await __pollMessageLogForTests();
+    expect(__messageLogStateForTests().view).not.toBe(aged);
+  });
+
+  it("does not let one slow host hold up the others", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "fork_message_log") {
+        return answer("mac-dev");
+      }
+      if (cmd === "fork_relay_traffic") {
+        return hops("mac-dev");
+      }
+      return [
+        { id: "m-slow", name: "Slow", endpoint: "", environmentId: "env" },
+        { id: "m-vivo", name: "Vivobook", endpoint: "", environmentId: "env" },
+      ];
+    });
+    remoteRequest.mockImplementation((id: string, method: string) => {
+      if (method === "environment.describe") {
+        return Promise.resolve(hostDescribe);
+      }
+      if (id === "m-slow") {
+        return new Promise(() => {});
+      }
+      return Promise.resolve(method === "messages.list" ? answer("vivobook", { sessions: [] }) : hops("vivobook"));
+    });
+    const lists = () => remoteRequest.mock.calls.filter((c) => c[0] === "m-vivo" && c[1] === "messages.list").length;
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    void __pollMessageLogForTests();
+    await settle();
+    expect(lists()).toBe(1);
+    void __pollMessageLogForTests();
+    await settle();
+    expect(lists()).toBe(2);
+    expect(remoteRequest.mock.calls.filter((c) => c[0] === "m-slow" && c[1] === "messages.list")).toHaveLength(1);
+  });
 });
+

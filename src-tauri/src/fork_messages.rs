@@ -159,7 +159,8 @@ fn socket_stop(c: char) -> bool {
     is_ws(c) || matches!(c, '\'' | '"' | ')' | ',' | ';')
 }
 
-/// Socket addresses become "uds:…" and quoted absolute paths "'…'".
+/// Socket addresses become "uds:…", quoted absolute paths "'…'", and any
+/// other path ending in ".sock" "…" (SCRUB_SOCK_PATH).
 pub(crate) fn scrub(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -188,7 +189,31 @@ pub(crate) fn scrub(text: &str) -> String {
         rest = &after[end + 1..];
     }
     done.push_str(rest);
-    done
+    scrub_sock_paths(&done)
+}
+
+/// `/[^\t\n\x0B\x0C\r '"),;]*\.sock/g` -> "…": from a "/", the longest run
+/// of path characters that ends in ".sock".
+fn scrub_sock_paths(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut from = 0;
+    while let Some(found) = rest[from..].find('/') {
+        let at = from + found;
+        let run = &rest[at + 1..];
+        let run = &run[..run.find(socket_stop).unwrap_or(run.len())];
+        match run.rfind(".sock") {
+            Some(end) => {
+                out.push_str(&rest[..at]);
+                out.push('…');
+                rest = &rest[at + 1 + end + 5..];
+                from = 0;
+            }
+            None => from = at + 1,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 pub(crate) fn preview_of(body: &str) -> String {
@@ -630,7 +655,10 @@ impl FileState {
                 continue;
             }
             event.status = Some("sent");
-            event.msg_id = result.as_ref().and_then(|r| str_of(&r["msg_id"]));
+            event.msg_id = result
+                .as_ref()
+                .and_then(|r| str_of(&r["msg_id"]))
+                .filter(|m| !m.is_empty());
             if event.address.is_some() {
                 event.to_name = message.as_deref().and_then(to_name);
             }
@@ -689,6 +717,9 @@ impl FileState {
             .map(str::to_string)
             .or_else(|| wrapped.map(|(_, b)| b.to_string()))
             .unwrap_or_default();
+        if trim(&body).is_empty() {
+            return;
+        }
         let from = str_of(&origin["from"]).or_else(|| wrapped.and_then(|(tag, _)| attr(tag, "from")));
         let from_name = str_of(&origin["name"])
             .or_else(|| wrapped.and_then(|(tag, _)| attr(tag, "from-name")))
@@ -717,7 +748,7 @@ impl FileState {
             summary: None,
             preview: preview_of(&body),
             key: key_of(&body),
-            msg_id: str_of(&origin["msg_id"]),
+            msg_id: str_of(&origin["msg_id"]).filter(|m| !m.is_empty()),
             status: None,
             error: None,
             address: from.filter(|_| kind != "name"),
@@ -975,7 +1006,7 @@ fn system_scan(params: MessageLogParams) -> MessageLogAnswer {
         };
         is_live(&env, pid, start.as_deref())
     };
-    let machine = crate::fork_relay::machine_name();
+    let machine = crate::fork_relay::relay_machine_name();
     let home = env.home.clone();
     let scan = Scan {
         home: &home,
@@ -1118,6 +1149,12 @@ mod tests {
         assert_eq!(scrub("(uds:/a/b),uds:/c;"), "(uds:…),uds:…;");
         assert_eq!(scrub("lstat '/tmp/1.sock' and 'rel' 'x"), "lstat '…' and 'rel' 'x");
         assert_eq!(scrub("uds:..: a"), "uds:..: a");
+        assert_eq!(scrub("connect ECONNREFUSED /tmp/cc-socks/777.sock"), "connect ECONNREFUSED …");
+        assert_eq!(scrub("(/a/b.sock), /c.sock;/d.sock.x"), "(…), …;….x");
+        assert_eq!(scrub("/a.sock/b.sock/c and /x/y"), "…/c and /x/y");
+        assert_eq!(scrub("a/b c/d.sock"), "a/b c…");
+        assert_eq!(scrub("/.sock é/ü.sock"), "… é…");
+        assert_eq!(scrub("/tmp/x.socket"), "…et");
     }
 
     #[test]
@@ -1158,6 +1195,46 @@ mod tests {
         let answer = reader.run(&scan, &MessageLogParams::default());
         let ids: Vec<&str> = answer.events.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, vec!["abcdefgh-1234:new-one"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drops_subagent_sends_by_plain_text_and_leaves_empty_fields_out() {
+        // The same transcript is in host/messages.test.ts.
+        let dir = std::env::temp_dir().join(format!("monocode-msglog-parity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join(".claude/projects/-p/abcdefgh-1234.jsonl");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let at = "2026-10-29T08:00:00.000Z";
+        let lines = [
+            serde_json::json!({"type": "assistant", "timestamp": at, "message": {"content": [
+                {"type": "tool_use", "name": "SendMessage", "id": "toolu_Q", "input": {"to": "worker", "message": "go"}},
+                {"type": "tool_use", "name": "SendMessage", "id": "toolu_S", "input": {"to": "peer", "message": "hi"}},
+            ]}}),
+            serde_json::json!({"type": "user", "timestamp": at, "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "toolu_Q", "content": "Message queued for delivery to worker"},
+                {"type": "tool_result", "tool_use_id": "toolu_S", "content": "{\"success\":true,\"msg_id\":\"\"}"},
+            ]}}),
+            serde_json::json!({"type": "user", "uuid": "u-empty", "timestamp": at, "origin": {"kind": "peer", "body": "  ", "name": "x"}}),
+            serde_json::json!({"type": "user", "uuid": "u-blank", "timestamp": at, "origin": {"kind": "peer", "body": "yo", "name": "", "msg_id": ""}}),
+        ];
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(&file, text).unwrap();
+        let live = |_: &Value| true;
+        let scan = Scan {
+            home: &dir,
+            machine: "m",
+            now: at_ms("2026-10-29T09:00:00.000Z"),
+            live: &live,
+        };
+        let answer = Reader::new().run(&scan, &MessageLogParams::default());
+        let ids: Vec<&str> = answer.events.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["abcdefgh-1234:toolu_S", "abcdefgh-1234:u-blank"]);
+        let got = serde_json::to_value(&answer.events).unwrap();
+        assert_eq!(got[0]["status"], "sent");
+        assert!(got[0].get("msgId").is_none());
+        assert!(got[1].get("fromName").is_none());
+        assert!(got[1].get("msgId").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

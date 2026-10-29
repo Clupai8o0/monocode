@@ -106,7 +106,8 @@
  * else (not JS `\s`, not Rust `char::is_whitespace`). Count code points, not
  * UTF-16 units or bytes, so Rust and JS agree. Every text field is scrubbed
  * first: each match of SCRUB_SOCKET becomes "uds:…", then each match of
- * SCRUB_QUOTED_PATH becomes "'…'".
+ * SCRUB_QUOTED_PATH becomes "'…'", then each match of SCRUB_SOCK_PATH (an
+ * unquoted path ending in ".sock") becomes "…".
  * - `preview` = scrub(body), trimmed, first PREVIEW_MAX code points, end trimmed.
  * - `key` = scrub(body), trimmed, every whitespace run turned into one space,
  *   first KEY_MAX code points, end trimmed. Both ends compute it the same way,
@@ -173,6 +174,10 @@ export const LINE_HINTS = ["SendMessage", "cross-session", '"peer"', "delivery n
 export const SCRUB_SOCKET = /uds:[^\t\n\x0B\x0C\r '"),;]*[^\t\n\x0B\x0C\r '"),;:.]/g;
 /** A quoted absolute path, e.g. lstat '/tmp/cc-socks/1.sock'. */
 export const SCRUB_QUOTED_PATH = /'\/[^']*'/g;
+/** A path ending in ".sock", unquoted, e.g. connect ECONNREFUSED
+ *  /tmp/cc-socks/777.sock: from a "/", the longest run without whitespace, a
+ *  quote, ")", "," or ";" that ends in ".sock". Same pattern in Rust. */
+export const SCRUB_SOCK_PATH = /\/[^\t\n\x0B\x0C\r '"),;]*\.sock/g;
 
 export const PREVIEW_MAX = 600;
 export const KEY_MAX = 160;
@@ -274,8 +279,9 @@ export type MessageLogParams = {
 
 export type MessageLogAnswer = {
   version: 1;
-  /** This machine's name as the relay knows it: the Mac's device name
-   *  (what `fork_relay` sends as `machine`), or the host's machine name. */
+  /** This machine's name as the relay knows it, cleaned as the host cleans
+   *  it (`cleanMachine` in host/relay-core.ts): the Mac's device name (what
+   *  `fork_relay` sends as `machine`), or the host's machine name. */
   machine: string;
   epoch: string;
   cursor: number;

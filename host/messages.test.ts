@@ -140,7 +140,69 @@ describe("message log reader", () => {
 
   it("follows the text rules", () => {
     expect(scrub("at uds:/tmp/cc-socks/1.sock: lstat '/tmp/x.sock'")).toBe("at uds:…: lstat '…'");
+    // The same cases are in fork_messages.rs (scrubs_sockets_and_quoted_paths).
+    expect(scrub("connect ECONNREFUSED /tmp/cc-socks/777.sock")).toBe("connect ECONNREFUSED …");
+    expect(scrub("(/a/b.sock), /c.sock;/d.sock.x")).toBe("(…), …;….x");
+    expect(scrub("/a.sock/b.sock/c and /x/y")).toBe("…/c and /x/y");
+    expect(scrub("a/b c/d.sock")).toBe("a/b c…");
+    expect(scrub("/.sock é/ü.sock")).toBe("… é…");
+    expect(scrub("/tmp/x.socket")).toBe("…et");
     expect(keyOf("  a b \n\t c  ")).toBe("a b c");
     expect(previewOf("🙂".repeat(700))).toBe("🙂".repeat(600));
+  });
+
+  it("runs one scan at a time", async () => {
+    const home = mkdtempSync(join(tmpdir(), "monocode-messages-queue-"));
+    dirs.push(home);
+    mkdirSync(join(home, ".claude/sessions"), { recursive: true });
+    writeFileSync(
+      join(home, ".claude/sessions/1.json"),
+      JSON.stringify({ pid: 1, sessionId: "s1", cwd: "/p/one", name: "one" }),
+    );
+    const order: string[] = [];
+    let calls = 0;
+    const isLive = async () => {
+      const call = ++calls;
+      order.push(`start ${call}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push(`end ${call}`);
+      return true;
+    };
+    const reader = createMessageReader();
+    const options = { home, machine: "m", now: 1, isLive };
+    const [first, second] = await Promise.all([reader.scan({}, options), reader.scan({}, options)]);
+    expect([first.cursor, second.cursor]).toEqual([1, 2]);
+    expect(order).toEqual(["start 1", "end 1", "start 2", "end 2"]);
+  });
+
+  it("drops subagent sends by plain text, and leaves empty fields out", async () => {
+    const home = mkdtempSync(join(tmpdir(), "monocode-messages-parity-"));
+    dirs.push(home);
+    mkdirSync(join(home, ".claude/projects/-p"), { recursive: true });
+    const at = "2026-10-29T08:00:00.000Z";
+    const lines = [
+      { type: "assistant", timestamp: at, message: { content: [
+        { type: "tool_use", name: "SendMessage", id: "toolu_Q", input: { to: "worker", message: "go" } },
+        { type: "tool_use", name: "SendMessage", id: "toolu_S", input: { to: "peer", message: "hi" } },
+      ] } },
+      { type: "user", timestamp: at, message: { content: [
+        { type: "tool_result", tool_use_id: "toolu_Q", content: "Message queued for delivery to worker" },
+        { type: "tool_result", tool_use_id: "toolu_S", content: '{"success":true,"msg_id":""}' },
+      ] } },
+      { type: "user", uuid: "u-empty", timestamp: at, origin: { kind: "peer", body: "  ", name: "x" } },
+      { type: "user", uuid: "u-blank", timestamp: at, origin: { kind: "peer", body: "yo", name: "", msg_id: "" } },
+    ];
+    writeFileSync(
+      join(home, ".claude/projects/-p/abcdefgh-1234.jsonl"),
+      lines.map((line) => JSON.stringify(line)).join("\n") + "\n",
+    );
+    const now = Date.parse("2026-10-29T09:00:00.000Z");
+    const answer = await createMessageReader().scan({}, { home, machine: "m", now, isLive: () => true });
+    expect(answer.events.map((event) => event.id)).toEqual(["abcdefgh-1234:toolu_S", "abcdefgh-1234:u-blank"]);
+    const [send, receive] = answer.events;
+    expect(send.kind === "send" && send.status).toBe("sent");
+    expect("msgId" in send).toBe(false);
+    expect("fromName" in receive).toBe(false);
+    expect("msgId" in receive).toBe(false);
   });
 });

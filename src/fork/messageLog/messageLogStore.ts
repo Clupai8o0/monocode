@@ -50,6 +50,9 @@ export type MessagesWindowRequest = {
 export const MAC_FAST_MS = 5_000;
 export const HOST_FAST_MS = 10_000;
 export const SLOW_MS = 60_000;
+/** The view also shows times ("waiting too long", the last hour's problems),
+ *  so a poll rebuilds it at least this often even when nothing came in. */
+const REBUILD_MIN_MS = 30_000;
 /** How often to ask a host again what it offers. */
 const DESCRIBE_EVERY_MS = 5 * 60_000;
 
@@ -80,7 +83,9 @@ let mono: readonly MonoSessionRef[] = [];
 let mac: Source = newSource();
 let macAnswered = false;
 let hosts = new Map<string, Host>();
-let hostsInFlight = false;
+/** Goes up with each host listing; an older listing that lands late is ignored. */
+let listing = 0;
+let bumpedAt = 0;
 
 const listeners = new Set<() => void>();
 let version = 0;
@@ -93,11 +98,61 @@ let hostTimer: ReturnType<typeof setInterval> | null = null;
 let timerMode: "off" | "fast" | "slow" = "off";
 
 function bump(): void {
+  bumpedAt = Date.now();
   version += 1;
   cached = null;
   for (const listener of listeners) {
     listener();
   }
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Whether merging `answer` into `prev` (giving `merged`) changed anything
+ *  the view shows. An incremental answer with no events and the same
+ *  sessions and proxies changes nothing, unless an event aged out. */
+function logChanged(
+  prev: MessageLogAnswer | undefined,
+  answer: MessageLogAnswer,
+  merged: MessageLogAnswer,
+): boolean {
+  return (
+    !prev ||
+    answer.full ||
+    answer.events.length > 0 ||
+    prev.epoch !== answer.epoch ||
+    prev.machine !== answer.machine ||
+    prev.windowHours !== answer.windowHours ||
+    prev.events.length !== merged.events.length ||
+    !sameJson(prev.sessions, answer.sessions) ||
+    !sameJson(prev.proxies, answer.proxies)
+  );
+}
+
+function trafficChanged(prev: RelayTrafficAnswer | undefined, answer: RelayTrafficAnswer): boolean {
+  return (
+    !prev ||
+    answer.hops.length > 0 ||
+    prev.epoch !== answer.epoch ||
+    prev.machine !== answer.machine ||
+    prev.enabled !== answer.enabled
+  );
+}
+
+/** Whether a poll should rebuild the view: something changed, or the times
+ *  it shows are getting old. */
+function due(changed: boolean): boolean {
+  return changed || Date.now() - bumpedAt >= REBUILD_MIN_MS;
+}
+
+/** Sets a source's state and error; true when either changed. */
+function setState(source: Source, state: SourceState, error: string | undefined): boolean {
+  const changed = source.state !== state || source.error !== error;
+  source.state = state;
+  source.error = error;
+  return changed;
 }
 
 function errorText(error: unknown): string {
@@ -145,6 +200,7 @@ async function pollMac(): Promise<void> {
   }
   const source = mac;
   source.inFlight = true;
+  let changed = !macAnswered;
   try {
     const [log, traffic] = await Promise.all([
       invoke<MessageLogAnswer>("fork_message_log", { params: logParams(source.log) }),
@@ -154,23 +210,26 @@ async function pollMac(): Promise<void> {
     if (source !== mac) {
       return;
     }
-    source.log = mergeLogAnswer(source.log, log, Date.now());
+    const merged = mergeLogAnswer(source.log, log, Date.now());
+    changed = logChanged(source.log, log, merged) || changed;
+    source.log = merged;
     if (traffic) {
+      changed = trafficChanged(source.traffic, traffic) || changed;
       source.traffic = mergeTraffic(source.traffic, traffic);
     }
-    source.state = "ok";
-    source.error = undefined;
+    changed = setState(source, "ok", undefined) || changed;
   } catch (error) {
     if (source !== mac) {
       return;
     }
-    source.state = "error";
-    source.error = errorText(error);
+    changed = setState(source, "error", errorText(error)) || changed;
   } finally {
     source.inFlight = false;
     if (source === mac) {
       macAnswered = true;
-      bump();
+      if (due(changed)) {
+        bump();
+      }
     }
   }
 }
@@ -181,21 +240,25 @@ async function pollHost(host: Host): Promise<void> {
   }
   host.inFlight = true;
   const id = host.machine.id;
+  let changed = false;
   try {
     const now = Date.now();
     if (!host.describedAt || now - host.describedAt > DESCRIBE_EVERY_MS) {
       const describe = await remoteRequest<unknown>(id, "environment.describe", {});
-      host.os = osOf(describe);
-      host.messages = offers(describe, MESSAGES_CAPABILITY);
-      host.relay = offers(describe, RELAY_TRAFFIC_CAPABILITY);
+      const os = osOf(describe);
+      const messages = offers(describe, MESSAGES_CAPABILITY);
+      const relay = offers(describe, RELAY_TRAFFIC_CAPABILITY);
+      changed = os !== host.os || messages !== host.messages || relay !== host.relay;
+      host.os = os;
+      host.messages = messages;
+      host.relay = relay;
       host.describedAt = now;
       if (!host.relay) {
         host.traffic = undefined;
       }
     }
     if (!host.messages) {
-      host.state = "old-host";
-      host.error = undefined;
+      changed = setState(host, "old-host", undefined) || changed;
       return;
     }
     const [log, traffic] = await Promise.all([
@@ -205,66 +268,67 @@ async function pollHost(host: Host): Promise<void> {
             .catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
-    host.log = mergeLogAnswer(host.log, log, Date.now());
+    const merged = mergeLogAnswer(host.log, log, Date.now());
+    changed = logChanged(host.log, log, merged) || changed;
+    host.log = merged;
     if (traffic) {
+      changed = trafficChanged(host.traffic, traffic) || changed;
       host.traffic = mergeTraffic(host.traffic, traffic);
     }
-    host.state = "ok";
-    host.error = undefined;
+    changed = setState(host, "ok", undefined) || changed;
   } catch (error) {
     // The last answer stays; the view says when it is from.
-    host.state = "offline";
-    host.error = errorText(error);
+    changed = setState(host, "offline", errorText(error)) || changed;
     host.describedAt = 0;
   } finally {
     host.inFlight = false;
-    if (hosts.get(id) === host) {
+    if (due(changed) && hosts.get(id) === host) {
       bump();
     }
   }
 }
 
+/** Lists the hosts and polls each one not already being polled: every host
+ *  has its own in-flight flag, so a slow one does not hold up the rest. */
 async function pollHosts(): Promise<void> {
-  if (hostsInFlight) {
+  const mine = ++listing;
+  let list: RemoteMachine[];
+  try {
+    const value = await invoke<RemoteMachine[]>("remote_machines");
+    list = Array.isArray(value) ? value : [];
+  } catch {
+    list = [...hosts.values()].map((host) => host.machine);
+  }
+  if (mine !== listing) {
+    // A newer listing is on its way, or has landed: it polls the hosts.
     return;
   }
-  hostsInFlight = true;
-  try {
-    let list: RemoteMachine[];
-    try {
-      const value = await invoke<RemoteMachine[]>("remote_machines");
-      list = Array.isArray(value) ? value : [];
-    } catch {
-      list = [...hosts.values()].map((host) => host.machine);
-    }
-    const next = new Map<string, Host>();
-    for (const machine of list) {
-      const known = hosts.get(machine.id);
-      next.set(
-        machine.id,
-        known
-          ? { ...known, machine }
-          : { ...newSource(), machine, os: "", messages: false, relay: false, describedAt: 0 },
-      );
-    }
-    const changed =
-      next.size !== hosts.size || [...next.keys()].some((id) => !hosts.has(id));
-    // Keep the same objects so polls in flight land on them.
-    for (const [id, host] of next) {
-      const known = hosts.get(id);
-      if (known) {
-        known.machine = host.machine;
-        next.set(id, known);
-      }
-    }
-    hosts = next;
-    if (changed) {
-      bump();
-    }
-    await Promise.all([...hosts.values()].map((host) => pollHost(host)));
-  } finally {
-    hostsInFlight = false;
+  const next = new Map<string, Host>();
+  for (const machine of list) {
+    const known = hosts.get(machine.id);
+    next.set(
+      machine.id,
+      known
+        ? { ...known, machine }
+        : { ...newSource(), machine, os: "", messages: false, relay: false, describedAt: 0 },
+    );
   }
+  const changed =
+    next.size !== hosts.size ||
+    [...next.values()].some((host) => hosts.get(host.machine.id)?.machine.name !== host.machine.name);
+  // Keep the same objects so polls in flight land on them.
+  for (const [id, host] of next) {
+    const known = hosts.get(id);
+    if (known) {
+      known.machine = host.machine;
+      next.set(id, known);
+    }
+  }
+  hosts = next;
+  if (changed) {
+    bump();
+  }
+  await Promise.all([...hosts.values()].map((host) => pollHost(host)));
 }
 
 function sourcesNow(): SourceInput[] {
@@ -420,7 +484,7 @@ export function __resetMessageLogForTests(pollingOn = false): void {
   mac = newSource();
   macAnswered = false;
   hosts = new Map();
-  hostsInFlight = false;
+  listing += 1;
   subscribers = 0;
   fastSubscribers = 0;
   bump();

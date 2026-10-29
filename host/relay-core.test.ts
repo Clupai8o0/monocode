@@ -138,6 +138,19 @@ describe("names and checks", () => {
     expect(cleanMachine("Sam's MacBook Pro", "x")).toBe("Sam-s-MacBook-Pro");
     expect(cleanMachine("", "x")).toBe("x");
     expect(cleanMachine(5, "x")).toBe("x");
+    // The same table is in src-tauri/src/fork_relay.rs (`clean_machine`): the Mac reports this name.
+    const x63 = "x".repeat(63);
+    const table: Array<[string, string]> = [
+      ["Samridh’s MacBook Pro", "Samridh-s-MacBook-Pro"],
+      ["  --a b--  ", "a-b"],
+      ["émile's mac", "mile-s-mac"],
+      ["MonoCode desktop", "MonoCode-desktop"],
+      ["host.local_1", "host.local_1"],
+      ["!!!", "peer"],
+      ["a".repeat(70), "a".repeat(64)],
+      [`${x63} y`, `${x63}-`],
+    ];
+    for (const [name, want] of table) expect(cleanMachine(name, "peer")).toBe(want);
     expect(cleanSockDir("/tmp/cc-socks/")).toBe("/tmp/cc-socks");
     expect(cleanSockDir("/run/user/1000/cc-socks")).toBe("/run/user/1000/cc-socks");
     expect(cleanSockDir("tmp/cc-socks")).toBeNull();

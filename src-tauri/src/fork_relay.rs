@@ -8,6 +8,8 @@
 //! session's own socket. Nothing here starts, stops or reads a session's
 //! transcript, and no pid or socket path leaves this Mac.
 
+use std::sync::OnceLock;
+
 use serde_json::Value;
 
 /// Whether a session registry entry is a relay copy, which readers of the
@@ -19,12 +21,59 @@ pub(crate) fn is_relay_entry(entry: &Value) -> bool {
             .is_some_and(|domain| domain.starts_with("relay:"))
 }
 
-/// This Mac's name as the other machines see it.
+/// This Mac's name as sent to a host (`machine` in `relay.sync`). Read once:
+/// it can take a subprocess, and answers poll it every few seconds.
 pub(crate) fn machine_name() -> String {
-    let name = crate::remote_ssh::device_name();
-    name.strip_prefix("MonoCode on ")
-        .map(str::to_string)
-        .unwrap_or(name)
+    names().0.clone()
+}
+
+/// This Mac's name as a host stores it in its relay copies
+/// (`monocodeRelay.machine`, `cleanMachine` in host/relay.ts), so the message
+/// log's `Resolved.machine` finds this Mac's answers.
+pub(crate) fn relay_machine_name() -> String {
+    names().1.clone()
+}
+
+fn names() -> &'static (String, String) {
+    static NAMES: OnceLock<(String, String)> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let device = crate::remote_ssh::device_name();
+        let raw = device
+            .strip_prefix("MonoCode on ")
+            .map(str::to_string)
+            .unwrap_or_else(|| device.clone());
+        // The host falls back to the paired device's name, cleaned.
+        let cleaned = clean_machine(&raw, &clean_machine(&device, "peer"));
+        (raw, cleaned)
+    })
+}
+
+/// `cleanMachine` in host/relay-core.ts: every run of characters outside
+/// A-Z a-z 0-9 . _ - becomes "-", leading and trailing "-" go, then the first
+/// 64 characters; `fallback` when nothing is left.
+pub(crate) fn clean_machine(value: &str, fallback: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut gap = false;
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+            if gap {
+                out.push('-');
+                gap = false;
+            }
+            out.push(c);
+        } else {
+            gap = true;
+        }
+    }
+    if gap {
+        out.push('-');
+    }
+    let name: String = out.trim_matches('-').chars().take(64).collect();
+    if name.is_empty() {
+        fallback.to_string()
+    } else {
+        name
+    }
 }
 
 #[cfg(unix)]
@@ -82,19 +131,25 @@ pub fn fork_relay_status() -> Value {
 
 /// What the relay on this Mac did with the lines it carried.
 #[tauri::command]
-pub fn fork_relay_traffic(params: Option<RelayTrafficParams>) -> RelayTrafficAnswer {
+pub async fn fork_relay_traffic(params: Option<RelayTrafficParams>) -> Result<RelayTrafficAnswer, String> {
     let since = params.and_then(|p| p.since);
+    tauri::async_runtime::spawn_blocking(move || relay_traffic(since))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn relay_traffic(since: Option<crate::fork_messages::Since>) -> RelayTrafficAnswer {
     #[cfg(unix)]
     {
         let enabled = running::status()["enabled"].as_bool().unwrap_or(false);
-        traffic::answer(since.as_ref(), machine_name(), enabled)
+        traffic::answer(since.as_ref(), relay_machine_name(), enabled)
     }
     #[cfg(not(unix))]
     {
         let _ = since;
         RelayTrafficAnswer {
             version: 1,
-            machine: machine_name(),
+            machine: relay_machine_name(),
             epoch: String::new(),
             cursor: 0,
             enabled: false,
@@ -342,5 +397,29 @@ mod running {
             && describe["capabilities"]
                 .as_array()
                 .is_some_and(|caps| caps.iter().any(|c| c.as_str() == Some(RELAY_CAPABILITY)))
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::clean_machine;
+
+    /// The same table is in host/relay-core.test.ts for `cleanMachine`.
+    #[test]
+    fn cleans_names_like_the_host() {
+        let x63 = "x".repeat(63);
+        let cases: [(&str, &str, String); 8] = [
+            ("Samridh’s MacBook Pro", "peer", "Samridh-s-MacBook-Pro".into()),
+            ("  --a b--  ", "peer", "a-b".into()),
+            ("émile's mac", "peer", "mile-s-mac".into()),
+            ("MonoCode desktop", "peer", "MonoCode-desktop".into()),
+            ("host.local_1", "peer", "host.local_1".into()),
+            ("!!!", "peer", "peer".into()),
+            (&"a".repeat(70), "peer", "a".repeat(64)),
+            (&format!("{x63} y"), "peer", format!("{x63}-")),
+        ];
+        for (name, fallback, want) in cases {
+            assert_eq!(clean_machine(name, fallback), want, "{name}");
+        }
     }
 }

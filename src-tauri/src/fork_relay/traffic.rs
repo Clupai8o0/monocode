@@ -122,7 +122,7 @@ impl Recorder {
             to_name: seen.to_name.and_then(|n| clip(&n, REASON_MAX)),
             from_session_id: seen.from_session_id,
             to_session_id: seen.to_session_id,
-            msg_id: frame["msg_id"].as_str().map(str::to_string),
+            msg_id: frame["msg_id"].as_str().filter(|m| !m.is_empty()).map(str::to_string),
             key: wrapped.map(|(_, body)| key_of(body)).filter(|k| !k.is_empty()),
         };
         self.hops.push_back(hop);

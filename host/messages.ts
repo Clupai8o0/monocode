@@ -17,6 +17,7 @@ import {
   NOTICE_PREFIX,
   PREVIEW_MAX,
   SCRUB_QUOTED_PATH,
+  SCRUB_SOCK_PATH,
   SCRUB_SOCKET,
   SESSION_FILE,
   SUBAGENT_ID,
@@ -100,7 +101,10 @@ function codePoints(text: string, max: number) {
 }
 
 export function scrub(text: string) {
-  return text.replace(SCRUB_SOCKET, "uds:…").replace(SCRUB_QUOTED_PATH, "'…'");
+  return text
+    .replace(SCRUB_SOCKET, "uds:…")
+    .replace(SCRUB_QUOTED_PATH, "'…'")
+    .replace(SCRUB_SOCK_PATH, "…");
 }
 
 function clipped(text: string, max: number) {
@@ -153,7 +157,7 @@ function toEntry(raw: unknown, account: LogAccount): Entry | null {
   const relay = record.monocodeRelay !== undefined || !!domain?.startsWith("relay:");
   const updatedAt = typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt) ? record.updatedAt : 0;
   const base = {
-    name: str(record.name),
+    name: str(record.name) || undefined,
     socket: str(record.messagingSocketPath),
     bridge: str(record.bridgeSessionId),
     updatedAt,
@@ -355,8 +359,16 @@ export class MessageReader {
   private lastWindow?: number;
   private readonly files = new Map<string, FileState>();
   private readonly events = new Map<string, Stored>();
+  /** Scans run one at a time: each reads and moves the same file offsets. */
+  private queue: Promise<unknown> = Promise.resolve();
 
-  async scan(params: MessageLogParams, options: MessageScanOptions): Promise<MessageLogAnswer> {
+  scan(params: MessageLogParams, options: MessageScanOptions): Promise<MessageLogAnswer> {
+    const run = this.queue.then(() => this.scanNow(params, options));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async scanNow(params: MessageLogParams, options: MessageScanOptions): Promise<MessageLogAnswer> {
     const rev = ++this.counter;
     const now = options.now;
     const windowHours = clampWindow(params?.windowHours);
@@ -572,7 +584,7 @@ export class MessageReader {
     const event: SendEvent = {
       kind: "send",
       id,
-      rev: 0,
+      rev: this.counter,
       at,
       updatedAt: at,
       sessionId: state.sessionId,
@@ -584,7 +596,7 @@ export class MessageReader {
       key: keyOf(text),
       status: "pending",
     };
-    this.events.set(id, { event, address: to, lookup: address === "name" ? to : undefined });
+    this.events.set(id, { event, address: to, lookup: address === "name" ? event.to : undefined });
     state.events.add(id);
     state.pending.set(part.id, id);
     changed.add(id);
@@ -614,10 +626,12 @@ export class MessageReader {
       }
     }
     const message = str(result?.message);
+    // The result's message, else the part's own text (a plain-text result).
+    const said = message ?? text ?? "";
     if (
       (result && (result.pin != null || result.resumedAgentId != null)) ||
-      message?.startsWith("Resuming agent") ||
-      message?.startsWith("Message queued for delivery to")
+      said.startsWith("Resuming agent") ||
+      said.startsWith("Message queued for delivery to")
     ) {
       this.events.delete(id);
       state.events.delete(id);
@@ -634,7 +648,7 @@ export class MessageReader {
       event.error = error || "Not sent";
     } else {
       event.status = "sent";
-      if (typeof result?.msg_id === "string") {
+      if (typeof result?.msg_id === "string" && result.msg_id) {
         event.msgId = result.msg_id;
         state.byMsgId.set(result.msg_id, id);
       }
@@ -647,6 +661,7 @@ export class MessageReader {
       }
     }
     event.updatedAt = at;
+    event.rev = this.counter;
     changed.add(id);
   }
 
@@ -666,6 +681,7 @@ export class MessageReader {
     if (found[2]) stored.event.error = found[2];
     else delete stored.event.error;
     stored.event.updatedAt = at;
+    stored.event.rev = this.counter;
     changed.add(id);
   }
 
@@ -685,20 +701,21 @@ export class MessageReader {
     const wrapper = WRAPPER.exec(text);
     const attrs = wrapper?.[1] ?? "";
     const body = str(origin?.body) ?? wrapper?.[2];
-    if (body === undefined) return;
+    if (body === undefined || !trim(body)) return;
     const from = str(origin?.from) ?? attr(attrs, "from") ?? "";
-    const fromName = str(origin?.name) ?? attr(attrs, "from-name");
+    const rawName = str(origin?.name) ?? attr(attrs, "from-name");
+    const fromName = rawName !== undefined ? scrub(rawName) || undefined : undefined;
     const msgId = str(origin?.msg_id);
     const id = `${state.sessionId}:${typeof record.uuid === "string" ? record.uuid : `r${offset}`}`;
     const event: ReceiveEvent = {
       kind: "receive",
       id,
-      rev: 0,
+      rev: this.counter,
       at,
       updatedAt: at,
       sessionId: state.sessionId,
       account: state.account,
-      ...(fromName !== undefined ? { fromName: scrub(fromName) } : {}),
+      ...(fromName !== undefined ? { fromName } : {}),
       fromAddress: addressOf(from),
       preview: previewOf(body),
       key: keyOf(body),
