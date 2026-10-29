@@ -1,0 +1,24 @@
+{
+  "pid": 1000000901,
+  "sessionId": "v-session-0002",
+  "cwd": "/home/clupai/proj",
+  "startedAt": 1793260000000,
+  "version": "2.1.0",
+  "peerProtocol": 1,
+  "peerFeatures": [],
+  "kind": "interactive",
+  "entrypoint": "relay",
+  "pidDomain": "relay:vivobook",
+  "messagingSocketPath": "/tmp/cc-socks/1000000901.sock",
+  "name": "clupai-32",
+  "nameSource": "derived",
+  "status": "idle",
+  "updatedAt": 1793260950000,
+  "statusUpdatedAt": 1793260950000,
+  "monocodeRelay": {
+    "machine": "vivobook",
+    "account": ".claude-exec",
+    "remoteSessionId": "v-session-0002"
+  },
+  "bridgeSessionId": "session_01FixtureBridge0001"
+}
