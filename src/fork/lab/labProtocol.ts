@@ -9,6 +9,8 @@
 
 export const LAB_CAPABILITY = "lab.v1";
 export const RELAY_CAPABILITY = "relay.v1";
+/** The host takes lab.timeZone.set and starts agents in that zone. */
+export const LAB_TZ_CAPABILITY = "lab.tz.v1";
 
 /** Where Claude sessions start with Remote Control on: every machine, or
  *  only lab machines (Linux), which keep it on in both scopes. */
@@ -107,6 +109,16 @@ export type RemoteDesktopStatus = {
   uri: string | null;
 };
 
+/** The time zone a host starts agent sessions in, as their TZ. */
+export type AgentTimeZoneStatus = {
+  /** An IANA name such as "Asia/Kolkata"; null: the host's own zone. */
+  zone: string | null;
+  /** When it was last set, ms since epoch; 0 if never. */
+  updatedAt: number;
+  /** The host's own zone, from its system settings; null if unknown. */
+  hostZone: string | null;
+};
+
 export type LabStatus = {
   version: 1;
   /** The host machine's name. */
@@ -121,6 +133,8 @@ export type LabStatus = {
   uresourced: UresourcedStatus | null;
   /** Linux only; null elsewhere. */
   remoteDesktop: RemoteDesktopStatus | null;
+  /** Hosts without lab.tz.v1 leave it out. */
+  timeZone?: AgentTimeZoneStatus;
 };
 
 /** Params of each lab method; every one of them answers a LabStatus. */
@@ -135,6 +149,9 @@ export type LabParams = {
   "lab.uresourced.set": { action: "off" | "on" | "restart" };
   /** Linux only. On binds krdpserver to the Tailscale address only. */
   "lab.remoteDesktop.set": { enabled: boolean };
+  /** zone: an IANA name installed on the host, or null for the host's own
+   *  zone. New agent sessions start with it; running ones keep theirs. */
+  "lab.timeZone.set": { zone: string | null };
   /** Desktops only (/rpc): what this machine applied. */
   "lab.report": {
     machine: string;
@@ -150,6 +167,7 @@ export const LAB_METHODS = [
   "lab.relay.set",
   "lab.uresourced.set",
   "lab.remoteDesktop.set",
+  "lab.timeZone.set",
   "lab.report",
 ] as const satisfies readonly LabMethod[];
 /** The lab methods a phone may call. */
