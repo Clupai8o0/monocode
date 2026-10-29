@@ -271,6 +271,8 @@ let inFlight: Promise<void> | null = null;
 /** Moved on by every save, so a read that started before it can't put the
  * old zone back. */
 let saves = 0;
+/** Asked for while a read was on its way: read once more after it. */
+let readAgain = false;
 
 function set(next: Partial<Store>): void {
   current = { ...current, ...next };
@@ -285,6 +287,8 @@ export function agentTimeZoneSnapshot(): Store {
 
 export function refreshAgentTimeZone(): Promise<void> {
   if (inFlight) {
+    // The read on its way may have started before the change asked about.
+    readAgain = true;
     return inFlight;
   }
   set({ loading: true });
@@ -305,6 +309,10 @@ export function refreshAgentTimeZone(): Promise<void> {
     .finally(() => {
       inFlight = null;
       set({ loading: false });
+      if (readAgain) {
+        readAgain = false;
+        void refreshAgentTimeZone();
+      }
     });
   return inFlight;
 }
@@ -341,14 +349,9 @@ export function subscribeAgentTimeZone(listener: () => void): () => void {
     let unlisten: (() => void) | undefined;
     const onFocus = () => void refreshAgentTimeZone();
     window.addEventListener("focus", onFocus);
-    void listen<unknown>(AGENT_TZ_CHANGED, (event) => {
-      const value = parseAgentTimeZone(event.payload);
-      if (value) {
-        set({ value, error: null });
-      } else {
-        void refreshAgentTimeZone();
-      }
-    })
+    // Read it again rather than trust the event's copy: an event can land
+    // after a newer save made here.
+    void listen<unknown>(AGENT_TZ_CHANGED, () => void refreshAgentTimeZone())
       .then((stop) => {
         if (cancelled) {
           stop();
@@ -389,5 +392,6 @@ export function resetAgentTimeZoneForTests(): void {
   stopSync = undefined;
   listeners.clear();
   inFlight = null;
+  readAgain = false;
   current = { value: null, loading: false, error: null, pickerOpen: false };
 }

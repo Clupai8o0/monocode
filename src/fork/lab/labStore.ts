@@ -404,14 +404,11 @@ export function probeLab(machineId: string): Promise<unknown> {
 }
 
 /** Reads one host again, and this Mac's side. */
-/** Settings' Refresh: also asks the host again what it offers. */
+/** Settings' Refresh: also asks the host again what it offers, alongside
+ * its status, so a slow answer to one can't hold up the other. */
 export function reloadHost(machineId: string): Promise<unknown> {
   const machine = machines.find((entry) => entry.id === machineId);
-  return Promise.all([
-    machine ? refreshMachine(machine, true) : loadStatus(machineId),
-    loadLocal(),
-    loadRelay(),
-  ]);
+  return Promise.all([machine ? describe(machine) : null, loadStatus(machineId), loadLocal(), loadRelay()]);
 }
 
 export function openLabSettings(): void {

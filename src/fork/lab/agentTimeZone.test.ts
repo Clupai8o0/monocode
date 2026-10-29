@@ -162,7 +162,10 @@ describe("store", () => {
     expect(invoke).toHaveBeenCalledWith("fork_agent_tz_get");
     expect(agentTimeZoneSnapshot().value?.systemZone).toBe("Asia/Kolkata");
 
-    fire?.({ payload: { zone: "Asia/Tokyo", systemZone: "Asia/Kolkata", effectiveZone: "Asia/Tokyo" } });
+    invoke.mockResolvedValue({ zone: "Asia/Tokyo", systemZone: "Asia/Kolkata", effectiveZone: "Asia/Tokyo" });
+    fire?.({ payload: { zone: "Asia/Seoul", systemZone: "Asia/Kolkata", effectiveZone: "Asia/Seoul" } });
+    await settle();
+    // The event only prompts a fresh read; its own copy may be stale.
     expect(agentTimeZoneSnapshot().value?.zone).toBe("Asia/Tokyo");
 
     invoke.mockResolvedValue({ zone: null, systemZone: "Europe/Paris", effectiveZone: "Europe/Paris" });
