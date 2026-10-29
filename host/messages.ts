@@ -344,7 +344,7 @@ function toNameOf(message: string): string | undefined {
     const at = rest.indexOf(stop);
     if (at >= 0 && at < end) end = at;
   }
-  const name = trim(rest.slice(0, end));
+  const name = trim(scrub(trim(rest.slice(0, end))));
   if (!name || name.startsWith("uds:") || name.startsWith("bridge:")) return undefined;
   return name;
 }
@@ -393,7 +393,11 @@ export class MessageReader {
             continue;
           }
           if (!info.isFile() || info.mtimeMs < since) continue;
-          await this.readFile(path, info, sessionId, account, options.tailMaxBytes ?? TAIL_MAX_BYTES, changed);
+          try {
+            await this.readFile(path, info, sessionId, account, options.tailMaxBytes ?? TAIL_MAX_BYTES, changed);
+          } catch {
+            // Gone or replaced since the stat; the next scan sees it again.
+          }
         }
       }
     }
@@ -573,7 +577,7 @@ export class MessageReader {
       updatedAt: at,
       sessionId: state.sessionId,
       account: state.account,
-      to: address === "name" ? to : "",
+      to: address === "name" ? scrub(to) : "",
       toAddress: address,
       ...(summary ? { summary } : {}),
       preview: previewOf(text),
@@ -772,8 +776,6 @@ export function messageReader(): MessageReader {
   return reader;
 }
 
-let liveness: MessageScanOptions["isLive"] | undefined;
-
 /** `messages.list`: this machine's message log, for a paired device. */
 export async function listMessages(
   params: Record<string, unknown>,
@@ -788,12 +790,12 @@ export async function listMessages(
     clean.since = { epoch: since.epoch, cursor: since.cursor };
   }
   if (typeof params.windowHours === "number") clean.windowHours = params.windowHours;
-  liveness ??= sessionLiveness();
   return messageReader().scan(clean, {
     home: options.home ?? homedir(),
     machine,
     now: options.now ?? Date.now(),
-    isLive: options.isLive ?? liveness,
+    // A fresh checker each scan: one caches its process table for good.
+    isLive: options.isLive ?? sessionLiveness(),
     ...(options.tailMaxBytes ? { tailMaxBytes: options.tailMaxBytes } : {}),
   });
 }
