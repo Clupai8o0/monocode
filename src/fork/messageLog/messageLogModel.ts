@@ -70,8 +70,33 @@
  * - a host "old-host": "<place> needs a host update to show its messages.".
  */
 
-import type { MessageLogAnswer, RelayTrafficAnswer } from "./messageLogProtocol";
-import type { MessageLogView, Place, SourceState, WindowChoice } from "./messageLogView";
+import {
+  TRAFFIC_MAX,
+  type LogEvent,
+  type MessageLogAnswer,
+  type ReceiveEvent,
+  type RelayHop,
+  type RelayTrafficAnswer,
+  type Resolved,
+  type SendEvent,
+} from "./messageLogProtocol";
+import {
+  PROBLEM_WAIT_MS,
+  WINDOW_HOURS,
+  type FeedRow,
+  type MapEdge,
+  type MapGraph,
+  type MapNode,
+  type MapPlace,
+  type MessageLogView,
+  type Party,
+  type Place,
+  type RowRoute,
+  type RowStatus,
+  type SourceState,
+  type SourceView,
+  type WindowChoice,
+} from "./messageLogView";
 
 /** A MonoCode session and the Claude session it runs. */
 export type MonoSessionRef = {
@@ -106,6 +131,18 @@ export type BuildInput = {
   loading: boolean;
 };
 
+const HOUR_MS = 3_600_000;
+const PAIR_BEFORE_MS = 60_000;
+const PAIR_AFTER_MS = 10 * 60_000;
+const HOP_MATCH_MS = 2 * 60_000;
+
+function byAtThenId(a: LogEvent, b: LogEvent): number {
+  if (a.at !== b.at) {
+    return a.at - b.at;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 /**
  * Folds a new answer into the last one: `next` alone when it is full, when
  * there is no `prev`, or when the epoch changed; else `prev`'s events with
@@ -117,9 +154,22 @@ export function mergeLogAnswer(
   next: MessageLogAnswer,
   now: number,
 ): MessageLogAnswer {
-  void prev;
-  void now;
-  return next; // Built by the model builder.
+  const cutoff = now - next.windowHours * HOUR_MS;
+  let events: LogEvent[];
+  if (next.full || !prev || prev.epoch !== next.epoch) {
+    events = next.events.slice();
+  } else {
+    const byId = new Map<string, LogEvent>();
+    for (const event of prev.events) {
+      byId.set(event.id, event);
+    }
+    for (const event of next.events) {
+      byId.set(event.id, event);
+    }
+    events = [...byId.values()];
+  }
+  events = events.filter((event) => event.at >= cutoff).sort(byAtThenId);
+  return { ...next, events };
 }
 
 /**
@@ -130,19 +180,455 @@ export function mergeTraffic(
   prev: RelayTrafficAnswer | undefined,
   next: RelayTrafficAnswer,
 ): RelayTrafficAnswer {
-  void prev;
-  return next; // Built by the model builder.
+  if (!prev || prev.epoch !== next.epoch) {
+    return next;
+  }
+  const last = prev.hops.reduce((max, hop) => Math.max(max, hop.seq), 0);
+  const hops = [...prev.hops, ...next.hops.filter((hop) => hop.seq > last)];
+  return { ...next, hops: hops.slice(-TRAFFIC_MAX) };
+}
+
+// ---- building the view ----
+
+type Ctx = {
+  input: BuildInput;
+  /** Relay name -> source index. */
+  byMachine: Map<string, number>;
+};
+
+type Located<T> = { event: T; source: number };
+
+type Hop = { hop: RelayHop; source: number };
+
+function placeIndex(ctx: Ctx, machine: string | undefined): number | undefined {
+  return machine === undefined ? undefined : ctx.byMachine.get(machine);
+}
+
+function party(
+  ctx: Ctx,
+  source: number | undefined,
+  sessionId: string | undefined,
+  name: string | undefined,
+  account?: "main" | "cx",
+): Party {
+  const src = source === undefined ? undefined : ctx.input.sources[source];
+  const place = src?.place;
+  if (sessionId) {
+    const session = src?.log?.sessions.find((entry) => entry.sessionId === sessionId);
+    const mono = place
+      ? ctx.input.mono.find(
+          (ref) => ref.placeId === place.id && ref.providerSessionId === sessionId,
+        )
+      : undefined;
+    const out: Party = {
+      key: `${place?.id ?? "?"}:${sessionId}`,
+      label: session?.name || name || session?.project || "A session",
+      live: !!session,
+      sessionId,
+    };
+    if (session?.project) {
+      out.project = session.project;
+    }
+    const acct = session?.account ?? account;
+    if (acct) {
+      out.account = acct;
+    }
+    if (place) {
+      out.place = place;
+    }
+    if (mono) {
+      out.openId = mono.id;
+    }
+    return out;
+  }
+  if (name) {
+    const out: Party = { key: `name:${name}`, label: name, live: false };
+    if (place) {
+      out.place = place;
+    }
+    return out;
+  }
+  const out: Party = {
+    key: `unknown:${place?.id ?? "?"}`,
+    label: "Unknown session",
+    live: false,
+  };
+  if (place) {
+    out.place = place;
+  }
+  return out;
+}
+
+function resolvedParty(ctx: Ctx, resolved: Resolved, fallbackName?: string): Party {
+  return party(
+    ctx,
+    placeIndex(ctx, resolved.machine),
+    resolved.sessionId,
+    resolved.name ?? fallbackName,
+    resolved.account,
+  );
+}
+
+function lowerFirst(text: string): string {
+  return text ? text[0].toLowerCase() + text.slice(1) : text;
+}
+
+function placeLabel(ctx: Ctx, machine: string): string {
+  const index = ctx.byMachine.get(machine);
+  return index === undefined ? machine : ctx.input.sources[index].place.label;
+}
+
+function hopMatches(
+  hop: RelayHop,
+  msgId: string | undefined,
+  key: string,
+  at: number,
+  fromSessionId: string | undefined,
+  toSessionId: string | undefined,
+): boolean {
+  if (hop.kind !== "message") {
+    return false;
+  }
+  if (hop.msgId && msgId) {
+    return hop.msgId === msgId;
+  }
+  if (!hop.key || hop.key !== key || Math.abs(hop.at - at) > HOP_MATCH_MS) {
+    return false;
+  }
+  if (hop.fromSessionId && fromSessionId && hop.fromSessionId !== fromSessionId) {
+    return false;
+  }
+  if (hop.toSessionId && toSessionId && hop.toSessionId !== toSessionId) {
+    return false;
+  }
+  return true;
+}
+
+function trailLine(ctx: Ctx, entry: Hop): string {
+  const { hop } = entry;
+  const here = ctx.input.sources[entry.source].place.label;
+  if (hop.outcome === "dropped") {
+    return `Dropped on ${here}: ${lowerFirst(hop.reason ?? "No reason given")}`;
+  }
+  const peer = placeLabel(ctx, hop.peer);
+  const [from, to] = hop.direction === "out" ? [here, peer] : [peer, here];
+  return `${from} → ${to} ${ctx.input.formatTime(hop.at)}`;
+}
+
+function sortByAt<T extends { event: LogEvent }>(list: T[]): T[] {
+  return list.sort((a, b) => byAtThenId(a.event, b.event));
+}
+
+/** Which receive each send claims, by send id. */
+function pair(
+  ctx: Ctx,
+  sends: Located<SendEvent>[],
+  receives: Located<ReceiveEvent>[],
+): Map<string, Located<ReceiveEvent>> {
+  const claims = new Map<string, Located<ReceiveEvent>>();
+  const taken = new Set<string>();
+  const byMsgId = new Map<string, Located<ReceiveEvent>>();
+  for (const receive of receives) {
+    if (receive.event.msgId && !byMsgId.has(receive.event.msgId)) {
+      byMsgId.set(receive.event.msgId, receive);
+    }
+  }
+  const claimKey = (r: Located<ReceiveEvent>) => `${r.source}\0${r.event.id}`;
+  for (const send of sends) {
+    const msgId = send.event.msgId;
+    const receive = msgId ? byMsgId.get(msgId) : undefined;
+    if (receive && !taken.has(claimKey(receive))) {
+      taken.add(claimKey(receive));
+      claims.set(send.event.id, receive);
+    }
+  }
+  for (const send of sends) {
+    if (claims.has(send.event.id)) {
+      continue;
+    }
+    const target = send.event.target;
+    const targetSource = placeIndex(ctx, target?.machine);
+    let best: Located<ReceiveEvent> | undefined;
+    for (const receive of receives) {
+      const r = receive.event;
+      if (taken.has(claimKey(receive)) || r.key !== send.event.key) {
+        continue;
+      }
+      if (send.event.msgId && r.msgId) {
+        continue;
+      }
+      if (r.at < send.event.at - PAIR_BEFORE_MS || r.at > send.event.at + PAIR_AFTER_MS) {
+        continue;
+      }
+      if (targetSource !== undefined && receive.source !== targetSource) {
+        continue;
+      }
+      if (target?.sessionId && r.sessionId !== target.sessionId) {
+        continue;
+      }
+      if (!best || Math.abs(r.at - send.event.at) < Math.abs(best.event.at - send.event.at)) {
+        best = receive;
+      }
+    }
+    if (best) {
+      taken.add(claimKey(best));
+      claims.set(send.event.id, best);
+    }
+  }
+  return claims;
+}
+
+function sendRow(
+  ctx: Ctx,
+  send: Located<SendEvent>,
+  receive: Located<ReceiveEvent> | undefined,
+  hops: Hop[],
+): FeedRow {
+  const { input } = ctx;
+  const event = send.event;
+  const from = party(ctx, send.source, event.sessionId, undefined, event.account);
+  let to: Party;
+  if (receive) {
+    to = party(ctx, receive.source, receive.event.sessionId, event.to || event.toName, receive.event.account);
+  } else if (event.target) {
+    to = resolvedParty(ctx, event.target, event.to || event.toName);
+  } else {
+    to = party(ctx, undefined, undefined, event.to || event.toName);
+  }
+  const msgId = event.msgId ?? receive?.event.msgId;
+  const matched = hops
+    .filter((entry) =>
+      hopMatches(entry.hop, msgId, event.key, event.at, from.sessionId, to.sessionId))
+    .sort((a, b) => a.hop.at - b.hop.at || a.hop.seq - b.hop.seq);
+  const dropped = matched.find((entry) => entry.hop.outcome === "dropped");
+  const targetSource = to.place
+    ? input.sources.findIndex((src) => src.place.id === to.place?.id)
+    : -1;
+  const targetOk = targetSource >= 0 && input.sources[targetSource].state === "ok";
+  let status: RowStatus;
+  let statusText: string;
+  let problem = false;
+  if (event.status === "failed") {
+    status = "failed";
+    statusText = event.error || "Not sent";
+  } else if (event.status === "expired") {
+    status = "expired";
+    statusText = "Held, then not approved in time";
+  } else if (event.status === "held") {
+    status = "held";
+    statusText = `Held by ${to.label} until someone approves it`;
+  } else if (dropped) {
+    status = "dropped";
+    const where = input.sources[dropped.source].place.label;
+    statusText = `Lost by the relay on ${where}: ${lowerFirst(dropped.hop.reason ?? "No reason given")}`;
+  } else if (receive) {
+    status = "delivered";
+    statusText = `Delivered ${input.formatTime(receive.event.at)}`;
+  } else if (event.status === "released") {
+    status = "delivered";
+    statusText = `Approved and delivered ${input.formatTime(event.updatedAt)}`;
+  } else if (event.status === "pending") {
+    status = "waiting";
+    statusText = "Sending…";
+  } else {
+    status = "waiting";
+    const time = input.formatTime(event.at);
+    if (targetOk) {
+      statusText = `Sent ${time}; not seen by ${to.label} yet`;
+      problem = input.now - event.at > PROBLEM_WAIT_MS;
+    } else if (to.place) {
+      statusText = `Sent ${time}; can't see ${to.place.label} to check`;
+    } else {
+      statusText = `Sent ${time}; can't tell where it went`;
+    }
+  }
+  if (status === "failed" || status === "dropped" || status === "expired") {
+    problem = true;
+  }
+  const row: FeedRow = {
+    id: event.id,
+    at: event.at,
+    from,
+    to,
+    route: (event.target?.route ?? "unknown") as RowRoute,
+    status,
+    statusText,
+    trail: matched.map((entry) => trailLine(ctx, entry)),
+    preview: event.preview,
+    problem,
+    crossMachine: !!from.place && !!to.place && from.place.id !== to.place.id,
+  };
+  if (event.summary) {
+    row.summary = event.summary;
+  }
+  return row;
+}
+
+function receiveRow(ctx: Ctx, receive: Located<ReceiveEvent>, hops: Hop[]): FeedRow {
+  const event = receive.event;
+  const from = event.sender
+    ? resolvedParty(ctx, event.sender, event.fromName)
+    : party(ctx, undefined, undefined, event.fromName);
+  const to = party(ctx, receive.source, event.sessionId, undefined, event.account);
+  const matched = hops
+    .filter((entry) =>
+      hopMatches(entry.hop, event.msgId, event.key, event.at, from.sessionId, to.sessionId))
+    .sort((a, b) => a.hop.at - b.hop.at || a.hop.seq - b.hop.seq);
+  return {
+    id: event.id,
+    at: event.at,
+    from,
+    to,
+    route: (event.sender?.route ?? "unknown") as RowRoute,
+    status: "delivered",
+    statusText: `Received ${ctx.input.formatTime(event.at)}`,
+    trail: matched.map((entry) => trailLine(ctx, entry)),
+    preview: event.preview,
+    problem: false,
+    crossMachine: !!from.place && !!to.place && from.place.id !== to.place.id,
+  };
+}
+
+function buildGraph(ctx: Ctx, rows: FeedRow[]): MapGraph {
+  const nodes = new Map<string, MapNode>();
+  const touch = (p: Party, sent: number, received: number, problems: number) => {
+    let node = nodes.get(p.key);
+    if (!node) {
+      node = { ...p, sent: 0, received: 0, problems: 0 };
+      nodes.set(p.key, node);
+    }
+    node.sent += sent;
+    node.received += received;
+    node.problems += problems;
+  };
+  const edges = new Map<string, MapEdge>();
+  for (const row of rows) {
+    const problem = row.problem ? 1 : 0;
+    touch(row.from, 1, 0, problem);
+    touch(row.to, 0, 1, problem);
+    const id = `${row.from.key}\0${row.to.key}`;
+    let edge = edges.get(id);
+    if (!edge) {
+      edge = { from: row.from.key, to: row.to.key, count: 0, problems: 0, lastAt: row.at, rowIds: [] };
+      edges.set(id, edge);
+    }
+    edge.count += 1;
+    edge.problems += problem;
+    edge.lastAt = Math.max(edge.lastAt, row.at);
+    edge.rowIds.push(row.id);
+  }
+  const order = (a: MapNode, b: MapNode) =>
+    b.sent + b.received - (a.sent + a.received) || a.label.localeCompare(b.label);
+  const places: MapPlace[] = ctx.input.sources.map((src, index) => {
+    const here = [...nodes.values()].filter((node) => node.place?.id === src.place.id);
+    for (const session of src.log?.sessions ?? []) {
+      const p = party(ctx, index, session.sessionId, undefined, session.account);
+      if (!nodes.has(p.key) && !here.some((node) => node.key === p.key)) {
+        here.push({ ...p, sent: 0, received: 0, problems: 0 });
+      }
+    }
+    return { ...src.place, nodes: here.sort(order), state: src.state };
+  });
+  const unknown = [...nodes.values()].filter((node) => !node.place).sort(order);
+  return { places, unknown, edges: [...edges.values()] };
+}
+
+function relayOf(src: SourceInput, local: boolean): SourceView["relay"] {
+  if (!src.traffic) {
+    return local ? undefined : "absent";
+  }
+  return src.traffic.enabled ? "on" : "off";
+}
+
+function warningFor(input: BuildInput, sources: SourceView[]): string | undefined {
+  const hosts = sources.filter((view) => !view.place.local);
+  if (hosts.length > 0) {
+    const off = sources.find((view) => view.relay === "off");
+    if (off) {
+      const host = off.place.local ? hosts[0].place.label : off.place.label;
+      return `The relay is off on ${off.place.label}, so sessions on this Mac and ${host} can't message each other through MonoCode.`;
+    }
+  }
+  const offline = hosts.find((view) => view.state === "offline");
+  if (offline) {
+    return offline.scannedAt === undefined
+      ? `Can't reach ${offline.place.label}, so its messages aren't shown.`
+      : `Can't reach ${offline.place.label}. Its messages are from ${input.formatTime(offline.scannedAt)}.`;
+  }
+  const old = hosts.find((view) => view.state === "old-host");
+  if (old) {
+    return `${old.place.label} needs a host update to show its messages.`;
+  }
+  return undefined;
 }
 
 export function buildMessageLogView(input: BuildInput): MessageLogView {
-  // Built by the model builder.
-  return {
+  const byMachine = new Map<string, number>();
+  input.sources.forEach((src, index) => {
+    if (src.log?.machine && !byMachine.has(src.log.machine)) {
+      byMachine.set(src.log.machine, index);
+    }
+  });
+  const ctx: Ctx = { input, byMachine };
+  const sends: Located<SendEvent>[] = [];
+  const receives: Located<ReceiveEvent>[] = [];
+  const hops: Hop[] = [];
+  input.sources.forEach((src, source) => {
+    for (const event of src.log?.events ?? []) {
+      if (event.kind === "send") {
+        sends.push({ event, source });
+      } else {
+        receives.push({ event, source });
+      }
+    }
+    for (const hop of src.traffic?.hops ?? []) {
+      hops.push({ hop, source });
+    }
+  });
+  sortByAt(sends);
+  sortByAt(receives);
+  const claims = pair(ctx, sends, receives);
+  const claimed = new Set<Located<ReceiveEvent>>(claims.values());
+  const cutoff = input.now - WINDOW_HOURS[input.window] * HOUR_MS;
+  const all: FeedRow[] = [
+    ...sends.map((send) => sendRow(ctx, send, claims.get(send.event.id), hops)),
+    ...receives
+      .filter((receive) => !claimed.has(receive))
+      .map((receive) => receiveRow(ctx, receive, hops)),
+  ];
+  const rows = all
+    .filter((row) => row.at >= cutoff)
+    .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const sources: SourceView[] = input.sources.map((src, index) => {
+    const view: SourceView = { place: src.place, state: src.state };
+    if (src.error) {
+      view.error = src.error;
+    }
+    const relay = relayOf(src, index === 0);
+    if (relay) {
+      view.relay = relay;
+    }
+    if (src.log) {
+      view.scannedAt = src.log.scannedAt;
+    }
+    return view;
+  });
+  const view: MessageLogView = {
     window: input.window,
-    rows: [],
-    graph: { places: [], unknown: [], edges: [] },
-    counts: { total: 0, problems: 0, crossMachine: 0 },
-    recentProblems: 0,
-    sources: input.sources.map((s) => ({ place: s.place, state: s.state, error: s.error })),
+    rows,
+    graph: buildGraph(ctx, rows),
+    counts: {
+      total: rows.length,
+      problems: rows.filter((row) => row.problem).length,
+      crossMachine: rows.filter((row) => row.crossMachine).length,
+    },
+    recentProblems: all.filter((row) => row.problem && row.at >= input.now - HOUR_MS).length,
+    sources,
     loading: input.loading,
   };
+  const warning = warningFor(input, sources);
+  if (warning) {
+    view.warning = warning;
+  }
+  return view;
 }
