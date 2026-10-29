@@ -19,7 +19,7 @@ import { createMobileHandler } from "./mobile";
 import { hostShows, showsListening } from "./shows";
 import { hostLab } from "./lab";
 import { hostRelay } from "./relay";
-import { LAB_CAPABILITY, RELAY_CAPABILITY } from "../src/fork/lab/labProtocol";
+import { LAB_CAPABILITY, LAB_TZ_CAPABILITY, RELAY_CAPABILITY } from "../src/fork/lab/labProtocol";
 import { hostOsName } from "./os-name";
 import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
@@ -387,6 +387,7 @@ export function createHostServer(
                 "externalSessions.read",
                 ...(showsListening() ? ["shows"] : []),
                 LAB_CAPABILITY,
+                LAB_TZ_CAPABILITY,
                 RELAY_CAPABILITY,
               ],
             };
@@ -744,6 +745,7 @@ export function createHostServer(
           case "lab.relay.set":
           case "lab.uresourced.set":
           case "lab.remoteDesktop.set":
+          case "lab.timeZone.set":
           case "lab.report":
             result = await hostLab({
               dataDir: dataDirOf(engine.store),

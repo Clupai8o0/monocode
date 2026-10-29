@@ -21,6 +21,7 @@ import {
   acquireHarnessBridge,
 } from "../src/integrations/harness/core/child";
 import { HostChildBackend } from "./child-backend";
+import { agentTimeZone } from "./lab";
 import { HostStore } from "./store";
 import { acquireHostOwner } from "./owner";
 import { HostEngine } from "./engine";
@@ -293,7 +294,8 @@ Connect another computer using an SSH forward to the loopback port.`);
     throw new Error("Unknown command; run with --help");
   }
   const releaseOwner = await acquireHostOwner(directory);
-  const backend = new HostChildBackend();
+  // Fork: agent sessions start in the zone stored in lab.json.
+  const backend = new HostChildBackend({}, () => agentTimeZone(directory));
   let shows: ReturnType<typeof hostShows> | undefined;
   let cleanup = () => {
     rmSync(statePath, { force: true });

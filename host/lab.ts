@@ -1,9 +1,10 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import type { HostStore } from "./store";
 import type {
+  AgentTimeZoneStatus,
   LabMethod,
   LabParams,
   LabStatus,
@@ -44,13 +45,21 @@ export type HostLabOptions = {
   relay?: LabRelay;
   uresourced?: UresourcedControl;
   krdp?: KrdpControl;
+  /** Where zone files live; tests point it at a fake tree. */
+  zoneInfo?: string;
+  /** The host's own zone; tests replace reading /etc/localtime. */
+  hostZone?: () => string | null;
 };
 
 /** <dataDir>/lab.json */
 type LabFile = {
   desired: RemoteControlChoice;
   machines: Record<string, RemoteControlMachine>;
+  /** Older files have none: the host's own zone. */
+  timeZone?: { zone: string | null; updatedAt: number };
 };
+
+const ZONEINFO = "/usr/share/zoneinfo";
 
 const DEFAULT_CHOICE: RemoteControlChoice = {
   scope: "all",
@@ -136,6 +145,9 @@ export class HostLab {
         this.linuxOnly();
         await this.krdp.set(params.enabled);
         break;
+      case "lab.timeZone.set":
+        await this.setTimeZone(params.zone);
+        break;
       case "lab.report":
         if (caller.surface !== "rpc") throw new Error("Only desktops report");
         await this.report(params);
@@ -165,7 +177,31 @@ export class HostLab {
       relay: this.relay.status(),
       uresourced,
       remoteDesktop,
+      timeZone: {
+        zone: file.timeZone?.zone ?? null,
+        updatedAt: file.timeZone?.updatedAt ?? 0,
+        hostZone: (this.options.hostZone ?? systemZone)(),
+      } satisfies AgentTimeZoneStatus,
     };
+  }
+
+  private async setTimeZone(value: unknown): Promise<void> {
+    if (value !== null && typeof value !== "string") {
+      throw new Error("Name a time zone, or none to follow this host");
+    }
+    if (value !== null) {
+      if (!validZoneName(value)) {
+        throw new Error(`Not a time zone name: ${String(value).slice(0, 64)}`);
+      }
+      if (!zoneInstalled(value, this.options.zoneInfo)) {
+        throw new Error(`Unknown time zone: ${value}`);
+      }
+    }
+    const updatedAt = this.now();
+    await this.update((file) => {
+      file.timeZone = { zone: value, updatedAt };
+      return true;
+    });
   }
 
   private linuxOnly(): void {
@@ -299,7 +335,13 @@ export class HostLab {
           };
         }
       }
+      const timeZone = raw.timeZone;
       return {
+        ...(timeZone &&
+        (timeZone.zone === null || validZoneName(timeZone.zone)) &&
+        Number.isFinite(timeZone.updatedAt)
+          ? { timeZone: { zone: timeZone.zone, updatedAt: timeZone.updatedAt } }
+          : {}),
         desired:
           desired &&
           (desired.scope === "all" || desired.scope === "lab") &&
@@ -361,6 +403,61 @@ function asTime(value: unknown): number {
 
 function asPlatform(platform: NodeJS.Platform): Platform {
   return platform === "darwin" || platform === "win32" ? platform : "linux";
+}
+
+/** The shared zone name rule: segments of [A-Za-z0-9_+-] joined by "/". */
+export function validZoneName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 64 &&
+    /^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*$/.test(value)
+  );
+}
+
+/** True when the zone is a regular file under the zone folder. */
+export function zoneInstalled(zone: string, zoneInfo = ZONEINFO): boolean {
+  if (!validZoneName(zone)) return false;
+  try {
+    return statSync(join(zoneInfo, zone)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The host's own zone, from /etc/localtime, else /etc/timezone. */
+export function systemZone(): string | null {
+  try {
+    const target = readlinkSync("/etc/localtime");
+    const at = target.lastIndexOf("zoneinfo/");
+    if (at >= 0) {
+      const zone = target.slice(at + "zoneinfo/".length);
+      if (validZoneName(zone)) return zone;
+    }
+  } catch {
+    // Not a link, or missing: try the Debian file.
+  }
+  try {
+    const zone = readFileSync("/etc/timezone", "utf8").split("\n")[0].trim();
+    if (validZoneName(zone)) return zone;
+  } catch {
+    // No file: unknown.
+  }
+  return null;
+}
+
+/**
+ * The zone agent sessions start in, as their TZ: the stored zone while it
+ * is still installed, else null (the host's own zone). Never throws.
+ */
+export function agentTimeZone(dataDir: string, zoneInfo = ZONEINFO): string | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(dataDir, "lab.json"), "utf8")) as Partial<LabFile>;
+    const zone = raw?.timeZone?.zone;
+    return validZoneName(zone) && zoneInstalled(zone, zoneInfo) ? zone : null;
+  } catch {
+    return null;
+  }
 }
 
 let active: HostLab | undefined;

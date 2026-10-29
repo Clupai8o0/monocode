@@ -107,6 +107,10 @@ const withShowsEnv = (env: NodeJS.ProcessEnv, sessionId: string) => ({
   ...showsAgentEnv(sessionId, env.PATH),
 });
 
+// Fork: sets TZ to the agent time zone when one is stored.
+export const withTimeZone = (env: NodeJS.ProcessEnv, zone: string | null) =>
+  zone ? { ...env, TZ: zone } : env;
+
 export class HostChildBackend implements ChildBackend {
   private events = new EventEmitter();
   private children = new Map<string, ChildProcessWithoutNullStreams>();
@@ -115,6 +119,8 @@ export class HostChildBackend implements ChildBackend {
 
   constructor(
     private readonly binaries: Partial<Record<RemoteProvider, string>> = {},
+    // Fork: the agent time zone, read at each start; null leaves TZ alone.
+    private readonly timeZone: () => string | null = () => null,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -369,9 +375,12 @@ export class HostChildBackend implements ChildBackend {
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         detached: process.platform !== "win32",
         windowsHide: true,
-        env: withShowsEnv(
-          { ...(account ? accountEnv(account, process.env) : process.env), MONOCODE_HOST: "1" },
-          id,
+        env: withTimeZone(
+          withShowsEnv(
+            { ...(account ? accountEnv(account, process.env) : process.env), MONOCODE_HOST: "1" },
+            id,
+          ),
+          this.timeZone(),
         ),
       },
     );
