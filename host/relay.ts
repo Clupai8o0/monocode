@@ -362,6 +362,19 @@ export class HostRelay {
     });
   }
 
+  /** Records a line for a peer dropped because it got too long to relay. */
+  private tooLong(line: string, peer: Peer, to: string): void {
+    const toName = peer.sessions.get(to)?.name;
+    this.traffic.recordLine(line, {
+      peer: peer.machine,
+      direction: "out",
+      outcome: "dropped",
+      reason: "Too long to relay",
+      ...(toName ? { toName } : {}),
+      toSessionId: to,
+    });
+  }
+
   /** Queues a line for a peer. A full queue drops it, logged once until a
    *  line fits again. */
   private enqueue(peer: Peer, delivery: RelayDelivery): boolean {
@@ -669,7 +682,10 @@ export class HostRelay {
     if (!sender) return;
     const fromPid = this.table(peer.id).pid(HOST, sender.sessionId);
     const rewritten = rewriteFrame(frame, `${peer.sockDir}/${fromPid}.sock`);
-    if (!rewritten) return;
+    if (!rewritten) {
+      this.tooLong(line, peer, target.sessionId);
+      return;
+    }
     // Nothing to answer here.
     this.enqueue(peer, { to: target.sessionId, fromPid, line: rewritten });
   }
@@ -701,7 +717,10 @@ export class HostRelay {
       if (!other || !session) return { accepted: false, reason: "Unknown target" };
       const fromPid = this.table(other.id).pid(peer.id, sender.sessionId);
       const line = rewriteFrame(frame, `${other.sockDir}/${fromPid}.sock`);
-      if (!line) return { accepted: false, reason: "Too long" };
+      if (!line) {
+        this.tooLong(params.line, other, session.sessionId);
+        return { accepted: false, reason: "Too long" };
+      }
       if (!this.enqueue(other, { to: session.sessionId, fromPid, line })) {
         return { accepted: false, reason: "Too much is waiting" };
       }
