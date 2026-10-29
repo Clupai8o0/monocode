@@ -19,8 +19,18 @@ pub(crate) fn is_relay_entry(entry: &Value) -> bool {
             .is_some_and(|domain| domain.starts_with("relay:"))
 }
 
+/// This Mac's name as the other machines see it.
+pub(crate) fn machine_name() -> String {
+    let name = crate::remote_ssh::device_name();
+    name.strip_prefix("MonoCode on ")
+        .map(str::to_string)
+        .unwrap_or(name)
+}
+
 #[cfg(unix)]
 mod link;
+#[cfg(unix)]
+pub(crate) mod traffic;
 #[cfg(unix)]
 mod local;
 #[cfg(all(test, unix))]
@@ -30,6 +40,31 @@ mod wire;
 
 #[cfg(unix)]
 pub use running::{start, stop};
+#[cfg(unix)]
+pub use traffic::{RelayTrafficAnswer, RelayTrafficParams};
+#[cfg(not(unix))]
+pub use fallback::{RelayTrafficAnswer, RelayTrafficParams};
+
+#[cfg(not(unix))]
+mod fallback {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Debug, Default, Deserialize)]
+    pub struct RelayTrafficParams {
+        pub since: Option<crate::fork_messages::Since>,
+    }
+
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RelayTrafficAnswer {
+        pub version: u8,
+        pub machine: String,
+        pub epoch: String,
+        pub cursor: u64,
+        pub enabled: bool,
+        pub hops: Vec<serde_json::Value>,
+    }
+}
 
 /// The relay on this Mac: whether it is on with any host, and each host's
 /// link.
@@ -42,6 +77,29 @@ pub fn fork_relay_status() -> Value {
     #[cfg(not(unix))]
     {
         serde_json::json!({ "enabled": false, "hosts": [] })
+    }
+}
+
+/// What the relay on this Mac did with the lines it carried.
+#[tauri::command]
+pub fn fork_relay_traffic(params: Option<RelayTrafficParams>) -> RelayTrafficAnswer {
+    let since = params.and_then(|p| p.since);
+    #[cfg(unix)]
+    {
+        let enabled = running::status()["enabled"].as_bool().unwrap_or(false);
+        traffic::answer(since.as_ref(), machine_name(), enabled)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = since;
+        RelayTrafficAnswer {
+            version: 1,
+            machine: machine_name(),
+            epoch: String::new(),
+            cursor: 0,
+            enabled: false,
+            hops: Vec::new(),
+        }
     }
 }
 
@@ -125,14 +183,6 @@ mod running {
         }
     }
 
-    /// This Mac's name as the other machines see it.
-    fn machine_name() -> String {
-        let name = crate::remote_ssh::device_name();
-        name.strip_prefix("MonoCode on ")
-            .map(str::to_string)
-            .unwrap_or(name)
-    }
-
     /// Runs in setup: cleans what an earlier run left, then keeps one link
     /// per paired host that offers the relay.
     pub fn start(app: &AppHandle) {
@@ -155,7 +205,7 @@ mod running {
         std::thread::spawn(move || {
             // The name can take a subprocess; it is not worth holding setup.
             let env = Env {
-                machine: machine_name(),
+                machine: super::machine_name(),
                 ..env
             };
             let shared = Arc::new(Shared::new(env));

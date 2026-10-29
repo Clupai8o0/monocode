@@ -136,8 +136,8 @@ struct Proc {
 type CommonDir = Box<dyn Fn(&Path) -> Option<PathBuf>>;
 
 /// What the rules read from the machine; tests build their own.
-struct Env {
-    home: PathBuf,
+pub(crate) struct Env {
+    pub(crate) home: PathBuf,
     now_ms: i64,
     mac: bool,
     /// The process table; None skips the start-time check.
@@ -146,7 +146,7 @@ struct Env {
 }
 
 impl Env {
-    fn system() -> Env {
+    pub(crate) fn system() -> Env {
         let now_ms = now_ms();
         let mac = !cfg!(target_os = "linux");
         Env {
@@ -257,7 +257,7 @@ fn agent_command(args: &str) -> bool {
     })
 }
 
-fn is_live(env: &Env, pid: i64, proc_start: Option<&str>) -> bool {
+pub(crate) fn is_live(env: &Env, pid: i64, proc_start: Option<&str>) -> bool {
     if pid <= 0 {
         return false;
     }
