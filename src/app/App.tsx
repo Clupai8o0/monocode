@@ -601,6 +601,8 @@ import {
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
+import { publishMonoSessions } from "../fork/messageLog/messageLogStore"; // Fork
+import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
 import { NotificationPopups } from "../fork/notifications/NotificationPopups"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
@@ -2273,6 +2275,7 @@ function Workspace({
   useEffect(() => {
     publishRunningWork(sessions);
     publishOwnSessions(sessions); // Fork: hide them from "Elsewhere".
+    publishMonoSessions(monoSessionRefs(sessions)); // Fork: lets the Messages window open them.
   }, [sessions]);
 
   /** Probe the active session's harness for its live model catalog whenever
