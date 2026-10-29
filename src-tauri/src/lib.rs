@@ -14,6 +14,8 @@ mod fork_claims;
 mod fork_external_sessions;
 // Fork: the relay, so Claude sessions on other machines can message ours.
 mod fork_relay;
+// Fork: the time zone agents and terminals the desktop starts see.
+mod fork_tz;
 mod fork_latex;
 mod fork_office;
 mod fork_shows; // Fork: cache files a remote machine shows on this computer.
@@ -696,6 +698,8 @@ pub fn run() {
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork
             fork_relay::fork_relay_status,    // Fork
+            fork_tz::fork_agent_tz_get,       // Fork
+            fork_tz::fork_agent_tz_set,       // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
             fork_html::fork_html_preview_create, // Fork

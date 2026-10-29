@@ -273,6 +273,7 @@ fn spawn_unix(
         cmd.env("HOME", &home);
     }
     cmd.env("PWD", &workdir);
+    crate::fork_tz::apply(&app, &mut cmd); // Fork: the owner's agent time zone.
 
     // setsid() already creates a new session and process group. Calling
     // process_group(0) first makes the child a group leader, so setsid()

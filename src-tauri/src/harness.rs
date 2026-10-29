@@ -1002,6 +1002,7 @@ pub fn harness_spawn(
     };
 
     crate::control::configure_child(&app, &session_id, &mut cmd);
+    crate::fork_tz::apply(&app, &mut cmd); // Fork: the owner's agent time zone.
 
     let mut child =
         spawn_managed(&mut cmd).map_err(|e| format!("Failed to start {command}: {e}"))?;
