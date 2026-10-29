@@ -173,19 +173,15 @@ export async function runLabPass(deps: LabDeps): Promise<PassResult> {
   }
   let local: LocalRemoteControl | undefined;
   let localFailed = false;
-  // Read once, on the first host that takes a zone.
-  let zone: string | undefined;
+  // Read for each host, so a zone picked mid-pass reaches the hosts after it.
   const zoneToSend = async (): Promise<string> => {
-    if (zone === undefined) {
-      let value: AgentTimeZone | null = null;
-      try {
-        value = deps.agentZone ? await deps.agentZone() : null;
-      } catch (reason) {
-        deps.fail("zone", reason);
-      }
-      zone = hostZoneToSend(value);
+    let value: AgentTimeZone | null = null;
+    try {
+      value = deps.agentZone ? await deps.agentZone() : null;
+    } catch (reason) {
+      deps.fail("zone", reason);
     }
-    return zone;
+    return hostZoneToSend(value);
   };
   for (const machine of machines) {
     let lab = false;

@@ -185,6 +185,19 @@ describe("hostLine", () => {
     expect(hostLine(host, "Asia/Tokyo")).toBe("vivobook uses Tokyo");
     expect(hostLine(host, "Asia/Kolkata")).toBe("vivobook: switching to Kolkata…");
   });
+
+  it("says when the host lacks the zone, and what its agents use", () => {
+    const host = {
+      name: "vivobook",
+      online: true,
+      tzCapable: true,
+      timeZone: { zone: "Asia/Tokyo", updatedAt: 1, hostZone: "Australia/Melbourne", installed: false },
+    };
+    expect(hostLine(host, "Asia/Tokyo")).toBe("vivobook doesn't have Tokyo; its agents use Melbourne");
+    expect(hostLine({ ...host, timeZone: { ...host.timeZone, hostZone: null } }, "Asia/Tokyo")).toBe(
+      "vivobook doesn't have Tokyo; its agents use its own zone",
+    );
+  });
 });
 
 describe("saving", () => {

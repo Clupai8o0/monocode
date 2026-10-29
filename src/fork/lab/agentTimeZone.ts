@@ -268,6 +268,9 @@ let current: Store = { value: null, loading: false, error: null, pickerOpen: fal
 const listeners = new Set<() => void>();
 let stopSync: (() => void) | undefined;
 let inFlight: Promise<void> | null = null;
+/** Moved on by every save, so a read that started before it can't put the
+ * old zone back. */
+let saves = 0;
 
 function set(next: Partial<Store>): void {
   current = { ...current, ...next };
@@ -285,12 +288,20 @@ export function refreshAgentTimeZone(): Promise<void> {
     return inFlight;
   }
   set({ loading: true });
+  const started = saves;
   inFlight = invoke<unknown>("fork_agent_tz_get")
     .then((raw) => {
+      if (started !== saves) {
+        return;
+      }
       const value = parseAgentTimeZone(raw);
       set(value ? { value, error: null } : { error: "The time zone came back unreadable." });
     })
-    .catch((reason: unknown) => set({ error: zoneErrorText(reason) }))
+    .catch((reason: unknown) => {
+      if (started === saves) {
+        set({ error: zoneErrorText(reason) });
+      }
+    })
     .finally(() => {
       inFlight = null;
       set({ loading: false });
@@ -312,6 +323,7 @@ export async function setAgentTimeZone(zone: string | null): Promise<AgentTimeZo
   if (zone) {
     rememberZone(zone);
   }
+  saves += 1;
   set({ value, error: null });
   return value;
 }

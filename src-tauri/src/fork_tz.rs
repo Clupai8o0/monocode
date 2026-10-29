@@ -132,7 +132,9 @@ fn check_zone(root: &Path, zone: Option<&str>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn fork_agent_tz_get(app: AppHandle) -> AgentTz {
-    payload(stored_zone(&app), system_zone())
+    // The zone children really get: a pick whose zone file has gone reads
+    // as following this Mac, as apply() treats it.
+    payload(picked_zone(&app), system_zone())
 }
 
 #[tauri::command]

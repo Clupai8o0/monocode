@@ -324,6 +324,28 @@ describe("runLabPass, agent time zone", () => {
     expect(zoneCalls(calls)).toHaveLength(1);
   });
 
+  it("reads the zone for each host, so one picked mid-pass reaches the hosts after it", async () => {
+    const { deps, calls } = fakes({
+      local,
+      hosts: { m1: rc, m2: rc },
+      machines: [machine("m1"), machine("m2")],
+      lab: ["m1", "m2"],
+      tz: { m1: null, m2: null },
+    });
+    const zones = ["Asia/Kolkata", "Asia/Tokyo"];
+    await runLabPass({
+      ...deps,
+      agentZone: async () => {
+        const zone = zones.shift() ?? "Asia/Tokyo";
+        return { zone, systemZone: "Asia/Kolkata", effectiveZone: zone };
+      },
+    });
+    expect(zoneCalls(calls).map((call) => [call.machineId, (call.params as { zone: string }).zone])).toEqual([
+      ["m1", "Asia/Kolkata"],
+      ["m2", "Asia/Tokyo"],
+    ]);
+  });
+
   it("keeps going past a host that refuses the zone", async () => {
     const hosts = { m1: rc, m2: rc };
     const tz: Record<string, string | null> = { m1: null, m2: null };

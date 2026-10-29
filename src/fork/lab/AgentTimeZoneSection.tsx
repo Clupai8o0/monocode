@@ -86,6 +86,10 @@ export function hostLine(host: AgentTimeZoneHost, target: string): string {
     return `${host.name} needs a host update for this`;
   }
   if (host.timeZone?.zone === target) {
+    if (host.timeZone.installed === false) {
+      const own = host.timeZone.hostZone ? cityLabel(host.timeZone.hostZone) : "its own zone";
+      return `${host.name} doesn't have ${cityLabel(target)}; its agents use ${own}`;
+    }
     return `${host.name} uses ${cityLabel(target)}`;
   }
   return `${host.name}: switching to ${cityLabel(target)}…`;
@@ -100,6 +104,9 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   const [error, setError] = useState("");
   const alive = useRef(true);
   const pickButton = useRef<HTMLButtonElement>(null);
+  /** A pick closed the picker; focus goes back to its button once the save
+   * lets go of it, so the keyboard isn't sent to the top of the page. */
+  const refocus = useRef(false);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -126,6 +133,7 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
     try {
       await setAgentTimeZone(next);
       if (alive.current) {
+        refocus.current = picking && next !== null;
         setPicking(false);
       }
       notifyLabChanged();
@@ -141,6 +149,28 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   };
 
   const busy = saving !== undefined;
+  useEffect(() => {
+    if (!busy && refocus.current) {
+      refocus.current = false;
+      pickButton.current?.focus();
+    }
+  }, [busy]);
+  // The popover leaves Escape to an open picker, so Escape closes it from
+  // anywhere, not only from inside this section (whose handler goes first).
+  useEffect(() => {
+    if (!picking) {
+      return;
+    }
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        setPicking(false);
+        pickButton.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picking]);
   // Compact matches the popover's other rows and its segmented switch.
   const segment = (on: boolean) =>
     compact

@@ -113,7 +113,7 @@ describe("host lab", () => {
       relay: { enabled: false, updatedAt: 0, peers: [], sessions: 0 },
       uresourced: null,
       remoteDesktop: null,
-      timeZone: { zone: null, updatedAt: 0, hostZone: "Australia/Melbourne" },
+      timeZone: { zone: null, updatedAt: 0, hostZone: "Australia/Melbourne", installed: true },
     });
   });
 
@@ -392,6 +392,7 @@ describe("host lab", () => {
       zone: "Asia/Kolkata",
       updatedAt: 1000,
       hostZone: "Australia/Melbourne",
+      installed: true,
     });
     expect(agentTimeZone(dataDir, zoneInfo)).toBe("Asia/Kolkata");
     tick(5);
@@ -408,19 +409,23 @@ describe("host lab", () => {
     expect(saved.timeZone).toEqual({ zone: "Asia/Kolkata", updatedAt: 1000 });
   });
 
-  it("refuses bad or missing zones and saves nothing", async () => {
+  it("refuses bad zone names and saves nothing", async () => {
     const { lab, dataDir } = setup();
     for (const zone of ["../etc/passwd", "Asia/", "Asia//Kolkata", "a.b", "", 7, "x".repeat(65)]) {
       await expect(lab.handle("lab.timeZone.set", { zone }, mac)).rejects.toThrow();
     }
-    await expect(
-      lab.handle("lab.timeZone.set", { zone: "Foo/Bar" }, mac),
-    ).rejects.toThrow("Unknown time zone: Foo/Bar");
-    // A folder is not a zone file.
-    await expect(
-      lab.handle("lab.timeZone.set", { zone: "Australia/Sydney" }, mac),
-    ).rejects.toThrow("Unknown time zone");
     expect(readdirSync(dataDir)).toEqual([]);
+  });
+
+  it("keeps a zone this host lacks, says so, and spawns keep the host's zone", async () => {
+    const { lab, dataDir, zoneInfo } = setup();
+    let status = await lab.handle("lab.timeZone.set", { zone: "Foo/Bar" }, mac);
+    expect(status.timeZone).toMatchObject({ zone: "Foo/Bar", installed: false });
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
+    // A folder is not a zone file.
+    status = await lab.handle("lab.timeZone.set", { zone: "Australia/Sydney" }, mac);
+    expect(status.timeZone).toMatchObject({ zone: "Australia/Sydney", installed: false });
+    expect(agentTimeZone(dataDir, zoneInfo)).toBeNull();
   });
 
   it("reads an older lab.json with no time zone", async () => {
@@ -436,6 +441,7 @@ describe("host lab", () => {
       zone: null,
       updatedAt: 0,
       hostZone: "Australia/Melbourne",
+      installed: true,
     });
   });
 

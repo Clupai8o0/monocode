@@ -91,6 +91,10 @@ type Known = { lab: boolean; timeZone: boolean };
 let machines: RemoteMachine[] = [];
 let machinesLoaded = false;
 const known = new Map<string, Known>();
+/** When each machine last said what it offers. Asked again after
+ * DESCRIBE_MS, so a host updated while the app runs shows what it gained. */
+const describedAt = new Map<string, number>();
+const DESCRIBE_MS = 5 * 60_000;
 const asking = new Set<string>();
 /** Machines whose describe failed and that were never answered. */
 const failed = new Set<string>();
@@ -194,6 +198,7 @@ async function readMachines(): Promise<void> {
   for (const id of [...known.keys()]) {
     if (!ids.has(id)) {
       known.delete(id);
+      describedAt.delete(id);
       failed.delete(id);
       statuses.delete(id);
       offline.delete(id);
@@ -209,6 +214,7 @@ async function describe(machine: RemoteMachine): Promise<void> {
   try {
     const answer = await remoteRequest<unknown>(machine.id, "environment.describe", {});
     known.set(machine.id, { lab: hasLabCapability(answer), timeZone: hasTimeZoneCapability(answer) });
+    describedAt.set(machine.id, Date.now());
     failed.delete(machine.id);
   } catch {
     // Asked again on the next refresh.
@@ -271,7 +277,8 @@ async function loadRelay(): Promise<void> {
 }
 
 async function refreshMachine(machine: RemoteMachine, rediscover: boolean): Promise<void> {
-  if (rediscover || !known.has(machine.id)) {
+  const stale = Date.now() - (describedAt.get(machine.id) ?? 0) >= DESCRIBE_MS;
+  if (rediscover || !known.has(machine.id) || stale) {
     await describe(machine);
   }
   if (known.get(machine.id)?.lab) {
@@ -397,8 +404,14 @@ export function probeLab(machineId: string): Promise<unknown> {
 }
 
 /** Reads one host again, and this Mac's side. */
+/** Settings' Refresh: also asks the host again what it offers. */
 export function reloadHost(machineId: string): Promise<unknown> {
-  return Promise.all([loadStatus(machineId), loadLocal(), loadRelay()]);
+  const machine = machines.find((entry) => entry.id === machineId);
+  return Promise.all([
+    machine ? refreshMachine(machine, true) : loadStatus(machineId),
+    loadLocal(),
+    loadRelay(),
+  ]);
 }
 
 export function openLabSettings(): void {
@@ -445,6 +458,7 @@ export function resetLabStore(): void {
   machines = [];
   machinesLoaded = false;
   known.clear();
+  describedAt.clear();
   asking.clear();
   failed.clear();
   statuses.clear();

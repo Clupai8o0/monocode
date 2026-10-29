@@ -198,4 +198,21 @@ describe("store", () => {
     await expect(setAgentTimeZone("Asia/Nowhere")).rejects.toThrow("Asia/Nowhere is not a time zone on this Mac.");
     expect(readRecentZones()).toEqual(["Asia/Tokyo"]);
   });
+
+  it("doesn't let a read that started before a save put the old zone back", async () => {
+    let answer: (value: unknown) => void = () => {};
+    invoke.mockImplementation((command: string) =>
+      command === "fork_agent_tz_get"
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve({ zone: "Asia/Tokyo", systemZone: "Asia/Kolkata", effectiveZone: "Asia/Tokyo" }),
+    );
+    const stop = subscribeAgentTimeZone(() => {});
+    await setAgentTimeZone("Asia/Tokyo");
+    answer({ zone: null, systemZone: "Asia/Kolkata", effectiveZone: "Asia/Kolkata" });
+    await settle();
+    expect(agentTimeZoneSnapshot().value?.zone).toBe("Asia/Tokyo");
+    stop();
+  });
 });

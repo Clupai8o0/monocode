@@ -181,6 +181,7 @@ export class HostLab {
         zone: file.timeZone?.zone ?? null,
         updatedAt: file.timeZone?.updatedAt ?? 0,
         hostZone: (this.options.hostZone ?? systemZone)(),
+        installed: !file.timeZone?.zone || zoneInstalled(file.timeZone.zone, this.options.zoneInfo),
       } satisfies AgentTimeZoneStatus,
     };
   }
@@ -189,13 +190,11 @@ export class HostLab {
     if (value !== null && typeof value !== "string") {
       throw new Error("Name a time zone, or none to follow this host");
     }
-    if (value !== null) {
-      if (!validZoneName(value)) {
-        throw new Error(`Not a time zone name: ${String(value).slice(0, 64)}`);
-      }
-      if (!zoneInstalled(value, this.options.zoneInfo)) {
-        throw new Error(`Unknown time zone: ${value}`);
-      }
+    // A zone this host lacks is kept anyway: lab.status says it is not
+    // installed, spawns keep the host's zone, and it starts working once
+    // tzdata has it. Refusing would leave the desktop asking every pass.
+    if (value !== null && !validZoneName(value)) {
+      throw new Error(`Not a time zone name: ${String(value).slice(0, 64)}`);
     }
     const updatedAt = this.now();
     await this.update((file) => {

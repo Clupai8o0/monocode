@@ -110,6 +110,27 @@ describe("lab store discovery", () => {
     stop();
   });
 
+  it("asks again after five minutes, or on a host's Refresh, so an updated host shows what it gained", async () => {
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(start);
+    try {
+      const { reloadHost } = await import("./labStore");
+      const describes = () => calls.filter((call) => call.endsWith("environment.describe")).length;
+      await refreshLab();
+      expect(describes()).toBe(2);
+      now.mockReturnValue(start + 4 * 60_000);
+      await refreshLab();
+      expect(describes()).toBe(2);
+      now.mockReturnValue(start + 5 * 60_000);
+      await refreshLab();
+      expect(describes()).toBe(4);
+      await reloadHost("m1");
+      expect(calls.filter((call) => call === "m1:environment.describe")).toHaveLength(3);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("asks a machine again when its describe failed", async () => {
     let fail = true;
     remote = (machineId, method) => {

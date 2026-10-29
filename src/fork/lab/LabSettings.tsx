@@ -112,7 +112,9 @@ function HostPanel({ host, state, now }: { host: LabHost; state: LabState; now: 
 {
   const machine: RemoteMachine = host.machine;
   const { status } = host;
-  const busy = hostBusyWord(state, machine.id);
+  const working = hostBusyWord(state, machine.id);
+  // An offline host shows what it last said, with its controls off.
+  const busy = working ?? (host.offline ? "offline" : undefined);
   const error = hostErrors(state, machine.id).join(" ");
 
   return (
@@ -125,12 +127,18 @@ function HostPanel({ host, state, now }: { host: LabHost; state: LabState; now: 
               : machine.name}
           </h2>
           <p className={`mt-1 ${quiet}`}>
-            {status ? "Home lab controls for this machine." : host.loading ? "Loading…" : ""}
+            {status
+              ? host.offline
+                ? "Offline. This is what it last reported."
+                : "Home lab controls for this machine."
+              : host.loading
+                ? "Loading…"
+                : ""}
           </p>
         </div>
         <button
           className={button}
-          disabled={!!busy || host.loading}
+          disabled={!!working || host.loading}
           onClick={() => void reloadHost(machine.id)}
         >
           Refresh

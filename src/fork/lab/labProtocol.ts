@@ -117,6 +117,9 @@ export type AgentTimeZoneStatus = {
   updatedAt: number;
   /** The host's own zone, from its system settings; null if unknown. */
   hostZone: string | null;
+  /** False when `zone` is not installed on the host, so its agents use
+   *  hostZone instead. Older hosts leave it out. */
+  installed?: boolean;
 };
 
 export type LabStatus = {

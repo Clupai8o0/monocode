@@ -45,11 +45,19 @@ for (const theme of ["dark", "light"] as const) {
     await expect(popover).toBeVisible();
     await expect(page.getByRole("button", { name: "Pick a zone" })).toBeFocused();
 
+    // Escape still closes it when focus has moved elsewhere in the popover.
+    await page.getByRole("button", { name: "Pick a zone" }).click();
+    await page.getByRole("switch", { name: "Remote desktop" }).focus();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(popover).toBeVisible();
+
     // Picking one: the Mac switches; the host waits for the watcher.
     await page.getByRole("button", { name: "Pick a zone" }).click();
     await page.getByRole("combobox", { name: "Find a time zone" }).fill("london");
     await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "London" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "London" })).toBeFocused();
     await expect(page.getByText("vivobook: switching to London…")).toBeVisible();
     await shoot("lab-popover-tz-picked");
     await page.getByRole("button", { name: /Follow this Mac/ }).click();
