@@ -250,6 +250,11 @@ import {
   type ProviderAccount,
   type ProviderAccountProvider,
 } from "../../providers/model/providerAccounts";
+import { ClaudeAccountSettings } from "../../../fork/accounts/ClaudeAccountSettings"; // Fork
+import {
+  accountDisplayLabel,
+  useAccountHomes,
+} from "../../../fork/accounts/accountHomes"; // Fork
 import { removeProviderAccountCredentials } from "../../providers/model/providerAccountCredentials";
 import {
   identityKey,
@@ -3501,7 +3506,7 @@ function ProvidersPage({
 
   return (
     <>
-      <ProviderAccountsSettings />
+      <ProviderAccountsSettings project={cwd} />
 
       <UsageDisplaySettings />
 
@@ -3632,7 +3637,8 @@ type AccountEditor = {
   label: string;
 };
 
-function ProviderAccountsSettings() {
+function ProviderAccountsSettings({ project }: { project?: string }) {
+  const homes = useAccountHomes(); // Fork: main / cx labels.
   const [version, setVersion] = useState(0);
   const [editor, setEditor] = useState<AccountEditor | null>(null);
   const [working, setWorking] = useState<string | null>(null);
@@ -3799,7 +3805,7 @@ function ProviderAccountsSettings() {
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate text-[12px] text-content/85">
-                          {account.label}
+                          {accountDisplayLabel(account, homes) /* Fork */}
                         </span>
                         {orgTag ? (
                           <span className="max-w-[8rem] shrink-0 truncate rounded bg-content/[0.07] px-1 text-[9px] leading-4 text-content/50">
@@ -3874,6 +3880,13 @@ function ProviderAccountsSettings() {
                 />
               ) : null}
             </div>
+            {/* Fork: main / cx / Auto for new sessions, and adding cx. */}
+            {provider === "claude" ? (
+              <ClaudeAccountSettings
+                project={project}
+                disabled={Boolean(working)}
+              />
+            ) : null}
           </div>
         );
       })}

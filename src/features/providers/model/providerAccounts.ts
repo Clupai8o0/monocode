@@ -1,5 +1,9 @@
 import { pathKey } from "../../../shared/lib/paths";
 import type { HarnessId } from "../../sessions/model/session";
+import {
+  AUTO_ACCOUNT_ID,
+  supportsAutoAccount,
+} from "../../../fork/accounts/autoAccount"; // Fork
 
 const ACCOUNTS_KEY = "monocode.providerAccounts.v1";
 const SELECTIONS_KEY = "monocode.providerAccountSelections.v1";
@@ -209,12 +213,43 @@ export function providerAccountExists(
   return providerAccounts(provider).some((account) => account.id === accountId);
 }
 
+// Fork: "auto" picks the account with the most headroom for each new session.
+export const AUTO_PROVIDER_ACCOUNT_ID = AUTO_ACCOUNT_ID;
+let autoResolver: ((provider: ProviderAccountProvider) => string | null) | null =
+  null;
+
+/** Fork: set by fork/accounts/autoResolver, which knows each account's usage. */
+export function setAutoProviderAccountResolver(
+  resolver: ((provider: ProviderAccountProvider) => string | null) | null,
+): void {
+  autoResolver = resolver;
+}
+
+/** Fork: the stored choice, which may be "auto"; never pass it to a spawn. */
+export function providerAccountChoice(
+  provider: ProviderAccountProvider,
+  project: string | undefined,
+): string {
+  const selections = readRecord<StoredSelections>(SELECTIONS_KEY);
+  const id = selections[selectionKey(project)]?.[provider];
+  if (id === AUTO_ACCOUNT_ID && supportsAutoAccount(provider)) return id;
+  return selectedProviderAccountId(provider, project);
+}
+
+/** Always a real account id: a project on Auto resolves to its pick now. */
 export function selectedProviderAccountId(
   provider: ProviderAccountProvider,
   project: string | undefined,
 ): string {
   const selections = readRecord<StoredSelections>(SELECTIONS_KEY);
   const id = selections[selectionKey(project)]?.[provider];
+  // Fork: resolve Auto to a real account before anything spawns with it.
+  if (id === AUTO_ACCOUNT_ID && supportsAutoAccount(provider)) {
+    const picked = autoResolver?.(provider);
+    return picked && providerAccounts(provider).some((account) => account.id === picked)
+      ? picked
+      : DEFAULT_PROVIDER_ACCOUNT_ID;
+  }
   return providerAccounts(provider).some((account) => account.id === id)
     ? id!
     : DEFAULT_PROVIDER_ACCOUNT_ID;
@@ -225,7 +260,10 @@ export function selectProviderAccount(
   project: string | undefined,
   accountId: string,
 ): void {
-  if (!providerAccounts(provider).some((account) => account.id === accountId)) {
+  if (
+    !providerAccounts(provider).some((account) => account.id === accountId) &&
+    !(accountId === AUTO_ACCOUNT_ID && supportsAutoAccount(provider)) // Fork
+  ) {
     return;
   }
   const selections = readRecord<StoredSelections>(SELECTIONS_KEY);

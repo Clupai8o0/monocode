@@ -55,6 +55,11 @@ import {
 import { ProviderAccountSubtitle } from "../../features/providers/ui/ProviderAccountSubtitle";
 import { useShowRemainingUsage } from "../../features/settings/model/displayPrefs";
 import { FooterUsage, footerAccountLabel } from "../../fork/usage/FooterUsage";
+import { AutoAccountRow } from "../../fork/accounts/AutoAccountRow"; // Fork
+import {
+  accountDisplayLabel,
+  useAccountHomes,
+} from "../../fork/accounts/accountHomes"; // Fork
 
 type UsageWindowEntry = {
   key: "session" | "weekly" | "monthly";
@@ -101,6 +106,8 @@ export function UsageProviderChip({
   onOpen,
   presentation,
   variant = "footer",
+  autoChoice = false,
+  onSelectAuto,
 }: {
   limits: ProviderRateLimits;
   now: number;
@@ -117,7 +124,15 @@ export function UsageProviderChip({
   onOpen?: () => void;
   /** `composer` matches the quiet tool buttons under a Mono's composer. */
   variant?: UsageChipVariant;
+  /** Fork: the project's choice is Auto; `accountId` is what Auto chose. */
+  autoChoice?: boolean;
+  /** Fork: offers Auto in the account picker. */
+  onSelectAuto?: () => void;
 }) {
+  // Fork: main / cx labels, read only where there are Claude accounts to name.
+  const homes = useAccountHomes(
+    limits.provider === "claude" && accounts.length > 1,
+  );
   const showRemaining = useShowRemainingUsage();
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -150,7 +165,10 @@ export function UsageProviderChip({
   const iconHarness = presentation?.harness ?? limits.provider;
   const activeAccount = accounts.find((account) => account.id === accountId);
   const canManageAccounts = Boolean(onSelectAccount && onAddAccount);
-  const activeAccountLabel = activeAccount?.label ?? "Removed account";
+  // Fork: "main (~/.claude)" / "cx (~/.claude-exec)", and "Auto · …" on Auto.
+  const activeAccountLabel = activeAccount
+    ? `${autoChoice ? "Auto · " : ""}${accountDisplayLabel(activeAccount, homes)}`
+    : "Removed account";
   const identities = useProviderAccountIdentities(
     accounts,
     `${open}:${limits.updatedAt}:${reconnectState}`,
@@ -276,6 +294,7 @@ export function UsageProviderChip({
           <>
             {accounts.length > 1 && activeAccount ? (
               <span className="max-w-24 truncate text-content/45">
+                {autoChoice ? "Auto · " : ""}
                 {footerAccountLabel(activeAccount)}
               </span>
             ) : null}
@@ -311,6 +330,15 @@ export function UsageProviderChip({
               accountId={accountId ?? ""}
               usageFor={usageFor}
               now={now}
+              autoChoice={autoChoice}
+              onSelectAuto={
+                onSelectAuto
+                  ? () => {
+                      onSelectAuto();
+                      setOpen(false);
+                    }
+                  : undefined
+              }
               onBack={() => setAccountView("usage")}
               onAdd={() => setAccountView("add")}
               onManage={
@@ -518,7 +546,11 @@ function ProviderAccountPicker({
   onAdd,
   onManage,
   onSelect,
+  autoChoice = false,
+  onSelectAuto,
 }: {
+  autoChoice?: boolean;
+  onSelectAuto?: () => void;
   providerLabel: string;
   accounts: ProviderAccount[];
   identities: Record<string, ProviderAccountIdentity | null>;
@@ -552,8 +584,16 @@ function ProviderAccountPicker({
         role="group"
         aria-label={`${providerLabel} accounts`}
       >
+        {/* Fork: Auto picks the account for each new session. */}
+        {onSelectAuto && accounts.length > 1 ? (
+          <AutoAccountRow
+            selected={autoChoice}
+            accounts={accounts}
+            onSelect={onSelectAuto}
+          />
+        ) : null}
         {accounts.map((account) => {
-          const selected = account.id === accountId;
+          const selected = !autoChoice && account.id === accountId; // Fork
           const identity = identities[identityKey(account)];
           const orgTag = identityOrganizationTag(identity);
           const usage = usageFor(account);
@@ -571,14 +611,16 @@ function ProviderAccountPicker({
               <button
                 type="button"
                 aria-pressed={selected}
-                aria-label={account.label}
+                aria-label={accountDisplayLabel(account)}
                 aria-describedby={`${statusId}-${account.id}`}
                 className="pointer-events-auto absolute inset-0 rounded-lg hover:bg-content/[0.04] focus-visible:outline-2 focus-visible:outline-accent"
                 onClick={() => onSelect(account.id)}
               />
               <span className="min-w-0 flex-1 py-0.5">
                 <span className="flex min-w-0 items-baseline gap-1.5">
-                  <span className="shrink-0 truncate">{account.label}</span>
+                  <span className="shrink-0 truncate">
+                    {accountDisplayLabel(account) /* Fork */}
+                  </span>
                   <ProviderAccountSubtitle
                     identity={identity}
                     className="text-[10px] text-content/35"
