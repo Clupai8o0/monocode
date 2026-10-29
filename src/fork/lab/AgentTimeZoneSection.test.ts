@@ -186,3 +186,27 @@ describe("hostLine", () => {
     expect(hostLine(host, "Asia/Kolkata")).toBe("vivobook: switching to Kolkata…");
   });
 });
+
+describe("saving", () => {
+  it("sends one save at a time", async () => {
+    let release: () => void = () => {};
+    await render();
+    invoke.mockImplementation(async (command: string, args?: { zone: string | null }) => {
+      if (command === "fork_agent_tz_get") {
+        return stored;
+      }
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { ...stored, zone: args?.zone ?? null, effectiveZone: args?.zone ?? stored.systemZone };
+    });
+    await act(async () => button(/Pick a zone/).click());
+    const input = container.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+    await type(input, "tokyo");
+    await key(input, "Enter");
+    await key(input, "Enter");
+    const sets = () => invoke.mock.calls.filter(([command]) => command === "fork_agent_tz_set");
+    expect(sets()).toHaveLength(1);
+    await act(async () => release());
+  });
+});

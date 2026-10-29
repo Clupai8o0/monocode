@@ -96,6 +96,10 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   const target = hostZoneToSend(value);
 
   const choose = async (next: string | null) => {
+    // One save at a time, so answers can't land out of order.
+    if (saving !== undefined) {
+      return;
+    }
     setSaving(next);
     setError("");
     try {
