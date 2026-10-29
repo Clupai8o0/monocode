@@ -1,19 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { remoteRequest, useRemoteMachines } from "../../features/connections/model/connections";
+import { useEffect, useState } from "react";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
-import { playCue } from "../../features/settings/model/sounds";
-import { copyText } from "../../platform/tauri/clipboard";
-import { Check, Copy, Loader } from "../../shared/ui/icons";
+import { Loader } from "../../shared/ui/icons";
 import {
   SCOPES,
   choiceLine,
   errorText,
-  hasLabCapability,
   localMachineName,
   localRelayLine,
   machineRows,
-  parseLocalRelay,
   relayLine,
   remoteDesktopView,
   timeAgo,
@@ -23,87 +18,53 @@ import {
 } from "./labModel";
 import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
 import {
-  applyLocalRemoteControl,
-  labRequest,
-  notifyLabChanged,
-  readLocalRemoteControl,
-} from "./labWatcher";
+  actionKey,
+  hostErrors,
+  probeLab,
+  refreshLab,
+  reloadHost,
+  setRelay,
+  setRemoteDesktop,
+  setScope,
+  setUresourced,
+  useLab,
+  type HostAction,
+  type LabHost,
+  type LabState,
+} from "./labStore";
+import { Block, CopyButton, Toggle, useNow } from "./labUi";
 
 /**
  * Fork: the "Home lab" settings section. One panel per connected machine
  * whose host offers the lab methods, with four blocks: Remote Control scope,
  * relay, uresourced and remote desktop. A block is left out when the host
- * has nothing for it (uresourced and remote desktop are Linux only).
+ * has nothing for it (uresourced and remote desktop are Linux only). The
+ * state and the changes live in labStore, shared with the footer chip.
  */
 
 const button =
   "rounded-lg bg-selection px-3 py-1.5 text-[12px] font-medium hover:bg-selection-hover disabled:opacity-40";
 const quiet = "text-[12px] leading-relaxed text-content/50";
-/** uresourced and remote desktop changes wait on systemd and a probe. */
-const SLOW_MS = 60_000;
 
-type LabHosts = { hosts: RemoteMachine[]; checking: boolean; recheck: () => void };
-
-/** Each machine's answer shows as it arrives; checking stays true only while
- * no lab host has answered and some machine is still being asked. */
-function useLabHosts(machines: RemoteMachine[]): LabHosts
-{
-  const [lab, setLab] = useState<Record<string, boolean>>({});
-  const [round, setRound] = useState(0);
-  const ids = machines.map((machine) => machine.id).join("\n");
-  useEffect(() => {
-    let disposed = false;
-    setLab({});
-    for (const machine of machines) {
-      void remoteRequest<unknown>(machine.id, "environment.describe", {})
-        .then(hasLabCapability, () => false)
-        .then((isLab) => {
-          if (!disposed) {
-            setLab((current) => ({ ...current, [machine.id]: isLab }));
-          }
-        });
-    }
-    return () => {
-      disposed = true;
-    };
-    // The id list stands for the machines.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids, round]);
-  const hosts = machines.filter((machine) => lab[machine.id]);
-  const recheck = useCallback(() => setRound((value) => value + 1), []);
-  return { hosts, checking: hosts.length === 0 && machines.some((machine) => !(machine.id in lab)), recheck };
+/** What is changing on a host, in the words the blocks check for. */
+function hostBusyWord(state: LabState, machineId: string): string | undefined {
+  if (state.busy.scope) {
+    return "scope";
+  }
+  const actions: HostAction[] = ["relay", "ures", "probe", "rdp", "tz", "scope"];
+  return actions.find((action) => state.busy[actionKey(machineId, action)]);
 }
 
 export function LabSettings()
 {
-  const { machines, loaded } = useRemoteMachines();
-  const { hosts, checking, recheck } = useLabHosts(machines);
-  const [local, setLocal] = useState<LocalRemoteControl>();
-  const [localError, setLocalError] = useState("");
-  const [relay, setRelay] = useState<LocalRelayStatus>();
-  const [relayError, setRelayError] = useState("");
-  const loadLocal = useCallback(async () => {
-    try {
-      setLocal(await readLocalRemoteControl());
-      setLocalError("");
-    } catch (reason) {
-      setLocalError(errorText(reason, "Reading Remote Control here"));
-    }
-  }, []);
-  const loadRelay = useCallback(async () => {
-    try {
-      setRelay(parseLocalRelay(await invoke<unknown>("fork_relay_status")));
-      setRelayError("");
-    } catch (reason) {
-      setRelayError(errorText(reason, "This Mac's relay status"));
-    }
-  }, []);
+  const state = useLab();
+  const { hosts, machinesLoaded, discovering, machineCount } = state;
+  const now = useNow();
   useEffect(() => {
-    void loadLocal();
-    void loadRelay();
-  }, [loadLocal, loadRelay]);
+    void refreshLab();
+  }, []);
 
-  if (!loaded || (checking && machines.length > 0)) {
+  if (!machinesLoaded || (discovering && machineCount > 0)) {
     return (
       <p className={`${quiet} flex items-center gap-2`}>
         <Loader className="size-4 animate-spin" /> Looking for lab machines…
@@ -119,7 +80,7 @@ export function LabSettings()
           controls show up here.
         </p>
         <div>
-          <button className={button} onClick={recheck}>
+          <button className={button} onClick={() => void refreshLab({ rediscover: true })}>
             Check again
           </button>
         </div>
@@ -128,106 +89,19 @@ export function LabSettings()
   }
   return (
     <div className="flex flex-col gap-12">
-      {hosts.map((machine) => (
-        <HostPanel
-          key={machine.id}
-          machine={machine}
-          local={local}
-          localError={localError}
-          onLocal={setLocal}
-          relay={relay}
-          relayError={relayError}
-          onRefreshLocal={() => {
-            void loadLocal();
-            void loadRelay();
-          }}
-        />
+      {hosts.map((host) => (
+        <HostPanel key={host.machine.id} host={host} state={state} now={now} />
       ))}
     </div>
   );
 }
 
-function HostPanel({
-  machine,
-  local,
-  localError,
-  onLocal,
-  relay,
-  relayError,
-  onRefreshLocal,
-}: {
-  machine: RemoteMachine;
-  local?: LocalRemoteControl;
-  localError: string;
-  onLocal: (local: LocalRemoteControl) => void;
-  relay?: LocalRelayStatus;
-  relayError: string;
-  onRefreshLocal: () => void;
-})
+function HostPanel({ host, state, now }: { host: LabHost; state: LabState; now: number })
 {
-  const [status, setStatus] = useState<LabStatus>();
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState<string>();
-  const [now, setNow] = useState(() => Date.now());
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  const call = useCallback(
-    async <M extends keyof LabParams>(key: string, method: M, params: LabParams[M], timeoutMs?: number) => {
-      setBusy(key);
-      setError("");
-      try {
-        const next = await labRequest(machine.id, method, params, timeoutMs);
-        if (alive.current) {
-          setStatus(next);
-          setNow(Date.now());
-        }
-        return next;
-      } catch (reason) {
-        if (alive.current) {
-          setError(errorText(reason));
-        }
-        return undefined;
-      } finally {
-        if (alive.current) {
-          setBusy(undefined);
-        }
-      }
-    },
-    [machine.id],
-  );
-  useEffect(() => {
-    void call("load", "lab.status", {});
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [call]);
-
-  const choose = async (scope: RemoteControlScope) => {
-    const updatedAt = Math.max(
-      Date.now(),
-      (status?.remoteControl.desired.updatedAt ?? 0) + 1,
-      (local?.updatedAt ?? 0) + 1,
-    );
-    const choice = { scope, updatedAt, by: localMachineName(local) };
-    setBusy("scope");
-    let localFailure = "";
-    try {
-      onLocal(await applyLocalRemoteControl(choice));
-    } catch (reason) {
-      localFailure = errorText(reason, "Changing it on this Mac");
-    }
-    const next = await call("scope", "lab.remoteControl.set", { scope, updatedAt: choice.updatedAt });
-    const kept = next && next.remoteControl.desired.scope !== scope ? "A newer choice was kept." : "";
-    const message = [localFailure, kept].filter(Boolean).join(" ");
-    if (message && alive.current) {
-      setError(message);
-    }
-    notifyLabChanged();
-  };
+  const machine: RemoteMachine = host.machine;
+  const { status } = host;
+  const busy = hostBusyWord(state, machine.id);
+  const error = hostErrors(state, machine.id).join(" ");
 
   return (
     <section aria-label={machine.name} className="flex flex-col gap-6">
@@ -239,16 +113,13 @@ function HostPanel({
               : machine.name}
           </h2>
           <p className={`mt-1 ${quiet}`}>
-            {status ? "Home lab controls for this machine." : busy === "load" ? "Loading…" : ""}
+            {status ? "Home lab controls for this machine." : host.loading ? "Loading…" : ""}
           </p>
         </div>
         <button
           className={button}
-          disabled={!!busy}
-          onClick={() => {
-            void call("load", "lab.status", {});
-            onRefreshLocal();
-          }}
+          disabled={!!busy || host.loading}
+          onClick={() => void reloadHost(machine.id)}
         >
           Refresh
         </button>
@@ -262,30 +133,28 @@ function HostPanel({
         <>
           <RemoteControlBlock
             status={status}
-            local={local}
-            localError={localError}
+            local={state.local}
+            localError={state.localError}
             busy={busy}
             now={now}
-            onChoose={(scope) => void choose(scope)}
+            onChoose={(scope) => void setScope(scope)}
           />
           <RelayBlock
             status={status}
             machineId={machine.id}
-            local={relay}
-            localError={relayError}
+            local={state.relay}
+            localError={state.relayError}
             busy={busy}
             now={now}
-            onToggle={(enabled) => {
-              void call("relay", "lab.relay.set", { enabled }).then(onRefreshLocal);
-            }}
+            onToggle={(enabled) => void setRelay(machine.id, enabled)}
           />
           {status.uresourced ? (
             <UresourcedBlock
               status={status.uresourced}
               busy={busy}
               now={now}
-              onProbe={() => void call("probe", "lab.status", { probe: true }, SLOW_MS)}
-              onAction={(action) => void call(`ures:${action}`, "lab.uresourced.set", { action }, SLOW_MS)}
+              onProbe={() => void probeLab(machine.id)}
+              onAction={(action) => void setUresourced(machine.id, action)}
             />
           ) : null}
           {status.remoteDesktop ? (
@@ -293,7 +162,7 @@ function HostPanel({
               status={status.remoteDesktop}
               machineName={machine.name}
               busy={busy}
-              onToggle={(enabled) => void call("rdp", "lab.remoteDesktop.set", { enabled }, SLOW_MS)}
+              onToggle={(enabled) => void setRemoteDesktop(machine.id, enabled)}
             />
           ) : null}
         </>
@@ -303,19 +172,6 @@ function HostPanel({
         </p>
       ) : null}
     </section>
-  );
-}
-
-function Block({ title, state, children }: { title: string; state?: ReactNode; children: ReactNode })
-{
-  return (
-    <div className="flex flex-col gap-3 rounded-xl bg-content/3 px-4 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[13px] font-semibold text-content">{title}</h3>
-        {state ? <span className="shrink-0 text-[12px] text-content/55">{state}</span> : null}
-      </div>
-      {children}
-    </div>
   );
 }
 
@@ -387,40 +243,6 @@ function RemoteControlBlock({
   );
 }
 
-function Toggle({
-  label,
-  on,
-  onChange,
-  disabled = false,
-}: {
-  label: string;
-  on: boolean;
-  onChange: (on: boolean) => void;
-  disabled?: boolean;
-})
-{
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-label={label}
-      aria-checked={on}
-      disabled={disabled}
-      onClick={() => {
-        onChange(!on);
-        playCue("switch");
-      }}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        on ? "bg-accent" : "bg-content/20"
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] ${on ? "left-4.5" : "left-0.5"}`}
-      />
-    </button>
-  );
-}
-
 function RelayBlock({
   status,
   machineId,
@@ -487,7 +309,7 @@ function UresourcedBlock({
 {
   const view = uresourcedView(status, now);
   const [confirming, setConfirming] = useState(false);
-  const working = busy?.startsWith("ures:") || busy === "probe";
+  const working = busy === "ures" || busy === "probe";
   return (
     <Block
       title="uresourced"
@@ -544,27 +366,6 @@ function UresourcedBlock({
         </div>
       )}
     </Block>
-  );
-}
-
-function CopyButton({ text, label }: { text: string; label: string })
-{
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      aria-label={`Copy ${label}`}
-      title={`Copy ${label}`}
-      className="rounded p-1.5 text-content/45 hover:bg-selection hover:text-content"
-      onClick={() => {
-        void copyText(text).then(() => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-    </button>
   );
 }
 

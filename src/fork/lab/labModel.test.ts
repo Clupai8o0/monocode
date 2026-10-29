@@ -9,6 +9,8 @@ import {
   errorText,
   formatFingerprint,
   hasLabCapability,
+  hasTimeZoneCapability,
+  labChip,
   localRelayLine,
   machineRows,
   parseLocalRelay,
@@ -347,5 +349,86 @@ describe("relay", () => {
     expect(
       localRelayLine({ enabled: true, hosts: [{ ...parsed!.hosts[0], lastError: "refused" }] }, "m1", NOW),
     ).toBe("This Mac couldn't reach it: refused");
+  });
+});
+
+describe("labChip", () => {
+  const ures: NonNullable<LabStatus["uresourced"]> = {
+    installed: true,
+    active: true,
+    masked: false,
+    pid: 900,
+    since: NOW - 60_000,
+    loop: null,
+    looping: false,
+  };
+  const rdp: NonNullable<LabStatus["remoteDesktop"]> = {
+    installed: true,
+    running: false,
+    via: null,
+    lanExposed: false,
+    address: "100.64.0.2",
+    port: 3389,
+    username: "clupai",
+    certificate: { present: false, sha256: null },
+    systemUser: true,
+    preauthorized: true,
+    rdpFile: null,
+    uri: null,
+  };
+  const on = (name: string, overrides: Partial<LabStatus> = {}) => ({ name, offline: false, status: status(overrides) });
+
+  it("says the scope and the relay in a few words", () => {
+    const chip = labChip([on("vivobook", { relay: { enabled: true, updatedAt: 0, peers: [], sessions: 0 } })]);
+    expect(chip.words).toBe("Lab only · Relay on");
+    expect(chip.sentence).toBe("Home lab: Remote Control on lab machines only, relay on.");
+  });
+
+  it("names the hosts when the relay is on for some only", () => {
+    const chip = labChip([
+      on("vivobook", { relay: { enabled: true, updatedAt: 0, peers: [], sessions: 0 } }),
+      on("pi", { relay: { enabled: false, updatedAt: 0, peers: [], sessions: 0 } }),
+    ]);
+    expect(chip.words).toBe("Lab only · Relay mixed");
+    expect(chip.sentence).toContain("relay on for vivobook only");
+  });
+
+  it("flags an offline host, a uresourced loop and remote desktop on", () => {
+    const chip = labChip([
+      { name: "pi", offline: true, status: status() },
+      on("vivobook", {
+        uresourced: { ...ures, looping: true },
+        remoteDesktop: { ...rdp, running: true },
+      }),
+    ]);
+    expect(chip.attention).toEqual([
+      "pi is offline.",
+      "uresourced is looping on vivobook.",
+      "Remote desktop is on for vivobook.",
+    ]);
+    expect(chip.sentence).toContain("pi is offline.");
+  });
+
+  it("has nothing to flag on a quiet host", () => {
+    const chip = labChip([
+      on("vivobook", {
+        uresourced: ures,
+        remoteDesktop: rdp,
+      }),
+    ]);
+    expect(chip.attention).toEqual([]);
+  });
+
+  it("falls back to this Mac's scope, and to plain words before any answer", () => {
+    expect(labChip([{ name: "vivobook", offline: false }], "all").words).toBe("Home lab");
+    expect(labChip([{ name: "vivobook", offline: true }]).words).toBe("Offline");
+  });
+});
+
+describe("hasTimeZoneCapability", () => {
+  it("reads lab.tz.v1 from a describe answer", () => {
+    expect(hasTimeZoneCapability({ capabilities: ["lab.v1", "lab.tz.v1"] })).toBe(true);
+    expect(hasTimeZoneCapability({ capabilities: ["lab.v1"] })).toBe(false);
+    expect(hasTimeZoneCapability(null)).toBe(false);
   });
 });

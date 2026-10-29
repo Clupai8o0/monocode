@@ -115,6 +115,8 @@ import Mail01Icon from "@hugeicons/core-free-icons/Mail01Icon";
 import SendIcon from "@hugeicons/core-free-icons/SendIcon";
 import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Location01Icon from "@hugeicons/core-free-icons/Location01Icon";
+// Fork: the footer Home lab button.
+import HomeWifiIcon from "@hugeicons/core-free-icons/HomeWifiIcon";
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -302,3 +304,5 @@ export const Send = wrap(SendIcon, "Send");
 // Fork: the footer ring button (location-aware alerts).
 export const Bell = wrap(Notification01Icon, "Bell");
 export const MapPin = wrap(Location01Icon, "MapPin");
+// Fork: the footer Home lab button.
+export const HomeLab = wrap(HomeWifiIcon, "HomeLab");
