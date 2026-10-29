@@ -146,6 +146,8 @@ const idleParkTimers = new Map<
 const sessionOperationTails = new Map<string, Promise<void>>();
 const sessionSteerTails = new Map<string, Promise<void>>();
 const activeTurnSessions = new Set<string>();
+/** Fork: when each warm child's turn settled, for the Memory manager. */
+const idleSinceBySession = new Map<string, number>();
 
 function queueSessionOperation<T>(
   sessionId: string,
@@ -197,10 +199,12 @@ function cancelIdlePark(sessionId: string): void {
   const idle = idleParkTimers.get(sessionId);
   if (idle) clearTimeout(idle.timer);
   idleParkTimers.delete(sessionId);
+  idleSinceBySession.delete(sessionId); // Fork
 }
 
 function scheduleIdlePark(harness: HarnessId, sessionId: string): void {
   cancelIdlePark(sessionId);
+  idleSinceBySession.set(sessionId, Date.now()); // Fork
   idleParkTimers.set(sessionId, {
     harness,
     timer: setTimeout(() => {
@@ -234,10 +238,42 @@ export function enforceHarnessIdleLimit(): void {
   }
 }
 
+/**
+ * Fork: when this session's warm child last went idle (its turn settled).
+ * Undefined while a turn runs, and once the child is parked or stopped.
+ */
+export function harnessIdleSince(sessionId: string): number | undefined {
+  return idleParkTimers.has(sessionId)
+    ? idleSinceBySession.get(sessionId)
+    : undefined;
+}
+
+/**
+ * Fork: park one idle warm child now, for the Memory manager. Only a child
+ * waiting out its idle timer qualifies, never one with a turn or operation in
+ * flight. Resume state stays, so the next prompt respawns the same Claude
+ * conversation, exactly like the idle timer's park.
+ */
+export async function parkIdleHarnessSession(
+  sessionId: string,
+): Promise<boolean> {
+  const idle = idleParkTimers.get(sessionId);
+  if (
+    !idle ||
+    activeTurnSessions.has(sessionId) ||
+    sessionOperationTails.has(sessionId)
+  ) {
+    return false;
+  }
+  await stopHarnessSession(idle.harness, sessionId);
+  return true;
+}
+
 /** Test seam. */
 export function resetHarnessIdlePark(): void {
   for (const { timer } of idleParkTimers.values()) clearTimeout(timer);
   idleParkTimers.clear();
+  idleSinceBySession.clear(); // Fork
   clearTimeout(idleLimitCheck);
   idleLimitCheck = undefined;
   idleParkPolicy = {

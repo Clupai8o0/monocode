@@ -22,6 +22,7 @@ export type SettingsSectionId =
   | "general"
   | "connections"
   | "lab" // Fork: Home lab
+  | "memory" // Fork: Memory manager
   | "appearance"
   | "keybindings"
   | "chat"
@@ -78,6 +79,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       "Remote Control, the relay, uresourced and remote desktop on your lab machines.", // Fork
     keywords: // Fork
       "lab vivobook linux remote control relay uresourced krdp rdp remote desktop tailscale", // Fork
+  }, // Fork
+  // Fork: Memory manager, after Home lab.
+  {
+    id: "memory", // Fork
+    group: "app", // Fork
+    label: "Memory", // Fork
+    description: // Fork
+      "Free memory by parking idle sessions; their conversations stay.", // Fork
+    keywords: // Fork
+      "memory ram park idle sessions pressure auto-park free swap", // Fork
   }, // Fork
   {
     id: "appearance",

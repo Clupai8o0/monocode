@@ -623,6 +623,7 @@ describe("settings navigation", () => {
       "general",
       "connections",
       "lab", // Fork: Home lab
+      "memory", // Fork: Memory manager
       "appearance",
       "keybindings",
       "chat",

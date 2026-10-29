@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ConnectionsSettings } from "../../connections/ui/ConnectionsSettings";
 import { MobileSettings } from "../../mobile/ui/MobileSettings";
 import { LabSettings } from "../../../fork/lab/LabSettings"; // Fork
+import { MemorySettings } from "../../../fork/memory/MemorySettings"; // Fork
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   ArrowDownCircle,
@@ -654,6 +655,8 @@ export function SettingsView({
               ) : null}
               {/* Fork: Home lab. */}
               {section === "lab" ? <LabSettings /> : null}
+              {/* Fork: Memory manager. */}
+              {section === "memory" ? <MemorySettings /> : null}
               {section === "appearance" ? (
                 <AppearancePage appearance={appearance} />
               ) : null}

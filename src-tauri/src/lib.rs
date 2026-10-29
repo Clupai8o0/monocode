@@ -24,6 +24,7 @@ mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
 mod fork_location; // Fork
+mod fork_memory; // Fork: the Memory manager's per-session RAM report.
 // Fork: installs a staged personal build on quit, however MonoCode was opened.
 #[cfg(target_os = "macos")]
 mod fork_update;
@@ -695,6 +696,7 @@ pub fn run() {
             fork_lab::fork_lab_rc_status,     // Fork
             fork_lab::fork_lab_rc_apply,      // Fork
             fork_lab::fork_lab_open_rdp,      // Fork
+            fork_memory::fork_memory_report, // Fork
             fork_claims::fork_claims_list,    // Fork
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork

@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Container, // Fork: Home lab
+  Gauge, // Fork: Memory manager
   type IconComponent,
 } from "../../shared/ui/icons";
 import { useLockOverscroll } from "../../shared/hooks/useLockOverscroll";
@@ -25,6 +26,7 @@ const SECTION_ICONS: Record<SettingsSectionId, IconComponent> = {
   general: SlidersHorizontal,
   connections: Internet,
   lab: Container, // Fork: Home lab
+  memory: Gauge, // Fork: Memory manager
   appearance: Palette,
   keybindings: Keyboard,
   chat: MessageSquare,

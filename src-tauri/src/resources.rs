@@ -40,12 +40,13 @@ pub struct OwnedProcess {
 }
 
 #[derive(Clone)]
-struct Process {
-    pid: u32,
-    parent: u32,
+pub(crate) struct Process {
+    // Fork: crate-visible for fork_memory's per-session totals.
+    pub(crate) pid: u32,
+    pub(crate) parent: u32,
     command: String,
     cpu: f64,
-    memory: u64,
+    pub(crate) memory: u64,
 }
 
 /// Kernel process birth time prevents PID reuse from authorizing a stop.
@@ -106,18 +107,9 @@ pub fn resource_usage() -> ResourceUsage {
             }
             *previous = Some(ticks);
         }
-        let mut pressure: u32 = 0;
-        let mut length = std::mem::size_of_val(&pressure);
-        let ok = libc::sysctlbyname(
-            c"kern.memorystatus_vm_pressure_level".as_ptr(),
-            &mut pressure as *mut _ as *mut _,
-            &mut length,
-            std::ptr::null_mut(),
-            0,
-        ) == 0;
         ResourceUsage {
             cpu_percent,
-            memory_pressure: ok.then_some(pressure),
+            memory_pressure: memory_pressure_level(), // Fork: shared with fork_memory
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -127,7 +119,28 @@ pub fn resource_usage() -> ResourceUsage {
     }
 }
 
-fn process_snapshot() -> Result<HashMap<u32, Process>, String> {
+/// Fork: the kernel's memory pressure level (1 normal, 2 warn, 4 critical).
+#[cfg(target_os = "macos")]
+pub(crate) fn memory_pressure_level() -> Option<u32> {
+    let mut pressure: u32 = 0;
+    let mut length = std::mem::size_of_val(&pressure);
+    let ok = unsafe {
+        libc::sysctlbyname(
+            c"kern.memorystatus_vm_pressure_level".as_ptr(),
+            &mut pressure as *mut _ as *mut _,
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    } == 0;
+    ok.then_some(pressure)
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn memory_pressure_level() -> Option<u32> {
+    None
+}
+
+pub(crate) fn process_snapshot() -> Result<HashMap<u32, Process>, String> { // Fork: crate-visible
     let output = Command::new("/bin/ps")
         .env("LC_ALL", "C")
         .args(["-axww", "-o", "pid=,ppid=,%cpu=,rss=,command="])
@@ -143,7 +156,7 @@ fn process_snapshot() -> Result<HashMap<u32, Process>, String> {
         .collect())
 }
 
-fn parse_process(line: &str) -> Option<Process> {
+pub(crate) fn parse_process(line: &str) -> Option<Process> { // Fork: crate-visible
     let mut fields = line.split_whitespace();
     Some(Process {
         pid: fields.next()?.parse().ok()?,
@@ -154,7 +167,7 @@ fn parse_process(line: &str) -> Option<Process> {
     })
 }
 
-fn owner<'a>(
+pub(crate) fn owner<'a>( // Fork: crate-visible
     pid: u32,
     processes: &HashMap<u32, Process>,
     roots: &'a [ProcessRoot],

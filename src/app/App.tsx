@@ -106,6 +106,7 @@ import { useDragResize } from "../shared/hooks/useDragResize";
 import { beginLayoutTransition } from "../shared/lib/layoutTransition";
 import { noteProjectStep, Sidebar } from "./shell/Sidebar";
 import { ResourcePressureNotice } from "../features/notifications/ui/ResourcePressureNotice";
+import { MemoryWatcher } from "../fork/memory/MemoryWatcher"; // Fork
 import { HarnessUpdateNotice } from "../features/providers/ui/HarnessUpdateNotice";
 import { NewLayoutNotice } from "./shell/NewLayoutNotice";
 import { WhatsNewDialog } from "./shell/WhatsNewDialog";
@@ -15059,6 +15060,13 @@ function Workspace({
             onStopAgent={(id) => onStop(id, true)}
             onStopSession={onStop}
             onPressureChange={transcriptPool.setResourcePressure}
+            chipHost={pressureChipHost}
+            insetChip={insetLayout}
+          />
+          {/* Fork: Memory chip; parks idle sessions to free RAM. */}
+          <MemoryWatcher
+            sessions={sessionsRef}
+            isForeground={harnessEvents.isForeground}
             chipHost={pressureChipHost}
             insetChip={insetLayout}
           />
