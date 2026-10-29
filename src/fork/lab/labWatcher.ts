@@ -14,13 +14,15 @@ import {
   parseLocalRemoteControl,
   type LocalRemoteControl,
 } from "./labModel";
-import type { LabParams, LabStatus, RemoteControlChoice } from "./labProtocol";
+import { LAB_TZ_CAPABILITY, type LabParams, type LabStatus, type RemoteControlChoice } from "./labProtocol";
+import { hostZoneToSend, parseAgentTimeZone, type AgentTimeZone } from "./agentTimeZone";
 
 /**
  * Fork: Home lab, the watcher. Mounted once in App. Every minute, and when
  * Home lab settings or the machine list change, it settles the Remote Control
  * scope between this Mac and each lab host (newest choice wins), then tells
- * each host what this Mac now has. Quiet on errors: each kind is logged once.
+ * each host what this Mac now has, and the time zone its agents should start
+ * in. Quiet on errors: each kind is logged once.
  * Runs in the main window only, and not under the test runner.
  */
 export const FORK_LAB_WATCHER = import.meta.env.MODE !== "test";
@@ -92,6 +94,9 @@ export type LabDeps = {
   readLocal: () => Promise<LocalRemoteControl>;
   applyLocal: (choice: RemoteControlChoice, over?: ReadChoice) => Promise<LocalRemoteControl>;
   platform: LabPlatform;
+  /** The agents' time zone as this Mac keeps it; without it, or when it
+   * fails, hosts get the webview's own zone. */
+  agentZone?: () => Promise<AgentTimeZone | null>;
   /** Called on each failure; the default logs each kind once. */
   fail: (step: string, reason: unknown) => void;
 };
@@ -102,13 +107,61 @@ export type PassResult = {
   pushed: string[];
   pulled: string[];
   reported: string[];
+  /** Machine ids told a new agent time zone. */
+  zoned: string[];
   local?: LocalRemoteControl;
 };
+
+function hasCapability(describe: unknown, capability: string): boolean {
+  if (!describe || typeof describe !== "object") {
+    return false;
+  }
+  const capabilities = (describe as Record<string, unknown>).capabilities;
+  return Array.isArray(capabilities) && capabilities.includes(capability);
+}
+
+/** Settles the scope with one host, then reports what this Mac has. */
+async function settleRemoteControl(
+  deps: LabDeps,
+  machineId: string,
+  status: LabStatus,
+  local: LocalRemoteControl,
+  result: PassResult,
+): Promise<LocalRemoteControl> {
+  const decision = decideSync(local, status.remoteControl.desired);
+  try {
+    if (decision.kind === "push") {
+      const answer = await deps.request(machineId, "lab.remoteControl.set", decision.params);
+      const kept = answer?.remoteControl?.desired;
+      if (kept && isScope(kept.scope) && typeof kept.updatedAt === "number" && kept.scope !== decision.params.scope) {
+        // The host kept a choice its clock calls later. Take it here, with
+        // the host's own stamp, or the same push is refused again every pass.
+        local = await deps.applyLocal({ scope: kept.scope, updatedAt: kept.updatedAt, by: kept.by }, local);
+        result.pulled.push(machineId);
+      } else {
+        result.pushed.push(machineId);
+      }
+    } else if (decision.kind === "pull") {
+      // Mirror the host's stamp, even when this Mac's own ran ahead of it.
+      local = await deps.applyLocal(decision.choice, local);
+      result.pulled.push(machineId);
+    }
+  } catch (reason) {
+    deps.fail(decision.kind, reason);
+  }
+  try {
+    await deps.request(machineId, "lab.report", buildReport(localMachineName(local), deps.platform, local));
+    result.reported.push(machineId);
+  } catch (reason) {
+    deps.fail("report", reason);
+  }
+  return local;
+}
 
 /** Settles the scope with every lab host, one after another, so a choice
  * pulled from one host is pushed to the next in the same pass. */
 export async function runLabPass(deps: LabDeps): Promise<PassResult> {
-  const result: PassResult = { hosts: [], pushed: [], pulled: [], reported: [] };
+  const result: PassResult = { hosts: [], pushed: [], pulled: [], reported: [], zoned: [] };
   let machines: RemoteMachine[];
   try {
     machines = await deps.machines();
@@ -117,23 +170,46 @@ export async function runLabPass(deps: LabDeps): Promise<PassResult> {
     return result;
   }
   let local: LocalRemoteControl | undefined;
+  let localFailed = false;
+  // Read once, on the first host that takes a zone.
+  let zone: string | undefined;
+  const zoneToSend = async (): Promise<string> => {
+    if (zone === undefined) {
+      let value: AgentTimeZone | null = null;
+      try {
+        value = deps.agentZone ? await deps.agentZone() : null;
+      } catch (reason) {
+        deps.fail("zone", reason);
+      }
+      zone = hostZoneToSend(value);
+    }
+    return zone;
+  };
   for (const machine of machines) {
     let lab = false;
+    let tz = false;
     try {
-      lab = hasLabCapability(await deps.describe(machine.id));
+      const describe = await deps.describe(machine.id);
+      lab = hasLabCapability(describe);
+      tz = hasCapability(describe, LAB_TZ_CAPABILITY);
     } catch (reason) {
       deps.fail("describe", reason);
     }
     if (!lab) {
       continue;
     }
-    if (!local) {
+    if (!local && !localFailed) {
       try {
         local = await deps.readLocal();
       } catch (reason) {
         deps.fail("local", reason);
-        return result;
+        localFailed = true;
       }
+    }
+    // Without this Mac's Remote Control there is nothing to settle; a host
+    // that takes a zone is still told it.
+    if (!local && !tz) {
+      continue;
     }
     let status: LabStatus;
     try {
@@ -143,36 +219,19 @@ export async function runLabPass(deps: LabDeps): Promise<PassResult> {
       continue;
     }
     result.hosts.push(machine.id);
-    const decision = decideSync(local, status.remoteControl.desired);
-    try {
-      if (decision.kind === "push") {
-        const answer = await deps.request(machine.id, "lab.remoteControl.set", decision.params);
-        const kept = answer?.remoteControl?.desired;
-        if (kept && isScope(kept.scope) && typeof kept.updatedAt === "number" && kept.scope !== decision.params.scope) {
-          // The host kept a choice its clock calls later. Take it here, with
-          // the host's own stamp, or the same push is refused again every pass.
-          local = await deps.applyLocal({ scope: kept.scope, updatedAt: kept.updatedAt, by: kept.by }, local);
-          result.pulled.push(machine.id);
-        } else {
-          result.pushed.push(machine.id);
-        }
-      } else if (decision.kind === "pull") {
-        // Mirror the host's stamp, even when this Mac's own ran ahead of it.
-        local = await deps.applyLocal(decision.choice, local);
-        result.pulled.push(machine.id);
-      }
-    } catch (reason) {
-      deps.fail(decision.kind, reason);
+    if (local) {
+      local = await settleRemoteControl(deps, machine.id, status, local, result);
     }
-    try {
-      await deps.request(
-        machine.id,
-        "lab.report",
-        buildReport(localMachineName(local), deps.platform, local),
-      );
-      result.reported.push(machine.id);
-    } catch (reason) {
-      deps.fail("report", reason);
+    if (tz) {
+      try {
+        const wanted = await zoneToSend();
+        if (status.timeZone?.zone !== wanted) {
+          await deps.request(machine.id, "lab.timeZone.set", { zone: wanted });
+          result.zoned.push(machine.id);
+        }
+      } catch (reason) {
+        deps.fail("timeZone", reason);
+      }
     }
   }
   result.local = local;
@@ -200,6 +259,7 @@ export const liveDeps: LabDeps = {
   readLocal: readLocalRemoteControl,
   applyLocal: applyLocalRemoteControl,
   platform: localPlatform(),
+  agentZone: async () => parseAgentTimeZone(await invoke<unknown>("fork_agent_tz_get")) ?? null,
   fail: failOnce,
 };
 

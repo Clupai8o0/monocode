@@ -2,12 +2,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import type { LocalRemoteControl } from "./labModel";
-import type { LabParams, LabStatus, RemoteControlChoice } from "./labProtocol";
+import type { AgentTimeZoneStatus, LabParams, LabStatus, RemoteControlChoice } from "./labProtocol";
 import { LAB_CHANGED, runLabPass, startLabWatcher, type LabDeps } from "./labWatcher";
 
 const machine = (id: string): RemoteMachine => ({ id, name: id, endpoint: "http://x", environmentId: `env-${id}` });
 
-function hostStatus(desired: RemoteControlChoice): LabStatus {
+function hostStatus(desired: RemoteControlChoice, timeZone?: AgentTimeZoneStatus): LabStatus {
   return {
     version: 1,
     machine: "vivobook",
@@ -16,6 +16,7 @@ function hostStatus(desired: RemoteControlChoice): LabStatus {
     relay: { enabled: false, updatedAt: 0, peers: [], sessions: 0 },
     uresourced: null,
     remoteDesktop: null,
+    ...(timeZone ? { timeZone } : {}),
   };
 }
 
@@ -25,6 +26,9 @@ function fakes(options: {
   local: LocalRemoteControl;
   hosts: Record<string, RemoteControlChoice>;
   failStatus?: string[];
+  /** Hosts that take lab.timeZone.set, with the zone each has now. */
+  tz?: Record<string, string | null>;
+  failZone?: string[];
 }) {
   const calls: { machineId: string; method: string; params: unknown }[] = [];
   const applied: RemoteControlChoice[] = [];
@@ -32,11 +36,22 @@ function fakes(options: {
   const failures: string[] = [];
   const deps: LabDeps = {
     machines: async () => options.machines ?? [machine("m1")],
-    describe: async (id) => ({ capabilities: (options.lab ?? ["m1"]).includes(id) ? ["lab.v1"] : [] }),
+    describe: async (id) => ({
+      capabilities: [
+        ...((options.lab ?? ["m1"]).includes(id) ? ["lab.v1"] : []),
+        ...(options.tz && id in options.tz ? ["lab.tz.v1"] : []),
+      ],
+    }),
     request: async <M extends keyof LabParams>(machineId: string, method: M, params: LabParams[M]) => {
       calls.push({ machineId, method, params });
       if (method === "lab.status" && options.failStatus?.includes(machineId)) {
         throw new Error("offline");
+      }
+      if (method === "lab.timeZone.set") {
+        if (options.failZone?.includes(machineId)) {
+          throw new Error("zone not installed");
+        }
+        options.tz![machineId] = (params as LabParams["lab.timeZone.set"]).zone;
       }
       if (method === "lab.remoteControl.set") {
         const set = params as LabParams["lab.remoteControl.set"];
@@ -44,7 +59,11 @@ function fakes(options: {
           options.hosts[machineId] = { scope: set.scope, updatedAt: set.updatedAt ?? 0, by: "Mac" };
         }
       }
-      return hostStatus(options.hosts[machineId]);
+      const zone = options.tz && machineId in options.tz ? options.tz[machineId] : undefined;
+      return hostStatus(
+        options.hosts[machineId],
+        zone === undefined ? undefined : { zone, updatedAt: 1, hostZone: "Australia/Sydney" },
+      );
     },
     readLocal: async () => local,
     applyLocal: async (choice) => {
@@ -53,6 +72,7 @@ function fakes(options: {
       return local;
     },
     platform: "darwin",
+    agentZone: async () => ({ zone: null, systemZone: "Asia/Kolkata", effectiveZone: "Asia/Kolkata" }),
     fail: (step) => failures.push(step),
   };
   return { deps, calls, applied, failures };
@@ -225,5 +245,94 @@ describe("startLabWatcher", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("runLabPass, agent time zone", () => {
+  const rc = { scope: "all" as const, updatedAt: 100, by: "Mac" };
+  const zoneCalls = (calls: { machineId: string; method: string; params: unknown }[]) =>
+    calls.filter((call) => call.method === "lab.timeZone.set");
+
+  it("tells a host the zone when it differs", async () => {
+    const tz: Record<string, string | null> = { m1: null };
+    const { deps, calls } = fakes({ local, hosts: { m1: rc }, tz });
+    const result = await runLabPass(deps);
+    expect(zoneCalls(calls)).toEqual([{ machineId: "m1", method: "lab.timeZone.set", params: { zone: "Asia/Kolkata" } }]);
+    expect(result.zoned).toEqual(["m1"]);
+    expect(tz.m1).toBe("Asia/Kolkata");
+  });
+
+  it("leaves a host alone when it already has the zone", async () => {
+    const { deps, calls } = fakes({ local, hosts: { m1: rc }, tz: { m1: "Asia/Kolkata" } });
+    const result = await runLabPass(deps);
+    expect(zoneCalls(calls)).toEqual([]);
+    expect(result.zoned).toEqual([]);
+  });
+
+  it("sends a picked zone", async () => {
+    const { deps, calls } = fakes({ local, hosts: { m1: rc }, tz: { m1: "Asia/Kolkata" } });
+    await runLabPass({
+      ...deps,
+      agentZone: async () => ({ zone: "Asia/Tokyo", systemZone: "Asia/Kolkata", effectiveZone: "Asia/Tokyo" }),
+    });
+    expect(zoneCalls(calls).map((call) => call.params)).toEqual([{ zone: "Asia/Tokyo" }]);
+  });
+
+  it("skips hosts without the time zone capability", async () => {
+    const { deps, calls } = fakes({ local, hosts: { m1: rc } });
+    await runLabPass(deps);
+    expect(zoneCalls(calls)).toEqual([]);
+  });
+
+  it("uses this webview's zone when this Mac's zone is unknown, never null", async () => {
+    const intl = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const { deps, calls } = fakes({ local, hosts: { m1: rc }, tz: { m1: null } });
+    await runLabPass({ ...deps, agentZone: async () => ({ zone: null, systemZone: null, effectiveZone: null }) });
+    const sent = zoneCalls(calls).map((call) => (call.params as { zone: string | null }).zone);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toBeTruthy();
+    expect(sent[0]).toBe(intl === "Asia/Calcutta" ? "Asia/Kolkata" : intl);
+  });
+
+  it("still sends a zone when reading it fails", async () => {
+    const { deps, calls, failures } = fakes({ local, hosts: { m1: rc }, tz: { m1: null } });
+    await runLabPass({
+      ...deps,
+      agentZone: async () => {
+        throw new Error("Command fork_agent_tz_get not found");
+      },
+    });
+    expect(failures).toEqual(["zone"]);
+    expect(zoneCalls(calls)).toHaveLength(1);
+  });
+
+  it("keeps going past a host that refuses the zone", async () => {
+    const hosts = { m1: rc, m2: rc };
+    const tz: Record<string, string | null> = { m1: null, m2: null };
+    const { deps, calls, failures } = fakes({
+      local,
+      hosts,
+      machines: [machine("m1"), machine("m2")],
+      lab: ["m1", "m2"],
+      tz,
+      failZone: ["m1"],
+    });
+    const result = await runLabPass(deps);
+    expect(failures).toEqual(["timeZone"]);
+    expect(result.zoned).toEqual(["m2"]);
+    expect(result.reported).toEqual(["m1", "m2"]);
+    expect(zoneCalls(calls).map((call) => call.machineId)).toEqual(["m1", "m2"]);
+  });
+
+  it("tells a host the zone even when this Mac's Remote Control can't be read", async () => {
+    const { deps, calls, failures } = fakes({ local, hosts: { m1: rc }, tz: { m1: null } });
+    await runLabPass({
+      ...deps,
+      readLocal: async () => {
+        throw new Error("Command fork_lab_rc_status not found");
+      },
+    });
+    expect(failures).toEqual(["local"]);
+    expect(calls.map((call) => call.method)).toEqual(["lab.status", "lab.timeZone.set"]);
   });
 });
