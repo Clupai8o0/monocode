@@ -238,8 +238,12 @@ export function rewriteLine(line: string, fromSocket: string): string | null {
  * something is past the cursor, else waits for a push, a wake or `waitMs`;
  * one answer carries about 8 MiB, the rest come on the next poll.
  */
+/** Why a queued line left without being handed on. */
+export type QueueDrop = "expired" | "full" | "cleared";
+
 export class DeliveryQueue {
-  private items: Array<{ seq: number; at: number; bytes: number; delivery: RelayDelivery }> = [];
+  private items: Array<{ seq: number; at: number; bytes: number; delivery: RelayDelivery; handed?: boolean }> =
+    [];
   private readonly waiters = new Set<() => void>();
   /** The newest poll; an older one still waiting answers empty, so two
    *  overlapping polls never both hand out the same line. */
@@ -249,17 +253,32 @@ export class DeliveryQueue {
     private readonly now: () => number,
     /** The relay-wide sequence: `next()` takes one, `current()` reads it. */
     private readonly seq: { next(): number; current(): number },
+    /** Told once per line: when it is first handed on, or when it goes
+     *  without having been. */
+    private readonly settle?: (delivery: RelayDelivery, drop?: QueueDrop) => void,
   ) {}
+
+  private expire(keep: (item: { seq: number; at: number }) => boolean): void {
+    const oldest = this.now() - QUEUE_TTL_MS;
+    this.items = this.items.filter((item) => {
+      if (item.at >= oldest && keep(item)) return true;
+      if (!item.handed) this.settle?.(item.delivery, item.at < oldest ? "expired" : "cleared");
+      return false;
+    });
+  }
 
   /** Queues a delivery; false, queueing nothing, when too much is waiting. */
   push(delivery: RelayDelivery): boolean {
     const bytes = Buffer.byteLength(JSON.stringify(delivery), "utf8");
-    const oldest = this.now() - QUEUE_TTL_MS;
-    this.items = this.items.filter((item) => item.at >= oldest);
+    this.expire(() => true);
     const waiting = this.items.reduce((total, item) => total + item.bytes, 0);
     if (waiting + bytes > QUEUE_BYTES_MAX) return false;
     this.items.push({ seq: this.seq.next(), at: this.now(), bytes, delivery });
-    if (this.items.length > QUEUE_MAX) this.items.splice(0, this.items.length - QUEUE_MAX);
+    if (this.items.length > QUEUE_MAX) {
+      for (const item of this.items.splice(0, this.items.length - QUEUE_MAX)) {
+        if (!item.handed) this.settle?.(item.delivery, "full");
+      }
+    }
     this.wake();
     return true;
   }
@@ -270,6 +289,7 @@ export class DeliveryQueue {
   }
 
   clear(): void {
+    for (const item of this.items) if (!item.handed) this.settle?.(item.delivery, "cleared");
     this.items = [];
   }
 
@@ -283,8 +303,7 @@ export class DeliveryQueue {
     const current = this.seq.current();
     // A cursor from before a restart is ahead of this run's sequence.
     const after = cursor > current ? 0 : cursor;
-    const oldest = this.now() - QUEUE_TTL_MS;
-    this.items = this.items.filter((item) => item.seq > after && item.at >= oldest);
+    this.expire((item) => item.seq > after);
     let bytes = 0;
     let count = 0;
     while (count < this.items.length) {
@@ -294,6 +313,11 @@ export class DeliveryQueue {
       count++;
     }
     const included = this.items.slice(0, count);
+    for (const item of included) {
+      if (item.handed) continue;
+      item.handed = true;
+      this.settle?.(item.delivery);
+    }
     return {
       cursor: count < this.items.length ? included[count - 1].seq : current,
       deliveries: included.map((item) => item.delivery),
