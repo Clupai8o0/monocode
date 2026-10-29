@@ -1,0 +1,14 @@
+{
+  "pid": 200,
+  "sessionId": "22222222-2222-4222-8222-222222222222",
+  "cwd": "/p/beta",
+  "startedAt": 1793260000000,
+  "procStart": "Thu Oct 29 08:00:00 2026",
+  "version": "2.1.0",
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "messagingSocketPath": "/tmp/cc-socks/200.sock",
+  "name": "beta-2",
+  "status": "busy",
+  "updatedAt": 1793260900000
+}

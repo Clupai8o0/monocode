@@ -1,0 +1,983 @@
+{
+  "about": "Run the steps in order against one reader, on a copy of home/ (copying gives fresh mtimes). Liveness: every registry entry that is not a relay copy is live. Compare whole answers except epoch: optional fields left out, events sorted by (at, id).",
+  "machine": "test-mac",
+  "forbidden": [
+    "cc-socks",
+    "uds:/",
+    "SECRET",
+    "1000000900"
+  ],
+  "sessions": [
+    {
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "account": "main",
+      "name": "alpha-1",
+      "cwd": "/p/alpha",
+      "project": "alpha",
+      "status": "idle",
+      "updatedAt": 1793260800000
+    },
+    {
+      "sessionId": "22222222-2222-4222-8222-222222222222",
+      "account": "cx",
+      "name": "beta-2",
+      "cwd": "/p/beta",
+      "project": "beta",
+      "status": "busy",
+      "updatedAt": 1793260900000
+    }
+  ],
+  "proxies": [
+    {
+      "name": "worker",
+      "machine": "vivobook",
+      "sessionId": "v-session-0001",
+      "account": "main"
+    },
+    {
+      "name": "clupai-32",
+      "machine": "vivobook",
+      "sessionId": "v-session-0002",
+      "account": "cx"
+    }
+  ],
+  "steps": [
+    {
+      "name": "first scan",
+      "now": "2026-10-29T09:00:00.000Z",
+      "params": {},
+      "expect": {
+        "full": true,
+        "cursor": 1,
+        "windowHours": 24,
+        "events": [
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A1",
+            "rev": 1,
+            "at": 1793260860000,
+            "updatedAt": 1793260861000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Ask beta to review",
+            "preview": "Please review   the\nlab diff when you can.",
+            "key": "Please review the lab diff when you can.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000001",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-1",
+            "rev": 1,
+            "at": 1793260865000,
+            "updatedAt": 1793260865000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "alpha-1",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "11111111-1111-4111-8111-111111111111",
+              "account": "main",
+              "name": "alpha-1",
+              "route": "local"
+            },
+            "preview": "Please review   the\nlab diff when you can.",
+            "key": "Please review the lab diff when you can.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A2",
+            "rev": 1,
+            "at": 1793260920000,
+            "updatedAt": 1793260921000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "target": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0001",
+              "account": "main",
+              "name": "worker",
+              "route": "relay"
+            },
+            "summary": "Hand over to the vivobook",
+            "preview": "Handover: branch msg/ui is pushed.",
+            "key": "Handover: branch msg/ui is pushed.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000002",
+            "status": "sent"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A3",
+            "rev": 1,
+            "at": 1793260980000,
+            "updatedAt": 1793260981000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "ghost",
+            "toAddress": "name",
+            "preview": "Are you there?",
+            "key": "Are you there?",
+            "status": "failed",
+            "error": "No agent named 'ghost' is reachable.\nUse ListAgents to see everyone you can message."
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A5",
+            "rev": 1,
+            "at": 1793261100000,
+            "updatedAt": 1793261101000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "summary": "Ping old session",
+            "preview": "Ping",
+            "key": "Ping",
+            "status": "failed",
+            "error": "Failed to send to uds:…: ENOENT: no such file or directory, lstat '…' — the peer process may have restarted, so this socket path is stale. Call ListAgents to get the current address."
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A6",
+            "rev": 1,
+            "at": 1793261160000,
+            "updatedAt": 1793261340000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "gamma",
+            "toAddress": "name",
+            "summary": "Ask gamma",
+            "preview": "Can you take the host deploy?",
+            "key": "Can you take the host deploy?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000004",
+            "status": "released"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A7",
+            "rev": 1,
+            "at": 1793261400000,
+            "updatedAt": 1793261400000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Follow-up",
+            "preview": "One more thing",
+            "key": "One more thing",
+            "status": "pending"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A9",
+            "rev": 1,
+            "at": 1793261640000,
+            "updatedAt": 1793261641000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "toName": "beta-2",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Check in",
+            "preview": "Status?",
+            "key": "Status?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000009",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-5",
+            "rev": 1,
+            "at": 1793261645000,
+            "updatedAt": 1793261645000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "alpha-1",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "11111111-1111-4111-8111-111111111111",
+              "account": "main",
+              "name": "alpha-1",
+              "route": "local"
+            },
+            "preview": "Status?",
+            "key": "Status?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000009"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A10",
+            "rev": 1,
+            "at": 1793261700000,
+            "updatedAt": 1793262600000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Late ask",
+            "preview": "Can you also check the APK?",
+            "key": "Can you also check the APK?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000010",
+            "status": "expired"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A11",
+            "rev": 1,
+            "at": 1793261760000,
+            "updatedAt": 1793261765000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "gamma",
+            "toAddress": "name",
+            "preview": "Refuse test",
+            "key": "Refuse test",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000011",
+            "status": "failed",
+            "error": "Refused: that session is not accepting messages from other sessions"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A12",
+            "rev": 1,
+            "at": 1793261820000,
+            "updatedAt": 1793261860000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Denied test",
+            "key": "Denied test",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000012",
+            "status": "failed",
+            "error": "Denied by that session's user"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-18",
+            "rev": 1,
+            "at": 1793262000000,
+            "updatedAt": 1793262000000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "worker",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0001",
+              "account": "main",
+              "name": "worker",
+              "route": "relay"
+            },
+            "preview": "Done: msg/ui is merged.",
+            "key": "Done: msg/ui is merged.",
+            "msgId": "bbbbbbbb-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A14",
+            "rev": 1,
+            "at": 1793262060000,
+            "updatedAt": 1793262060000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Still there?",
+            "key": "Still there?",
+            "status": "pending"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A15",
+            "rev": 1,
+            "at": 1793262120000,
+            "updatedAt": 1793262121000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦",
+            "preview": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "key": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000015",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-3",
+            "rev": 1,
+            "at": 1793262600000,
+            "updatedAt": 1793262600000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "clupai-32",
+            "fromAddress": "bridge",
+            "sender": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0002",
+              "account": "cx",
+              "name": "clupai-32",
+              "route": "bridge"
+            },
+            "preview": "pong from vivobook",
+            "key": "pong from vivobook"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:r2410",
+            "rev": 1,
+            "at": 1793263200000,
+            "updatedAt": 1793263200000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "old-sender",
+            "fromAddress": "socket",
+            "preview": "Legacy hello",
+            "key": "Legacy hello"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a result and a receive appended, then half a line",
+      "now": "2026-10-29T09:00:00.000Z",
+      "append": [
+        {
+          "to": "home/.claude/projects/-p-alpha/11111111-1111-4111-8111-111111111111.jsonl",
+          "from": "append-alpha-1.jsonl"
+        }
+      ],
+      "params": {
+        "since": "previous"
+      },
+      "expect": {
+        "full": false,
+        "cursor": 2,
+        "windowHours": 24,
+        "events": [
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A7",
+            "rev": 2,
+            "at": 1793261400000,
+            "updatedAt": 1793261402000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Follow-up",
+            "preview": "One more thing",
+            "key": "One more thing",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000007",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-50",
+            "rev": 2,
+            "at": 1793263800000,
+            "updatedAt": 1793263800000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "beta-2",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Reviewed: looks good.",
+            "key": "Reviewed: looks good.",
+            "msgId": "cccccccc-0000-4000-8000-000000000001"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the rest of the line",
+      "now": "2026-10-29T09:00:00.000Z",
+      "append": [
+        {
+          "to": "home/.claude/projects/-p-alpha/11111111-1111-4111-8111-111111111111.jsonl",
+          "from": "append-alpha-2.jsonl"
+        }
+      ],
+      "params": {
+        "since": "previous"
+      },
+      "expect": {
+        "full": false,
+        "cursor": 3,
+        "windowHours": 24,
+        "events": [
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-55",
+            "rev": 3,
+            "at": 1793264100000,
+            "updatedAt": 1793264100000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "phone-1",
+            "fromAddress": "bridge",
+            "preview": "From the phone",
+            "key": "From the phone"
+          }
+        ]
+      }
+    },
+    {
+      "name": "nothing new",
+      "now": "2026-10-29T09:00:00.000Z",
+      "params": {
+        "since": "previous"
+      },
+      "expect": {
+        "full": false,
+        "cursor": 4,
+        "windowHours": 24,
+        "events": []
+      }
+    },
+    {
+      "name": "another epoch gets everything",
+      "now": "2026-10-29T09:00:00.000Z",
+      "params": {
+        "since": {
+          "epoch": "not-this-one",
+          "cursor": 2
+        }
+      },
+      "expect": {
+        "full": true,
+        "cursor": 5,
+        "windowHours": 24,
+        "events": [
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A1",
+            "rev": 1,
+            "at": 1793260860000,
+            "updatedAt": 1793260861000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Ask beta to review",
+            "preview": "Please review   the\nlab diff when you can.",
+            "key": "Please review the lab diff when you can.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000001",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-1",
+            "rev": 1,
+            "at": 1793260865000,
+            "updatedAt": 1793260865000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "alpha-1",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "11111111-1111-4111-8111-111111111111",
+              "account": "main",
+              "name": "alpha-1",
+              "route": "local"
+            },
+            "preview": "Please review   the\nlab diff when you can.",
+            "key": "Please review the lab diff when you can.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A2",
+            "rev": 1,
+            "at": 1793260920000,
+            "updatedAt": 1793260921000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "target": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0001",
+              "account": "main",
+              "name": "worker",
+              "route": "relay"
+            },
+            "summary": "Hand over to the vivobook",
+            "preview": "Handover: branch msg/ui is pushed.",
+            "key": "Handover: branch msg/ui is pushed.",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000002",
+            "status": "sent"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A3",
+            "rev": 1,
+            "at": 1793260980000,
+            "updatedAt": 1793260981000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "ghost",
+            "toAddress": "name",
+            "preview": "Are you there?",
+            "key": "Are you there?",
+            "status": "failed",
+            "error": "No agent named 'ghost' is reachable.\nUse ListAgents to see everyone you can message."
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A5",
+            "rev": 1,
+            "at": 1793261100000,
+            "updatedAt": 1793261101000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "summary": "Ping old session",
+            "preview": "Ping",
+            "key": "Ping",
+            "status": "failed",
+            "error": "Failed to send to uds:…: ENOENT: no such file or directory, lstat '…' — the peer process may have restarted, so this socket path is stale. Call ListAgents to get the current address."
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A6",
+            "rev": 1,
+            "at": 1793261160000,
+            "updatedAt": 1793261340000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "gamma",
+            "toAddress": "name",
+            "summary": "Ask gamma",
+            "preview": "Can you take the host deploy?",
+            "key": "Can you take the host deploy?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000004",
+            "status": "released"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A7",
+            "rev": 2,
+            "at": 1793261400000,
+            "updatedAt": 1793261402000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Follow-up",
+            "preview": "One more thing",
+            "key": "One more thing",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000007",
+            "status": "sent"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A9",
+            "rev": 1,
+            "at": 1793261640000,
+            "updatedAt": 1793261641000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "",
+            "toAddress": "socket",
+            "toName": "beta-2",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Check in",
+            "preview": "Status?",
+            "key": "Status?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000009",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-5",
+            "rev": 1,
+            "at": 1793261645000,
+            "updatedAt": 1793261645000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "alpha-1",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "11111111-1111-4111-8111-111111111111",
+              "account": "main",
+              "name": "alpha-1",
+              "route": "local"
+            },
+            "preview": "Status?",
+            "key": "Status?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000009"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A10",
+            "rev": 1,
+            "at": 1793261700000,
+            "updatedAt": 1793262600000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "Late ask",
+            "preview": "Can you also check the APK?",
+            "key": "Can you also check the APK?",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000010",
+            "status": "expired"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A11",
+            "rev": 1,
+            "at": 1793261760000,
+            "updatedAt": 1793261765000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "gamma",
+            "toAddress": "name",
+            "preview": "Refuse test",
+            "key": "Refuse test",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000011",
+            "status": "failed",
+            "error": "Refused: that session is not accepting messages from other sessions"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A12",
+            "rev": 1,
+            "at": 1793261820000,
+            "updatedAt": 1793261860000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Denied test",
+            "key": "Denied test",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000012",
+            "status": "failed",
+            "error": "Denied by that session's user"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-18",
+            "rev": 1,
+            "at": 1793262000000,
+            "updatedAt": 1793262000000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "worker",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0001",
+              "account": "main",
+              "name": "worker",
+              "route": "relay"
+            },
+            "preview": "Done: msg/ui is merged.",
+            "key": "Done: msg/ui is merged.",
+            "msgId": "bbbbbbbb-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A14",
+            "rev": 1,
+            "at": 1793262060000,
+            "updatedAt": 1793262060000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Still there?",
+            "key": "Still there?",
+            "status": "pending"
+          },
+          {
+            "kind": "send",
+            "id": "11111111-1111-4111-8111-111111111111:toolu_A15",
+            "rev": 1,
+            "at": 1793262120000,
+            "updatedAt": 1793262121000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "to": "beta-2",
+            "toAddress": "name",
+            "target": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "summary": "📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦",
+            "preview": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "key": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "msgId": "aaaaaaaa-0000-4000-8000-000000000015",
+            "status": "sent"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-3",
+            "rev": 1,
+            "at": 1793262600000,
+            "updatedAt": 1793262600000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "clupai-32",
+            "fromAddress": "bridge",
+            "sender": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0002",
+              "account": "cx",
+              "name": "clupai-32",
+              "route": "bridge"
+            },
+            "preview": "pong from vivobook",
+            "key": "pong from vivobook"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:r2410",
+            "rev": 1,
+            "at": 1793263200000,
+            "updatedAt": 1793263200000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "old-sender",
+            "fromAddress": "socket",
+            "preview": "Legacy hello",
+            "key": "Legacy hello"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-50",
+            "rev": 2,
+            "at": 1793263800000,
+            "updatedAt": 1793263800000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "beta-2",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Reviewed: looks good.",
+            "key": "Reviewed: looks good.",
+            "msgId": "cccccccc-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-55",
+            "rev": 3,
+            "at": 1793264100000,
+            "updatedAt": 1793264100000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "phone-1",
+            "fromAddress": "bridge",
+            "preview": "From the phone",
+            "key": "From the phone"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a one hour window",
+      "now": "2026-10-29T09:30:00.000Z",
+      "params": {
+        "windowHours": 1
+      },
+      "expect": {
+        "full": true,
+        "cursor": 6,
+        "windowHours": 1,
+        "events": [
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:u-b-3",
+            "rev": 1,
+            "at": 1793262600000,
+            "updatedAt": 1793262600000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "clupai-32",
+            "fromAddress": "bridge",
+            "sender": {
+              "machine": "vivobook",
+              "sessionId": "v-session-0002",
+              "account": "cx",
+              "name": "clupai-32",
+              "route": "bridge"
+            },
+            "preview": "pong from vivobook",
+            "key": "pong from vivobook"
+          },
+          {
+            "kind": "receive",
+            "id": "22222222-2222-4222-8222-222222222222:r2410",
+            "rev": 1,
+            "at": 1793263200000,
+            "updatedAt": 1793263200000,
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "account": "cx",
+            "fromName": "old-sender",
+            "fromAddress": "socket",
+            "preview": "Legacy hello",
+            "key": "Legacy hello"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-50",
+            "rev": 2,
+            "at": 1793263800000,
+            "updatedAt": 1793263800000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "beta-2",
+            "fromAddress": "socket",
+            "sender": {
+              "machine": "test-mac",
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "account": "cx",
+              "name": "beta-2",
+              "route": "local"
+            },
+            "preview": "Reviewed: looks good.",
+            "key": "Reviewed: looks good.",
+            "msgId": "cccccccc-0000-4000-8000-000000000001"
+          },
+          {
+            "kind": "receive",
+            "id": "11111111-1111-4111-8111-111111111111:u-a-55",
+            "rev": 3,
+            "at": 1793264100000,
+            "updatedAt": 1793264100000,
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "account": "main",
+            "fromName": "phone-1",
+            "fromAddress": "bridge",
+            "preview": "From the phone",
+            "key": "From the phone"
+          }
+        ]
+      }
+    }
+  ]
+}

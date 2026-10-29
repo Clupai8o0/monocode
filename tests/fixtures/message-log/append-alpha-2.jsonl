@@ -1,0 +1,1 @@
+gin":{"kind":"peer","from":"bridge:session_unknown0002","name":"phone-1","fromMode":"bypass","body":"From the phone"},"promptSource":"peer","message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"bridge:session_unknown0002\" from-name=\"phone-1\" from-mode=\"bypass\">\nFrom the phone\n</cross-session-message>"}}
