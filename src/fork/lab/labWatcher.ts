@@ -30,6 +30,8 @@ export const FORK_LAB_WATCHER = import.meta.env.MODE !== "test";
 const PASS_MS = 60_000;
 /** Fired by the Home lab settings after a change, so the watcher syncs now. */
 export const LAB_CHANGED = "monocode:fork-lab-changed";
+/** Fired after a pass changed a host or this Mac, so the lab store reads them again. */
+export const LAB_SYNCED = "monocode:fork-lab-synced";
 const MACHINES_CHANGED = "monocode:remote-machines";
 
 export function notifyLabChanged(): void {
@@ -280,7 +282,10 @@ export function startLabWatcher(deps: LabDeps = liveDeps, everyMs = PASS_MS): ()
     try {
       do {
         again = false;
-        await runLabPass(deps);
+        const result = await runLabPass(deps);
+        if (result.pushed.length || result.pulled.length || result.zoned.length) {
+          window.dispatchEvent(new Event(LAB_SYNCED));
+        }
       } while (again && !stopped);
     } finally {
       running = false;

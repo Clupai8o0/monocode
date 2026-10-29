@@ -1,6 +1,8 @@
 import { useRef, useState, type ReactNode } from "react";
 import { HomeLab, LoaderCircle } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
+import { useZonePickerOpen } from "./agentTimeZone";
+import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import { labChip, remoteDesktopView, uresourcedView, type LabChip } from "./labModel";
 import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
 import {
@@ -44,6 +46,8 @@ function Lab() {
   const state = useLab();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
+  // Escape in the zone search closes the search, not the popover.
+  const pickerOpen = useZonePickerOpen();
   if (!state.hosts.length) {
     return null;
   }
@@ -82,6 +86,7 @@ function Lab() {
           width={332}
           ignore="[data-fork-lab]"
           autoFocus
+          dismissOnEscape={!pickerOpen}
           aria-label="Home lab"
           onDismiss={(reason) => {
             setOpen(false);
@@ -153,11 +158,11 @@ export function LabPanel({ state, onSettings }: { state: LabState; onSettings?: 
         {scopeError ? <ErrorLine text={scopeError} /> : null}
       </Row>
 
+      <AgentTimeZoneSection compact hosts={zoneHosts(state.hosts)} />
+
       {state.hosts.map((host) => (
         <HostGroup key={host.machine.id} host={host} state={state} heading={several} now={now} />
       ))}
-
-      {/* Fork: agent time zone section */}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import { Loader } from "../../shared/ui/icons";
+import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import {
   SCOPES,
   choiceLine,
@@ -58,12 +59,23 @@ function hostBusyWord(state: LabState, machineId: string): string | undefined {
 export function LabSettings()
 {
   const state = useLab();
-  const { hosts, machinesLoaded, discovering, machineCount } = state;
   const now = useNow();
   useEffect(() => {
     void refreshLab();
   }, []);
 
+  // The agents' zone counts on this Mac too, so it shows without a lab host.
+  return (
+    <div className="flex flex-col gap-12">
+      <AgentTimeZoneSection hosts={zoneHosts(state.hosts)} />
+      <LabHosts state={state} now={now} />
+    </div>
+  );
+}
+
+function LabHosts({ state, now }: { state: LabState; now: number })
+{
+  const { hosts, machinesLoaded, discovering, machineCount } = state;
   if (!machinesLoaded || (discovering && machineCount > 0)) {
     return (
       <p className={`${quiet} flex items-center gap-2`}>

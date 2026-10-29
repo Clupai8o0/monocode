@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Clock, Search } from "../../shared/ui/icons";
+import { Search } from "../../shared/ui/icons";
 import {
   agentZone,
   cityLabel,
@@ -14,9 +14,11 @@ import {
   useAgentTimeZone,
   zoneEntries,
   zoneLabel,
+  zoneNames,
   type ZoneEntry,
 } from "./agentTimeZone";
 import type { AgentTimeZoneStatus } from "./labProtocol";
+import type { LabHost } from "./labStore";
 import { notifyLabChanged } from "./labWatcher";
 
 /**
@@ -58,6 +60,24 @@ function useMinute(): Date
   return now;
 }
 
+/** The lab hosts as the section lists them; a host still loading waits. */
+export function zoneHosts(hosts: LabHost[]): AgentTimeZoneHost[] {
+  return hosts
+    .filter((host) => host.status || host.offline)
+    .map((host) => ({
+      name: host.machine.name,
+      online: !host.offline,
+      tzCapable: host.timeZone,
+      timeZone: host.status?.timeZone,
+    }));
+}
+
+/** "IST", or "GMT+5:30" where the zone has no short name. */
+function shortZone(zone: string, now: Date): string {
+  const { abbr, offset } = zoneNames(zone, now);
+  return abbr ?? offset;
+}
+
 export function hostLine(host: AgentTimeZoneHost, target: string): string {
   if (!host.online) {
     return `${host.name} offline`;
@@ -79,6 +99,7 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   const [saving, setSaving] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState("");
   const alive = useRef(true);
+  const pickButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -120,24 +141,44 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   };
 
   const busy = saving !== undefined;
+  // Compact matches the popover's other rows and its segmented switch.
   const segment = (on: boolean) =>
-    `inline-flex min-w-0 items-center gap-1.5 rounded-md px-2.5 py-1 font-medium disabled:opacity-40 ${
-      on ? "bg-selection text-content" : "text-content/55 hover:bg-selection-hover hover:text-content"
-    }`;
+    compact
+      ? `inline-flex min-w-0 flex-auto items-center justify-center rounded px-1.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          on ? "bg-content/10 font-semibold text-content" : "text-content/60 hover:text-content"
+        }`
+      : `inline-flex min-w-0 items-center gap-1.5 rounded-md px-2.5 py-1 font-medium disabled:opacity-40 ${
+          on ? "bg-selection text-content" : "text-content/55 hover:bg-selection-hover hover:text-content"
+        }`;
 
-  const clock = (
-    <div className={`flex min-w-0 items-baseline gap-2 ${compact ? "text-[12px]" : ""}`}>
-      {compact ? <Clock className="size-3.5 shrink-0 self-center text-content/45" strokeWidth={1.75} aria-hidden /> : null}
-      <span className={compact ? "text-content/50" : "sr-only"}>Agents' time</span>
-      <time
-        dateTime={now.toISOString()}
-        className={`shrink-0 font-semibold tabular-nums text-content ${compact ? "" : "text-[22px] leading-none tracking-tight"}`}
-      >
-        {formatTime(now, zone)}
-      </time>
-      <span className={`min-w-0 truncate ${compact ? "text-content/60" : "text-[13px] text-content/60"}`}>
-        {zoneLabel(zone, now)}
-      </span>
+  const head = compact ? (
+    <>
+      <div className="flex min-h-5 items-center gap-2">
+        <span className="font-medium text-content">Agents' time zone</span>
+        <time
+          dateTime={now.toISOString()}
+          title={zoneLabel(zone, now)}
+          className="ml-auto shrink-0 tabular-nums text-content/55"
+        >
+          {formatTime(now, zone)} {shortZone(zone, now)}
+        </time>
+      </div>
+      <p className="-mt-1 text-[11px] leading-snug text-content/45">
+        The clock new agents see, here and on the lab.
+      </p>
+    </>
+  ) : (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[12px] text-content/50">Agents' time</span>
+      <div className="flex min-w-0 items-baseline gap-2">
+        <time
+          dateTime={now.toISOString()}
+          className="shrink-0 text-[22px] font-semibold leading-none tracking-tight tabular-nums text-content"
+        >
+          {formatTime(now, zone)}
+        </time>
+        <span className="min-w-0 truncate text-[13px] text-content/60">{zoneLabel(zone, now)}</span>
+      </div>
     </div>
   );
 
@@ -145,7 +186,11 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
     <div
       role="group"
       aria-label="Agents' time zone"
-      className={`flex min-w-0 items-center gap-1 ${compact ? "text-[11px]" : "text-[12px]"}`}
+      className={
+        compact
+          ? "flex min-w-0 gap-0.5 rounded-md bg-content/5 p-0.5"
+          : "flex min-w-0 items-center gap-1 text-[12px]"
+      }
     >
       <button
         type="button"
@@ -163,6 +208,7 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
         <span className="truncate">Follow this Mac ({cityLabel(mac)})</span>
       </button>
       <button
+        ref={pickButton}
         type="button"
         aria-pressed={!following}
         aria-expanded={picking}
@@ -181,7 +227,15 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
   return (
     <div
       data-fork-agent-tz=""
-      className={compact ? "flex flex-col gap-2" : "flex flex-col gap-3 rounded-xl bg-content/3 px-4 py-4"}
+      className={compact ? "flex flex-col gap-1.5" : "flex flex-col gap-3 rounded-xl bg-content/3 px-4 py-4"}
+      onKeyDown={(event) => {
+        if (picking && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setPicking(false);
+          pickButton.current?.focus();
+        }
+      }}
     >
       {compact ? null : (
         <div className="flex items-baseline justify-between gap-3">
@@ -191,14 +245,7 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
           </span>
         </div>
       )}
-      {compact ? (
-        clock
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-content/50">Agents' time</span>
-          {clock}
-        </div>
-      )}
+      {head}
       {switcher}
       {picking ? (
         <ZonePicker
@@ -208,7 +255,6 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
           saving={typeof saving === "string" ? saving : null}
           now={now}
           onPick={(next) => void choose(next)}
-          onClose={() => setPicking(false)}
         />
       ) : null}
       {shownError ? (
@@ -217,7 +263,7 @@ export function AgentTimeZoneSection({ compact = false, hosts }: Props)
         </p>
       ) : null}
       {lines.length ? (
-        <ul className={`flex flex-col gap-0.5 ${compact ? "text-[11px] text-content/50" : quiet}`}>
+        <ul className={`flex flex-col gap-0.5 ${compact ? "text-[11px] text-content/45" : quiet}`}>
           {lines.map((line, index) => (
             <li key={`${index}:${line}`}>{line}</li>
           ))}
@@ -237,7 +283,6 @@ function ZonePicker({
   saving,
   now,
   onPick,
-  onClose,
 }: {
   compact: boolean;
   mac: string;
@@ -245,7 +290,6 @@ function ZonePicker({
   saving: string | null;
   now: Date;
   onPick: (zone: string) => void;
-  onClose: () => void;
 })
 {
   const id = useId();
@@ -294,10 +338,6 @@ function ZonePicker({
       if (entry) {
         onPick(entry.zone);
       }
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
     }
   };
 

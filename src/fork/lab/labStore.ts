@@ -14,6 +14,7 @@ import {
 import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
 import {
   LAB_CHANGED,
+  LAB_SYNCED,
   applyLocalRemoteControl,
   labRequest,
   notifyLabChanged,
@@ -420,6 +421,7 @@ export function subscribeLab(listener: () => void): () => void {
       }
     }, LAB_POLL_MS);
     window.addEventListener(LAB_CHANGED, onLabChanged);
+    window.addEventListener(LAB_SYNCED, onLabChanged);
     window.addEventListener(MACHINES_CHANGED, onMachinesChanged);
   }
   return () => {
@@ -428,6 +430,7 @@ export function subscribeLab(listener: () => void): () => void {
       clearInterval(timer);
       timer = null;
       window.removeEventListener(LAB_CHANGED, onLabChanged);
+      window.removeEventListener(LAB_SYNCED, onLabChanged);
       window.removeEventListener(MACHINES_CHANGED, onMachinesChanged);
     }
   };

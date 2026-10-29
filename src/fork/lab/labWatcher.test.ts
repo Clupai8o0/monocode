@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import type { LocalRemoteControl } from "./labModel";
 import type { AgentTimeZoneStatus, LabParams, LabStatus, RemoteControlChoice } from "./labProtocol";
-import { LAB_CHANGED, runLabPass, startLabWatcher, type LabDeps } from "./labWatcher";
+import { LAB_CHANGED, LAB_SYNCED, runLabPass, startLabWatcher, type LabDeps } from "./labWatcher";
 
 const machine = (id: string): RemoteMachine => ({ id, name: id, endpoint: "http://x", environmentId: `env-${id}` });
 
@@ -244,6 +244,24 @@ describe("startLabWatcher", () => {
       expect(machines).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("tells the lab store after a pass that changed a host, and only then", async () => {
+    const synced = vi.fn();
+    window.addEventListener(LAB_SYNCED, synced);
+    try {
+      const tz: Record<string, string | null> = { m1: null };
+      const { deps } = fakes({ local, hosts: { m1: { scope: "all", updatedAt: 100, by: "Mac" } }, tz });
+      const stop = startLabWatcher(deps, 60_000);
+      await vi.waitFor(() => expect(synced).toHaveBeenCalledTimes(1));
+      // The host has the zone now, so the next pass changes nothing.
+      window.dispatchEvent(new Event(LAB_CHANGED));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(synced).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      window.removeEventListener(LAB_SYNCED, synced);
     }
   });
 });
