@@ -20,6 +20,8 @@ import { hostShows, showsListening } from "./shows";
 import { hostLab } from "./lab";
 import { hostRelay } from "./relay";
 import { LAB_CAPABILITY, LAB_TZ_CAPABILITY, RELAY_CAPABILITY } from "../src/fork/lab/labProtocol";
+import { MESSAGES_CAPABILITY, RELAY_TRAFFIC_CAPABILITY } from "../src/fork/messageLog/messageLogProtocol";
+import { listMessages } from "./messages";
 import { hostOsName } from "./os-name";
 import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
@@ -389,6 +391,8 @@ export function createHostServer(
                 LAB_CAPABILITY,
                 LAB_TZ_CAPABILITY,
                 RELAY_CAPABILITY,
+                MESSAGES_CAPABILITY,
+                RELAY_TRAFFIC_CAPABILITY,
               ],
             };
             break;
@@ -755,9 +759,17 @@ export function createHostServer(
               surface: "rpc",
             });
             break;
+          case "messages.list":
+            result = await listMessages(
+              params,
+              engine.store.device(token),
+              hostRelay({ dataDir: dataDirOf(engine.store), store: engine.store }).machineName,
+            );
+            break;
           case "relay.sync":
           case "relay.send":
           case "relay.next":
+          case "relay.traffic":
             result = await hostRelay({
               dataDir: dataDirOf(engine.store),
               store: engine.store,

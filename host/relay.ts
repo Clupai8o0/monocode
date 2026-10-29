@@ -12,17 +12,21 @@ import type {
   RelayStatus,
   RelaySyncResult,
 } from "../src/fork/lab/labProtocol";
+import type { RelayTrafficAnswer } from "../src/fork/messageLog/messageLogProtocol";
 import { sessionLiveness } from "./external-sessions";
+import { RelayTraffic } from "./relay-traffic";
 import {
   cleanMachine,
   cleanSession,
   cleanSockDir,
   DeliveryQueue,
+  type QueueDrop,
   frameSender,
   LINE_MAX,
   NEXT_WAIT_MAX_MS,
   PEER_SESSIONS_MAX,
   PidTable,
+  QUEUE_TTL_MS,
   readFrame,
   rewriteFrame,
   type PeerSession,
@@ -38,7 +42,7 @@ import {
   type LocalSession,
 } from "./relay-registry";
 
-export type RelayMethod = "relay.sync" | "relay.send" | "relay.next";
+export type RelayMethod = "relay.sync" | "relay.send" | "relay.next" | "relay.traffic";
 
 export type HostRelayOptions = {
   dataDir: string;
@@ -130,6 +134,12 @@ export class HostRelay {
   /** Proxy pids by target machine: HOST, or a peer's device id. */
   private readonly pids = new Map<string, PidTable>();
   private readonly proxies = new Map<number, Proxy>();
+  /** What happened to each line carried; peers' names outlive the peers so
+   *  lines dropped as a peer goes still say whose they were. */
+  private readonly traffic: RelayTraffic;
+  private readonly peerNames = new Map<string, { name: string; machine: string }>();
+  /** Why queued lines are being cleared, while they are. */
+  private clearing = "The relay dropped it";
   private chain: Promise<unknown> = Promise.resolve();
   private seqValue: number;
   private readonly seq = {
@@ -144,6 +154,7 @@ export class HostRelay {
     // Starts from the clock, so a desktop's cursor from an earlier run is
     // behind this run's deliveries rather than ahead of them.
     this.seqValue = this.now();
+    this.traffic = new RelayTraffic(this.now);
     this.state = { enabled: false, updatedAt: 0 };
     try {
       const raw = JSON.parse(readFileSync(this.statePath, "utf8"));
@@ -156,6 +167,21 @@ export class HostRelay {
     } catch {
       // Off until someone turns it on.
     }
+  }
+
+  /** This machine's name in relayed entries. */
+  get machineName(): string {
+    return this.machine;
+  }
+
+  /** The hops recorded since `params.since`. */
+  trafficAnswer(params: Record<string, unknown>): RelayTrafficAnswer {
+    const since = params.since as { epoch?: unknown; cursor?: unknown } | undefined;
+    const valid =
+      since && typeof since === "object" && typeof since.epoch === "string" && typeof since.cursor === "number"
+        ? { epoch: since.epoch, cursor: since.cursor }
+        : undefined;
+    return this.traffic.answer(valid ? { since: valid } : {}, this.machine, this.state.enabled);
   }
 
   /** Switched on, and not closed. */
@@ -223,6 +249,8 @@ export class HostRelay {
         return this.send(params, device);
       case "relay.next":
         return this.next(params, device);
+      case "relay.traffic":
+        return this.trafficAnswer(params);
       default:
         throw new Error("Unsupported relay method");
     }
@@ -242,6 +270,7 @@ export class HostRelay {
       if (peer.lastSeen >= oldest) continue;
       this.peers.delete(peer.id);
       this.pids.delete(peer.id);
+      this.clearing = `${peer.name} stopped answering`;
       this.queues.get(peer.id)?.clear();
       this.queues.get(peer.id)?.wake();
     }
@@ -278,6 +307,7 @@ export class HostRelay {
     this.locals.clear();
     this.localSeen.clear();
     this.localsAt = 0;
+    this.clearing = "The relay was switched off";
     for (const queue of this.queues.values()) {
       queue.clear();
       queue.wake();
@@ -306,19 +336,48 @@ export class HostRelay {
   private queue(peerId: string): DeliveryQueue {
     let queue = this.queues.get(peerId);
     if (!queue) {
-      queue = new DeliveryQueue(this.now, this.seq);
+      queue = new DeliveryQueue(this.now, this.seq, (delivery, drop) => this.settled(peerId, delivery, drop));
       this.queues.set(peerId, queue);
     }
     return queue;
   }
 
+  /** Records a queued line's fate: handed to the peer, or dropped. */
+  private settled(peerId: string, delivery: RelayDelivery, drop?: QueueDrop): void {
+    const known = this.peerNames.get(peerId);
+    const name = known?.name ?? "the other machine";
+    const reasons: Record<QueueDrop, string> = {
+      expired: `Not picked up within ${QUEUE_TTL_MS / 1000} s`,
+      full: `The queue for ${name} was full`,
+      cleared: this.clearing,
+    };
+    const toName = this.peers.get(peerId)?.sessions.get(delivery.to)?.name;
+    this.traffic.recordLine(delivery.line, {
+      peer: known?.machine ?? "peer",
+      direction: "out",
+      outcome: drop ? "dropped" : "passed",
+      ...(drop ? { reason: reasons[drop] } : {}),
+      ...(toName ? { toName } : {}),
+      toSessionId: delivery.to,
+    });
+  }
+
   /** Queues a line for a peer. A full queue drops it, logged once until a
    *  line fits again. */
   private enqueue(peer: Peer, delivery: RelayDelivery): boolean {
+    this.peerNames.set(peer.id, { name: peer.name, machine: peer.machine });
     if (this.queue(peer.id).push(delivery)) {
       this.dropping.delete(peer.id);
       return true;
     }
+    this.traffic.recordLine(delivery.line, {
+      peer: peer.machine,
+      direction: "out",
+      outcome: "dropped",
+      reason: `The queue for ${peer.name} was full`,
+      ...(peer.sessions.get(delivery.to)?.name ? { toName: peer.sessions.get(delivery.to)!.name } : {}),
+      toSessionId: delivery.to,
+    });
     if (!this.dropping.has(peer.id)) {
       this.dropping.add(peer.id);
       console.error(`The relay is dropping messages for ${peer.name}: too much is waiting`);
@@ -654,20 +713,40 @@ export class HostRelay {
       await this.discover();
       local = this.locals.get(target.sessionId);
     }
-    if (!local) return { accepted: false, reason: "That session has ended" };
+    const handed = (outcome: "passed" | "dropped", reason?: string) =>
+      this.traffic.recordLine(params.line as string, {
+        peer: peer.machine,
+        direction: "in",
+        outcome,
+        ...(reason ? { reason } : {}),
+        ...(local ? { toName: local.name } : {}),
+        toSessionId: target.sessionId,
+      });
+    if (!local) {
+      handed("dropped", "That session has closed");
+      return { accepted: false, reason: "That session has ended" };
+    }
     // Replies and receipts come back to the proxy standing for the sender,
     // which must be this process, listening, before the line goes out.
     const proxyPid = this.table(HOST).pid(peer.id, sender.sessionId);
     if (!this.proxies.has(proxyPid)) await this.reconcile();
     const proxy = this.proxies.get(proxyPid);
-    if (!proxy) return { accepted: false, reason: "Not ready" };
+    if (!proxy) {
+      handed("dropped", "The relay was not ready for it");
+      return { accepted: false, reason: "Not ready" };
+    }
     const line = rewriteFrame(frame, proxy.socket);
-    if (!line) return { accepted: false, reason: "Too long" };
+    if (!line) {
+      handed("dropped", "Too long to relay");
+      return { accepted: false, reason: "Too long" };
+    }
     try {
       await deliver(local.socket, line);
     } catch {
+      handed("dropped", "The session did not answer");
       return { accepted: false, reason: "The session did not answer" };
     }
+    handed("passed");
     return { accepted: true };
   }
 

@@ -504,3 +504,54 @@ function readdirJson(dir: string): string[] {
     return [];
   }
 }
+
+describe("HostRelay traffic", () => {
+  it("records lines handed on, and lines dropped with a reason", async () => {
+    const s1 = await claude(".claude", 101, S1, "vivo-main");
+    await claude(".claude-exec", 102, S2, "vivo-cx");
+    makeRelay([101, 102]);
+    await relay.start();
+    const empty = relay.trafficAnswer({});
+    expect(empty).toMatchObject({ version: 1, machine: "vivobook", cursor: 0, enabled: false, hops: [] });
+    await relay.setEnabled(true);
+    const macSync = await sync(MAC, "Sams-Mac", [{ sessionId: T1, account: ".claude", name: "mac-work", cwd: "/Users/sam/proj" }]);
+    const pS2 = pidOf(macSync.entries, S2);
+    const pT1 = await until(() => {
+      const names = readdirJson(join(home, ".claude/sessions")).filter((name) => Number(name.split(".")[0]) >= 1e9);
+      return names.length === 1 ? Number(names[0].split(".")[0]) : undefined;
+    });
+
+    // Out, handed on when the Mac takes it.
+    await sendTo(join(socks, `${pT1}.sock`), userFrame(s1.socket, "hello   mac\nthere", "m-1"));
+    const got = await next(MAC, 0, 5_000);
+    expect(got.deliveries).toHaveLength(1);
+    // In, handed to S2.
+    expect(await send(MAC, { from: T1, to: pS2, line: userFrame("/tmp/cc-socks/555.sock", "hello cx", "m-2") })).toEqual({ accepted: true });
+    // Out, never taken: dropped after 45 s.
+    await sendTo(join(socks, `${pT1}.sock`), userFrame(s1.socket, "late", "m-3"));
+    await until(() => relay.trafficAnswer({}).hops.length === 2 && relay["queues"].get(MAC.id)?.size === 2);
+    clock += 46_000;
+    await next(MAC, got.cursor);
+
+    const answer = relay.trafficAnswer({});
+    expect(answer.enabled).toBe(true);
+    expect(answer.hops.map(({ id: _, at: __, ...hop }) => hop)).toEqual([
+      { seq: 1, peer: "Sams-Mac", direction: "out", kind: "message", outcome: "passed", fromName: "n", fromSessionId: "x", toName: "mac-work", toSessionId: T1, msgId: "m-1", key: "hello mac there" },
+      { seq: 2, peer: "Sams-Mac", direction: "in", kind: "message", outcome: "passed", fromName: "n", fromSessionId: "x", toName: "vivo-cx", toSessionId: S2, msgId: "m-2", key: "hello cx" },
+      { seq: 3, peer: "Sams-Mac", direction: "out", kind: "message", outcome: "dropped", reason: "Not picked up within 45 s", fromName: "n", fromSessionId: "x", toName: "mac-work", toSessionId: T1, msgId: "m-3", key: "late" },
+    ]);
+    expect(answer.cursor).toBe(3);
+    expect(JSON.stringify(answer)).not.toContain("cc-socks");
+    expect(relay.trafficAnswer({ since: { epoch: answer.epoch, cursor: 2 } }).hops.map((hop) => hop.seq)).toEqual([3]);
+    expect(relay.trafficAnswer({ since: { epoch: "other", cursor: 2 } }).hops).toHaveLength(3);
+    expect(await relay.handle("relay.traffic", {}, MAC)).toMatchObject({ cursor: 3 });
+    await expect(relay.handle("relay.traffic", {}, null)).rejects.toThrow("not paired");
+
+    // A session that stopped listening: dropped in.
+    const p1 = pidOf(macSync.entries, S1);
+    await new Promise<void>((resolve) => s1.server.close(() => resolve()));
+    rmSync(s1.socket, { force: true });
+    expect((await send(MAC, { from: T1, to: p1, line: userFrame("/tmp/cc-socks/555.sock", "bye", "m-4") })).accepted).toBe(false);
+    expect(relay.trafficAnswer({}).hops.at(-1)).toMatchObject({ direction: "in", outcome: "dropped", reason: "The session did not answer", msgId: "m-4", toName: "vivo-main" });
+  });
+});

@@ -15,6 +15,7 @@ import { gunzipSync } from "node:zlib";
 import { HostEngine } from "./engine";
 import { HostStore } from "./store";
 import { createHostServer } from "./server";
+import { listMessages } from "./messages";
 import { HostChildBackend } from "./child-backend";
 import { configureChildBackend } from "../src/integrations/harness/core/child";
 import type { SendTurnInput } from "../src/integrations/harness/core/types";
@@ -129,6 +130,19 @@ describe("remote host API", () => {
     expect((await s.call("environment.describe")).value.result.capabilities).toContain("externalSessions.read");
     // No shows socket is listening in this test host.
     expect((await s.call("environment.describe")).value.result.capabilities).not.toContain("shows");
+  });
+
+  it("lists messages and relay traffic for a paired device", async () => {
+    const s = await setup();
+    const capabilities = (await s.call("environment.describe")).value.result.capabilities;
+    expect(capabilities).toContain("messages.v1");
+    expect(capabilities).toContain("relay.traffic.v1");
+    const listed = (await s.call("messages.list", { windowHours: 2 })).value.result;
+    expect(listed).toMatchObject({ version: 1, full: true, windowHours: 2 });
+    expect(typeof listed.machine).toBe("string");
+    const traffic = (await s.call("relay.traffic", {})).value.result;
+    expect(traffic).toMatchObject({ version: 1, cursor: 0, hops: [] });
+    await expect(listMessages({}, null, "m")).rejects.toThrow("not paired");
   });
 
   it("rejects a credential revoked while its request body is arriving", async () => {
