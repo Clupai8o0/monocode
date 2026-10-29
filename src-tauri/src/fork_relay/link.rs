@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::local::{self, Env, Ledger, LocalSession, PROXY_PID_MAX, PROXY_PID_MIN};
+use super::traffic;
 use super::wire;
 
 const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -447,51 +448,111 @@ impl Link {
 
     /// A line a local session wrote to proxy `to`: on to the host.
     fn forward(&self, to: u32, from: &Path, line: String) {
+        let (to_name, to_session_id) = self.proxy_who(to);
+        let mut seen = traffic::Seen {
+            peer: self.name.clone(),
+            direction: "out",
+            outcome: "dropped",
+            to_name,
+            to_session_id,
+            ..traffic::Seen::default()
+        };
         let Some(sender) = self.local_session(|s| same_socket(&s.socket, from)) else {
+            seen.reason = Some("The sender is not a session on this Mac".into());
+            traffic::record(&line, seen);
             return;
         };
+        seen.from_session_id = Some(sender.session.session_id.clone());
         let params = json!({ "from": sender.session.session_id, "to": to, "line": line });
-        let _ = self.rpc.call("relay.send", params, SYNC_TIMEOUT);
+        match self.rpc.call("relay.send", params, SYNC_TIMEOUT) {
+            Ok(answer) if answer["accepted"] == false => {
+                seen.reason = Some(
+                    answer["reason"]
+                        .as_str()
+                        .unwrap_or("The host did not take it")
+                        .to_string(),
+                );
+            }
+            Ok(_) => seen.outcome = "passed",
+            Err(_) => seen.reason = Some(format!("Could not reach {}", self.name)),
+        }
+        traffic::record(&line, seen);
+    }
+
+    /// The name and remote session id of the session a proxy stands for.
+    fn proxy_who(&self, pid: u32) -> (Option<String>, Option<String>) {
+        let state = lock(&self.state);
+        let Some(entry) = state.proxies.get(&pid).map(|p| &p.entry) else {
+            return (None, None);
+        };
+        let name = entry["name"].as_str().map(str::to_string);
+        let session = entry["monocodeRelay"]["remoteSessionId"]
+            .as_str()
+            .or_else(|| entry["sessionId"].as_str())
+            .map(str::to_string);
+        (name, session)
     }
 
     /// A line from the host: write it to the local session it is for, from
     /// the proxy that stands for its sender, so replies come back there.
     fn deliver(&self, delivery: &Value) {
-        let (Some(to), Some(from_pid), Some(line)) = (
+        let Some(line) = delivery["line"].as_str() else {
+            return;
+        };
+        let mut seen = traffic::Seen {
+            peer: self.name.clone(),
+            direction: "in",
+            outcome: "dropped",
+            to_session_id: delivery["to"].as_str().map(str::to_string),
+            ..traffic::Seen::default()
+        };
+        if let Err(reason) = self.deliver_line(delivery, line, &mut seen) {
+            seen.reason = Some(reason.to_string());
+        } else {
+            seen.outcome = "passed";
+        }
+        traffic::record(line, seen);
+    }
+
+    fn deliver_line(&self, delivery: &Value, line: &str, seen: &mut traffic::Seen) -> Result<(), &'static str> {
+        let (Some(to), Some(from_pid)) = (
             delivery["to"].as_str(),
             delivery["fromPid"]
                 .as_u64()
                 .filter(|pid| (PROXY_PID_MIN..PROXY_PID_MAX).contains(pid))
                 .map(|pid| pid as u32),
-            delivery["line"].as_str(),
         ) else {
-            return;
+            return Err("Not a message");
         };
         if line.len() > wire::MAX_LINE || line.contains('\n') {
-            return;
+            return Err("The line was too long");
         }
         if !self.has_proxy(from_pid) {
             let _ = self.sync_once();
             if !self.has_proxy(from_pid) {
-                return;
+                return Err("The sender is no longer offered by the host");
             }
         }
+        seen.from_session_id = self.proxy_who(from_pid).1;
         let Some(target) = self.local_session(|s| s.session.session_id == to) else {
-            return;
+            return Err("That session has closed");
         };
+        seen.to_name = Some(target.session.name.clone());
         let Ok(mut stream) = UnixStream::connect(&target.socket) else {
-            return;
+            return Err("That session is not listening");
         };
         let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
         let mut bytes = Vec::with_capacity(line.len() + 1);
         bytes.extend_from_slice(line.as_bytes());
         bytes.push(b'\n');
-        if stream.write_all(&bytes).is_ok() {
-            std::thread::spawn(move || {
-                std::thread::sleep(CLOSE_AFTER);
-                drop(stream);
-            });
+        if stream.write_all(&bytes).is_err() {
+            return Err("Could not write to that session");
         }
+        std::thread::spawn(move || {
+            std::thread::sleep(CLOSE_AFTER);
+            drop(stream);
+        });
+        Ok(())
     }
 }
 
