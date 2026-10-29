@@ -91,10 +91,13 @@ fn memory_totals() -> (u64, u64) {
         {
             return (0, 0);
         }
+        // One send right for the app's life, not one leaked per poll.
+        static HOST: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        let host = *HOST.get_or_init(|| mach_host_self());
         let mut stats: libc::vm_statistics64 = std::mem::zeroed();
         let mut count = libc::HOST_VM_INFO64_COUNT;
         if libc::host_statistics64(
-            mach_host_self(),
+            host,
             libc::HOST_VM_INFO64,
             &mut stats as *mut _ as *mut _,
             &mut count,
@@ -121,14 +124,21 @@ pub async fn fork_memory_report(host: State<'_, HarnessHost>) -> Result<MemoryRe
     let roots = host.process_roots();
     crate::background_work::read(move || {
         // A root whose PID now belongs to another process owns nothing.
-        let roots: Vec<ProcessRoot> = roots
-            .into_iter()
-            .filter(|root| root.identity.is_some() && resources::identity(root.pid) == root.identity)
-            .collect();
+        let verified = |roots: Vec<ProcessRoot>| -> Vec<ProcessRoot> {
+            roots
+                .into_iter()
+                .filter(|root| {
+                    root.identity.is_some() && resources::identity(root.pid) == root.identity
+                })
+                .collect()
+        };
+        let roots = verified(roots);
         let sessions = if roots.is_empty() {
             Vec::new()
         } else {
-            aggregate(&resources::process_snapshot()?, &roots)
+            let processes = resources::process_snapshot()?;
+            // Checked again after `ps`, so a PID reused meanwhile is not counted.
+            aggregate(&processes, &verified(roots))
         };
         let (total_bytes, available_bytes) = memory_totals();
         Ok(MemoryReport {
