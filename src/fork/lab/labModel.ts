@@ -1,5 +1,6 @@
 import {
   LAB_CAPABILITY,
+  LAB_TZ_CAPABILITY,
   type LabParams,
   type LabStatus,
   type RemoteControlAccount,
@@ -55,13 +56,23 @@ export const SCOPES: { scope: RemoteControlScope; label: string; detail: string 
   },
 ];
 
-/** Whether an `environment.describe` answer offers the lab methods. */
-export function hasLabCapability(describe: unknown): boolean {
+/** Whether an `environment.describe` answer lists a capability. */
+export function hasCapability(describe: unknown, capability: string): boolean {
   if (!describe || typeof describe !== "object") {
     return false;
   }
   const capabilities = (describe as Record<string, unknown>).capabilities;
-  return Array.isArray(capabilities) && capabilities.includes(LAB_CAPABILITY);
+  return Array.isArray(capabilities) && capabilities.includes(capability);
+}
+
+/** Whether an `environment.describe` answer offers the lab methods. */
+export function hasLabCapability(describe: unknown): boolean {
+  return hasCapability(describe, LAB_CAPABILITY);
+}
+
+/** Whether a host takes lab.timeZone.set and starts agents in that zone. */
+export function hasTimeZoneCapability(describe: unknown): boolean {
+  return hasCapability(describe, LAB_TZ_CAPABILITY);
 }
 
 export function isScope(value: unknown): value is RemoteControlScope {
@@ -472,4 +483,61 @@ export function errorText(reason: unknown, what = "That"): string {
 export function errorKind(step: string, reason: unknown): string {
   const text = reason instanceof Error ? reason.message : String(reason);
   return `${step}:${text.replace(/\d+/g, "#").slice(0, 80)}`;
+}
+
+/** One lab host as the footer chip sees it. */
+export type ChipHost = { name: string; status?: LabStatus; offline: boolean };
+
+export type LabChip = {
+  /** Short words for the footer, "All · Relay on"; "Home lab" before any answer. */
+  words: string;
+  /** The full state in one or two sentences, for the title and screen readers. */
+  sentence: string;
+  /** What needs the owner, one plain line each; the chip shows a dot when any. */
+  attention: string[];
+};
+
+/** "Every machine" in the chip's few words. */
+function scopeWord(scope: RemoteControlScope): string {
+  return scope === "lab" ? "Lab only" : "All";
+}
+
+/** The footer chip's words, sentence and warnings. The scope comes from the
+ * first host that answered, else this Mac's own choice. */
+export function labChip(hosts: ChipHost[], localScope?: RemoteControlScope): LabChip {
+  const attention: string[] = [];
+  for (const host of hosts) {
+    if (host.offline) {
+      attention.push(`${host.name} is offline.`);
+      continue;
+    }
+    if (host.status?.uresourced?.looping) {
+      attention.push(`uresourced is looping on ${host.name}.`);
+    }
+    if (host.status?.remoteDesktop?.running) {
+      attention.push(`Remote desktop is on for ${host.name}.`);
+    }
+  }
+  const online = hosts.filter((host) => host.status && !host.offline);
+  const scope = online[0]?.status?.remoteControl.desired.scope ?? localScope;
+  if (!online.length) {
+    const offline = hosts.length > 0 && hosts.every((host) => host.offline);
+    return {
+      words: offline ? "Offline" : "Home lab",
+      sentence: offline ? `Home lab: ${attention.join(" ")}` : "Home lab: checking the lab machines.",
+      attention,
+    };
+  }
+  const on = online.filter((host) => host.status?.relay.enabled);
+  const relayWord = on.length === online.length ? "Relay on" : on.length === 0 ? "Relay off" : "Relay mixed";
+  const relayPhrase =
+    on.length === online.length
+      ? "relay on"
+      : on.length === 0
+        ? "relay off"
+        : `relay on for ${on.map((host) => host.name).join(", ")} only`;
+  const scopePhrase = scope === "lab" ? "Remote Control on lab machines only" : "Remote Control on every machine";
+  const words = scope ? `${scopeWord(scope)} · ${relayWord}` : relayWord;
+  const sentence = [`Home lab: ${scope ? `${scopePhrase}, ` : ""}${relayPhrase}.`, ...attention].join(" ");
+  return { words, sentence, attention };
 }

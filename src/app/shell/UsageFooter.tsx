@@ -48,6 +48,7 @@ import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
+import { LabButton } from "../../fork/lab/LabButton"; // Fork
 import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import {
@@ -180,6 +181,7 @@ export function UsageFooter({
           <RingButton />
           <WorkspacesButton />
           <MessagesButton />
+          <LabButton />
           <StacksButton />
           {pressureSlot ? (
             <span

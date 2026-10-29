@@ -12669,6 +12669,13 @@ function Workspace({
     return () => window.removeEventListener(OPEN_REMOTE_PROJECT_EVENT, open);
   }, []);
 
+  // Fork: the footer Home lab popover's Settings link.
+  useEffect(() => {
+    const onOpenLab = () => openSettings("lab");
+    window.addEventListener("monocode:fork-open-lab-settings", onOpenLab);
+    return () =>
+      window.removeEventListener("monocode:fork-open-lab-settings", onOpenLab);
+  }, [openSettings]);
   useEffect(() => {
     const onOpenMcp = () => openSettings("mcp");
     window.addEventListener("monocode:open-mcp-settings", onOpenMcp);
