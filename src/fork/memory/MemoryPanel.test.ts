@@ -107,7 +107,7 @@ describe("memory popover", () => {
     act(() => (container.querySelector('[aria-label="Park Refactor"]') as HTMLButtonElement).click());
     expect(onPark).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "idle" }));
     expect(container.textContent).toContain("Old chat");
-    expect(container.textContent).toContain("Parked — opens again when you return");
+    expect(container.textContent).toContain("Parked — wakes on your next message");
     expect(container.textContent).toContain("Memory is very tight");
   });
 
@@ -149,7 +149,7 @@ describe("memory popover", () => {
       await act(async () => vi.advanceTimersByTimeAsync(0));
       expect(park).toHaveBeenCalledWith("idle");
       expect(parkedSessions().has("idle")).toBe(true);
-      expect(document.body.textContent).toContain("Parked — opens again when you return");
+      expect(document.body.textContent).toContain("Parked — wakes on your next message");
     } finally {
       vi.useRealTimers();
     }

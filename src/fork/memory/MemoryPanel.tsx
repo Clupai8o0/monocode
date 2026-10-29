@@ -129,7 +129,7 @@ export function MemoryPanel({
                 {entry.title}
               </p>
               <p className="text-[11px] text-content/40">
-                Parked — opens again when you return
+                Parked — wakes on your next message
               </p>
             </li>
           ))}

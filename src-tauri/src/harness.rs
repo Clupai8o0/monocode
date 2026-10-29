@@ -1169,8 +1169,12 @@ pub fn provider_account_remove(
     let dir = provider_account_path(&app, &provider, &account_id)?;
     host.kill_account(&provider, &account_id);
 
+    // Fork: a linked account (a symlink to ~/.claude-exec, say) borrows another
+    // login; removing it drops only the link, never that login's credentials.
     #[cfg(target_os = "macos")]
-    if provider == "claude" {
+    let linked = std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink());
+    #[cfg(target_os = "macos")]
+    if provider == "claude" && !linked {
         crate::rate_limits::delete_claude_keychain_credentials(&dir)?;
     }
 
