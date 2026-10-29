@@ -147,6 +147,32 @@ describe("memory park", () => {
     await running;
   });
 
+  it("makes a message sent while parking wait, then resume", async () => {
+    const first = turn("hello");
+    await waitFor(() => spawned.length === 1, "first spawn");
+    await waitFor(() => onLine !== undefined && sent.length > 0, "initialize");
+    await finishTurn(0, "monocode_1");
+    await first;
+    await new Promise((r) => setTimeout(r, 0));
+
+    const parking = parkIdleHarnessSession("s1");
+    const before = userCount();
+    const next = turn("are you there?");
+    expect(await parking).toBe(true);
+    await waitFor(() => spawned.length === 2, "respawn after park");
+    expect(spawned[1]).toEqual(expect.arrayContaining(["--resume", "sess_1"]));
+    await waitFor(() => parse().filter((m) => {
+      const request = m.request as Record<string, unknown> | undefined;
+      return request?.subtype === "initialize";
+    }).length === 2, "second initialize");
+    const init = parse().filter((m) => {
+      const request = m.request as Record<string, unknown> | undefined;
+      return request?.subtype === "initialize";
+    }).at(-1)!;
+    await finishTurn(before, String(init.request_id));
+    await next;
+  });
+
   it("refuses a session it has never seen", async () => {
     expect(await parkIdleHarnessSession("nobody")).toBe(false);
   });

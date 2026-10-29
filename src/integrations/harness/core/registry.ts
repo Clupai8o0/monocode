@@ -254,19 +254,22 @@ export function harnessIdleSince(sessionId: string): number | undefined {
  * flight. Resume state stays, so the next prompt respawns the same Claude
  * conversation, exactly like the idle timer's park.
  */
-export async function parkIdleHarnessSession(
-  sessionId: string,
-): Promise<boolean> {
+export function parkIdleHarnessSession(sessionId: string): Promise<boolean> {
   const idle = idleParkTimers.get(sessionId);
   if (
     !idle ||
     activeTurnSessions.has(sessionId) ||
     sessionOperationTails.has(sessionId)
   ) {
-    return false;
+    return Promise.resolve(false);
   }
-  await stopHarnessSession(idle.harness, sessionId);
-  return true;
+  // Queued, so a message sent meanwhile waits for the stop to finish and
+  // then respawns, instead of racing the kill.
+  return queueSessionOperation(sessionId, async () => {
+    if (idleParkTimers.get(sessionId) !== idle) return false;
+    await stopHarnessSession(idle.harness, sessionId);
+    return true;
+  });
 }
 
 /** Test seam. */
