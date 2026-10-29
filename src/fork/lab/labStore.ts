@@ -95,7 +95,8 @@ const asking = new Set<string>();
 const failed = new Set<string>();
 const statuses = new Map<string, LabStatus>();
 const offline = new Set<string>();
-const loading = new Set<string>();
+/** lab.status reads on their way, per host. */
+const loading = new Map<string, number>();
 /** Request counters per host: a lab.status that started before the latest
  * applied answer, or before a change answered, is dropped. */
 const counter = new Map<string, number>();
@@ -119,7 +120,7 @@ function build(): LabState {
         timeZone: entry.timeZone,
         status: statuses.get(machine.id),
         offline: offline.has(machine.id),
-        loading: loading.has(machine.id),
+        loading: (loading.get(machine.id) ?? 0) > 0,
       },
     ];
   });
@@ -226,7 +227,7 @@ function nextCount(machineId: string): number {
 /** lab.status for one host; marks it offline when it fails. */
 async function loadStatus(machineId: string): Promise<void> {
   const count = nextCount(machineId);
-  loading.add(machineId);
+  loading.set(machineId, (loading.get(machineId) ?? 0) + 1);
   publish();
   try {
     const status = await labRequest(machineId, "lab.status", {});
@@ -238,11 +239,12 @@ async function loadStatus(machineId: string): Promise<void> {
     }
   } catch (reason) {
     if (count > (floor.get(machineId) ?? 0)) {
+      floor.set(machineId, count);
       offline.add(machineId);
       setError(actionKey(machineId, "load"), errorText(reason));
     }
   } finally {
-    loading.delete(machineId);
+    loading.set(machineId, Math.max(0, (loading.get(machineId) ?? 0) - 1));
     publish();
   }
 }

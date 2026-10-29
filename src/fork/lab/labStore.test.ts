@@ -239,6 +239,25 @@ describe("lab store changes", () => {
     expect(getLabState().hosts[0].status?.relay.enabled).toBe(false);
   });
 
+  it("drops an older status answer that lands after a newer failure", async () => {
+    await refreshLab();
+    const slow = deferred<LabStatus>();
+    remote = () => slow.promise;
+    const first = refreshLab();
+    await vi.waitFor(() => expect(calls.at(-1)).toBe("m1:lab.status"));
+    const { reloadHost } = await import("./labStore");
+    remote = () => {
+      throw new Error("offline");
+    };
+    await reloadHost("m1");
+    expect(getLabState().hosts[0].offline).toBe(true);
+    slow.resolve(hostStatus("lab"));
+    await first;
+    expect(getLabState().hosts[0].offline).toBe(true);
+    expect(getLabState().hosts[0].status?.remoteControl.desired.scope).toBe("all");
+    expect(getLabState().hosts[0].loading).toBe(false);
+  });
+
   it("keeps a failed change's words under its key", async () => {
     await refreshLab();
     remote = (_, method) => {

@@ -110,7 +110,15 @@ export function LabPanel({ state, onSettings }: { state: LabState; onSettings?: 
   const reachable = state.hosts.filter((host) => host.status && !host.offline);
   const scope = reachable[0]?.status?.remoteControl.desired.scope ?? state.local?.scope;
   const several = state.hosts.length > 1;
-  const scopeError = state.errors.scope;
+  const scopeError = [
+    state.errors.scope,
+    ...state.hosts.flatMap((host) => {
+      const error = state.errors[actionKey(host.machine.id, "scope")];
+      return error ? [several ? `${host.machine.name}: ${error}` : error] : [];
+    }),
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <div className="flex max-h-[520px] flex-col gap-4 overflow-y-auto p-3 text-[12px]">
       <div className="flex items-center gap-2">
