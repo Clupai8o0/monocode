@@ -3,6 +3,16 @@ import { emit } from "@tauri-apps/api/event";
 import { NOTIFICATION_CLICK_EVENT } from "../../features/notifications/model/notifications";
 import { Mail } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
+import { openLabSettings } from "../lab/labStore";
+import { MessagesWindow } from "../messageLog/MessagesWindow";
+import {
+  closeMessagesWindow,
+  openMessagesWindow,
+  setMessageLogWindow,
+  useMessageLog,
+  useMessagesWindowRequest,
+  type MessagesWindowRequest,
+} from "../messageLog/messageLogStore";
 import { formatPeerTime } from "./peerMessage";
 import {
   inboxRows,
@@ -17,10 +27,52 @@ export const FORK_MESSAGES = import.meta.env.MODE !== "test";
 /**
  * Fork: footer button "Messages · N" (N unread). Opens every message other
  * sessions sent into MonoCode's sessions, newest first, with a filter per
- * project; a row opens the session it went to. Hidden until there is one.
+ * project; a row opens the session it went to. A red count shows messages
+ * between sessions that went wrong in the last hour, and the popover opens
+ * the Messages window (src/fork/messageLog).
  */
 export function MessagesButton() {
-  return FORK_MESSAGES ? <Messages /> : null;
+  return FORK_MESSAGES ? (
+    <>
+      <Messages />
+      <MessagesWindowHost />
+    </>
+  ) : null;
+}
+
+// A new request (another "Open" while it is open) starts the window afresh.
+const requestIds = new WeakMap<MessagesWindowRequest, number>();
+let nextRequestId = 0;
+
+function MessagesWindowHost() {
+  const request = useMessagesWindowRequest();
+  if (!request) {
+    return null;
+  }
+  if (!requestIds.has(request)) {
+    requestIds.set(request, ++nextRequestId);
+  }
+  return <OpenMessagesWindow key={requestIds.get(request)} request={request} />;
+}
+
+function OpenMessagesWindow({ request }: { request: MessagesWindowRequest }) {
+  const view = useMessageLog(true);
+  return (
+    <MessagesWindow
+      view={view}
+      initial={request}
+      onClose={closeMessagesWindow}
+      onWindowChange={setMessageLogWindow}
+      onOpenSession={(openId) => {
+        void emit(NOTIFICATION_CLICK_EVENT, openId);
+        closeMessagesWindow();
+      }}
+      onOpenHomeLab={() => {
+        closeMessagesWindow();
+        openLabSettings();
+      }}
+    />
+  );
 }
 
 function Messages() {
@@ -28,9 +80,7 @@ function Messages() {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const rows = inboxRows();
-  if (rows.length === 0) {
-    return null;
-  }
+  const problems = useMessageLog(false).recentProblems;
   const unread = rows.filter((r) => r.unread);
   const urgent = unread.some((r) => r.urgent);
   const label = unread.length ? `Messages · ${unread.length}` : "Messages";
@@ -48,17 +98,30 @@ function Messages() {
               : "text-content/40 hover:text-content"
         }`}
         aria-expanded={open}
-        title={
+        title={[
           unread.length
             ? `${unread.length} unread message${unread.length === 1 ? "" : "s"} from other sessions`
-            : "Messages from other sessions"
-        }
+            : "Messages from other sessions",
+          problems
+            ? `${problems} message${problems === 1 ? "" : "s"} between sessions went wrong in the last hour`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(". ")}
         onClick={() => setOpen(!open)}
       >
         <Mail className="size-3.5" strokeWidth={1.75} aria-hidden />
         <span className="tabular-nums">{label}</span>
         {urgent ? (
           <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
+        ) : null}
+        {problems ? (
+          <span
+            data-fork-messages-problems=""
+            className="min-w-3.5 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-3.5 tabular-nums text-white"
+          >
+            {problems > 99 ? "99+" : problems}
+          </span>
         ) : null}
       </button>
       {open ? (
@@ -90,10 +153,24 @@ function MessagesPanel({
   const shown = project ? rows.filter((r) => r.project === project) : rows;
   return (
     <div className="flex max-h-[420px] flex-col gap-1 p-2 text-[12px]">
+      <button
+        type="button"
+        onClick={() => {
+          openMessagesWindow();
+          onOpen();
+        }}
+        className="mb-1 flex items-center justify-between rounded-md bg-content/[0.06] px-2 py-1.5 text-left font-medium text-content hover:bg-content/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        Open messages view
+        <span className="text-[11px] font-normal text-content/45">Every session, every machine</span>
+      </button>
       <div className="flex items-center gap-2 px-1 pb-1">
         <span className="font-semibold text-content">Messages</span>
         <span className="text-content/45">{rows.length} in</span>
       </div>
+      {rows.length === 0 ? (
+        <p className="px-1 pb-1 text-content/50">No session has messaged MonoCode's sessions yet.</p>
+      ) : null}
       {projects.length > 1 ? (
         <div
           className="flex flex-wrap gap-1 px-1 pb-1"
