@@ -497,7 +497,7 @@ import {
   DEFAULT_PROVIDER_ACCOUNT_ID,
   providerAccountExists,
   sameProviderAccountId,
-  selectedProviderAccountId,
+  sessionProviderAccountId, // Fork
   supportsProviderAccounts,
   type ProviderAccountProvider,
 } from "../features/providers/model/providerAccounts";
@@ -7568,8 +7568,7 @@ function Workspace({
         ? current.harness
         : undefined;
       const providerAccountId = accountProvider
-        ? (current.providerAccountId ??
-          selectedProviderAccountId(accountProvider, current.cwd))
+        ? sessionProviderAccountId(accountProvider, current) // Fork: legacy sessions stay on default
         : undefined;
       if (
         accountProvider &&
@@ -10852,8 +10851,7 @@ function Workspace({
             model: current.model,
             modelSettings: current.modelSettings,
             providerAccountId: supportsProviderAccounts(current.harness)
-              ? (current.providerAccountId ??
-                selectedProviderAccountId(current.harness, current.cwd))
+              ? sessionProviderAccountId(current.harness, current) // Fork
               : undefined,
             runtimeMode: current.runtimeMode,
             ephemeral: current.ephemeral === true,

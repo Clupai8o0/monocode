@@ -19,13 +19,18 @@ import {
   saveProviderAccount,
   selectedProviderAccountId,
   selectProviderAccount,
+  sessionProviderAccountId,
   setAutoProviderAccountResolver,
 } from "../../features/providers/model/providerAccounts";
 import {
   clearCachedRateLimits,
   setCachedRateLimits,
 } from "../../features/providers/model/rateLimitsCache";
-import { mobileAccountChoice } from "../../features/mobile/model/mobileProviderAccounts";
+import {
+  mobileAccountChoice,
+  mobileSessionAccountId,
+} from "../../features/mobile/model/mobileProviderAccounts";
+import { newSession } from "../../features/sessions/model/session";
 import {
   exhaustedSwitchFor,
   installAutoAccountResolver,
@@ -68,6 +73,15 @@ describe("Auto account choice", () => {
     expect(spawned).toBe("account-cx");
     expect(providerAccountExists("claude", spawned)).toBe(true);
     expect(mobileAccountChoice("claude", PROJECT, {})).toBe("account-cx");
+  });
+
+  it("between two ready accounts, picks the one with more left", () => {
+    selectProviderAccount("claude", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+    setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(60));
+    setCachedRateLimits("claude", "account-cx", usage(20));
+    expect(selectedProviderAccountId("claude", PROJECT)).toBe("account-cx");
+    setCachedRateLimits("claude", "account-cx", usage(60));
+    expect(selectedProviderAccountId("claude", PROJECT)).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
   });
 
   it("re-picks for each new session as usage changes", () => {
@@ -116,5 +130,54 @@ describe("exhaustedSwitchFor", () => {
     setCachedRateLimits("claude", "account-cx", usage(100));
     setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(100));
     expect(exhaustedSwitchFor("claude", "account-cx")).toBeNull();
+  });
+});
+
+describe("sessionProviderAccountId", () => {
+  const user = (draft?: boolean) => ({ role: "user", draft });
+
+  it("resolves Auto only for empty or new sessions; legacy ones stay on default", () => {
+    selectProviderAccount("claude", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+    setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(100));
+    setCachedRateLimits("claude", "account-cx", usage(30));
+    const base = { cwd: PROJECT };
+    // New: Auto picks cx.
+    expect(sessionProviderAccountId("claude", { ...base, blocks: [] })).toBe("account-cx");
+    // Only an unsent draft: still new.
+    expect(sessionProviderAccountId("claude", { ...base, blocks: [user(true)] })).toBe(
+      "account-cx",
+    );
+    // Sent turns but no id: a legacy session, which ran on default.
+    expect(
+      sessionProviderAccountId("claude", { ...base, blocks: [user(true), user()] }),
+    ).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
+    // Its own id always wins.
+    expect(
+      sessionProviderAccountId("claude", {
+        ...base,
+        providerAccountId: DEFAULT_PROVIDER_ACCOUNT_ID,
+        blocks: [],
+      }),
+    ).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
+    expect(
+      sessionProviderAccountId("claude", {
+        ...base,
+        providerAccountId: "account-cx",
+        blocks: [user()],
+      }),
+    ).toBe("account-cx");
+  });
+
+  it("is the same rule mobile uses", () => {
+    selectProviderAccount("claude", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+    setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(100));
+    setCachedRateLimits("claude", "account-cx", usage(30));
+    const fresh = newSession("claude", PROJECT);
+    expect(mobileSessionAccountId(fresh)).toBe("account-cx");
+    const legacy = {
+      ...fresh,
+      blocks: [{ id: "u1", role: "user" as const, text: "hi" }],
+    } as typeof fresh;
+    expect(mobileSessionAccountId(legacy)).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
   });
 });

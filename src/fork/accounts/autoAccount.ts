@@ -10,7 +10,11 @@ export const AUTO_ACCOUNT_ID = "auto";
 /** Same tones as accountUsage's AccountStatusTone. */
 export type AutoTone = "ready" | "low" | "checking" | "unknown" | "exhausted";
 
-export type AutoCandidate = { id: string; tone: AutoTone };
+/**
+ * `headroom` is the remaining % (accountHeadroom) the tone was derived from,
+ * absent while usage is unknown.
+ */
+export type AutoCandidate = { id: string; tone: AutoTone; headroom?: number };
 
 const RANK: Record<AutoTone, number> = {
   ready: 0,
@@ -27,8 +31,9 @@ export function supportsAutoAccount(provider: string): boolean {
 
 /**
  * The account a new session should start on: ready before low before
- * not-yet-known, exhausted only when every account is. Ties go to main, then
- * to the first account in the list. Null only for an empty list.
+ * not-yet-known, exhausted only when every account is. Within one tone the
+ * account with more headroom wins; ties go to main, then to the first account
+ * in the list. Null only for an empty list.
  */
 export function pickAutoAccount(
   candidates: AutoCandidate[],
@@ -36,15 +41,29 @@ export function pickAutoAccount(
 ): string | null {
   let best: AutoCandidate | null = null;
   for (const candidate of candidates) {
-    if (!best || RANK[candidate.tone] < RANK[best.tone]) {
-      best = candidate;
-      continue;
-    }
-    if (RANK[candidate.tone] === RANK[best.tone] && candidate.id === mainId) {
+    if (!best || beats(candidate, best, mainId)) {
       best = candidate;
     }
   }
   return best?.id ?? null;
+}
+
+function beats(
+  candidate: AutoCandidate,
+  best: AutoCandidate,
+  mainId: string,
+): boolean {
+  if (RANK[candidate.tone] !== RANK[best.tone]) {
+    return RANK[candidate.tone] < RANK[best.tone];
+  }
+  if (
+    candidate.headroom !== undefined &&
+    best.headroom !== undefined &&
+    candidate.headroom !== best.headroom
+  ) {
+    return candidate.headroom > best.headroom;
+  }
+  return candidate.id === mainId;
 }
 
 /**

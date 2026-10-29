@@ -27,7 +27,7 @@ import {
 } from "./memoryModel";
 import {
   markParked,
-  memorySettings,
+  refreshMemorySettings,
   pruneParked,
   useParkedSessions,
 } from "./memoryStore";
@@ -147,7 +147,8 @@ export function MemoryWatcher({
       setReport(next);
       setRows(nextRows);
       setError("");
-      const settings = memorySettings();
+      // Fresh from storage: another window may have turned auto-park off.
+      const settings = refreshMemorySettings();
       const step = autoParkStep(auto.current, {
         enabled: settings.autoPark,
         report: next,

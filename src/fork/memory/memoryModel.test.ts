@@ -21,7 +21,8 @@ function facts(id: string, extra: Partial<SessionFacts> = {}): SessionFacts {
     busy: false,
     needsInput: false,
     foreground: false,
-    idleSince: NOW - 10 * MIN,
+    // Idle sessions are always under 3 min: the stock timer parks them then.
+    idleSince: NOW - 2 * MIN,
     ...extra,
   };
 }
@@ -99,22 +100,34 @@ describe("park suggestions", () => {
   it("ranks by RAM times idle time and stops once enough is freed", () => {
     // warn wants 15% of 16 GB available: 2.4 GB, so 1.9 GB is needed.
     const r = report("warn", [
-      ["big-fresh", 3],
-      ["mid-old", 1.5],
-      ["small-old", 0.5],
+      ["mid-fresh", 1.5],
+      ["mid-older", 1.5],
+      ["small-older", 0.5],
+      ["tiny-oldest", 0.1],
     ]);
     const rows = buildRows(
       r,
       byId(
-        facts("big-fresh", { idleSince: NOW - 2 * MIN }), // 6 GB*min
-        facts("mid-old", { idleSince: NOW - 20 * MIN }), // 30
-        facts("small-old", { idleSince: NOW - 30 * MIN }), // 15
+        facts("mid-fresh", { idleSince: NOW - 1 * MIN }), // 1.5 GB x 2 = 3
+        facts("mid-older", { idleSince: NOW - 2.5 * MIN }), // 1.5 x 3.5 = 5.25
+        facts("small-older", { idleSince: NOW - 2.5 * MIN }), // 0.5 x 3.5 = 1.75
+        facts("tiny-oldest", { idleSince: NOW - 2.9 * MIN }), // 0.1 x 3.9 = 0.39
       ),
       NOW,
     );
     const suggestion = suggestParks(rows, r);
-    expect(suggestion.rows.map((row) => row.sessionId)).toEqual(["mid-old", "small-old"]);
-    expect(formatBytes(suggestion.freedBytes)).toBe("2.0 GB");
+    expect(suggestion.rows.map((row) => row.sessionId)).toEqual(["mid-older", "mid-fresh"]);
+    expect(formatBytes(suggestion.freedBytes)).toBe("3.0 GB");
+  });
+
+  it("still ranks a big session that only just went idle over a tiny older one", () => {
+    const r = report("warn", [["big", 2], ["tiny", 0.1]], 8 * GB);
+    const rows = buildRows(
+      r,
+      byId(facts("big", { idleSince: NOW }), facts("tiny", { idleSince: NOW - 2.9 * MIN })),
+      NOW,
+    );
+    expect(suggestParks(rows, r, 0).rows.map((row) => row.sessionId)).toEqual(["big"]);
   });
 
   it("parks at least one when the kernel says tight but the estimate does not", () => {
@@ -140,14 +153,14 @@ describe("auto-park", () => {
   const rows = buildRows(
     r,
     byId(
-      facts("idle", { idleSince: NOW - 45 * MIN }),
-      facts("busy", { busy: true, idleSince: NOW - 45 * MIN }),
-      facts("asks", { needsInput: true, idleSince: NOW - 45 * MIN }),
-      facts("screen", { foreground: true, idleSince: NOW - 45 * MIN }),
+      facts("idle", { idleSince: NOW - 1.5 * MIN }),
+      facts("busy", { busy: true, idleSince: NOW - 1.5 * MIN }),
+      facts("asks", { needsInput: true, idleSince: NOW - 1.5 * MIN }),
+      facts("screen", { foreground: true, idleSince: NOW - 1.5 * MIN }),
     ),
     NOW,
   );
-  const input = { enabled: true, report: r, rows, idleThresholdMs: 30 * MIN, now: NOW };
+  const input = { enabled: true, report: r, rows, idleThresholdMs: 1 * MIN, now: NOW };
 
   it("does nothing while the setting is off, however long memory is tight", () => {
     const step = autoParkStep({ tightSince: NOW - 10 * MIN }, { ...input, enabled: false });
@@ -168,7 +181,7 @@ describe("auto-park", () => {
   it("respects the idle threshold and resets when pressure clears", () => {
     const strict = autoParkStep(
       { tightSince: NOW - 2 * MIN },
-      { ...input, idleThresholdMs: 60 * MIN },
+      { ...input, idleThresholdMs: 2 * MIN },
     );
     expect(strict.park).toEqual([]);
     const calm = autoParkStep(
@@ -176,5 +189,20 @@ describe("auto-park", () => {
       { ...input, report: { ...r, pressure: "normal" } },
     );
     expect(calm).toEqual({ state: {}, park: [] });
+  });
+
+  it("with the threshold at 0, parks a session the moment its turn ends", () => {
+    const fresh = report("critical", [["done", 2]]);
+    const freshRows = buildRows(fresh, byId(facts("done", { idleSince: NOW })), NOW);
+    const step = autoParkStep(
+      { tightSince: NOW - 2 * MIN },
+      { ...input, report: fresh, rows: freshRows, idleThresholdMs: 0 },
+    );
+    expect(step.park.map((row) => row.sessionId)).toEqual(["done"]);
+    const oneMin = autoParkStep(
+      { tightSince: NOW - 2 * MIN },
+      { ...input, report: fresh, rows: freshRows, idleThresholdMs: 1 * MIN },
+    );
+    expect(oneMin.park).toEqual([]);
   });
 });

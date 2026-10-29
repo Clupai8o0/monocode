@@ -21,10 +21,16 @@ function readSettings(): MemorySettings {
   let idleMinutes: IdleMinutes = IDLE_MINUTES_DEFAULT;
   try {
     autoPark = localStorage.getItem(AUTO_PARK_KEY) === "1";
-    const raw = Number(localStorage.getItem(IDLE_MINUTES_KEY) ?? NaN);
+    const stored = localStorage.getItem(IDLE_MINUTES_KEY);
+    const raw = Number(stored ?? NaN);
     idleMinutes =
       IDLE_MINUTE_CHOICES.find((choice) => choice === raw) ??
       IDLE_MINUTES_DEFAULT;
+    if (stored !== null && String(idleMinutes) !== stored) {
+      // An older build offered 5-60 min, which the 3 min idle timer made
+      // unreachable; those become the default.
+      localStorage.setItem(IDLE_MINUTES_KEY, String(idleMinutes));
+    }
   } catch {
     // Storage blocked: the defaults stand.
   }
@@ -39,6 +45,45 @@ export function memorySettings(): MemorySettings {
   return settings;
 }
 
+function notifySettings(): void {
+  for (const listener of settingsListeners) {
+    listener();
+  }
+}
+
+/**
+ * Re-read storage, since another window may have changed the settings.
+ * Keeps the same object (and skips listeners) when nothing changed.
+ */
+export function refreshMemorySettings(): MemorySettings {
+  const next = readSettings();
+  const current = settings;
+  if (
+    current &&
+    current.autoPark === next.autoPark &&
+    current.idleMinutes === next.idleMinutes
+  ) {
+    return current;
+  }
+  settings = next;
+  if (current) {
+    notifySettings();
+  }
+  return next;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (
+      event.key === null ||
+      event.key === AUTO_PARK_KEY ||
+      event.key === IDLE_MINUTES_KEY
+    ) {
+      refreshMemorySettings();
+    }
+  });
+}
+
 export function setMemorySettings(next: Partial<MemorySettings>): void {
   settings = { ...memorySettings(), ...next };
   try {
@@ -47,9 +92,7 @@ export function setMemorySettings(next: Partial<MemorySettings>): void {
   } catch {
     // private mode / quota
   }
-  for (const listener of settingsListeners) {
-    listener();
-  }
+  notifySettings();
 }
 
 export function useMemorySettings(): MemorySettings {

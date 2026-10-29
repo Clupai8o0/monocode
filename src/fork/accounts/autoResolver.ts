@@ -1,5 +1,8 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { accountStatus } from "../../features/providers/model/accountUsage";
+import {
+  accountHeadroom,
+  accountStatus,
+} from "../../features/providers/model/accountUsage";
 import {
   DEFAULT_PROVIDER_ACCOUNT_ID,
   providerAccounts,
@@ -28,10 +31,15 @@ export function autoCandidates(
   provider: ProviderAccountProvider,
   now = Date.now(),
 ): AutoCandidate[] {
-  return providerAccounts(provider).map((account) => ({
-    id: account.id,
-    tone: accountStatus(getCachedRateLimits(provider, account.id), now).tone,
-  }));
+  return providerAccounts(provider).map((account) => {
+    const limits = getCachedRateLimits(provider, account.id);
+    const headroom = accountHeadroom(limits, now) ?? undefined;
+    return {
+      id: account.id,
+      tone: accountStatus(limits, now).tone,
+      ...(headroom === undefined ? {} : { headroom }),
+    };
+  });
 }
 
 export function resolveAutoAccount(

@@ -13,11 +13,12 @@ export function MemorySettings() {
       <Block title="Auto-park idle sessions when memory is tight">
         <div className="flex items-start gap-4">
           <p className="min-w-0 flex-1 text-[12px] leading-relaxed text-content/55">
-            When this Mac has been short of memory for a minute, MonoCode stops
-            the agents of the sessions that have sat idle longest and hold the
-            most memory. Their conversations stay; your next message picks each
-            one up again. Sessions that are working, waiting for you, or on
-            screen are never touched.
+            MonoCode already rests sessions 3 minutes after they finish. When
+            memory is tight, this rests them sooner. Once this Mac has been
+            short of memory for a minute, MonoCode stops the agents of the idle
+            sessions holding the most memory. Their conversations stay; your
+            next message picks each one up again. Sessions that are working,
+            waiting for you, or on screen are never touched.
           </p>
           <Toggle
             label="Auto-park idle sessions when memory is tight"
@@ -26,13 +27,13 @@ export function MemorySettings() {
           />
         </div>
       </Block>
-      <Block title="Idle for at least">
+      <Block title="Rest them after">
         <div className="flex flex-col gap-2 text-[12px]">
           <Segmented<string>
             label="Idle threshold"
             options={IDLE_MINUTE_CHOICES.map((minutes) => ({
               value: String(minutes),
-              label: `${minutes} min`,
+              label: minutes === 0 ? "Right away" : `${minutes} min`,
             }))}
             value={String(idleMinutes)}
             onChange={(value) =>
@@ -40,8 +41,9 @@ export function MemorySettings() {
             }
           />
           <p className="leading-relaxed text-content/50">
-            Auto-park only picks sessions idle this long. You can always park a
-            session yourself from the Memory chip in the footer.
+            How long a session must sit idle after its turn ends before
+            auto-park may rest it. You can always park a session yourself from
+            the Memory chip in the footer.
           </p>
         </div>
       </Block>

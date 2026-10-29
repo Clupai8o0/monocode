@@ -509,7 +509,7 @@ export function UsageChips({
     ? {
         accounts: claudeAccounts,
         accountId: claudeAccountId,
-        autoChoice: claudeAuto, // Fork
+        autoChoice: claudeAuto && !claudePinned, // Fork: a pinned session is not on Auto
         onSelectAuto: () => selectAccount("claude", AUTO_PROVIDER_ACCOUNT_ID), // Fork
         onSelectAccount: (accountId: string) =>
           selectAccount("claude", accountId),

@@ -255,6 +255,28 @@ export function selectedProviderAccountId(
     : DEFAULT_PROVIDER_ACCOUNT_ID;
 }
 
+/**
+ * Fork: the account a session runs on. Its own id when it has one. A legacy
+ * session that already has sent (non-draft) user turns but no id predates
+ * per-session accounts and stays on the default login; only an empty or new
+ * session takes the project's choice, which is where Auto resolves.
+ */
+export function sessionProviderAccountId(
+  provider: ProviderAccountProvider,
+  session: {
+    providerAccountId?: string;
+    cwd?: string;
+    blocks: ReadonlyArray<{ role: string; draft?: boolean }>;
+  },
+): string {
+  if (session.providerAccountId) {
+    return session.providerAccountId;
+  }
+  return session.blocks.some((block) => block.role === "user" && !block.draft)
+    ? DEFAULT_PROVIDER_ACCOUNT_ID
+    : selectedProviderAccountId(provider, session.cwd);
+}
+
 export function selectProviderAccount(
   provider: ProviderAccountProvider,
   project: string | undefined,

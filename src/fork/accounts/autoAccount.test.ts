@@ -79,6 +79,49 @@ describe("pickAutoAccount", () => {
     expect(pickAutoAccount([], "default")).toBeNull();
   });
 
+  it("within one tone prefers more headroom, ties going to main", () => {
+    const pick = (main: [AutoTone, number?], cx: [AutoTone, number?]) =>
+      pickAutoAccount(
+        [
+          { id: "default", tone: main[0], headroom: main[1] },
+          { id: "cx", tone: cx[0], headroom: cx[1] },
+        ],
+        "default",
+      );
+    // Same tone: more remaining % wins, either way round.
+    expect(pick(["ready", 40], ["ready", 90])).toBe("cx");
+    expect(pick(["ready", 90], ["ready", 40])).toBe("default");
+    expect(pick(["low", 5], ["low", 15])).toBe("cx");
+    expect(pick(["low", 15], ["low", 5])).toBe("default");
+    // Equal headroom, or none known: main.
+    expect(pick(["ready", 70], ["ready", 70])).toBe("default");
+    expect(pick(["exhausted", 0], ["exhausted", 0])).toBe("default");
+    expect(pick(["checking"], ["unknown"])).toBe("default");
+    expect(pick(["ready", 70], ["ready"])).toBe("default");
+    // Tone still beats headroom.
+    expect(pick(["low", 19], ["ready", 21])).toBe("cx");
+    expect(pick(["ready", 21], ["low", 19])).toBe("default");
+    // Main listed second still wins a tie and loses on headroom.
+    expect(
+      pickAutoAccount(
+        [
+          { id: "cx", tone: "ready", headroom: 60 },
+          { id: "default", tone: "ready", headroom: 60 },
+        ],
+        "default",
+      ),
+    ).toBe("default");
+    expect(
+      pickAutoAccount(
+        [
+          { id: "cx", tone: "ready", headroom: 80 },
+          { id: "default", tone: "ready", headroom: 60 },
+        ],
+        "default",
+      ),
+    ).toBe("cx");
+  });
+
   it("is offered for Claude only", () => {
     expect(supportsAutoAccount("claude")).toBe(true);
     expect(supportsAutoAccount("codex")).toBe(false);

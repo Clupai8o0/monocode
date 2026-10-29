@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => path,
 }));
 vi.mock("../../integrations/harness/core/registry", () => ({
-  harnessIdleSince: (id: string) => (id === "idle" ? Date.now() - 20 * 60_000 : undefined),
+  harnessIdleSince: (id: string) => (id === "idle" ? Date.now() - 2 * 60_000 : undefined),
   parkIdleHarnessSession: park,
 }));
 
@@ -22,6 +22,7 @@ import { buildRows, suggestParks, type MemoryReport } from "./memoryModel";
 import {
   memorySettings,
   parkedSessions,
+  refreshMemorySettings,
   resetMemoryStores,
   setMemorySettings,
 } from "./memoryStore";
@@ -156,7 +157,7 @@ describe("memory popover", () => {
   });
 
   it("with auto-park on, parks the idle session after a minute of pressure and says so quietly", async () => {
-    setMemorySettings({ autoPark: true, idleMinutes: 10 });
+    setMemorySettings({ autoPark: true, idleMinutes: 1 });
     invoke.mockImplementation(async (command: string) => {
       if (command === "fork_memory_report") {
         const gone = new Set(park.mock.calls.map(([id]) => id));
@@ -182,5 +183,31 @@ describe("memory popover", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("memory settings", () => {
+  it("defaults to off and 1 min, and moves an old 5-60 min threshold to the default", () => {
+    expect(memorySettings()).toEqual({ autoPark: false, idleMinutes: 1 });
+    resetMemoryStores();
+    localStorage.setItem("monocode.fork.memory.idleMinutes", "30");
+    expect(memorySettings().idleMinutes).toBe(1);
+    expect(localStorage.getItem("monocode.fork.memory.idleMinutes")).toBe("1");
+    resetMemoryStores();
+    localStorage.setItem("monocode.fork.memory.idleMinutes", "0");
+    expect(memorySettings().idleMinutes).toBe(0);
+  });
+
+  it("sees another window turn auto-park off", () => {
+    setMemorySettings({ autoPark: true });
+    const before = memorySettings();
+    // Another window writes storage; this one hears a storage event.
+    localStorage.setItem("monocode.fork.memory.autoPark", "0");
+    window.dispatchEvent(new StorageEvent("storage", { key: "monocode.fork.memory.autoPark" }));
+    expect(memorySettings().autoPark).toBe(false);
+    // And a tick's re-read keeps the same object when nothing changed.
+    const after = memorySettings();
+    expect(after).not.toBe(before);
+    expect(refreshMemorySettings()).toBe(after);
   });
 });

@@ -1,8 +1,8 @@
 import {
-  DEFAULT_PROVIDER_ACCOUNT_ID,
   providerAccountExists,
   providerAccounts,
   selectedProviderAccountId,
+  sessionProviderAccountId,
   supportsAccountProfiles,
 } from "../../providers/model/providerAccounts";
 import type { HarnessId, Session } from "../../sessions/model/session";
@@ -24,12 +24,7 @@ export function mobileProviderAccounts(project: string) {
 
 export function mobileSessionAccountId(session: Session): string | undefined {
   if (!supportsAccountProfiles(session.harness)) return undefined;
-  return (
-    session.providerAccountId ??
-    (session.blocks.some((block) => block.role === "user")
-      ? DEFAULT_PROVIDER_ACCOUNT_ID
-      : selectedProviderAccountId(session.harness, session.cwd))
-  );
+  return sessionProviderAccountId(session.harness, session);
 }
 
 /** Validate against the final provider, including when the phone changes models. */

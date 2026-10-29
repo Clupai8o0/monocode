@@ -47,9 +47,16 @@ export type Suggestion = { rows: MemoryRow[]; freedBytes: number };
 export const MANUAL_MIN_IDLE_MS = 60_000;
 /** Pressure must last this long before auto-park acts, and between rounds. */
 export const AUTO_PARK_AFTER_MS = 60_000;
-export const IDLE_MINUTE_CHOICES = [1, 2, 5, 10, 30, 60] as const;
+/**
+ * Auto-park's idle thresholds. The stock idle timer (HARNESS_IDLE_PARK_MS,
+ * 3 min) already parks every idle child, so only shorter waits can matter;
+ * 0 means right after the turn ends.
+ */
+export const IDLE_MINUTE_CHOICES = [0, 1, 2] as const;
 export type IdleMinutes = (typeof IDLE_MINUTE_CHOICES)[number];
-export const IDLE_MINUTES_DEFAULT: IdleMinutes = 30;
+export const IDLE_MINUTES_DEFAULT: IdleMinutes = 1;
+/** Added to idle time when ranking, so RAM still counts for a just-idle child. */
+const SCORE_IDLE_FLOOR_MS = 60_000;
 /** Share of RAM that should be available once parking is done. */
 const TARGET_AVAILABLE: Record<Exclude<MemoryPressure, "normal">, number> = {
   warn: 0.15,
@@ -129,9 +136,15 @@ export function buildRows(
     .sort((a, b) => b.rssBytes - a.rssBytes);
 }
 
-/** Big and long idle first: RAM held times how long it sat unused. */
+/**
+ * Big and long idle first: RAM held times how long it sat unused (plus a
+ * minute, so a big session that just went idle still outranks a small one
+ * idle a little longer; every idle session is under 3 min anyway).
+ */
 export function parkScore(row: MemoryRow): number {
-  return row.parkable ? row.rssBytes * (row.idleMs ?? 0) : 0;
+  return row.parkable
+    ? row.rssBytes * ((row.idleMs ?? 0) + SCORE_IDLE_FLOOR_MS)
+    : 0;
 }
 
 export function totalSessionBytes(rows: readonly MemoryRow[]): number {
@@ -195,10 +208,11 @@ export function autoParkStep(
   if (input.now - tightSince < AUTO_PARK_AFTER_MS) {
     return { state: { tightSince }, park: [] };
   }
+  // The owner's threshold stands as set, even 0 (right after the turn).
   const { rows } = suggestParks(
     input.rows,
     input.report,
-    Math.max(MANUAL_MIN_IDLE_MS, input.idleThresholdMs),
+    Math.max(0, input.idleThresholdMs),
   );
   return { state: { tightSince: input.now }, park: rows };
 }

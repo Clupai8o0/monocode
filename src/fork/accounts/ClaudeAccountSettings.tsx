@@ -5,10 +5,13 @@ import {
   AUTO_PROVIDER_ACCOUNT_ID,
   newProviderAccount,
   providerAccountChoice,
+  providerAccountExists,
   providerAccounts,
   saveProviderAccount,
   selectProviderAccount,
+  subscribeProviderAccounts,
 } from "../../features/providers/model/providerAccounts";
+import { removeProviderAccountCredentials } from "../../features/providers/model/providerAccountCredentials";
 import { footerAccountLabel } from "../usage/FooterUsage";
 import {
   canAddCxAccount,
@@ -36,6 +39,15 @@ export function ClaudeAccountSettings({
   useEffect(() => {
     void loadAccountHomes();
   }, []);
+  // An account removed (or added) elsewhere changes which links exist, so
+  // "Add cx account" comes back once the cx account is gone.
+  useEffect(
+    () =>
+      subscribeProviderAccounts(() => {
+        void loadAccountHomes();
+      }),
+    [],
+  );
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const accounts = providerAccounts("claude");
@@ -50,7 +62,20 @@ export function ClaudeAccountSettings({
     try {
       const account = newProviderAccount("claude", "cx");
       await linkCxAccount(account.id);
-      saveProviderAccount(account);
+      try {
+        saveProviderAccount(account);
+        if (!providerAccountExists("claude", account.id)) {
+          throw new Error("Could not save the cx account");
+        }
+      } catch (saveError) {
+        // Roll back: drop the link (only the link; cx's login is untouched)
+        // so no orphan folder is left behind.
+        await removeProviderAccountCredentials("claude", account.id).catch(
+          () => undefined,
+        );
+        await loadAccountHomes();
+        throw saveError;
+      }
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : String(caught || "Could not add the cx account"),
