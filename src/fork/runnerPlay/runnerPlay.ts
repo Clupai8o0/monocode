@@ -534,7 +534,11 @@ function land(state: PlayState, now: number, world: PlayWorld): void {
 }
 
 function pickAntic(state: PlayState, now: number): AnticKind {
-  if (now - state.turnAt >= NAP_AFTER_MS && state.random() < NAP_CHANCE) {
+  if (
+    state.lastAntic !== "nap" &&
+    now - state.turnAt >= NAP_AFTER_MS &&
+    state.random() < NAP_CHANCE
+  ) {
     return "nap";
   }
   const options = DAY_ANTICS.filter((kind) => kind !== state.lastAntic);

@@ -522,6 +522,15 @@ describe("idle antics", () => {
     expect(state.mode).toBe("run");
   });
 
+  it("doesn't nap twice in a row", () => {
+    const state = createPlay(0, false, () => 0);
+    state.lastAntic = "nap";
+    state.nextAnticAt = 0;
+    stepPlay(state, NAP_AFTER_MS + 1, 16, LEDGE, WORLD);
+    expect(state.mode).toBe("antic");
+    expect(state.antic).not.toBe("nap");
+  });
+
   it("doesn't start one in the air, or while stunned or held", () => {
     const state = createPlay(0, false, seeded(5));
     const later = ANTIC_GAP_MAX_MS + 1;
