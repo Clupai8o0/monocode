@@ -50,6 +50,7 @@ import { codexMcpConfirmation } from "./codexElicitation";
 import { snapshotRemainder } from "../../core/streamText";
 import { prepareCodexMonoContext } from "./codexStore";
 import { CodexPeerMessages } from "../../../../fork/codex/peerMessages"; // Fork
+import { effortAutoFor } from "../../../../fork/effortAsk/effortAsk"; // Fork
 import type {
   ApprovalDecision,
   CompactContextInput,
@@ -662,6 +663,8 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     },
     "codex",
     codexStore,
+    undefined,
+    effortAutoFor(input.sessionId, input.ephemeral),
   );
 
   try {

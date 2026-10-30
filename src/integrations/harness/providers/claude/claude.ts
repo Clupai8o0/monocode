@@ -89,6 +89,7 @@ import type {
   SteerTurnInput,
 } from "../../core/types";
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
+import { effortAutoFor } from "../../../../fork/effortAsk/effortAsk"; // Fork
 import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
 import { remoteControlRequest } from "../../../../fork/peerMessages/remoteControl"; // Fork
 import { publishClaudeStreamUsage } from "../../../../fork/usage/claudeStreamUsage"; // Fork
@@ -591,6 +592,9 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       ? undefined
       : { provider: "claude", id: input.providerAccountId ?? "default" },
     vivobook ? "vivobook" : "claude",
+    undefined,
+    undefined,
+    !vivobook && effortAutoFor(input.sessionId, input.ephemeral),
   );
 
   liveByThread.set(input.sessionId, live);

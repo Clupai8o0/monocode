@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { HostChildBackend, withTimeZone } from "./child-backend";
+import { HostChildBackend, withEffortAuto, withTimeZone } from "./child-backend";
 import { REMOTE_PROVIDERS } from "../src/features/connections/model/protocol";
 
 it("resolves every provider and runs only allowed provider commands", async () => {
@@ -383,6 +383,18 @@ describe("agent time zone", () => {
     expect(withTimeZone({ PATH: "/bin", TZ: "UTC" }, "Asia/Kolkata")).toEqual({
       PATH: "/bin",
       TZ: "Asia/Kolkata",
+    });
+  });
+});
+
+describe("withEffortAuto", () => {
+  it("sets the flag only when the app will switch effort", () => {
+    expect(withEffortAuto({ A: "1" }, true)).toEqual({
+      A: "1",
+      MONOCODE_EFFORT_AUTO: "1",
+    });
+    expect(withEffortAuto({ A: "1", MONOCODE_EFFORT_AUTO: "1" }, false)).toEqual({
+      A: "1",
     });
   });
 });

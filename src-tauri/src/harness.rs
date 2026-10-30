@@ -943,6 +943,7 @@ pub fn harness_spawn(
     binary_path: Option<String>,
     codex_store: Option<String>,
     devin_ask_edits: Option<bool>,
+    effort_auto: Option<bool>,
 ) -> Result<u32, String> {
     let workdir = expand_home(&cwd);
     if !workdir.is_dir() {
@@ -979,6 +980,13 @@ pub fn harness_spawn(
         .stderr(Stdio::piped());
     prepare_child(&mut cmd, &command);
     apply_provider_account(&app, &mut cmd, account.as_ref())?;
+    // Fork: the vault's effort gate promises a switch only with this set, so
+    // one inherited from a parent shell must not leak in.
+    if effort_auto == Some(true) {
+        cmd.env("MONOCODE_EFFORT_AUTO", "1");
+    } else {
+        cmd.env_remove("MONOCODE_EFFORT_AUTO");
+    }
     let codex_store = match codex_store.as_deref() {
         None => None,
         Some("mono")

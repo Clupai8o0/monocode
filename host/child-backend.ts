@@ -108,6 +108,12 @@ const withShowsEnv = (env: NodeJS.ProcessEnv, sessionId: string) => ({
 });
 
 // Fork: sets TZ to the agent time zone when one is stored.
+/** Fork: set only when the app will really switch this session's effort. */
+export const withEffortAuto = (env: NodeJS.ProcessEnv, on: boolean) => {
+  const { MONOCODE_EFFORT_AUTO: _inherited, ...rest } = env;
+  return on ? { ...rest, MONOCODE_EFFORT_AUTO: "1" } : rest;
+};
+
 export const withTimeZone = (env: NodeJS.ProcessEnv, zone: string | null) =>
   zone ? { ...env, TZ: zone } : env;
 
@@ -377,7 +383,10 @@ export class HostChildBackend implements ChildBackend {
         windowsHide: true,
         env: withTimeZone(
           withShowsEnv(
-            { ...(account ? accountEnv(account, process.env) : process.env), MONOCODE_HOST: "1" },
+            withEffortAuto(
+              { ...(account ? accountEnv(account, process.env) : process.env), MONOCODE_HOST: "1" },
+              args.effortAuto === true,
+            ),
             id,
           ),
           this.timeZone(),

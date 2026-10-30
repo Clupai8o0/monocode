@@ -352,6 +352,8 @@ export async function spawnChild(
   codexStore?: "mono",
   /** `devin acp` only: start with an approval rule for every edit. */
   devinAskEdits?: boolean,
+  /** Fork: the app switches this session's effort; tells the effort gate. */
+  effortAuto?: boolean,
 ): Promise<void> {
   livePid.delete(sessionId);
   pendingExit.delete(sessionId);
@@ -369,6 +371,7 @@ export async function spawnChild(
     binaryPath,
     ...(codexStore ? { codexStore } : {}),
     ...(devinAskEdits ? { devinAskEdits } : {}),
+    ...(effortAuto ? { effortAuto } : {}),
   });
   if (typeof pid !== "number" || pid <= 0) return;
   livePid.set(sessionId, pid);

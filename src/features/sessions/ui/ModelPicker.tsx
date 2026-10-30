@@ -758,6 +758,7 @@ export function ModelPicker({
           }${triggerUltracode ? ", Ultracode on" : ""}`
         }
         aria-keyshortcuts={`${MOD}.`}
+        data-fork-effort-target={hideSettings ? undefined : ""}
         aria-expanded={open || recentMenu != null}
         aria-haspopup={hideSettings ? "dialog" : "menu"}
         onMouseDown={(event) => event.preventDefault()}
@@ -1386,6 +1387,7 @@ function SelectPill({
         aria-expanded={open}
         aria-haspopup="menu"
         data-model-control
+        data-fork-effort-target={isEffortSetting(setting) ? "" : undefined}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => (open ? dismiss(true) : openPicker())}
         className={controlClass(variant, open)}

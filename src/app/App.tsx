@@ -597,6 +597,7 @@ import {
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
+import { useEffortAsks } from "../fork/effortAsk/effortAsk";
 import {
   focusSessionElsewhere,
   OPEN_SESSION_EVENT,
@@ -2419,6 +2420,7 @@ function Workspace({
   );
   useInputNotifications(promptableSessions, activeSessionId);
   useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
+  useEffortAsks(promptableSessions, setSessions); // Fork: the model sets its effort
   // Fork: report this window's sessions so no other window opens them twice.
   const forkSessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
   useWindowSessions(forkSessionIds);
