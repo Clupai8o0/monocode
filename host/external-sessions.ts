@@ -6,12 +6,13 @@ import type {
   ExternalSession,
   ExternalTranscriptPage,
   ExternalTurn,
+  UnfiledExternalSession,
 } from "../src/fork/externalSessions/externalSessionsModel";
 import { isRelayEntry } from "../src/fork/lab/labProtocol";
 
 /**
- * "Elsewhere": agent sessions on this machine's projects that MonoCode did
- * not start, read from the agents' session registries, the shared claims
+ * "Elsewhere": agent sessions on this machine that MonoCode did not start,
+ * in its projects or outside them, read from the agents' session registries, the shared claims
  * history and handoff files. Read-only; nothing here touches a session.
  */
 
@@ -444,17 +445,19 @@ function agentOfName(name: string | undefined) {
 }
 
 type Row = ExternalSession & { transcriptPath?: string };
+type UnfiledRow = UnfiledExternalSession & { transcriptPath?: string };
 
 /**
  * The external sessions of every project, or of `only`, transcript paths
  * included. Folders match against every project either way, so a nested
- * project keeps its own sessions.
+ * project keeps its own sessions. Live sessions under no project come back
+ * as `unfiled`, unless `only` asks for one project.
  */
 async function buildRows(
   projects: ExternalProject[],
   options: ExternalSessionsOptions,
   only?: string,
-): Promise<Row[]> {
+): Promise<{ rows: Row[]; unfiled: UnfiledRow[] }> {
   const home = options.home ?? homedir();
   const platform = options.platform ?? process.platform;
   const now = options.now ?? Date.now;
@@ -489,20 +492,20 @@ async function buildRows(
   };
 
   const rows: Row[] = [];
+  const unfiled: UnfiledRow[] = [];
   const live = new Set<string>();
   for (const record of await readRegistries(home, platform)) {
     if (excluded.has(record.sessionId) || !SESSION_ID.test(record.sessionId)) continue;
     if (!(await isAlive(record.pid, record.procStart))) continue;
     live.add(record.sessionId);
     const project = await match(record.cwd);
-    if (!wanted(project)) continue;
+    if (project ? !wanted(project) : only !== undefined) continue;
     const claude = record.source === "claude" || record.source === "claude-cx";
     const found = claude
       ? await locateTranscript(home, platform, record.source, record.cwd, record.sessionId)
       : null;
-    rows.push({
+    const row: UnfiledRow = {
       id: record.sessionId,
-      projectId: project.id,
       source: found?.source ?? record.source,
       ...(record.name ? { name: record.name } : {}),
       cwd: record.cwd,
@@ -511,7 +514,9 @@ async function buildRows(
       updatedAt: record.updatedAt,
       hasTranscript: Boolean(found),
       ...(found ? { transcriptPath: found.path } : {}),
-    });
+    };
+    if (project) rows.push({ ...row, projectId: project.id });
+    else unfiled.push(row);
   }
 
   // Notes and hand-overs, one history file per repository.
@@ -520,13 +525,18 @@ async function buildRows(
     const common = commonOf.get(project.id);
     if (common && !histories.has(common)) histories.set(common, readHistory(common, at));
   }
+  // A repository no project holds still has notes for its sessions.
+  for (const row of unfiled) {
+    const common = await gitCommonDir(row.cwd);
+    if (common && !histories.has(common)) histories.set(common, readHistory(common, at));
+  }
   const latest = new Map<string, HistoryLine>();
   for (const lines of await Promise.all(histories.values()))
     for (const line of lines) {
       const current = latest.get(line.session);
       if (!current || line.at >= current.at) latest.set(line.session, line);
     }
-  for (const row of rows) {
+  for (const row of [...rows, ...unfiled]) {
     const note = latest.get(row.id);
     if (!note) continue;
     if (note.text) row.note = note.text;
@@ -613,7 +623,7 @@ async function buildRows(
     }
   }
 
-  const byUpdate = (a: Row, b: Row) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+  const byUpdate = (a: UnfiledRow, b: UnfiledRow) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   const result: Row[] = [];
   for (const project of scope) {
     result.push(...rows.filter((row) => row.projectId === project.id).sort(byUpdate));
@@ -624,10 +634,10 @@ async function buildRows(
         .slice(0, MAX_HANDED_OVER),
     );
   }
-  return result;
+  return { rows: result, unfiled: unfiled.sort(byUpdate) };
 }
 
-function publicRow({ transcriptPath: _, ...row }: Row): ExternalSession {
+function publicRow<T extends UnfiledRow>({ transcriptPath: _, ...row }: T) {
   return row;
 }
 
@@ -635,7 +645,7 @@ export async function listExternalSessions(
   projects: ExternalProject[],
   options: ExternalSessionsOptions = {},
   params: { projectId?: unknown } = {},
-): Promise<{ sessions: ExternalSession[] }> {
+): Promise<{ sessions: ExternalSession[]; unfiled?: UnfiledExternalSession[] }> {
   let only: string | undefined;
   if (params.projectId !== undefined && params.projectId !== null) {
     if (typeof params.projectId !== "string") throw new Error("Invalid project id");
@@ -643,7 +653,11 @@ export async function listExternalSessions(
       throw new Error("Project is not registered on this machine");
     only = params.projectId;
   }
-  return { sessions: (await buildRows(projects, options, only)).map(publicRow) };
+  const { rows, unfiled } = await buildRows(projects, options, only);
+  return {
+    sessions: rows.map(publicRow),
+    ...(only === undefined ? { unfiled: unfiled.map(publicRow) } : {}),
+  };
 }
 
 function clip(text: string, page: { truncated: boolean }) {
@@ -809,10 +823,15 @@ export async function readExternalSession(
   options: ExternalSessionsOptions,
   params: { projectId?: unknown; sessionId?: unknown; before?: unknown; limit?: unknown },
 ): Promise<ExternalTranscriptPage> {
-  const project = projects.find((item) => item.id === params.projectId);
-  if (!project) throw new Error("Project is not registered on this machine");
+  // Without a project, any live session on the machine; hand-overs need one.
+  const named = params.projectId !== undefined && params.projectId !== null;
+  const project = named ? projects.find((item) => item.id === params.projectId) : undefined;
+  if (named && !project) throw new Error("Project is not registered on this machine");
   const sessionId = params.sessionId;
-  if (typeof sessionId !== "string" || !(SESSION_ID.test(sessionId) || HANDOFF_ID.test(sessionId)))
+  if (
+    typeof sessionId !== "string" ||
+    !(SESSION_ID.test(sessionId) || (project && HANDOFF_ID.test(sessionId)))
+  )
     throw new Error("Invalid session id");
   let before: number | undefined;
   if (params.before !== undefined && params.before !== null) {
@@ -824,10 +843,13 @@ export async function readExternalSession(
     typeof params.limit === "number" && Number.isFinite(params.limit)
       ? Math.min(200, Math.max(1, Math.floor(params.limit)))
       : 60;
-  const row = (await buildRows(projects, options, project.id)).find((item) => item.id === sessionId);
+  const { rows, unfiled } = await buildRows(projects, options, project?.id);
+  const row = project
+    ? rows.find((item) => item.id === sessionId)
+    : [...rows, ...unfiled].find((item) => item.id === sessionId && item.state !== "handed-over");
   if (!row) throw new Error("Session not found");
   const handoff =
-    before === undefined && row.handoffPath
+    project && before === undefined && row.handoffPath
       ? await readHandoff(project.path, row.handoffPath)
       : undefined;
   const extra = handoff ? { handoff } : {};
