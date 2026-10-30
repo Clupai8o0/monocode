@@ -80,10 +80,7 @@ export function GamesPanel() {
     lastGrid.current = gameId;
   }
   const gridId = lastGrid.current;
-  const gridRun = useRef(runId);
-  if (!atTable) {
-    gridRun.current = runId;
-  }
+  const [tableRun, setTableRun] = useState(0);
   const game = GRID_GAMES.find((item) => item.id === gridId) ?? GRID_GAMES[0]!;
   const paused = !open || !focused || notice !== null || atTable;
 
@@ -141,7 +138,8 @@ export function GamesPanel() {
 
   const newGame = () => {
     resume();
-    setRunId((value) => value + 1);
+    // Fork: a table restarting leaves the parked grid game alone.
+    (atTable ? setTableRun : setRunId)((value) => value + 1);
     focusBoard();
   };
 
@@ -274,7 +272,7 @@ export function GamesPanel() {
             host={{
               gameId: gridId,
               mode,
-              runId: gridRun.current,
+              runId,
               paused,
               active: open && !atTable,
               onStats,
@@ -288,7 +286,7 @@ export function GamesPanel() {
           <TableGames
             gameId={gameId}
             mode={mode}
-            runId={runId}
+            runId={tableRun}
             open={open}
             waiting={activity.waiting}
             onExit={() => gamesPanel.hide()}

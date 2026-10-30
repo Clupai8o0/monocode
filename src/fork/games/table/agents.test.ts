@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seeded } from "../seeded";
 import { AGENTS, AGENT_IDS, defaultSeats, fillSeats, pickLine, type ChatterEvent } from "./agents";
-import { formatTokens, rivalLine, rivalShares } from "./tokens";
+import { chipsInPlay, formatTokens, rivalLine, rivalShares } from "./tokens";
 
 const EVENTS: ChatterEvent[] = [
   "thinking",
@@ -64,6 +64,17 @@ describe("agents", () => {
 });
 
 describe("tokens", () => {
+  it("lets one card game at a time have chips in play", () => {
+    expect(chipsInPlay.claim("poker")).toBe(true);
+    expect(chipsInPlay.claim("poker")).toBe(true);
+    expect(chipsInPlay.claim("blackjack")).toBe(false);
+    chipsInPlay.release("blackjack");
+    expect(chipsInPlay.claim("blackjack")).toBe(false);
+    chipsInPlay.release("poker");
+    expect(chipsInPlay.claim("blackjack")).toBe(true);
+    chipsInPlay.release("blackjack");
+  });
+
   it("formats amounts", () => {
     expect(formatTokens(950)).toBe("950");
     expect(formatTokens(12400)).toBe("12.4k");

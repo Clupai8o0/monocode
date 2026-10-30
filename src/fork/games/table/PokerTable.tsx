@@ -43,7 +43,7 @@ import {
 import { decidePoker, equityRuns } from "./pokerAi";
 import { handName } from "./pokerEval";
 import { BUTTON_MARK } from "./sprites";
-import { formatTokens, rivalShares, tokenStore } from "./tokens";
+import { chipsInPlay, formatTokens, rivalShares, tokenStore } from "./tokens";
 
 /** Fork: the poker table. The engine holds the rules; this paces and draws them. */
 
@@ -136,6 +136,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (!result) {
       return;
     }
+    chipsInPlay.release("poker");
     for (const pot of result.pots) {
       for (const winner of pot.winners) {
         flyCoins(root.current, "[data-pot]", seatSelector(seatIds[winner]!), 4);
@@ -191,6 +192,10 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (tokens < big) {
       return;
     }
+    if (!chipsInPlay.claim("poker")) {
+      setLastWords("Finish your blackjack round first.");
+      return;
+    }
     const nextIds = fillSeats(pickedRef.current, MIN_AGENTS).slice(0, MAX_AGENTS);
     const cap = big * STACK_BIGS;
     const players = [
@@ -236,6 +241,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (!active) {
       return;
     }
+    chipsInPlay.release("poker");
     handRef.current = null;
     setHand(null);
     setIds([]);
@@ -478,7 +484,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
               ) : yourTurn ? (
                 "your turn"
               ) : !hand ? (
-                `blinds ${stakes.small}/${stakes.big}`
+                lastWords || `blinds ${stakes.small}/${stakes.big}`
               ) : (
                 ""
               )}

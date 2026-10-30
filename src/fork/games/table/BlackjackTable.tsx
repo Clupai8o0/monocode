@@ -46,7 +46,7 @@ import {
 } from "./kit";
 import type { TableProps } from "./PokerTable";
 import { DEALER } from "./sprites";
-import { formatTokens, tokenStore } from "./tokens";
+import { chipsInPlay, formatTokens, tokenStore } from "./tokens";
 
 /** Fork: the blackjack table. Agents sit first and play first; you go last. */
 
@@ -153,6 +153,7 @@ export function BlackjackTable({ mode, runId, active, waiting, onExit, onInput }
   }, []);
 
   const settle = (done: BjState) => {
+    chipsInPlay.release("blackjack");
     const count = idsRef.current.length;
     const mine = seatNet(done.seats[count]!);
     done.seats.forEach((seat, index) => {
@@ -197,6 +198,10 @@ export function BlackjackTable({ mode, runId, active, waiting, onExit, onInput }
     if (yourBet < min) {
       return;
     }
+    if (!chipsInPlay.claim("blackjack")) {
+      setNote("Finish your poker hand first.");
+      return;
+    }
     const nextIds = pickedRef.current.slice(0, MAX_AGENTS);
     const bank = min * AGENT_BANK;
     const players = [
@@ -239,6 +244,7 @@ export function BlackjackTable({ mode, runId, active, waiting, onExit, onInput }
     if (!active) {
       return;
     }
+    chipsInPlay.release("blackjack");
     stateRef.current = null;
     setState(null);
     setIds([]);

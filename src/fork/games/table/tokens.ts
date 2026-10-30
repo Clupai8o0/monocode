@@ -52,6 +52,28 @@ function parseRivals(value: unknown): Rivals | null {
   return value && typeof value === "object" ? (value as Rivals) : null;
 }
 
+/**
+ * The card games share one balance, so only one may have chips in play at a
+ * time; otherwise the same tokens could be bet twice.
+ */
+let tableInPlay: string | null = null;
+
+export const chipsInPlay = {
+  /** Claims the balance for a game. False if the other game has it. */
+  claim(game: string) {
+    if (tableInPlay && tableInPlay !== game) {
+      return false;
+    }
+    tableInPlay = game;
+    return true;
+  },
+  release(game: string) {
+    if (tableInPlay === game) {
+      tableInPlay = null;
+    }
+  },
+};
+
 let bankroll: Bankroll | null = null;
 let rivals: Rivals | null = null;
 const listeners = new Set<() => void>();

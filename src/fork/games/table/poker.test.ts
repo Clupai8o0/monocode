@@ -136,6 +136,40 @@ describe("raises", () => {
     expect(legalActions(state).callAmount).toBe(15);
   });
 
+  it("reopens the betting once short all-ins add up to a full raise", () => {
+    let state = hand([1000, 1000, 150, 200, 1000], 3);
+    expect(state.button).toBe(4);
+    expect(state.toAct).toBe(2);
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "raise", to: 100 }); // The button, by 90.
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "raise", to: 150 }); // Seat 2 all in, +50.
+    expect(state.minRaise).toBe(90);
+    expect(state.toAct).toBe(3);
+    state = applyAction(state, { type: "raise", to: 200 }); // Seat 3 all in, +50.
+    // That's 100 since the full raise, so the button may raise again.
+    expect(state.toAct).toBe(4);
+    expect(legalActions(state).canRaise).toBe(true);
+    expect(state.minRaise).toBe(90);
+  });
+
+  it("keeps the betting shut while short all-ins fall short of a full raise", () => {
+    let state = hand([1000, 1000, 150, 1000, 1000], 3);
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "raise", to: 100 });
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "call" });
+    state = applyAction(state, { type: "raise", to: 150 });
+    expect(state.toAct).toBe(3);
+    expect(legalActions(state).canRaise).toBe(true); // Hasn't acted since the raise.
+    state = applyAction(state, { type: "call" });
+    expect(state.toAct).toBe(4);
+    expect(legalActions(state).canRaise).toBe(false); // Raised already; only +50 since.
+  });
+
   it("can't raise when nobody else can bet", () => {
     // Seat 0 has the button and the small blind, and shoves its whole stack.
     let state = hand([200, 1000]);

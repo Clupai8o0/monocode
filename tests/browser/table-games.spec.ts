@@ -312,3 +312,35 @@ test("a small window still fits every control", async ({ page }, testInfo) => {
   expect(board.y + board.height).toBeLessThanOrEqual(panel.y + panel.height);
   expect(board.width % 96).toBe(0);
 });
+
+test("only one card game holds chips at a time, and New game leaves a parked grid game", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "poker");
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-action="fold"]')).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("tab", { name: "blackjack" }).click();
+  await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Blackjack table")).toHaveAttribute("data-table-phase", "idle");
+  await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Finish your poker hand first.");
+
+  // Finish the hand, and blackjack opens up.
+  await page.getByRole("tab", { name: "poker" }).click();
+  await page.keyboard.press("f");
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done", { timeout: 60_000 });
+  await page.getByRole("tab", { name: "blackjack" }).click();
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Blackjack table")).not.toHaveAttribute("data-table-phase", "idle");
+
+  // A grid game's score survives New game at a table.
+  await page.getByRole("tab", { name: "agent run" }).click();
+  await expect(page.locator("[data-grid-board]")).toBeFocused();
+  await page.keyboard.press(" ");
+  await expect.poll(() => tokens(page), { timeout: 8000 }).toBeGreaterThan(2);
+  const before = await tokens(page);
+  await page.getByRole("tab", { name: "chess" }).click();
+  await page.getByRole("button", { name: "New game" }).click();
+  await page.getByRole("tab", { name: "agent run" }).click();
+  expect(await tokens(page)).toBeGreaterThanOrEqual(before);
+});

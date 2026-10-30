@@ -62,6 +62,8 @@ export type PokerState = {
   currentBet: number;
   /** The smallest legal raise on top of `currentBet`. */
   minRaise: number;
+  /** The bet when betting last reopened: short all-ins add up from here. */
+  reopenedAt: number;
   result: PokerResult | null;
 };
 
@@ -157,6 +159,7 @@ export function startHand(
     toAct: -1,
     currentBet: bigBlind,
     minRaise: bigBlind,
+    reopenedAt: bigBlind,
     result: null,
   };
   state.toAct = firstToAct(state, bbSeat);
@@ -282,14 +285,18 @@ export function applyAction(
     const raisedBy = to - state.currentBet;
     post(seat, to - seat.bet);
     next.currentBet = to;
-    if (raisedBy >= state.minRaise) {
-      // A full raise reopens the betting for everyone still in.
-      next.minRaise = raisedBy;
+    // A full raise reopens the betting for everyone still in. So do short
+    // all-ins once together they add up to one, without changing the raise size.
+    if (to - state.reopenedAt >= state.minRaise) {
+      next.reopenedAt = to;
+      if (raisedBy >= state.minRaise) {
+        next.minRaise = raisedBy;
+      }
       for (const other of seats) {
         other.mayRaise = true;
       }
     }
-    // Short or not, everyone else has to answer it. A short one reopens nothing.
+    // Short or not, everyone else has to answer it.
     for (const other of seats) {
       other.acted = false;
     }
@@ -339,6 +346,7 @@ export function advance(state: PokerState): PokerState {
           : "river",
     currentBet: 0,
     minRaise: state.bigBlind,
+    reopenedAt: 0,
     toAct: -1,
   };
   // Heads-up too, the first to act after the flop is left of the button.
