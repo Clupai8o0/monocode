@@ -23,6 +23,7 @@ mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
+mod fork_cost; // Fork: API-equivalent cost from local transcripts.
 mod fork_turn_diff; // Fork: one turn's changes, and restoring from it.
 mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
@@ -719,6 +720,7 @@ pub fn run() {
             fork_shows::fork_shows_cache_write, // Fork
             fork_shows::fork_shows_cache_prune, // Fork
             fork_shows::fork_shows_cache_root,  // Fork
+            fork_cost::fork_cost_report, // Fork
             fork_worktree_merge::fork_worktree_merge_status, // Fork
             fork_worktree_merge::fork_worktree_merge_back,   // Fork
             fork_worktree_merge::fork_worktree_delete_merged_branch, // Fork

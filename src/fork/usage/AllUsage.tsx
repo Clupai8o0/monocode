@@ -27,6 +27,7 @@ import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
 import { Gauge, RefreshCw } from "../../shared/ui/icons";
 import { Popover, type PopoverDismissReason } from "../../shared/ui/Popover";
 import { footerAccountLabel } from "./FooterUsage";
+import { CostPanel } from "../cost/CostPanel"; // Fork
 import {
   loadExtraUsage,
   useExtraUsage,
@@ -105,6 +106,7 @@ function useAccounts(provider: "claude" | "codex"): ProviderAccount[] {
 }
 
 export function AllUsagePanel() {
+  const [tab, setTab] = useState<"usage" | "cost">("usage");
   const claude = useAccounts("claude");
   const codex = useAccounts("codex");
   const [now, setNow] = useState(Date.now);
@@ -133,6 +135,28 @@ export function AllUsagePanel() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Fork: Usage or Cost, the footer's All panel. */}
+      <div role="tablist" aria-label="Show" className="flex gap-0.5">
+        {(["usage", "cost"] as const).map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            role="tab"
+            aria-selected={tab === choice}
+            onClick={() => setTab(choice)}
+            className={`h-6 rounded-md px-2 text-[12px] transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-accent ${
+              tab === choice
+                ? "bg-content/10 font-medium text-content"
+                : "text-content/55 hover:text-content"
+            }`}
+          >
+            {choice === "usage" ? "Usage" : "Cost"}
+          </button>
+        ))}
+      </div>
+      {tab === "cost" ? <CostPanel /> : null}
+      {tab === "usage" ? (
+        <>
       <div className="flex items-center justify-between">
         <h2 className="text-[12px] font-medium">Usage on every account</h2>
         <button
@@ -177,6 +201,8 @@ export function AllUsagePanel() {
       <Section name="Grok" harness="grok">
         <p className="text-content/45">Grok Build doesn't report plan usage.</p>
       </Section>
+        </>
+      ) : null}
     </div>
   );
 }

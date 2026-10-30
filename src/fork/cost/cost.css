@@ -1,0 +1,16 @@
+/* Validated with the dataviz skill's script against each surface. Dark's steps
+   sit darker on purpose, so the marks don't glare. */
+.fork-cost {
+  --cost-opus: #3987e5;
+  --cost-sonnet: #d95926;
+  --cost-haiku: #199e70;
+  --cost-fable: #c98500;
+  --cost-other: #9085e9;
+}
+.theme-light .fork-cost {
+  --cost-opus: #2a78d6;
+  --cost-sonnet: #eb6834;
+  --cost-haiku: #1baf7a;
+  --cost-fable: #eda100;
+  --cost-other: #6250d6;
+}
