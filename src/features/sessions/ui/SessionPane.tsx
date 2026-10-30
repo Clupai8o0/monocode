@@ -1,4 +1,5 @@
 // Fork: auto worktrees, Merge back, the follow-up coach mark, Continue in Codex.
+import { DevicePanel } from "../../../fork/device/DevicePanel";
 import {
   ContinuedFromCard,
   ContinueElsewhereButton,
@@ -1403,6 +1404,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
       </div>
     </div>
     <ChecklistSidebar blocks={session.blocks} />
+    {/* Fork: a live emulator or simulator, opened from Stacks */}
+    {focused ? <DevicePanel /> : null}
     </div>
   );
 });

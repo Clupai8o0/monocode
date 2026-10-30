@@ -259,6 +259,23 @@ fn serve(mut stream: TcpStream, app: &AppHandle, inner: &Arc<Mutex<Inner>>) {
             if crate::fork_mcp::is_whoami(&request.action) {
                 return Ok(json!({"ok": true, "result": {"level": client.level}}));
             }
+            // Fork: devices need no window, and run on this worker thread.
+            if crate::fork_device::is_device_action(&request.action) {
+                let outcome =
+                    crate::fork_device::handle_action(&request.action, &request.input);
+                let reply = match &outcome {
+                    Ok(result) => json!({"ok": true, "result": result}),
+                    Err(error) => json!({"ok": false, "error": error}),
+                };
+                crate::fork_mcp::log_call(
+                    &dir,
+                    &client,
+                    &request.action,
+                    &request.input,
+                    Ok(&reply),
+                );
+                return Ok(reply);
+            }
             Some((dir, client))
         } else {
             None

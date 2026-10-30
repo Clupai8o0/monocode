@@ -1,3 +1,4 @@
+import { openDevicePanel, type Device } from "../device/deviceModel"; // Fork
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Container, LoaderCircle, RefreshCw } from "../../shared/ui/icons";
@@ -312,11 +313,21 @@ function Row({ row }: { row: StackRow }) {
             {row.kind}
           </span>
         ) : null}
+        {/* Fork: a running device can be watched beside the session. */}
+        {running && (row.kind === "ios" || row.kind === "android") ? (
+          <button
+            type="button"
+            className="ml-auto shrink-0 rounded px-1.5 text-[11px] font-medium text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={() => openDevicePanel(row.kind as Device["kind"])}
+          >
+            Show
+          </button>
+        ) : null}
         {running && stop.step !== "asking" ? (
           <button
             type="button"
             disabled={stop.step === "stopping"}
-            className="ml-auto shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent"
+            className={`${row.kind === "stack" ? "ml-auto " : ""}shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent`}
             onClick={() => {
               const question = stopQuestion(row);
               if (question) {

@@ -24,6 +24,7 @@ mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
 mod fork_cost; // Fork: API-equivalent cost from local transcripts.
+mod fork_device; // Fork: a live emulator or simulator beside a session.
 mod fork_turn_diff; // Fork: one turn's changes, and restoring from it.
 mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
@@ -722,6 +723,11 @@ pub fn run() {
             fork_shows::fork_shows_cache_prune, // Fork
             fork_shows::fork_shows_cache_root,  // Fork
             fork_cost::fork_cost_report, // Fork
+            fork_device::fork_device_list,       // Fork
+            fork_device::fork_device_screenshot, // Fork
+            fork_device::fork_device_tap,        // Fork
+            fork_device::fork_device_swipe,      // Fork
+            fork_device::fork_device_type,       // Fork
             fork_mcp::fork_mcp_clients,       // Fork
             fork_mcp::fork_mcp_create_client, // Fork
             fork_mcp::fork_mcp_revoke_client, // Fork

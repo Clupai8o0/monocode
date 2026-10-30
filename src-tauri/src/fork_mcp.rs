@@ -32,7 +32,16 @@ static LOG_LOCK: Mutex<()> = Mutex::new(());
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
 const READ_ACTIONS: [&str; 2] = ["sessions.list", "sessions.read"];
-const ACT_ACTIONS: [&str; 3] = ["sessions.start", "sessions.send", "sessions.stop"];
+const ACT_ACTIONS: [&str; 8] = [
+    "sessions.start",
+    "sessions.send",
+    "sessions.stop",
+    "device.list",
+    "device.screenshot",
+    "device.tap",
+    "device.swipe",
+    "device.type",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,7 +267,7 @@ pub fn log_call(
 
 /// What the log keeps of a call: where it went, never what it said.
 pub fn log_target(input: &Value) -> Option<String> {
-    ["sessionId", "project"]
+    ["sessionId", "project", "device"]
         .iter()
         .find_map(|key| input.get(key).and_then(Value::as_str))
         .map(str::to_string)
@@ -309,7 +318,19 @@ fn session_schema() -> Value {
     })
 }
 
-const TOOLS: [Tool; 5] = [
+fn device_schema(extra: Value, required: &[&str]) -> Value {
+    let mut properties = json!({
+        "device": { "type": "string", "description": "An id from device_list." },
+    });
+    if let (Some(all), Some(more)) = (properties.as_object_mut(), extra.as_object()) {
+        all.extend(more.clone());
+    }
+    let mut needed = vec!["device"];
+    needed.extend_from_slice(required);
+    json!({ "type": "object", "properties": properties, "required": needed })
+}
+
+const TOOLS: [Tool; 10] = [
     Tool {
         name: "monocode_sessions_list",
         action: "sessions.list",
@@ -378,6 +399,53 @@ const TOOLS: [Tool; 5] = [
         action: "sessions.stop",
         description: "Stop a session's current turn.",
         schema: session_schema,
+    },
+    Tool {
+        name: "device_list",
+        action: "device.list",
+        description:
+            "List the running iOS Simulators and Android emulators. Real phones are never listed.",
+        schema: || json!({ "type": "object", "properties": {} }),
+    },
+    Tool {
+        name: "device_screenshot",
+        action: "device.screenshot",
+        description:
+            "See a device's screen. Points for the other device tools are in this image's pixels.",
+        schema: || device_schema(json!({}), &[]),
+    },
+    Tool {
+        name: "device_tap",
+        action: "device.tap",
+        description: "Tap a point on a device's screen, in screenshot pixels.",
+        schema: || {
+            device_schema(
+                json!({ "x": { "type": "number" }, "y": { "type": "number" } }),
+                &["x", "y"],
+            )
+        },
+    },
+    Tool {
+        name: "device_swipe",
+        action: "device.swipe",
+        description: "Swipe between two points on a device's screen, in screenshot pixels.",
+        schema: || {
+            device_schema(
+                json!({
+                    "fromX": { "type": "number" },
+                    "fromY": { "type": "number" },
+                    "toX": { "type": "number" },
+                    "toY": { "type": "number" },
+                }),
+                &["fromX", "fromY", "toX", "toY"],
+            )
+        },
+    },
+    Tool {
+        name: "device_type",
+        action: "device.type",
+        description: "Type text into the focused field on a device.",
+        schema: || device_schema(json!({ "text": { "type": "string" } }), &["text"]),
     },
 ];
 
@@ -451,6 +519,14 @@ pub fn handle_line(line: &str, forward: &mut Forward) -> Option<Value> {
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             match forward(tool.action, arguments) {
+                // A screenshot goes back as an image the agent can see.
+                Ok(reply) if reply.get("png").and_then(Value::as_str).is_some() => rpc_result(
+                    &id,
+                    json!({
+                        "content": [{ "type": "image", "data": reply["png"], "mimeType": "image/png" }],
+                        "isError": false,
+                    }),
+                ),
                 Ok(reply) => rpc_result(&id, tool_text(reply.to_string(), false)),
                 Err(error) => rpc_result(&id, tool_text(error, true)),
             }
@@ -809,7 +885,7 @@ mod tests {
             tool_names("read"),
             vec!["monocode_sessions_list", "monocode_sessions_read"]
         );
-        assert_eq!(tool_names("supervised").len(), 5);
+        assert_eq!(tool_names("supervised").len(), 10);
         assert!(!tool_names("full")
             .iter()
             .any(|name| name.contains("delete")));
@@ -846,6 +922,26 @@ mod tests {
         let (action, input) = seen.unwrap();
         assert_eq!(action, "sessions.send");
         assert_eq!(input["prompt"], "hi");
+    }
+
+    #[test]
+    fn read_level_cant_see_or_touch_a_device() {
+        let dir = dir();
+        let (_, token) = make(&dir, Level::Read);
+        for action in ["device.list", "device.screenshot", "device.tap"] {
+            assert!(authorize(&dir.0, &token, action).is_err(), "{action}");
+        }
+    }
+
+    #[test]
+    fn a_screenshot_comes_back_as_an_image() {
+        let mut forward = |_: &str, _: Value| Ok(json!({ "png": "aGk=" }));
+        let reply = call(
+            r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"device_screenshot","arguments":{"device":"android:emulator-1"}}}"#,
+            &mut forward,
+        );
+        assert_eq!(reply["result"]["content"][0]["type"], "image");
+        assert_eq!(reply["result"]["content"][0]["data"], "aGk=");
     }
 
     #[test]

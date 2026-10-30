@@ -35,7 +35,7 @@ export const MCP_LEVELS: readonly { id: McpLevel; label: string; note: string }[
   {
     id: "supervised",
     label: "Supervised",
-    note: "Also start, message and stop sessions that ask before acting.",
+    note: "Also start, message and stop sessions that ask before acting, and use emulators.",
   },
   {
     id: "full",
@@ -130,6 +130,11 @@ const ACTION_WORDS: Record<string, string> = {
   "sessions.start": "started a session",
   "sessions.send": "messaged a session",
   "sessions.stop": "stopped a session",
+  "device.list": "listed devices",
+  "device.screenshot": "looked at a device",
+  "device.tap": "tapped a device",
+  "device.swipe": "swiped a device",
+  "device.type": "typed on a device",
 };
 
 export const mcpActionText = (action: string) =>
