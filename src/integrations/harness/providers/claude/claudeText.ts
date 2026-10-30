@@ -46,6 +46,9 @@ type TextSettings = {
   maxTurns?: number;
 };
 
+/** Side questions may read files before answering; each tool call costs a turn. */
+const READ_ONLY_MAX_TURNS = 12;
+
 type InFlightTool = {
   id: string;
   name: string;
@@ -103,7 +106,9 @@ function textSettings(
     effort: normalizeClaudeCliEffort(effort, model),
     promptEffort: effort,
     settings,
-    ...(readOnly ? { permissionMode: "plan" as const, maxTurns: 1 } : {}),
+    ...(readOnly
+      ? { permissionMode: "plan" as const, maxTurns: READ_ONLY_MAX_TURNS }
+      : {}),
   };
 }
 
