@@ -130,6 +130,9 @@ export type SessionSummary = {
   busy?: boolean;
   /** What it waits on the user for; absent from an older desktop. */
   waiting?: "approval" | "question";
+  /** Its current tool step and turn start, for the lock screen. Also absent from an older desktop. */
+  step?: string;
+  busySince?: number;
   /** The tool call it waits to run, from a machine's host. */
   approval?: { requestId: number; label: string };
 };

@@ -29,6 +29,7 @@ import { radii, themedStyles, THEMES, useColors, useTheme } from "@/ui/theme";
 const CATEGORY_ICONS: Record<NotificationCategory, IconName> = {
   agentInput: "lock",
   agentFinished: "check",
+  liveProgress: "metrics",
 };
 
 export default function SettingsScreen() {

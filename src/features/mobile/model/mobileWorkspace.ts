@@ -173,6 +173,8 @@ export async function mobileCatalog(
           [...session.blocks].reverse().find((block) => block.startedAt)
             ?.startedAt ?? 0,
         busy: !!session.busy,
+        // Fork: the phone's lock screen card shows these.
+        ...(session.busy ? mobileLiveStep(session.blocks) : {}),
         // What it waits on the user for, so the phone can notify of it.
         ...(hasPendingApproval(session.blocks)
           ? { waiting: "approval" as const }
@@ -641,6 +643,19 @@ export function mobileFileHighlight(job: string, from: number) {
 
 /** The uncommitted changes in the project's checkout, or in one of its
  *  worktrees when the phone names it. */
+/** The current turn's start and latest tool step, kept short for a lock screen. */
+function mobileLiveStep(blocks: Session["blocks"]) {
+  const started = [...blocks]
+    .reverse()
+    .find((block) => block.role === "user" && block.startedAt)?.startedAt;
+  const tool = [...blocks].reverse().find((block) => block.role === "tool");
+  const step = (tool?.tool?.title || tool?.text || "").trim().split("\n")[0];
+  return {
+    ...(started ? { busySince: started } : {}),
+    ...(step ? { step: step.slice(0, 60) } : {}),
+  };
+}
+
 /**
  * Fork: what one turn changed, read-only. Only for a turn of a session in a
  * project this phone can see, like everything else it reads.

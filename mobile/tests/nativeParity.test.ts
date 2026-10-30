@@ -23,7 +23,10 @@ const ANDROID_GUARD = /Platform\.OS === "android"|Platform\.OS === "ios"/;
  * needs an `.android.tsx` twin, or a Platform check before it draws one.
  */
 describe("SwiftUI views stay off Android", () => {
-  const files = sources(SRC).filter((path) => !path.includes(".android."));
+  // A `.ios` file never loads on Android, so it's free to use them.
+  const files = sources(SRC).filter(
+    (path) => !path.includes(".android.") && !path.includes(".ios."),
+  );
   const users = files.filter((path) =>
     SWIFT_VIEWS.test(readFileSync(path, "utf8")),
   );

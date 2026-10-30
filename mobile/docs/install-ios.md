@@ -32,7 +32,10 @@ You need the Mac with Xcode, Rust and the iPhone on a cable.
 ### Limits of a free Apple ID
 - The signature lasts 7 days, and only 3 free apps can be installed at once.
 - There is no Apple push. The app already asks for none, so signing works, and ntfy covers alerts.
-- Live Activities can update only from the app itself, not from a push.
+- Live Activities can update only from the app itself, not from a push. The timer keeps counting; the step text can go
+  stale once iOS suspends the app.
+- **Unverified:** Live Activities add a widget extension and an app group. If Xcode refuses to sign them on a free Apple
+  ID, remove `"expo-widgets"` from `app.json`'s plugins and rebuild. Keep the package, since the code imports it.
 
 ## TestFlight (after buying the program, $99 a year)
 1. Create an Expo project and link it: `npx eas-cli@latest init`. This fills in the `owner` and `projectId` that were

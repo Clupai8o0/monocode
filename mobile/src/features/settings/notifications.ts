@@ -9,6 +9,7 @@ import { useSyncExternalStore } from "react";
 export const NOTIFICATION_CATEGORIES = [
   { id: "agentInput", label: "Approvals and questions" },
   { id: "agentFinished", label: "Agent finished" },
+  { id: "liveProgress", label: "Live progress on the lock screen" },
 ] as const;
 
 export type NotificationCategory =

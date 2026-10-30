@@ -1,3 +1,4 @@
+import { LiveProgressBridge } from "@/features/liveProgress/LiveProgressBridge";
 import {
   DarkTheme,
   DefaultTheme,
@@ -139,6 +140,7 @@ function LinkedWorkspace() {
   return (
     <WorkspaceProvider key={connection.pairing?.desktop.deviceId}>
       <SessionNotifications />
+      <LiveProgressBridge />
       <SessionActivity />
       <ScenePagerHost>
         <SessionFrame>
