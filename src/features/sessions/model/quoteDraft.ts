@@ -1,6 +1,7 @@
 export const ADD_TO_CHAT_EVENT = "monocode:add-to-chat";
 
-export type AddToChatMode = "quote" | "plain";
+/** `line` and `removeLine` add or take back one line, for a picked option. */
+export type AddToChatMode = "quote" | "plain" | "line" | "removeLine";
 
 export type AddToChatRequest = {
   text: string;
@@ -29,9 +30,7 @@ export function composerSeedForAddToChat(
   text: string,
   mode: AddToChatMode = "quote",
 ): string {
-  return mode === "plain"
-    ? appendComposerInsert("", text)
-    : appendSelectionQuote("", text);
+  return applyInsert("", text, mode);
 }
 
 export type QuoteConsumption = {
@@ -66,6 +65,43 @@ export function appendComposerInsert(draft: string, text: string): string {
   return joinComposerInsert(draft, selected);
 }
 
+export function appendComposerLine(draft: string, text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (!line) return draft;
+  const separator = draft.length === 0 || draft.endsWith("\n") ? "" : "\n";
+  return `${draft}${separator}${line}\n`;
+}
+
+/**
+ * Takes back the last such line, since options go in at the end; a draft left
+ * with nothing else in it empties.
+ */
+export function removeComposerLine(draft: string, text: string): string {
+  const lines = draft.split("\n");
+  const index = lines.lastIndexOf(text.replace(/\s+/g, " ").trim());
+  if (index < 0) return draft;
+  lines.splice(index, 1);
+  const next = lines.join("\n");
+  return next.trim() ? next : "";
+}
+
+function applyInsert(
+  draft: string,
+  text: string,
+  mode: AddToChatMode = "quote",
+): string {
+  switch (mode) {
+    case "plain":
+      return appendComposerInsert(draft, text);
+    case "line":
+      return appendComposerLine(draft, text);
+    case "removeLine":
+      return removeComposerLine(draft, text);
+    case "quote":
+      return appendSelectionQuote(draft, text);
+  }
+}
+
 export function consumeQuoteRequest(
   draft: string,
   consumedId: number | null,
@@ -75,10 +111,7 @@ export function consumeQuoteRequest(
     return { draft, consumedId, changed: false };
   }
 
-  const next =
-    request.mode === "plain"
-      ? appendComposerInsert(draft, request.text)
-      : appendSelectionQuote(draft, request.text);
+  const next = applyInsert(draft, request.text, request.mode);
   return {
     draft: next,
     consumedId: request.id,

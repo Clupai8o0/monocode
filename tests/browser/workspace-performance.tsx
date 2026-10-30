@@ -325,7 +325,7 @@ const sessions = Array.from({ length: projectsFixture ? 64 : 6 }, (_, index) => 
       branch: "mine",
       blocks: [
         { id: `${index}-u`, role: "user" as const, text: "Review the sample interface and check the result. This is fixture data; do not run an agent.", startedAt: Date.now() - (index + 1) * 60_000 },
-        { id: `${index}-a`, role: "assistant" as const, text: "This preview uses the real MonoCode app and sidebar. All 16 projects, 64 sessions, and usage values are sample data.\n\nThe fixture controls start and finish local sample runs so you can check ordering, selection, and status badges." },
+        { id: `${index}-a`, role: "assistant" as const, text: `This preview uses the real MonoCode app and sidebar. All 16 projects, 64 sessions, and usage values are sample data.\n\nThe fixture controls start and finish local sample runs so you can check ordering, selection, and status badges.${params.has("taskPicks") ? "\n\n- [ ] Ship it\n- [ ] Hold it" : ""}` },
       ],
       pendingQuestion: waiting ? { requestId: index, title: "Choose the next approach", questions: [{ id: "direction", prompt: "Which sample should I check next?", multiSelect: false, allowCustom: false, options: [{ id: "keyboard", label: "Keyboard navigation" }, { id: "layout", label: "Layout spacing" }] }] } : undefined,
     };

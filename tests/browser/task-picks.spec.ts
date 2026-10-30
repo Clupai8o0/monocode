@@ -1,25 +1,40 @@
 import { expect, test } from "@playwright/test";
 
-test("ticks the boxes in a reply and adds them to the message", async ({ page }, testInfo) => {
+test("picks options from a reply into the real composer", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/tests/browser/workspace-performance.html?projects&taskPicks");
+  const ship = page.locator('input[data-task-label="Ship it"]:visible').first();
+  const hold = page.locator('input[data-task-label="Hold it"]:visible').first();
+  await expect(ship).toBeEnabled();
+  const composer = page.locator("textarea:visible").first();
+  await composer.fill("My note");
+
+  await ship.click();
+  await expect(composer).toHaveValue("My note\nShip it\n");
+  await expect(composer).toBeFocused();
+  await page.getByText("Hold it", { exact: true }).first().click();
+  await expect(hold).toBeChecked();
+  await expect(composer).toHaveValue("My note\nShip it\nHold it\n");
+  await page.screenshot({ path: testInfo.outputPath("picked.png") });
+
+  await ship.click();
+  await expect(ship).not.toBeChecked();
+  await expect(composer).toHaveValue("My note\nHold it\n");
+
+  // Picking only fills the box: Nothing was sent, and it stays until sent.
+  await expect(page.locator('[data-chat-message-role="user"]', { hasText: "Hold it" })).toHaveCount(0);
+});
+
+test("keeps picks across a reload and between windows", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/tests/browser/task-picks.html");
 
   const apply = page.locator('input[data-task-label^="Apply"]');
   const hold = page.locator('input[data-task-label^="Hold"]');
-  await expect(apply).toBeEnabled();
-  await page.screenshot({ path: testInfo.outputPath("unticked.png") });
-
   await apply.click();
-  await expect(apply).toBeChecked();
   await page.getByText("Hold: if A fails").click();
+  await expect(apply).toBeChecked();
   await expect(hold).toBeChecked();
-  await page.screenshot({ path: testInfo.outputPath("ticked.png") });
-
-  await page.locator("[data-task-picks-add]").click();
-  await expect(page.locator("[data-fixture-composer]")).toContainText(
-    "Picked:\n- Apply at A's line",
-  );
-  await expect(page.locator("[data-task-picks-add]")).toHaveCount(0);
 
   await page.reload();
   await expect(apply).toBeChecked();

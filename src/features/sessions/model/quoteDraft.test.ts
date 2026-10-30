@@ -89,6 +89,35 @@ describe("consumeQuoteRequest", () => {
   });
 });
 
+describe("picked options in the draft", () => {
+  const consume = (draft: string, text: string, mode: "line" | "removeLine") =>
+    consumeQuoteRequest(draft, null, { id: 1, text, mode }).draft;
+
+  it("adds each option on its own line", () => {
+    const one = consume("", "Apply", "line");
+    expect(one).toBe("Apply\n");
+    expect(consume(one, "Hold", "line")).toBe("Apply\nHold\n");
+    expect(consume("my note", "Apply", "line")).toBe("my note\nApply\n");
+  });
+
+  it("takes back only that option, leaving what was typed", () => {
+    expect(consume("Apply\nHold\n", "Apply", "removeLine")).toBe("Hold\n");
+    expect(consume("my note\nApply\n", "Apply", "removeLine")).toBe(
+      "my note\n",
+    );
+    expect(consume("Apply\n", "Apply", "removeLine")).toBe("");
+    expect(consume("Apply\nmy note\nApply\n", "Apply", "removeLine")).toBe(
+      "Apply\nmy note\n",
+    );
+    expect(consume("I typed this", "Apply", "removeLine")).toBe("I typed this");
+  });
+
+  it("opens no new chat just to take an option back", () => {
+    expect(composerSeedForAddToChat("Apply", "removeLine")).toBe("");
+    expect(composerSeedForAddToChat("Apply", "line")).toBe("Apply\n");
+  });
+});
+
 describe("acknowledgeQuoteRequest", () => {
   it("clears only the request that was acknowledged", () => {
     const current: QuoteRequest = { id: 2, text: "newer" };

@@ -1,7 +1,10 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentMarkdown } from "../../src/features/sessions/ui/AgentMarkdown";
-import { ADD_TO_CHAT_EVENT } from "../../src/features/sessions/model/quoteDraft";
+import {
+  ADD_TO_CHAT_EVENT,
+  consumeQuoteRequest,
+} from "../../src/features/sessions/model/quoteDraft";
 import { TaskPicksReply } from "../../src/fork/taskPicks/TaskPicks";
 import "../../src/styles/index.css";
 
@@ -16,7 +19,14 @@ const REPLY = `**Recap**
 function Fixture() {
   const [composer, setComposer] = useState("");
   useEffect(() => {
-    const onAdd = (event: Event) => setComposer((event as CustomEvent).detail.text);
+    let id = 0;
+    const onAdd = (event: Event) => {
+      const { text, mode } = (event as CustomEvent).detail;
+      id += 1;
+      setComposer(
+        (draft) => consumeQuoteRequest(draft, null, { id, text, mode }).draft,
+      );
+    };
     window.addEventListener(ADD_TO_CHAT_EVENT, onAdd);
     return () => window.removeEventListener(ADD_TO_CHAT_EVENT, onAdd);
   }, []);

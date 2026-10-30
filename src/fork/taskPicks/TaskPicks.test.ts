@@ -59,7 +59,6 @@ const box = (label: string) =>
   container.querySelector<HTMLInputElement>(
     `input[data-task-label^="${label}"]`,
   )!;
-const addButton = () => container.querySelector<HTMLButtonElement>("[data-task-picks-add]");
 
 async function click(element: Element) {
   await act(async () => {
@@ -77,7 +76,7 @@ describe("ticking the boxes in a reply", () => {
     );
     expect(box("Hold").dataset.taskLabel).toBe("Hold: nothing ships");
     expect(box("Already").checked).toBe(true);
-    expect(addButton()).toBeNull();
+    expect(added).toEqual([]);
   });
 
   it("leaves Markdown outside a reply with fixed boxes", async () => {
@@ -135,8 +134,7 @@ describe("ticking the boxes in a reply", () => {
       true,
       true,
     ]);
-    await click(addButton()!);
-    expect(added[0].text).toBe("Picked:\n- Review\n- Review");
+    expect(added.map((pick) => pick.text)).toEqual(["Review", "Review"]);
   });
 
   it("does not tick while text is selected", async () => {
@@ -149,35 +147,31 @@ describe("ticking the boxes in a reply", () => {
     vi.restoreAllMocks();
   });
 
-  it("unticks a box the reply wrote as done, and it is not a pick", async () => {
-    await renderReply();
-    expect(addButton()).toBeNull();
-    await click(box("Already"));
-    expect(box("Already").checked).toBe(false);
-    expect(addButton()).toBeNull();
-  });
-
-  it("puts the picks in the composer once, and only new ones after", async () => {
+  it("puts an option in the composer at once, and takes it back", async () => {
     await renderReply();
     await click(box("Apply"));
-    await click(box("Hold"));
-    expect(addButton()!.textContent).toBe("Add 2 picks to message");
-
-    await click(addButton()!);
     expect(added).toEqual([
       {
-        text: "Picked:\n- Apply at A's line: run B-READY.md and see the plan\n- Hold: nothing ships",
-        mode: "plain",
+        text: "Apply at A's line: run B-READY.md and see the plan",
+        mode: "line",
       },
     ]);
-    expect(addButton()).toBeNull();
-    expect(box("Apply").checked).toBe(true);
+    await click(box("Hold").closest("li")!);
+    expect(added[1]).toEqual({ text: "Hold: nothing ships", mode: "line" });
+    await click(box("Hold"));
+    expect(added[2]).toEqual({
+      text: "Hold: nothing ships",
+      mode: "removeLine",
+    });
+    expect(added).toHaveLength(3);
+  });
 
-    await click(box("Already"));
-    await click(box("Already"));
-    expect(addButton()!.textContent).toBe("Add 1 pick to message");
-    await click(addButton()!);
-    expect(added[1].text).toBe("Picked:\n- Already done");
+  it("adds nothing for a click that does not pick", async () => {
+    await renderReply();
+    const apply = box("Apply").closest("li")!;
+    await click(apply.querySelector("a")!);
+    await click(apply.querySelector("code")!);
+    expect(added).toEqual([]);
   });
 
   it("keeps ticks when the reply is shown again", async () => {

@@ -1,13 +1,11 @@
 import type { Element, ElementContent, Root } from "hast";
 
 /**
- * Fork feature: the `- [ ]` boxes in a reply can be ticked. A box is known by
- * its reply's block id and its own text, and stays ticked across restarts.
- *
- * `ticked` waits to go into the composer, `added` went in, and `off` was
- * unticked, which is also how a box the reply wrote as `- [x]` stays clear.
+ * Fork feature: a `- [ ]` box in a reply is an option to pick. A box is known by
+ * its reply's block id and its own text, and stays ticked across restarts, as
+ * a record of what was picked. `off` is how a `- [x]` box stays clear.
  */
-export type TaskPick = "ticked" | "added" | "off";
+export type TaskPick = "ticked" | "off";
 export type BlockPicks = Readonly<Record<string, TaskPick>>;
 
 const STORAGE_KEY = "monocode.fork.taskPicks";
@@ -99,26 +97,6 @@ export function setTaskPick(
     ...picks,
     [key]: ticked ? "ticked" : "off",
   }));
-}
-
-/** The ticked boxes that have not gone into the composer yet, in tick order. */
-export function pendingPicks(picks: BlockPicks | undefined): string[] {
-  return Object.entries(picks ?? {})
-    .filter(([, pick]) => pick === "ticked")
-    .map(([key]) => key);
-}
-
-export function markPicksAdded(blockId: string, keys: string[]): void {
-  updateBlock(blockId, (picks) => {
-    const added = { ...picks };
-    for (const key of keys) added[key] = "added";
-    return added;
-  });
-}
-
-export function picksMessage(keys: string[]): string {
-  const lines = keys.map((key) => `- ${key.slice(key.indexOf(" ") + 1)}`);
-  return ["Picked:", ...lines].join("\n");
 }
 
 function isElement(node: ElementContent): node is Element {

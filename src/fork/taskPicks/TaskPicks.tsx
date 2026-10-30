@@ -11,10 +11,7 @@ import {
 import { requestAddToChat } from "../../features/sessions/model/quoteDraft";
 import {
   blockPicks,
-  markPicksAdded,
-  pendingPicks,
   pickKey,
-  picksMessage,
   setTaskPick,
   subscribeTaskPicks,
   type BlockPicks,
@@ -63,14 +60,16 @@ export function MarkdownTaskInput({ node: _node, ...props }: MarkdownInputProps)
       data-task-label={label}
       checked={pick ? pick !== "off" : !!props.checked}
       disabled={reply.streaming}
-      onChange={(event) =>
-        setTaskPick(reply.blockId, key, event.target.checked)
-      }
+      onChange={(event) => {
+        const ticked = event.target.checked;
+        setTaskPick(reply.blockId, key, ticked);
+        requestAddToChat(label, ticked ? "line" : "removeLine");
+      }}
     />
   );
 }
 
-/** A click on the item's text ticks it too, unless it opens something or selects. */
+/** A click on the option's text picks it too, unless it opens something or selects. */
 function tickFromRow(event: MouseEvent<HTMLDivElement>): void {
   const target = event.target as Element;
   if (target.closest("a, button, input, pre, code")) return;
@@ -81,9 +80,9 @@ function tickFromRow(event: MouseEvent<HTMLDivElement>): void {
 }
 
 /**
- * Makes the task boxes in one reply tickable, and offers to put the ticked ones
- * in the composer. Ticking alone sends nothing, so a box can also just be a
- * to-do the person checks off.
+ * Makes the task boxes in one reply into options: a click puts that option's
+ * text straight in the composer, and another click takes it back out. Nothing
+ * is sent until the person sends it, so several can be picked or a note added.
  */
 export function TaskPicksReply({
   blockId,
@@ -95,26 +94,11 @@ export function TaskPicksReply({
   children: ReactNode;
 }) {
   const value = useMemo(() => ({ blockId, streaming }), [blockId, streaming]);
-  const pending = pendingPicks(useBlockPicks(blockId));
   return (
     <TaskPicksContext.Provider value={value}>
       <div className="contents" onClick={tickFromRow}>
         {children}
       </div>
-      {pending.length > 0 ? (
-        <button
-          type="button"
-          data-task-picks-add
-          className="mt-2 select-none rounded-md bg-content/8 px-2 py-1 font-sans text-xs text-content/80 hover:bg-content/12 hover:text-content"
-          onClick={() => {
-            requestAddToChat(picksMessage(pending), "plain");
-            markPicksAdded(blockId, pending);
-          }}
-        >
-          Add {pending.length} {pending.length === 1 ? "pick" : "picks"} to
-          message
-        </button>
-      ) : null}
     </TaskPicksContext.Provider>
   );
 }
