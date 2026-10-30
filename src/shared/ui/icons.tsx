@@ -117,6 +117,7 @@ import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Location01Icon from "@hugeicons/core-free-icons/Location01Icon";
 // Fork: the footer Home lab button.
 import HomeWifiIcon from "@hugeicons/core-free-icons/HomeWifiIcon";
+import LaptopIcon from "@hugeicons/core-free-icons/LaptopIcon";
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -235,6 +236,7 @@ export const GitPullRequestDraft = wrap(
 export const GripVertical = wrap(DragDropVerticalIcon, "GripVertical");
 export const Globe = wrap(GlobeIcon, "Globe");
 export const Internet = wrap(InternetIcon, "Internet");
+export const Laptop = wrap(LaptopIcon, "Laptop");
 export const ImagePlus = wrap(ImageAdd01Icon, "ImagePlus");
 export const Inbox = wrap(InboxIcon, "Inbox");
 export const BellOff = wrap(NotificationOff01Icon, "BellOff");

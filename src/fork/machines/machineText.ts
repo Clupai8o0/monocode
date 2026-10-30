@@ -18,6 +18,14 @@ export function whereText(
   return options.local && where.show ? where.label : undefined;
 }
 
+/** The composer's device chip: what the session's agent is running on. */
+export function deviceChipText(label: string, busy: boolean, online: boolean | undefined): string {
+  if (online === false) {
+    return `${label}, reconnecting`;
+  }
+  return busy ? `Running on ${label}` : label;
+}
+
 /** "tab — project — MonoCode" becomes "tab — project — Vivobook (Linux) — MonoCode". */
 export function titleWithMachine(title: string, where: Where, enabled: boolean): string {
   if (!enabled || !where.remote) {

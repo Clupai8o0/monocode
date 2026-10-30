@@ -107,7 +107,7 @@ function StateMark({ state }: { state: ExternalSession["state"] }) {
   );
 }
 
-function Row({
+export function Row({
   session,
   now,
   onOpen,
@@ -173,7 +173,12 @@ export function ElsewhereGroup({
     // Adjusting state while rendering, as React documents; not an effect.
     setViewing(null);
   }
-  const viewing = stillOpen && viewingFor ? viewingFor.session : null;
+  // The list's newer copy, so an idle session that starts working goes live.
+  const viewing =
+    stillOpen && viewingFor
+      ? (shown.find((session) => session.id === viewingFor.session.id) ??
+        viewingFor.session)
+      : null;
 
   if (!target || !supported || sessions.length === 0) {
     return null;

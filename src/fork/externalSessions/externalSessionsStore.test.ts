@@ -4,6 +4,7 @@ import type { ExternalSession } from "./externalSessionsModel";
 import {
   groupByProject,
   isUnsupportedError,
+  liveSessions,
   machineKey,
   matchProjects,
   ownSessionIds,
@@ -85,5 +86,28 @@ describe("external sessions store", () => {
     const ids = await storedSessionIds(["/a", "/b", "/a"]);
     expect([...ids].sort()).toEqual(["w2", "w3"]);
     expect(listSessionsByProject).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("liveSessions", () => {
+  const row = (name: string, state: ExternalSession["state"]): ExternalSession => ({
+    id: name,
+    name,
+    projectId: "p",
+    source: "claude",
+    cwd: "/x",
+    state,
+    hasTranscript: true,
+  });
+
+  it("drops handed-over sessions and puts the working ones first", () => {
+    expect(
+      liveSessions([
+        row("b-idle", "idle"),
+        row("gone", "handed-over"),
+        row("c-run", "running"),
+        row("a-idle", "idle"),
+      ]).map((session) => session.name),
+    ).toEqual(["c-run", "a-idle", "b-idle"]);
   });
 });

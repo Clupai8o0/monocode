@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Where } from "./machineLabel";
-import { titleWithMachine, whereText } from "./machineText";
+import { deviceChipText, titleWithMachine, whereText } from "./machineText";
 
 const remote: Where = {
   remote: true,
@@ -17,6 +17,15 @@ describe("whereText", () => {
     expect(whereText(local, { enabled: true, local: true })).toBe("This Mac");
     expect(whereText({ ...local, show: false }, { enabled: true, local: true })).toBeUndefined();
     expect(whereText(remote, { enabled: false })).toBeUndefined();
+  });
+});
+
+describe("deviceChipText", () => {
+  it("says what the agent is doing on the device", () => {
+    expect(deviceChipText("Vivobook · Linux", false, true)).toBe("Vivobook · Linux");
+    expect(deviceChipText("Vivobook · Linux", true, true)).toBe("Running on Vivobook · Linux");
+    expect(deviceChipText("This Mac", true, undefined)).toBe("Running on This Mac");
+    expect(deviceChipText("Vivobook · Linux", true, false)).toBe("Vivobook · Linux, reconnecting");
   });
 });
 

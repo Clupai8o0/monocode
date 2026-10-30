@@ -11,6 +11,7 @@ import {
   StickyNote,
   X,
 } from "../../../shared/ui/icons";
+import { ComposerDevice } from "../../../fork/machines/ComposerDevice";
 import { useMachineText } from "../../../fork/machines/MachinePill";
 import {
   useCallback,
@@ -2046,6 +2047,8 @@ export function Composer({
           data-composer-box
           data-composer-editing={resendEdited ? "" : undefined}
           className={`relative z-10 border ${
+            machineText ? "shadow-[0_0_28px_-14px_var(--color-accent)] ring-1 ring-accent/30 " : ""
+          }${
             resendEdited
               ? "edit-last-turn-composer rounded-lg"
               : "rounded-lg border-content/10 has-focus:border-content/20"
@@ -2057,6 +2060,7 @@ export function Composer({
                 : "border-content/10 has-focus:border-content/20"
           }`}
         >
+          <ComposerDevice cwd={cwd} busy={busy} />
           {fileDrag ? (
             <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-[inherit] bg-accent/8 text-[12px] text-content/70">
               Drop files to attach

@@ -38,8 +38,23 @@ const REMOTE_POLL_MS = 20_000;
 /** How long to leave a host alone after it says it lacks the methods. */
 const UNSUPPORTED_RETRY_MS = 5 * 60_000;
 const LOCAL = "local";
+/** A remote target's project id for every session on that machine. */
+export const ALL_PROJECTS = "\0all";
 
 // ---- pure helpers ----
+
+/** Sessions still alive on a machine, the working ones first. */
+export function liveSessions(
+  sessions: readonly ExternalSession[],
+): ExternalSession[] {
+  return sessions
+    .filter((session) => session.state !== "handed-over")
+    .sort(
+      (a, b) =>
+        Number(b.state === "running") - Number(a.state === "running") ||
+        (a.name ?? a.id).localeCompare(b.name ?? b.id),
+    );
+}
 
 /** Session ids MonoCode runs itself, which must not show as "elsewhere". */
 export function ownSessionIds(
@@ -381,7 +396,9 @@ export function useExternalSessions(
   }
   const rows = withoutOwnSessions(
     withoutOwnSessions(
-      groupByProject(machine.rows).get(target.projectId) ?? EMPTY,
+      target.projectId === ALL_PROJECTS
+        ? machine.rows
+        : (groupByProject(machine.rows).get(target.projectId) ?? EMPTY),
       own,
     ),
     machine.stored,

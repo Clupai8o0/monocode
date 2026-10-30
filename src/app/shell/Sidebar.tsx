@@ -197,6 +197,7 @@ import {
   useProjectLabel,
 } from "../../features/projects/ui/CurrentProjectIcon"; // Fork
 import { SessionCardPreview } from "../../features/sessions/ui/SessionCardPreview";
+import { MachineSessions } from "../../fork/machines/MachineSessions"; // Fork
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
@@ -3210,6 +3211,8 @@ function SidebarComponent({
         {paneHost ? null : changesPane}
         {showSidebarFooter ? (
           <>
+            {/* Fork: what the connected machines are running. */}
+            <MachineSessions />
             {/* Fork: Projects already shows live work in the inset layout. */}
             {inset && onSelectProject ? null : (
               <LiveAgentsPreview

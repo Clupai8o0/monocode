@@ -154,6 +154,21 @@ const fixtureInvoke = async (
       }
       return;
     }
+    if (params.has("machines")) {
+      if (command === "remote_machines") { return [{ id: "vivo", name: "Vivobook", environmentId: "env-vivo" }]; }
+      if (command === "remote_request" && args.method === "describe") { return { platform: "linux", hostname: "fedora" }; }
+      if (command === "remote_request" && args.method === "externalSessions.list") {
+        const row = { projectId: "monocode", source: "claude", cwd: "/home/sam/monocode", hasTranscript: true };
+        return { sessions: [
+          { ...row, id: "lab-idle", name: "clupai-32", state: "idle" },
+          { ...row, id: "lab-run", name: "monocode-effort", state: "running" },
+          { ...row, id: "lab-gone", name: "old-one", state: "handed-over" },
+        ] };
+      }
+      if (command === "remote_request" && args.method === "externalSessions.read") {
+        return { turns: [{ role: "user", text: "Fix the gate hook" }, { role: "assistant", text: `Live turn from ${(args.params as { sessionId: string }).sessionId}` }] };
+      }
+    }
     if (command === "notification_permission") { return "unsupported"; }
     if (["show_notification", "plugin:window|unminimize", "plugin:window|set_focus"].includes(command)) { return; }
     if (command === "harness_resolve_claude" || command === "harness_resolve_codex") {

@@ -11112,14 +11112,17 @@ function Workspace({
       const parentId =
         sessionsRef.current.find((session) => session.id === sessionId)
           ?.orchestrationLeadId ?? orchestrator.forSession(sessionId)?.leadId;
+      // Fork: always through the full open, which also moves the project. The
+      // tab strip follows projectCwd, so focusing the tab alone left it showing
+      // the previous project's tabs beside this session.
       if (parentId && parentId !== sessionId) {
         setInspectedWorkerId(sessionId);
-        if (!focusOpenSession(parentId)) void onSelectHistorySession(parentId);
-      } else if (!focusOpenSession(sessionId)) {
+        void onSelectHistorySession(parentId);
+      } else {
         void onSelectHistorySession(sessionId);
       }
     },
-    [focusOpenSession, onSelectHistorySession],
+    [onSelectHistorySession],
   );
 
   useEffect(() => {
