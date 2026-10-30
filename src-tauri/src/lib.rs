@@ -23,6 +23,7 @@ mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
+mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
 mod fork_memory; // Fork: the Memory manager's per-session RAM report.
 mod fork_account_homes; // Fork: which Claude login (main or cx) each account runs on.
@@ -713,6 +714,9 @@ pub fn run() {
             fork_shows::fork_shows_cache_write, // Fork
             fork_shows::fork_shows_cache_prune, // Fork
             fork_shows::fork_shows_cache_root,  // Fork
+            fork_worktree_merge::fork_worktree_merge_status, // Fork
+            fork_worktree_merge::fork_worktree_merge_back,   // Fork
+            fork_worktree_merge::fork_worktree_delete_merged_branch, // Fork
             fork_workspaces::fork_workspace_list,           // Fork
             fork_workspaces::fork_workspace_create,         // Fork
             fork_workspaces::fork_workspace_open,           // Fork

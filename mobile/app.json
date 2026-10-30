@@ -2,7 +2,6 @@
   "expo": {
     "name": "MonoCode",
     "slug": "monocode-mobile",
-    "owner": "hardbeat920",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -13,7 +12,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/app.icon",
-      "bundleIdentifier": "com.hardbeat920.monocode-mobile",
+      "bundleIdentifier": "com.clupai.monocode",
       "infoPlist": {
         "CFBundleDisplayName": "Monocode",
         "NSLocalNetworkUsageDescription": "Connect securely to your paired Monocode desktop."
@@ -90,13 +89,8 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "extra": {
-      "eas": {
-        "projectId": "f80fe97b-6056-48a4-9fb2-b45ca2c8974b"
-      }
-    },
     "updates": {
-      "url": "https://u.expo.dev/f80fe97b-6056-48a4-9fb2-b45ca2c8974b"
+      "enabled": false
     }
   }
 }

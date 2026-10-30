@@ -1,0 +1,14 @@
+# Shared step, not a test on its own. Closes a bottom sheet on either platform.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          direction: DOWN

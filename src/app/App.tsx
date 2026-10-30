@@ -1,3 +1,15 @@
+// Fork: new sessions get their own worktree when it helps.
+// Fork: the feature coach in Settings > Tips.
+import {
+  recordFeatureUse,
+  registerCoachHost,
+} from "../fork/featureCoach/featureCoach";
+import {
+  publishBusySessions,
+  registerWorktreeRemover,
+  renamedWorktreeBranch,
+  sessionWorktreeBranchName,
+} from "../fork/autoWorktree/autoWorktree";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { useMobileWorkspace } from "../features/mobile/hooks/useMobileWorkspace";
 import { hasMobileAttachments, mobileAttachments } from "../features/mobile/model/mobileAttachments";
@@ -174,7 +186,6 @@ import {
   removeWorktree,
   renameWorktreeBranch,
   sessionInWorktree,
-  temporaryWorktreeBranchName,
   worktreeDeletedExternally,
   worktreeSessionIds,
   type Worktree,
@@ -3298,6 +3309,7 @@ function Workspace({
     (dir: SplitDir) => {
       closeMonoView();
       if (!activeTab) return;
+      recordFeatureUse("split"); // Fork
       const session = newDefaultSession(
         sessionDefaults?.cwd ?? projectCwd,
         sessionDefaults?.runtimeMode,
@@ -6409,6 +6421,13 @@ function Workspace({
     [persistSession],
   );
 
+  // Fork: auto worktrees need to see busy sessions and use the removal flow.
+  useEffect(() => publishBusySessions(sessions), [sessions]);
+  useEffect(() => {
+    registerWorktreeRemover(onRemoveWorktree);
+    return () => registerWorktreeRemover(null);
+  }, [onRemoveWorktree]);
+
   const onWorkspaceModeChange = useCallback(
     (sessionId: string, mode: WorkspaceMode, base?: string) => {
       setSessions((prev) =>
@@ -7790,6 +7809,7 @@ function Workspace({
                   ? "steer"
                   : "queue"
                 : (options?.followUpBehavior ?? loadFollowUpBehavior());
+        if (!mono) recordFeatureUse("queue"); // Fork
         if (followUpBehavior === "queue") {
           setSessions((prev) =>
             prev.map((s) =>
@@ -8272,7 +8292,10 @@ function Workspace({
         if (createDraftWorktree) {
           const tree = await createWorktree(
             current.cwd,
-            temporaryWorktreeBranchName(),
+            // Fork: named after the request from the start, with a short id.
+            sessionWorktreeBranchName(
+              harnessText || attachments.map((file) => file.name).join(" "),
+            ),
             current.worktreeBase || "HEAD",
             false,
           );
@@ -8309,7 +8332,7 @@ function Workspace({
               const renamed = await renameWorktreeBranch(
                 current.cwd,
                 tree.path,
-                branch,
+                renamedWorktreeBranch(branch, tree.branch), // Fork
               );
               setSessions((prev) =>
                 prev.map((session) =>
@@ -9322,7 +9345,10 @@ function Workspace({
       ),
     [appendTab, submitSession, onSaveDraft],
   );
-  useQuickComposerLaunches(launchQuickSession);
+  useQuickComposerLaunches((launch, id) => {
+    recordFeatureUse("quick-composer"); // Fork
+    return launchQuickSession(launch, id);
+  });
   const launchQuickSessionRef = useRef(launchQuickSession);
   launchQuickSessionRef.current = launchQuickSession;
   const submitSessionRef = useRef(submitSession);
@@ -12465,6 +12491,7 @@ function Workspace({
     setFilePickerOpen(true);
   }, []);
   const onOpenCommandPalette = useCallback(() => {
+    recordFeatureUse("palette"); // Fork
     setSearchViewOpen(false);
     setInboxViewOpen(false);
     setNotesViewOpen(false);
@@ -12716,6 +12743,57 @@ function Workspace({
     },
     [],
   );
+
+  // Fork: what the buttons in Settings > Tips can do.
+  useEffect(() => {
+    registerCoachHost({
+      sessions: () => {
+        // A saved summary has the pin, dates and change totals an open session
+        // lacks; the open session knows its current worktree.
+        const saved = new Map(history.map((entry) => [entry.id, entry]));
+        const live = sessionsRef.current.map((session) => {
+          const entry = saved.get(session.id);
+          return entry
+            ? { ...session, ...entry, worktreeCwd: session.worktreeCwd }
+            : session;
+        });
+        const open = new Set(live.map((session) => session.id));
+        return [...live, ...history.filter((entry) => !open.has(entry.id))];
+      },
+      openSettings,
+      openPalette: () => {
+        setSettingsOpen(false);
+        onOpenCommandPalette();
+      },
+      split: () => {
+        setSettingsOpen(false);
+        onSplit("right");
+      },
+      newSessionWith: (draft) => {
+        setSettingsOpen(false);
+        const cwd = sidebarCwdRef.current;
+        const session = {
+          ...newWorkspaceSession(cwd, sessionDefaults?.runtimeMode),
+          composerSeed: draft,
+        };
+        const tab = newTab(session.id);
+        setSessions((prev) => [...prev, session]);
+        appendTab(tab, cwd);
+        setActiveTabId(tab.id);
+        setComposerFocused(true);
+      },
+      pin: (sessionId) => onPinHistorySession(sessionId, true),
+    });
+    return () => registerCoachHost(null);
+  }, [
+    appendTab,
+    history,
+    onOpenCommandPalette,
+    onPinHistorySession,
+    onSplit,
+    openSettings,
+    sessionDefaults?.runtimeMode,
+  ]);
 
   const onOpenSettings = useCallback(() => openSettings(), [openSettings]);
   useEffect(() => {

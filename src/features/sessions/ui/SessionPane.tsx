@@ -1,3 +1,8 @@
+// Fork: auto worktrees, Merge back and the follow-up coach mark.
+import { FollowUpCoachMark } from "../../../fork/featureCoach/FollowUpCoachMark";
+import { noteUserWorkspaceChoice } from "../../../fork/autoWorktree/autoWorktree";
+import { useAutoWorktree } from "../../../fork/autoWorktree/useAutoWorktree";
+import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
@@ -670,15 +675,30 @@ const LocalSessionPane = memo(function LocalSessionPane({
     (!draftBlock && (!isEmpty || inSplit || !!session.inboxAsk || !!agent));
   const composerDockMotion = useComposerDockMotion(dockComposer);
   const draftRef = useRef<string | undefined>(getComposerDraft(session.id));
-  // Fork: text in the composer means the person is not done with this session.
-  const [draftWritten, setDraftWritten] = useState(
-    () => !!draftRef.current?.trim(),
-  );
+  const [draftTyped, setDraftTyped] = useState(() => !!draftRef.current?.trim()); // Fork
+  // Fork: blank sessions pick up a worktree when the setting says so.
+  const localDraft =
+    !remote &&
+    !session.inboxAsk &&
+    !session.worktreeRemoved &&
+    !managed &&
+    !agent &&
+    isEmpty &&
+    !session.worktreeCwd;
+  useAutoWorktree({
+    sessionId: session.id,
+    cwd: session.cwd,
+    draft: localDraft,
+    mode: session.workspaceMode,
+    branch: session.branch,
+    onChange: (mode, base) => onWorkspaceModeChange(session.id, mode, base),
+  });
   const [draftAttached, setDraftAttached] = useState(false);
+  // Fork: typed text or a file means the person is not done with this session.
   const closeSessionOffer =
     onArchiveSession &&
     !remote &&
-    !draftWritten &&
+    !draftTyped &&
     !draftAttached &&
     offersSafeClose(session, withRunningLeads(NO_SESSIONS, orchestrationRuns)) ? (
       <CloseSessionButton onClose={() => onArchiveSession(session.id, true)} />
@@ -694,6 +714,27 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onOpenFile={onOpenFile}
       onOpenDiff={onOpenDiff}
     />
+    {/* Fork: teaches queue and steer the first time it applies */}
+    <FollowUpCoachMark show={!!session.busy && !agent && !remote && draftTyped} />
+    {/* Fork: the worktree's branch, and Merge back */}
+    {remote || session.worktreeRemoved || agent ? null : (
+      <WorktreeStrip
+        sessionId={session.id}
+        cwd={session.cwd}
+        worktreeCwd={session.worktreeCwd}
+        branch={session.branch}
+        busy={!!session.busy}
+        draft={localDraft && session.workspaceMode === "worktree"}
+        onStayInCheckout={() => {
+          noteUserWorkspaceChoice(session.id, session.cwd);
+          onWorkspaceModeChange(session.id, "current");
+        }}
+        onAskAgent={(prompt) => {
+          onSubmit(session.id, prompt, []);
+        }}
+        onOpenSettings={onManageWorktrees}
+      />
+    )}
     <Composer
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id}
@@ -731,7 +772,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onDraftChange={(text) => {
         draftRef.current = text;
         setComposerDraft(session.id, text);
-        setDraftWritten(!!text.trim());
+        setDraftTyped(!!text.trim()); // Fork
       }}
       onAttachedChange={setDraftAttached}
       inboxCard={session.inboxCard}
@@ -762,9 +803,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }
       workspaceMode={session.workspaceMode}
       worktreeBase={session.worktreeBase}
-      onWorkspaceModeChange={(mode, base) =>
-        onWorkspaceModeChange(session.id, mode, base)
-      }
+      onWorkspaceModeChange={(mode, base) => {
+        noteUserWorkspaceChoice(session.id, session.cwd); // Fork
+        onWorkspaceModeChange(session.id, mode, base);
+      }}
       onWorktreeBaseChange={(base) => onWorktreeBaseChange(session.id, base)}
       worktreeRemoved={session.worktreeRemoved}
       onManageWorktrees={onManageWorktrees}

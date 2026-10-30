@@ -222,6 +222,8 @@ fn create(root: &Path, branch: &str, base: &str, existing: bool) -> Result<Workt
                 commit.trim(),
             ],
         )?;
+        // Fork: remember where Merge back should go.
+        crate::fork_worktree_merge::remember_base(root, branch, base);
     }
     list(root)?
         .into_iter()

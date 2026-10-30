@@ -1,3 +1,4 @@
+import { BranchChip } from "../../fork/autoWorktree/BranchChip"; // Fork
 import { NO_BRANCH_LABEL } from "../../features/source-control/model/worktrees";
 import {
   type WorktreeFocus,
@@ -5547,10 +5548,26 @@ export const SessionCard = memo(function SessionCard({
                       : gitLabel
                   }
                 >
-                  <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
-                  <span className="min-w-0 truncate">
-                    {project ? `${project} · ${gitLabel}` : gitLabel}
-                  </span>
+                  {/* Fork: a worktree's branch wears the project's colour. */}
+                  {session.worktreeCwd && !session.worktreeRemoved && session.branch ? (
+                    <>
+                      {project ? (
+                        <span className="min-w-0 shrink-[2] truncate">{project}</span>
+                      ) : null}
+                      <BranchChip
+                        cwd={session.cwd}
+                        branch={session.branch}
+                        title={`${gitLabel}\n${session.worktreeCwd}`}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
+                      <span className="min-w-0 truncate">
+                        {project ? `${project} · ${gitLabel}` : gitLabel}
+                      </span>
+                    </>
+                  )}
                 </span>
               ) : (
                 <span className="min-w-0 flex-1" />

@@ -36,6 +36,7 @@ const SECTION_ICONS: Record<SettingsSectionId, IconComponent> = {
   monos: Ghost,
   inbox: Inbox,
   worktrees: FolderTree,
+  tips: Sparkles, // Fork
   archive: Archive,
 };
 

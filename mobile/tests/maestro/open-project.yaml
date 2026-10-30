@@ -1,0 +1,7 @@
+# Shared step, not a test on its own. With the one project 02-pair saved, the
+# app opens straight on it; its Settings button shows it has loaded.
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 30000
