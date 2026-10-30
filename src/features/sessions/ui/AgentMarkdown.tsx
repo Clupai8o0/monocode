@@ -69,6 +69,8 @@ import {
   TaskPicksContext,
 } from "../../../fork/taskPicks/TaskPicks";
 import { rehypeTaskLabels } from "../../../fork/taskPicks/picksStore";
+import { rehypeSessionRefs } from "../../../fork/sessionRefs/sessionRefs";
+import { MarkdownSpan } from "../../../fork/sessionRefs/SessionRefLink";
 import {
   pacedRevealPreferred,
   rehypeWordFade,
@@ -607,6 +609,8 @@ const MARKDOWN_COMPONENTS = {
   // Fork: a task box in a reply can be ticked; see fork/taskPicks.
   input: MarkdownTaskInput,
   source: MarkdownPictureSource,
+  // Fork: a session named in a reply opens it; see fork/sessionRefs.
+  span: MarkdownSpan,
 } satisfies Components;
 
 /**
@@ -773,10 +777,14 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   const tickable = !!useContext(TaskPicksContext);
   const rehypePlugins = useMemo(() => {
     const labelled = tickable
-      ? [...baseRehypePlugins, rehypeTaskLabels]
+      ? [
+          ...baseRehypePlugins,
+          rehypeTaskLabels,
+          ...(fading ? [] : [rehypeSessionRefs]),
+        ]
       : baseRehypePlugins;
     return hardBreaks ? [...labelled, rehypeHardBreaks] : labelled;
-  }, [baseRehypePlugins, hardBreaks, tickable]);
+  }, [baseRehypePlugins, fading, hardBreaks, tickable]);
 
   const onFileMenuPick = (id: string) => {
     if (!fileMenu) return;

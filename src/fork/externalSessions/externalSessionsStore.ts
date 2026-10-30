@@ -386,6 +386,25 @@ function targetKey(target: ExternalSessionsTarget | undefined): string {
     : `remote\0${target.machineId}\0${target.projectId}`;
 }
 
+/** Every session the machine pollers currently hold, for naming them. */
+export function remoteExternalRows(): {
+  session: ExternalSession;
+  machineId: string;
+}[] {
+  return [...machines.values()].flatMap((machine) =>
+    machine.machineId
+      ? [...machine.rows, ...machine.unfiled].map((session) => ({
+          session,
+          machineId: machine.machineId as string,
+        }))
+      : [],
+  );
+}
+
+export function subscribeExternalRows(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
 const EMPTY: ExternalSession[] = [];
 
 /** One project's sessions elsewhere, kept fresh while shown. */

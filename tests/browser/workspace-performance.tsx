@@ -175,11 +175,14 @@ const fixtureInvoke = async (
       return { path: `/fixture/bin/${command.endsWith("codex") ? "codex" : "claude"}` };
     }
     if (command === "session_list_by_project") {
-      return sessions.filter(session => session.cwd === args.cwd).map(session => ({ ...session, createdAt: Date.now() - 3_600_000, updatedAt: Date.now() }));
+      return sessions.filter(session => session.cwd === args.cwd).map(session => ({ ...session, providerSessionId: session.id === "workspace-session-1" ? "provider-own" : undefined, createdAt: Date.now() - 3_600_000, updatedAt: Date.now() }));
     }
     if (command === "session_get") { return sessions.find(session => session.id === args.sessionId) ?? null; }
     if (command === "session_list_in_flight") { return []; }
     if (command === "session_set_archived") { return; }
+    if (params.has("sessionRefs") && command === "fork_external_sessions_list") {
+      return { sessions: [{ id: "provider-own", name: "monocode-own", projectId: "/fixture/projects/monocode", source: "claude", cwd: "/fixture/projects/monocode", state: "idle", hasTranscript: true }] };
+    }
     if (command === "session_upsert") { return { ...(args.session as object), createdAt: Date.now(), updatedAt: Date.now() }; }
     if (command === "git_worktrees") {
       return {
@@ -327,7 +330,7 @@ const sessions = Array.from({ length: projectsFixture ? 64 : 6 }, (_, index) => 
       branch: "mine",
       blocks: [
         { id: `${index}-u`, role: "user" as const, text: "Review the sample interface and check the result. This is fixture data; do not run an agent.", startedAt: Date.now() - (index + 1) * 60_000 },
-        { id: `${index}-a`, role: "assistant" as const, text: `This preview uses the real MonoCode app and sidebar. All 16 projects, 64 sessions, and usage values are sample data.\n\nThe fixture controls start and finish local sample runs so you can check ordering, selection, and status badges.${params.has("taskPicks") ? "\n\n- [ ] Ship it\n- [ ] Hold it" : ""}${params.has("safeClose") ? "\n\n**Recap**\n\n- **Close:** Safe to close: nothing left to do." : ""}` },
+        { id: `${index}-a`, role: "assistant" as const, text: `This preview uses the real MonoCode app and sidebar. All 16 projects, 64 sessions, and usage values are sample data.\n\nThe fixture controls start and finish local sample runs so you can check ordering, selection, and status badges.${params.has("taskPicks") ? "\n\n- [ ] Ship it\n- [ ] Hold it" : ""}${params.has("sessionRefs") ? "\n\nAsk monocode-effort, then `clupai-32` or monocode-own. A real-time mention stays plain, as does `peer send clupai-32`." : ""}${params.has("safeClose") ? "\n\n**Recap**\n\n- **Close:** Safe to close: nothing left to do." : ""}` },
       ],
       pendingQuestion: waiting ? { requestId: index, title: "Choose the next approach", questions: [{ id: "direction", prompt: "Which sample should I check next?", multiSelect: false, allowCustom: false, options: [{ id: "keyboard", label: "Keyboard navigation" }, { id: "layout", label: "Layout spacing" }] }] } : undefined,
     };
