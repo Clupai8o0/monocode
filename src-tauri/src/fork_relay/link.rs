@@ -18,13 +18,18 @@ use super::local::{self, Env, Ledger, LocalSession, PROXY_PID_MAX, PROXY_PID_MIN
 use super::traffic;
 use super::wire;
 
-const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+const SYNC_TIMEOUT: Duration = Duration::from_secs(15);
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// `relay.next` waits up to 25 s on the host; the request allows for more.
 const NEXT_TIMEOUT: Duration = Duration::from_secs(35);
 const NEXT_WAIT_MS: u64 = 25_000;
 const SYNC_ON: Duration = Duration::from_secs(3);
 const SYNC_OFF: Duration = Duration::from_secs(20);
 const SYNC_BACKOFF: Duration = Duration::from_secs(30);
+/// After a failed sync while the host still counts this Mac in. One lost
+/// request on a bad network must leave time for another try before
+/// SILENT_LIMIT, or every session's row goes.
+const SYNC_RETRY: Duration = Duration::from_secs(5);
 /// Past this without a sync the host counts this Mac gone, so its proxies
 /// go too.
 const SILENT_LIMIT: Duration = Duration::from_secs(45);
@@ -123,6 +128,15 @@ pub(crate) struct Link {
     signal: (Mutex<()>, Condvar),
 }
 
+/// Retry quickly while the host still counts this Mac in; once it has gone
+/// silent for longer, the rows are gone anyway, so back off.
+pub(super) fn failed_sync_wait(since_ok: Option<Duration>) -> Duration {
+    match since_ok {
+        Some(since) if since < SILENT_LIMIT => SYNC_RETRY,
+        _ => SYNC_BACKOFF,
+    }
+}
+
 impl Link {
     pub fn new(id: String, name: String, rpc: Arc<dyn Rpc>, shared: Arc<Shared>) -> Arc<Link> {
         Arc::new_cyclic(|me| Link {
@@ -200,7 +214,7 @@ impl Link {
             let wait = match self.sync_once() {
                 Ok(true) => lock(&self.state).next_sync.unwrap_or(SYNC_ON),
                 Ok(false) => SYNC_OFF,
-                Err(_) => SYNC_BACKOFF,
+                Err(_) => failed_sync_wait(lock(&self.state).last_ok.map(|at| at.elapsed())),
             };
             self.nap(wait, |link| link.sync_now.load(Ordering::SeqCst));
         }
@@ -464,7 +478,7 @@ impl Link {
         };
         seen.from_session_id = Some(sender.session.session_id.clone());
         let params = json!({ "from": sender.session.session_id, "to": to, "line": line });
-        match self.rpc.call("relay.send", params, SYNC_TIMEOUT) {
+        match self.rpc.call("relay.send", params, SEND_TIMEOUT) {
             Ok(answer) if answer["accepted"] == false => {
                 seen.reason = Some(
                     answer["reason"]

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::link::{Link, Rpc, Shared};
+use super::link::{failed_sync_wait, Link, Rpc, Shared};
 use super::local::tests::temp_dir;
 use super::local::{self, Env};
 
@@ -492,6 +492,13 @@ fn a_copy_that_cannot_be_written_is_tried_alone_and_still_cleared() {
         serde_json::from_slice(&std::fs::read(dir.join("ledger.json")).unwrap()).unwrap();
     assert_eq!(ledger["files"], json!([]));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_sync_retries_soon_enough_to_stay_counted_in() {
+    assert_eq!(failed_sync_wait(Some(Duration::from_secs(3))), Duration::from_secs(5));
+    assert_eq!(failed_sync_wait(Some(Duration::from_secs(60))), Duration::from_secs(30));
+    assert_eq!(failed_sync_wait(None), Duration::from_secs(30));
 }
 
 #[test]
