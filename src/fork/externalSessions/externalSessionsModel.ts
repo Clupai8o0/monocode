@@ -7,10 +7,15 @@
  * The Mac reads its own with a Tauri command. A machine's host answers the
  * same two methods on `/rpc` and `/mobile`, in the shapes below:
  *
- * - `externalSessions.list {projectId?}` -> `{sessions: ExternalSession[]}`,
- *   every project's when `projectId` is absent.
- * - `externalSessions.read {projectId, sessionId, before?, limit?}` ->
+ * - `externalSessions.list {projectId?}` -> `{sessions: ExternalSession[],
+ *   unfiled?: UnfiledExternalSession[]}`, every project's when `projectId` is
+ *   absent. Only then does `unfiled` come too: the live sessions under no
+ *   project, such as one in the home folder. Hosts before this field omit it.
+ * - `externalSessions.read {projectId?, sessionId, before?, limit?}` ->
  *   `ExternalTranscriptPage`. `limit` defaults to 60 turns, at most 200.
+ *   Without `projectId` it reads any live session on the machine, filed or
+ *   not; hand-overs and handoff files still need their project. Hosts before
+ *   this answer "Project is not registered on this machine".
  *
  * A host from before this feature answers with an error; callers then hide
  * the section rather than show the error.
@@ -41,6 +46,9 @@ export type ExternalSession = {
   /** Whether `externalSessions.read` returns its turns. */
   hasTranscript: boolean;
 };
+
+/** A live session whose folder is under none of the machine's projects. */
+export type UnfiledExternalSession = Omit<ExternalSession, "projectId">;
 
 export type ExternalTurn = {
   role: "user" | "assistant" | "tool";

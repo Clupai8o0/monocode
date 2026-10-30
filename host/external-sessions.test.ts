@@ -266,6 +266,52 @@ describe("externalSessions.list", () => {
     expect(sessions.map((s) => s.id)).toEqual(["cccccccc-3", "session_live-1"]);
   });
 
+  it("lists live sessions under no project as unfiled, only for the whole machine", async () => {
+    const { home, project, projects, options } = setup([1, 2, 3]);
+    const outside = temp("ext-outside-");
+    record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: project, updatedAt: 10 });
+    record(home, ".claude-exec/sessions", "2.json", { pid: 2, sessionId: "bbbbbbbb-2", cwd: home, name: "clupai-f5", updatedAt: 20, status: "idle" });
+    record(home, ".claude/sessions", "3.json", { pid: 3, sessionId: "cccccccc-3", cwd: outside, updatedAt: 30 });
+    record(home, ".claude/sessions", "4.json", { pid: 4, sessionId: "dddddddd-4", cwd: outside, updatedAt: 40 });
+    write(join(home, ".claude-exec/projects", home.replace(/[^A-Za-z0-9]/g, "-"), "bbbbbbbb-2.jsonl"), line({ type: "user", message: { content: "hi" } }));
+    const all = await listExternalSessions(projects, options);
+    expect(all.sessions.map((row) => row.id)).toEqual(["aaaaaaaa-1"]);
+    expect(all.unfiled?.map((row) => row.id)).toEqual(["cccccccc-3", "bbbbbbbb-2"]);
+    expect(all.unfiled?.[1]).toEqual({
+      id: "bbbbbbbb-2",
+      source: "claude-cx",
+      name: "clupai-f5",
+      cwd: home,
+      state: "idle",
+      updatedAt: 20,
+      hasTranscript: true,
+    });
+    expect(await listExternalSessions([], options)).toMatchObject({ sessions: [] });
+    expect((await listExternalSessions([], options)).unfiled).toHaveLength(3);
+    const one = await listExternalSessions(projects, options, { projectId: "p1" });
+    expect(one.sessions.map((row) => row.id)).toEqual(["aaaaaaaa-1"]);
+    expect(one).not.toHaveProperty("unfiled");
+  });
+
+  it("keeps MonoCode's own sessions and relay copies out of unfiled", async () => {
+    const { home, projects, options } = setup([1, 2]);
+    record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: home, updatedAt: 1 });
+    record(home, ".claude/sessions", "2.json", { pid: 2, sessionId: "bbbbbbbb-2", cwd: home, updatedAt: 1, monocodeRelay: { machine: "mac" } });
+    const listed = await listExternalSessions(projects, { ...options, excludeIds: ["aaaaaaaa-1"] });
+    expect(listed.unfiled).toEqual([]);
+  });
+
+  it("puts notes on unfiled sessions from their own repository", async () => {
+    const { home, projects, options } = setup([1]);
+    const outside = temp("ext-outside-");
+    const common = join(outside, ".git");
+    options.gitCommonDir = async (path) => (path === outside ? common : null);
+    record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: outside, updatedAt: 1 });
+    write(join(common, "claude-claims-history.jsonl"), line({ at: (NOW - 1000) / 1000, event: "note", session: "aaaaaaaa-1", branch: "side", text: "doing now" }));
+    const { unfiled } = await listExternalSessions(projects, options);
+    expect(unfiled?.[0]).toMatchObject({ note: "doing now", branch: "side" });
+  });
+
   it("rejects an unknown project", async () => {
     const { projects, options } = setup();
     await expect(listExternalSessions(projects, options, { projectId: "nope" })).rejects.toThrow("not registered");
@@ -426,6 +472,29 @@ describe("externalSessions.read", () => {
     await expect(read({ sessionId: "zzzzzzzz-9" })).rejects.toThrow("Session not found");
     await expect(read({ sessionId: "aaaaaaaa-1", before: -1 })).rejects.toThrow("Invalid before");
     await expect(readExternalSession(projects, options, { projectId: "x", sessionId: "aaaaaaaa-1" })).rejects.toThrow("not registered");
+  });
+
+  it("reads any live session without a project, and only live ones", async () => {
+    const { home, project, projects, options } = setup([1, 2, 3]);
+    const common = join(project, ".git");
+    options.gitCommonDir = async (path) => (path === project ? common : null);
+    record(home, ".claude/sessions", "1.json", { pid: 1, sessionId: "aaaaaaaa-1", cwd: home, updatedAt: 1 });
+    record(home, ".claude/sessions", "2.json", { pid: 2, sessionId: "bbbbbbbb-2", cwd: project, updatedAt: 1 });
+    record(home, ".claude/sessions", "3.json", { pid: 3, sessionId: "cccccccc-3", cwd: home, updatedAt: 1 });
+    const hello = line({ type: "user", message: { content: "hello" } });
+    write(join(home, ".claude/projects", home.replace(/[^A-Za-z0-9]/g, "-"), "aaaaaaaa-1.jsonl"), hello);
+    write(join(home, ".claude/projects", project.replace(/[^A-Za-z0-9]/g, "-"), "bbbbbbbb-2.jsonl"), hello);
+    write(join(project, ".claude/handoff.md"), "notes");
+    write(join(common, "claude-claims-history.jsonl"), line({ at: (NOW - 1000) / 1000, event: "note", session: "gone-session-1", worktree: project, text: "handed over: .claude/handoff.md" }));
+    const turns = [{ role: "user", text: "hello" }];
+    expect(await readExternalSession(projects, options, { sessionId: "aaaaaaaa-1" })).toEqual({ turns });
+    expect(await readExternalSession(projects, options, { projectId: null, sessionId: "bbbbbbbb-2" })).toEqual({ turns });
+    expect(await readExternalSession(projects, options, { sessionId: "cccccccc-3" })).toEqual({ turns: [] });
+    await expect(readExternalSession(projects, { ...options, excludeIds: ["aaaaaaaa-1"] }, { sessionId: "aaaaaaaa-1" })).rejects.toThrow("Session not found");
+    await expect(readExternalSession(projects, options, { sessionId: "gone-session-1" })).rejects.toThrow("Session not found");
+    await expect(readExternalSession(projects, options, { sessionId: "handoff:.claude/handoff.md" })).rejects.toThrow("Invalid session id");
+    // Unfiled sessions stay out of a project's reads, as old clients expect.
+    await expect(readExternalSession(projects, options, { projectId: "p1", sessionId: "aaaaaaaa-1" })).rejects.toThrow("Session not found");
   });
 
   it("reads a handoff-only row", async () => {
