@@ -163,7 +163,7 @@ const fixtureInvoke = async (
           { ...row, id: "lab-idle", name: "clupai-32", state: "idle" },
           { ...row, id: "lab-run", name: "monocode-effort", state: "running" },
           { ...row, id: "lab-gone", name: "old-one", state: "handed-over" },
-        ] };
+        ], unfiled: [{ id: "lab-home", name: "home-session", source: "claude", cwd: "/home/sam", state: "idle", hasTranscript: true }] };
       }
       if (command === "remote_request" && args.method === "externalSessions.read") {
         return { turns: [{ role: "user", text: "Fix the gate hook" }, { role: "assistant", text: `Live turn from ${(args.params as { sessionId: string }).sessionId}` }] };

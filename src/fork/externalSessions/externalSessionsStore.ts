@@ -12,6 +12,7 @@ import type {
   ExternalSession,
   ExternalSessionsTarget,
   ExternalTranscriptPage,
+  UnfiledExternalSession,
 } from "./externalSessionsModel";
 
 export type ExternalSessionsState = {
@@ -42,6 +43,13 @@ const LOCAL = "local";
 export const ALL_PROJECTS = "\0all";
 
 // ---- pure helpers ----
+
+/** Rows for sessions in no project, which read without a project id. */
+export function unfiledRows(
+  unfiled: readonly UnfiledExternalSession[] | undefined,
+): ExternalSession[] {
+  return (unfiled ?? []).map((session) => ({ ...session, projectId: "" }));
+}
 
 /** Sessions still alive on a machine, the working ones first. */
 export function liveSessions(
@@ -174,6 +182,8 @@ type Machine = {
   /** Local project id -> folder, with a count of hooks asking. */
   projects: Map<string, { cwd?: string; count: number }>;
   rows: ExternalSession[];
+  /** Remote only: live sessions under none of the machine's projects. */
+  unfiled: ExternalSession[];
   /** Local only: sessions any MonoCode window started in these projects. */
   stored: Set<string>;
   loaded: boolean;
@@ -217,12 +227,18 @@ function refreshMachine(machine: Machine) {
     .map(([projectId, { cwd }]) => ({ projectId, cwd: cwd ?? "" }))
     .filter((project) => project.cwd);
   const request = machine.machineId
-    ? remoteRequest<{ sessions?: ExternalSession[] }>(
+    ? remoteRequest<{
+        sessions?: ExternalSession[];
+        unfiled?: UnfiledExternalSession[];
+      }>(
         machine.machineId,
         "externalSessions.list",
         {},
       )
-    : invoke<{ sessions?: ExternalSession[] }>("fork_external_sessions_list", {
+    : invoke<{
+        sessions?: ExternalSession[];
+        unfiled?: UnfiledExternalSession[];
+      }>("fork_external_sessions_list", {
         projects: matchProjects(asked, knownLocalProjectPaths()),
         // Rows and history of just these; the rest only place sessions.
         only: asked.map((project) => project.projectId),
@@ -239,6 +255,7 @@ function refreshMachine(machine: Machine) {
         );
       }
       machine.rows = rows;
+      machine.unfiled = unfiledRows(result?.unfiled);
       machine.supported = true;
       machine.error = undefined;
     })
@@ -246,6 +263,7 @@ function refreshMachine(machine: Machine) {
       if (machine.machineId && isUnsupportedError(error)) {
         machine.supported = false;
         machine.rows = [];
+        machine.unfiled = [];
         machine.error = undefined;
         machine.unsupportedUntil = Date.now() + UNSUPPORTED_RETRY_MS;
       } else {
@@ -306,6 +324,7 @@ function addTarget(target: ExternalSessionsTarget) {
       machineId: target.kind === "remote" ? target.machineId : undefined,
       projects: new Map(),
       rows: [],
+      unfiled: [],
       stored: new Set(),
       loaded: false,
       loading: false,
@@ -397,7 +416,7 @@ export function useExternalSessions(
   const rows = withoutOwnSessions(
     withoutOwnSessions(
       target.projectId === ALL_PROJECTS
-        ? machine.rows
+        ? [...machine.rows, ...machine.unfiled]
         : (groupByProject(machine.rows).get(target.projectId) ?? EMPTY),
       own,
     ),
@@ -433,8 +452,10 @@ export async function readExternalSession(
   return remoteRequest<ExternalTranscriptPage>(
     target.machineId,
     "externalSessions.read",
-    before === undefined
-      ? { projectId: target.projectId, sessionId }
-      : { projectId: target.projectId, sessionId, before },
+    {
+      ...(target.projectId ? { projectId: target.projectId } : {}),
+      sessionId,
+      ...(before === undefined ? {} : { before }),
+    },
   );
 }

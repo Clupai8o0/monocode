@@ -9,6 +9,7 @@ import {
   matchProjects,
   ownSessionIds,
   storedSessionIds,
+  unfiledRows,
   withoutOwnSessions,
 } from "./externalSessionsStore";
 
@@ -109,5 +110,14 @@ describe("liveSessions", () => {
         row("a-idle", "idle"),
       ]).map((session) => session.name),
     ).toEqual(["c-run", "a-idle", "b-idle"]);
+  });
+});
+
+describe("unfiledRows", () => {
+  it("gives sessions in no project an empty project id, and copes with old hosts", () => {
+    expect(unfiledRows(undefined)).toEqual([]);
+    expect(
+      unfiledRows([{ id: "s", source: "claude", cwd: "/home/me", state: "idle", hasTranscript: true }]),
+    ).toEqual([{ id: "s", projectId: "", source: "claude", cwd: "/home/me", state: "idle", hasTranscript: true }]);
   });
 });

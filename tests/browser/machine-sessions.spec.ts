@@ -29,8 +29,9 @@ test("shows a connected machine's live sessions and the device on the composer",
   await expect(group).toContainText("Vivobook");
   await expect(group).toContainText("1 running");
   const rows = group.locator("[data-fork-elsewhere-row]");
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(3);
   await expect(rows.first()).toContainText("monocode-effort");
+  await expect(rows.last()).toContainText("home-session");
 
   await expect(page.locator("[data-composer-device]").first()).toContainText("This Mac");
   await page.screenshot({ path: testInfo.outputPath("machine-sessions.png") });
