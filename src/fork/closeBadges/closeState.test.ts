@@ -26,6 +26,20 @@ describe("parseCloseLine", () => {
     ).toEqual({ kind: "unsafe", detail: "tests still running" });
   });
 
+  it("reads a close line that ends the reply on its own", () => {
+    expect(parseCloseLine("All done.\n\n`Safe to close: nothing left to do.`\n")).toEqual({
+      kind: "safe",
+      detail: "",
+    });
+    expect(parseCloseLine("Done.\nNot safe to close: tests running")?.kind).toBe("unsafe");
+    expect(parseCloseLine("Done.\nSafe to close, handover ready: h.md")?.kind).toBe("handover");
+  });
+
+  it("does not take prose for a bare close line", () => {
+    expect(parseCloseLine("Safe to close: yes.\nThe tests still need a look.")).toBeNull();
+    expect(parseCloseLine("Safe to close once the tests pass")).toBeNull();
+  });
+
   it("uses the last close line and ignores other text", () => {
     const text = "Close: Not safe to close: x\nmore\n- Close: Safe to close: done";
     expect(parseCloseLine(text)?.kind).toBe("safe");

@@ -305,6 +305,8 @@ type Props = {
   providerAccountId?: string;
   onOpenFile?: (path: string) => void;
   onDraftChange?: (text: string) => void;
+  /** Fork: whether files are attached, which the draft text does not show. */
+  onAttachedChange?: (attached: boolean) => void;
   onRecallLastTurnReady?: (recall: () => void) => void;
   onEditingLastTurnChange?: (editing: boolean) => void;
   children?: ReactNode;
@@ -424,6 +426,7 @@ export function Composer({
   providerAccountId,
   onOpenFile,
   onDraftChange,
+  onAttachedChange,
   onRecallLastTurnReady,
   onEditingLastTurnChange,
   children,
@@ -486,6 +489,10 @@ export function Composer({
       !!handoffCard,
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attached = attachments.length > 0;
+  useEffect(() => {
+    onAttachedChange?.(attached);
+  }, [attached, onAttachedChange]);
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [planSelected, setPlanSelected] = useState(false);

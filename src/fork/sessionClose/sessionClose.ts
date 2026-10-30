@@ -5,6 +5,7 @@ import {
 } from "../../features/sessions/model/session";
 import { shouldPersistSession } from "../../features/sessions/data/sessionStore";
 import { isMonoSession } from "../../features/monos/model/mono";
+import { closeStateOfBlocks } from "../closeBadges/closeState";
 import {
   closeLeaf,
   leafIds,
@@ -40,6 +41,25 @@ export function canCloseForMemory(
     !isMonoSession(session.id) &&
     !sessionNeedsInput(session) &&
     !sessionDraftBlock(session)
+  );
+}
+
+/**
+ * True when the last reply says "Safe to close: nothing left to do" and nothing
+ * has happened since. A handover still has follow-ups, so it does not count.
+ */
+export function offersSafeClose(
+  session: Session,
+  busyIds: ReadonlySet<string>,
+): boolean {
+  return (
+    !session.backgroundTasks?.length &&
+    // A by-the-way answer still running would be cut off.
+    !session.blocks.some((block) =>
+      block.btwThreads?.some((thread) => thread.status === "running"),
+    ) &&
+    canCloseForMemory(session, busyIds) &&
+    closeStateOfBlocks(session.blocks)?.kind === "safe"
   );
 }
 

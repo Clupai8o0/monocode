@@ -10,6 +10,7 @@ import {
 } from "../../features/workspace/model/layout";
 import {
   canCloseForMemory,
+  offersSafeClose,
   planSessionClose,
   referencedSessionIds,
   withRunningLeads,
@@ -28,6 +29,100 @@ function session(id: string, extra: Partial<Session> = {}): Session {
     ...extra,
   } as Session;
 }
+
+describe("offersSafeClose", () => {
+  const offers = (entry: Session, busy: string[] = []) =>
+    offersSafeClose(entry, new Set(busy));
+  const replied = (close: string, extra: Partial<Session> = {}) =>
+    session("s", {
+      blocks: [
+        { id: "u", role: "user", text: "hi" },
+        {
+          id: "a",
+          role: "assistant",
+          text: `**Recap**\n\n- **Close:** ${close}`,
+        },
+      ],
+      ...extra,
+    });
+
+  it("offers it when the reply says there is nothing left to do", () => {
+    expect(offers(replied("Safe to close: nothing left to do."))).toBe(
+      true,
+    );
+    expect(
+      offers(replied("`Safe to close: nothing left to do.`")),
+    ).toBe(true);
+  });
+
+  it("offers it for the close line on its own", () => {
+    expect(
+      offers(
+        session("s", {
+          blocks: [
+            { id: "u", role: "user", text: "hi" },
+            {
+              id: "a",
+              role: "assistant",
+              text: "All done.\n\nSafe to close: nothing left to do.",
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not for a handover, a not-safe line or no line", () => {
+    expect(
+      offers(replied("Safe to close, handover ready: /a/handoff.md")),
+    ).toBe(false);
+    expect(offers(replied("Not safe to close: tests running"))).toBe(
+      false,
+    );
+    expect(offers(session("s"))).toBe(false);
+  });
+
+  it("does not once the person has written again", () => {
+    const safe = replied("Safe to close: nothing left to do.");
+    expect(
+      offers({
+        ...safe,
+        blocks: [...safe.blocks, { id: "u2", role: "user", text: "one more" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not while work is still going", () => {
+    const close = "Safe to close: nothing left to do.";
+    expect(offers(replied(close), ["s"])).toBe(false);
+    expect(
+      offers(
+        replied(close, {
+          blocks: [
+            { id: "u", role: "user", text: "hi" },
+            {
+              id: "a",
+              role: "assistant",
+              text: `Close: ${close}`,
+              btwThreads: [{ status: "running" }],
+            },
+          ] as Session["blocks"],
+        }),
+      ),
+    ).toBe(false);
+    expect(offers(replied(close, { busy: true }))).toBe(false);
+    expect(
+      offers(replied(close, { backgroundTasks: ["build"] })),
+    ).toBe(false);
+    expect(
+      offers(
+        replied(close, {
+          queuedMessages: [{ id: "q" }] as Session["queuedMessages"],
+        }),
+      ),
+    ).toBe(false);
+  });
+});
 
 function tabWith(...ids: string[]): WorkspaceTab {
   const tab = newTab(ids[0]);

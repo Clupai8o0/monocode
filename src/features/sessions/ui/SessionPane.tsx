@@ -1,5 +1,10 @@
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
+import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
+import {
+  offersSafeClose,
+  withRunningLeads,
+} from "../../../fork/sessionClose/sessionClose";
 import {
   StatusExtras,
   useSessionStatus,
@@ -308,6 +313,8 @@ export const SessionPane = memo(function SessionPane(input: SessionPaneProps) {
     );
   return <LocalSessionPane {...props} />;
 });
+
+const NO_SESSIONS: ReadonlySet<string> = new Set();
 
 const LocalSessionPane = memo(function LocalSessionPane({
   remoteSession = false,
@@ -663,6 +670,19 @@ const LocalSessionPane = memo(function LocalSessionPane({
     (!draftBlock && (!isEmpty || inSplit || !!session.inboxAsk || !!agent));
   const composerDockMotion = useComposerDockMotion(dockComposer);
   const draftRef = useRef<string | undefined>(getComposerDraft(session.id));
+  // Fork: text in the composer means the person is not done with this session.
+  const [draftWritten, setDraftWritten] = useState(
+    () => !!draftRef.current?.trim(),
+  );
+  const [draftAttached, setDraftAttached] = useState(false);
+  const closeSessionOffer =
+    onArchiveSession &&
+    !remote &&
+    !draftWritten &&
+    !draftAttached &&
+    offersSafeClose(session, withRunningLeads(NO_SESSIONS, orchestrationRuns)) ? (
+      <CloseSessionButton onClose={() => onArchiveSession(session.id, true)} />
+    ) : undefined;
   // Fork: the status strip sits under the composer, docked or centred.
   const composer = (
     <>
@@ -711,7 +731,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onDraftChange={(text) => {
         draftRef.current = text;
         setComposerDraft(session.id, text);
+        setDraftWritten(!!text.trim());
       }}
+      onAttachedChange={setDraftAttached}
       inboxCard={session.inboxCard}
       noteCard={session.noteCard}
       handoffCard={session.handoffCard}
@@ -1112,28 +1134,33 @@ const LocalSessionPane = memo(function LocalSessionPane({
                         : undefined
                     }
                     latestTurnAccessory={
-                      reviewHidden || agent ? undefined : (
-                        <SessionReview
-                          sessionId={session.id}
-                          editedPaths={editedPaths}
-                          cwd={workCwd}
-                          enabled={visible}
-                          busy={!!session.busy}
-                          undoLocked={
-                            reviewUndoLocked ||
-                            orchestrationRuns.some(
-                              (run) =>
-                                (run.status === "active" ||
-                                  run.status === "paused") &&
-                                (run.leadId === session.id ||
-                                  run.tasks.some(
-                                    (task) => task.sessionId === session.id,
-                                  )),
-                            )
-                          }
-                          onOpenDiff={onOpenDiff}
-                          onCommit={onCommitChanges}
-                        />
+                      reviewHidden || agent ? (
+                        closeSessionOffer
+                      ) : (
+                        <>
+                          <SessionReview
+                            sessionId={session.id}
+                            editedPaths={editedPaths}
+                            cwd={workCwd}
+                            enabled={visible}
+                            busy={!!session.busy}
+                            undoLocked={
+                              reviewUndoLocked ||
+                              orchestrationRuns.some(
+                                (run) =>
+                                  (run.status === "active" ||
+                                    run.status === "paused") &&
+                                  (run.leadId === session.id ||
+                                    run.tasks.some(
+                                      (task) => task.sessionId === session.id,
+                                    )),
+                              )
+                            }
+                            onOpenDiff={onOpenDiff}
+                            onCommit={onCommitChanges}
+                          />
+                          {closeSessionOffer}
+                        </>
                       )
                     }
                   />

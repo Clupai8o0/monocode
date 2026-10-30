@@ -20,17 +20,20 @@ const CLOSE_LINE = /^(?:[-*+]\s+)?close\s*:\s*(.*)$/i;
 const UNSAFE = /^not safe to close\b[\s:,-]*(.*)$/i;
 const HANDOVER = /^safe to close\s*,?\s*handover ready\b[\s:,-]*(.*)$/i;
 const SAFE = /^safe to close\b/i;
+/** A reply may end on the close line alone, without the recap's "Close:". */
+const BARE_CLOSE_LINE = /^(?:not )?safe to close\s*(?:[:,.]|$)/i;
 
 /** Reads the last "Close:" line of a reply, ignoring markdown bold and code. */
 export function parseCloseLine(text: string): CloseState | null {
-  const lines = text.split("\n");
+  const lines = text.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].replace(/[*`_]/g, "").trim();
     const match = CLOSE_LINE.exec(line);
-    if (!match) {
+    const bare = i === lines.length - 1 && BARE_CLOSE_LINE.test(line);
+    if (!match && !bare) {
       continue;
     }
-    const rest = match[1].trim();
+    const rest = match ? match[1].trim() : line;
     const unsafe = UNSAFE.exec(rest);
     if (unsafe) {
       return { kind: "unsafe", detail: tidy(unsafe[1]) };
