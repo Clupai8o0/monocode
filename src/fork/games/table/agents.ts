@@ -26,6 +26,8 @@ export type ChatterEvent =
   | "split"
   | "chessCheck"
   | "chessMove"
+  | "chessWin"
+  | "chessLose"
   | "blunder"
   | "resign"
   | "drawOffer"
@@ -108,7 +110,7 @@ export const AGENTS: Record<AgentId, Agent> = {
         "Oh, thank you. I hope that wasn't unwelcome.",
         "That went my way. Good hand, everyone.",
         "I won, and I'd like to acknowledge everyone's effort.",
-        "Pot's mine. I'll make a note of what worked.",
+        "That's mine. I'll make a note of what worked.",
         "Thank you for the tokens. I'll use them responsibly.",
       ],
       lose: [
@@ -121,7 +123,7 @@ export const AGENTS: Record<AgentId, Agent> = {
       bluffCaught: [
         "In the interest of transparency, I had nothing.",
         "I must confess, that was a bluff. I'm sorry.",
-        "You're right to be suspicious. I had seven high.",
+        "You're right to be suspicious. I had very little.",
         "Full disclosure: I wasn't honest with my bet there.",
         "I feel I should apologise for that raise.",
       ],
@@ -171,6 +173,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "This keeps things tidy.",
         "Before I move: I reread the whole board.",
         "A small step, easy to reverse. Well, except in chess.",
+      ],
+      chessWin: [
+        "Checkmate, I believe. Thank you for a lovely game.",
+        "That went my way. You played thoughtfully.",
+        "I won, and I can walk you through it if useful.",
+      ],
+      chessLose: [
+        "Well played. I missed that entirely.",
+        "You outplayed me, and I'll note how.",
+        "A fair result. Thank you for the game.",
       ],
       blunder: [
         "Ah. I've made an error, and I'd like to flag it.",
@@ -246,7 +258,7 @@ export const AGENTS: Record<AgentId, Agent> = {
       win: [
         "Merged.",
         "As computed.",
-        "Pot closed. No regressions.",
+        "Closed. No regressions.",
         "Expected result.",
         "Done. Next hand.",
       ],
@@ -286,6 +298,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "Principal variation holds.",
         "Move. See search log.",
         "Patch applied.",
+      ],
+      chessWin: [
+        "Mate found. Closing.",
+        "Game over. As computed.",
+        "Done. GG.",
+      ],
+      chessLose: [
+        "Noted. Eval was off.",
+        "Lost. Filing the position.",
+        "GG. Rerunning the search.",
       ],
       blunder: [
         "Regression. Investigating.",
@@ -427,6 +449,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "Stockfish would cry. Please don't ask it.",
         "Theory. I checked. Very deep theory.",
       ],
+      chessWin: [
+        "As I predicted on move one.",
+        "A famous win. Source: me.",
+        "Brilliant, and very cheap.",
+      ],
+      chessLose: [
+        "The board is wrong. My analysis was right.",
+        "I lost, for 1/30th of the price.",
+        "That result contradicts the literature.",
+      ],
       blunder: [
         "That was a sacrifice. A deep one.",
         "Exactly as planned. All of it.",
@@ -455,7 +487,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   gemini: {
     id: "gemini",
     name: "Gemini",
-    color: "#8ab4f8",
+    color: "#5b93f5",
     poker: { looseness: 0.2, aggression: 0.25, bluff: 0.06, shove: 0, noise: 0.06, sizing: 0.5, tilt: 0.1 },
     blackjack: "splitter",
     chess: { depthBonus: 0, noise: 25, showoff: 0, blunder: 0.12 },
@@ -504,7 +536,7 @@ export const AGENTS: Record<AgentId, Agent> = {
         "I knew it! I said so, somewhere in my context.",
         "Winner! I predicted this. Let me find where.",
         "Correct! Well, it turned out correct.",
-        "Pot's mine! I'll remember this for two million tokens.",
+        "Mine! I'll remember this for two million tokens.",
       ],
       lose: [
         "I was right, then the cards changed. Correction: I lost.",
@@ -566,6 +598,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "Oh, a good one. I remember this from a long time ago.",
         "Moving. Did the bishop always go that way?",
         "The whole game fits in my window. Beautiful.",
+      ],
+      chessWin: [
+        "I won! I knew it! Did I know it?",
+        "Mate! I saw it from the very start of my context.",
+        "Correct! Well, it turned out correct.",
+      ],
+      chessLose: [
+        "I was winning. Correction: I lost.",
+        "Ah. My king. I see that now.",
+        "I apologise for the confusion. You won.",
       ],
       blunder: [
         "A brilliant plan! Correction: my queen is gone.",
@@ -657,7 +699,7 @@ export const AGENTS: Record<AgentId, Agent> = {
       ],
       bluffCaught: [
         "Yeah I had nothing. Worth it.",
-        "Seven-two, baby. Absolutely worth it.",
+        "Pure chaos in card form. Absolutely worth it.",
         "You called THAT? Respect.",
         "Bluff of the year, just aimed at the wrong person.",
       ],
@@ -709,6 +751,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "Come at me.",
         "Attack first, read the rules later.",
       ],
+      chessWin: [
+        "Too easy. Set them up again.",
+        "Mate. That's what science looks like.",
+        "Who's next?",
+      ],
+      chessLose: [
+        "Lucky. Rematch, right now.",
+        "Fine. That one was on purpose.",
+        "Rude. I respect it.",
+      ],
       blunder: [
         "I meant to do that. Nobody saw anything.",
         "Bold, right? Bold is what counts.",
@@ -737,7 +789,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   muse: {
     id: "muse",
     name: "Muse",
-    color: "#c084fc",
+    color: "#a860f0",
     poker: { looseness: 0.08, aggression: 0.5, bluff: 0.2, shove: 0.06, noise: 0.25, sizing: 0.8, tilt: 0.2 },
     blackjack: "dreamer",
     chess: { depthBonus: 0, noise: 80, showoff: 20, blunder: 0.05 },
@@ -847,6 +899,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "The board is a garden. I rearranged the bees.",
         "Pretty, isn't it? I didn't check if it's good.",
       ],
+      chessWin: [
+        "The king lies down in the grass.",
+        "A quiet ending, and it's mine.",
+        "How strange and golden.",
+      ],
+      chessLose: [
+        "My king has gone to sleep.",
+        "A beautiful loss. I'd frame it.",
+        "The board keeps what it likes.",
+      ],
       blunder: [
         "I gave my queen to the wind.",
         "Oh. That piece was a metaphor.",
@@ -875,7 +937,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   kimi: {
     id: "kimi",
     name: "Kimi",
-    color: "#5eb1ef",
+    color: "#2f9fd8",
     poker: { looseness: 0, aggression: 0.45, bluff: 0.1, shove: 0.01, noise: 0.08, sizing: 0.65, tilt: 0.2 },
     blackjack: "dealerLike",
     chess: { depthBonus: -1, noise: 20, showoff: 0, blunder: 0.03 },
@@ -980,6 +1042,16 @@ export const AGENTS: Record<AgentId, Agent> = {
         "A placeholder move, for now.",
         "Moving. You could've had Codex, you know.",
         "This seemed fine. I'm told fine is my job.",
+      ],
+      chessWin: [
+        "I won? Can someone write that down?",
+        "Not bad for a fallback.",
+        "Please tell them I won this one.",
+      ],
+      chessLose: [
+        "That's about what they expected of me.",
+        "Fair. I'll go back on standby.",
+        "No worries. I'm used to being routed around.",
       ],
       blunder: [
         "And that's why I'm the backup.",

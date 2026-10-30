@@ -1,0 +1,128 @@
+/* Fork: table games. Colours only by fill, never a line. */
+[data-table-board] {
+  --table-felt: color-mix(in srgb, var(--color-content) 7%, transparent);
+  --table-slot: color-mix(in srgb, var(--color-content) 6%, transparent);
+  --table-card: color-mix(in srgb, var(--color-content) 22%, var(--color-background-base));
+  --table-back: color-mix(in srgb, var(--color-content) 13%, var(--color-background-base));
+  --table-back-ink: color-mix(in srgb, var(--color-content) 38%, var(--color-background-base));
+  --table-bubble: color-mix(in srgb, var(--color-content) 16%, var(--color-background-base));
+  --table-red: #ef8d84;
+  --table-win: #7fd18b;
+  --table-sq-light: #96958d;
+  --table-sq-dark: #62646c;
+  --table-piece-white: #f7f4ea;
+  --table-piece-black: #16171b;
+  --table-sq-from: #c9b25a;
+  --table-sq-to: #b09a46;
+  --table-sq-check: #c45b52;
+  --table-dot: rgb(20 20 24 / 0.45);
+}
+
+html.theme-light [data-table-board] {
+  --table-felt: color-mix(in srgb, var(--color-content) 8%, transparent);
+  --table-slot: color-mix(in srgb, var(--color-content) 7%, transparent);
+  --table-card: #ffffff;
+  --table-back: color-mix(in srgb, var(--color-content) 16%, #ffffff);
+  --table-back-ink: color-mix(in srgb, var(--color-content) 45%, #ffffff);
+  --table-bubble: #ffffff;
+  --table-red: #b3403a;
+  --table-win: #24803a;
+}
+
+.table-bubble {
+  background: var(--table-bubble);
+  clip-path: polygon(
+    2px 0,
+    calc(100% - 2px) 0,
+    calc(100% - 2px) 2px,
+    100% 2px,
+    100% calc(100% - 2px),
+    calc(100% - 2px) calc(100% - 2px),
+    calc(100% - 2px) 100%,
+    2px 100%,
+    2px calc(100% - 2px),
+    0 calc(100% - 2px),
+    0 2px,
+    2px 2px
+  );
+  animation: table-pop 140ms steps(3) both;
+}
+
+@keyframes table-pop {
+  from {
+    transform: translateY(3px);
+    opacity: 0;
+  }
+}
+
+.table-hop {
+  animation: table-hop 480ms steps(1) infinite;
+}
+
+@keyframes table-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+.table-button {
+  transition: transform 90ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.table-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* A slider made of blocks. */
+.table-slider {
+  appearance: none;
+  height: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.table-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: color-mix(in srgb, var(--color-content) 18%, transparent);
+}
+
+.table-slider::-moz-range-track {
+  height: 4px;
+  background: color-mix(in srgb, var(--color-content) 18%, transparent);
+}
+
+.table-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 8px;
+  height: 12px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 0;
+  background: #e8b923;
+}
+
+.table-slider::-moz-range-thumb {
+  width: 8px;
+  height: 12px;
+  border: 0;
+  border-radius: 0;
+  background: #e8b923;
+}
+
+.table-slider:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-bubble,
+  .table-hop {
+    animation: none;
+  }
+  .table-button {
+    transition: none;
+  }
+}

@@ -284,6 +284,27 @@ export function chooseMove(request: SearchRequest, random: Random): SearchResult
   };
 }
 
+/**
+ * After a search, whether the agent bows out or proposes a draw. Claude resigns
+ * early and offers draws politely; the others only give up once it's hopeless.
+ */
+export function chessVerdict(
+  id: string,
+  score: number,
+  ply: number,
+  lastOffer: number,
+  roll: number,
+): "resign" | "offer" | null {
+  const claude = id === "claude";
+  if (score < (claude ? -600 : -1500) && ply > (claude ? 20 : 30)) {
+    return "resign";
+  }
+  if (claude && ply > 30 && ply - lastOffer >= 20 && Math.abs(score) < 60 && roll < 0.25) {
+    return "offer";
+  }
+  return null;
+}
+
 /** Finds a played move by name in a position's legal moves. */
 export function findMove(position: Position, name: string): Move | null {
   return position.legalMoves().find((move) => moveName(move) === name) ?? null;

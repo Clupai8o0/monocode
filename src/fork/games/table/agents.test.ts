@@ -21,6 +21,8 @@ const EVENTS: ChatterEvent[] = [
   "split",
   "chessCheck",
   "chessMove",
+  "chessWin",
+  "chessLose",
   "blunder",
   "resign",
   "drawOffer",

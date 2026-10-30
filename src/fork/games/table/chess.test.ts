@@ -11,7 +11,7 @@ import {
   QUEEN,
   squareAt,
 } from "./chess";
-import { chooseMove, findMove, modeDepth } from "./chessAi";
+import { chessVerdict, chooseMove, findMove, modeDepth } from "./chessAi";
 
 const KIWIPETE =
   "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
@@ -235,4 +235,17 @@ describe("the engine", () => {
       }
     }
   }, 60_000);
+});
+
+describe("how an agent bows out", () => {
+  it("Claude resigns when lost and offers draws politely; others hang on longer", () => {
+    expect(chessVerdict("claude", -700, 25, -100, 0.9)).toBe("resign");
+    expect(chessVerdict("claude", -700, 15, -100, 0.9)).toBeNull();
+    expect(chessVerdict("codex", -700, 25, -100, 0.9)).toBeNull();
+    expect(chessVerdict("codex", -1600, 35, -100, 0.9)).toBe("resign");
+    expect(chessVerdict("claude", 10, 40, -100, 0.1)).toBe("offer");
+    expect(chessVerdict("claude", 10, 40, 30, 0.1)).toBeNull();
+    expect(chessVerdict("claude", 200, 40, -100, 0.1)).toBeNull();
+    expect(chessVerdict("grok", 10, 40, -100, 0.1)).toBeNull();
+  });
 });

@@ -15,6 +15,7 @@ import { TerminalGridBackground } from "../../features/terminal/ui/TerminalGridB
 import { LAYER } from "../../shared/lib/layers";
 import { useAgentActivity } from "../backgroundAgents/runningAgents";
 import {
+  DEFAULT_GAME,
   activityLabel,
   activityNotice,
   gamesPanel,
@@ -24,6 +25,14 @@ import {
   saveLastGame,
   type BestScores,
 } from "./gamesPanelStore";
+// Fork: poker, blackjack and chess share the panel with the grid games.
+import {
+  TABLE_GAMES,
+  TableGames,
+  TableScore,
+  isTableGame,
+  tableHint,
+} from "./table/TableGames";
 
 /**
  * Fork: a floating panel that plays the grid games. It isn't modal, so the chat
@@ -33,13 +42,17 @@ import {
  */
 
 const WIDTH = 600;
-const HEIGHT = 520;
+// Fork: 520 plus the second header row all the tabs now need at this width,
+// so a grid game's board stays the size it was.
+const HEIGHT = 548;
+const TABLE_WIDTH = 720;
+const TABLE_HEIGHT = 560;
 /** Clear of the footer and the window's edge. */
 const MARGIN = 10;
 const FOOTER = 34;
 
 const CHIP =
-  "h-6 cursor-pointer whitespace-nowrap rounded px-2 text-[11px] leading-none";
+  "h-6 cursor-pointer whitespace-nowrap rounded px-1.5 text-[11px] leading-none";
 const CHIP_ON = "bg-content/10 text-content";
 const CHIP_OFF = "text-content/50 hover:bg-content/10 hover:text-content";
 
@@ -49,7 +62,7 @@ export function GamesPanel() {
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [gameId, setGameId] = useState(() =>
-    loadLastGame(GRID_GAMES.map((game) => game.id)),
+    loadLastGame([...GRID_GAMES, ...TABLE_GAMES].map((game) => game.id)),
   );
   const [mode, setMode] = useState<ArcadeMode>("mid");
   const [runId, setRunId] = useState(0);
@@ -58,8 +71,21 @@ export function GamesPanel() {
   const [stats, setStats] = useState({ score: 0, lives: 0, over: false });
   const [best, setBest] = useState<BestScores>(loadBest);
 
-  const game = GRID_GAMES.find((item) => item.id === gameId) ?? GRID_GAMES[0]!;
-  const paused = !open || !focused || notice !== null;
+  // Fork: a table game leaves the grid board parked on its last game.
+  const atTable = isTableGame(gameId);
+  const tableOpened = useRef(atTable);
+  tableOpened.current ||= atTable;
+  const lastGrid = useRef(DEFAULT_GAME);
+  if (!atTable) {
+    lastGrid.current = gameId;
+  }
+  const gridId = lastGrid.current;
+  const gridRun = useRef(runId);
+  if (!atTable) {
+    gridRun.current = runId;
+  }
+  const game = GRID_GAMES.find((item) => item.id === gridId) ?? GRID_GAMES[0]!;
+  const paused = !open || !focused || notice !== null || atTable;
 
   // Where focus goes back to on hiding. Read before the board's effect takes it.
   useLayoutEffect(() => {
@@ -122,10 +148,10 @@ export function GamesPanel() {
   const onStats = (score: number, lives: number, over: boolean) => {
     setStats({ score, lives, over });
     setBest((current) => {
-      if (score <= (current[gameId] ?? 0)) {
+      if (score <= (current[gridId] ?? 0)) {
         return current;
       }
-      const next = { ...current, [gameId]: score };
+      const next = { ...current, [gridId]: score };
       saveBest(next);
       return next;
     });
@@ -133,7 +159,9 @@ export function GamesPanel() {
 
   const status = notice
     ? notice
-    : stats.over
+    : atTable
+      ? null
+      : stats.over
       ? game.hasAction
         ? "game over · space to retry"
         : "game over"
@@ -151,8 +179,8 @@ export function GamesPanel() {
         zIndex: LAYER.popover,
         right: MARGIN,
         bottom: FOOTER,
-        width: `min(${WIDTH}px, calc(100vw - ${MARGIN * 2}px))`,
-        height: `min(${HEIGHT}px, calc(100vh - ${FOOTER + MARGIN}px))`,
+        width: `min(${atTable ? TABLE_WIDTH : WIDTH}px, calc(100vw - ${MARGIN * 2}px))`,
+        height: `min(${atTable ? TABLE_HEIGHT : HEIGHT}px, calc(100vh - ${FOOTER + MARGIN}px))`,
         display: open ? undefined : "none",
       }}
       className="fixed isolate flex flex-col overflow-hidden rounded-xl border border-content/10 text-content shadow-xl"
@@ -163,7 +191,7 @@ export function GamesPanel() {
         onMouseDown={(event) => event.preventDefault()}
       >
         <div className="flex items-center gap-0.5" role="tablist" aria-label="Game">
-          {GRID_GAMES.map((item) => (
+          {[...GRID_GAMES, ...TABLE_GAMES].map((item) => (
             <button
               key={item.id}
               type="button"
@@ -211,38 +239,62 @@ export function GamesPanel() {
         </div>
       </header>
       <div className="relative z-[1] flex shrink-0 items-center gap-3 px-3 pb-1.5 font-mono text-[11px] tabular-nums text-content/55">
-        <span data-fork-games-score={stats.score}>score {stats.score}</span>
-        <span className="text-content/35">best {best[gameId] ?? 0}</span>
-        {game.lives ? (
+        {atTable ? (
+          <TableScore gameId={gameId} />
+        ) : (
+          <>
+            <span data-fork-games-score={stats.score}>score {stats.score}</span>
+            <span className="text-content/35">best {best[gameId] ?? 0}</span>
+          </>
+        )}
+        {!atTable && game.lives ? (
           <span className="text-content/35" aria-label={`${stats.lives} lives`}>
             {"•".repeat(stats.lives)}
           </span>
         ) : null}
         <span className="ml-auto truncate text-content/35">
-          {activityLabel(activity) || game.hint}
+          {activityLabel(activity) || (atTable ? tableHint(gameId) : game.hint)}
         </span>
       </div>
       <div
-        className="relative z-[1] min-h-0 flex-1 cursor-pointer"
+        className={`relative z-[1] min-h-0 flex-1 ${atTable ? "" : "cursor-pointer"}`}
         onMouseDown={() => {
           resume();
-          focusBoard();
+          if (!atTable) {
+            focusBoard();
+          }
         }}
       >
-        {/* Mounted with the panel, so it's only ever made once it's wanted. */}
-        <TerminalGridBackground
-          host={{
-            gameId,
-            mode,
-            runId,
-            paused,
-            active: open,
-            onStats,
-            onExit: () => gamesPanel.hide(),
-            onFocusChange: setFocused,
-            onInput: resume,
-          }}
-        />
+        <div
+          className="absolute inset-0"
+          style={atTable ? { display: "none" } : undefined}
+        >
+          {/* Mounted with the panel, so it's only ever made once it's wanted. */}
+          <TerminalGridBackground
+            host={{
+              gameId: gridId,
+              mode,
+              runId: gridRun.current,
+              paused,
+              active: open && !atTable,
+              onStats,
+              onExit: () => gamesPanel.hide(),
+              onFocusChange: setFocused,
+              onInput: resume,
+            }}
+          />
+        </div>
+        {tableOpened.current ? (
+          <TableGames
+            gameId={gameId}
+            mode={mode}
+            runId={runId}
+            open={open}
+            waiting={activity.waiting}
+            onExit={() => gamesPanel.hide()}
+            onInput={resume}
+          />
+        ) : null}
         {status ? (
           <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center">
             <span
