@@ -1280,7 +1280,7 @@ function ChatPage() {
         <Row
           id="empty-session-games"
           label="Empty session games"
-          description="Pac-man and snake idle on the empty-session grid. Hover the band to take control of whichever is on screen. Turn this off to keep the pane still."
+          description="Pac-man, snake, blocks, agent run and mono bros idle on the empty-session grid. Hover the band to take control of whichever is on screen. Turn this off to keep the pane still."
         >
           <Toggle
             label="Empty session games"

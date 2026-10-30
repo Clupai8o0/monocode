@@ -8,6 +8,9 @@ describe("grid game slider", () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain("pacman");
     expect(ids).toContain("snake");
+    expect(ids).toEqual(
+      expect.arrayContaining(["blocks", "runner", "platformer"]),
+    );
   });
 
   it("walks to the end and back instead of wrapping", () => {
@@ -45,6 +48,13 @@ describe("grid game slider", () => {
       arcade.step(33);
       expect(arcade.fade()).toBeGreaterThan(0);
       expect(arcade.controlled()).toBe(false);
+    }
+  });
+
+  it("gives every game a hint, and Space to games that say they use it", () => {
+    for (const game of GRID_GAMES) {
+      expect(game.hint).toBeTruthy();
+      expect(Boolean(game.create().action)).toBe(Boolean(game.hasAction));
     }
   });
 });

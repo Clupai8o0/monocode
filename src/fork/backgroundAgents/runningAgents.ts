@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from "react";
-import type { Block, Session } from "../../features/sessions/model/session";
+import {
+  hasPendingApproval,
+  type Block,
+  type Session,
+} from "../../features/sessions/model/session";
 import {
   isSubagentBlock,
   toolCallState,
@@ -90,9 +94,15 @@ function sameWork(a: RunningWork | undefined, b: RunningWork): boolean {
 export function publishRunningWork(
   sessions: readonly Pick<
     Session,
-    "id" | "busy" | "blocks" | "queuedMessages"
+    | "id"
+    | "busy"
+    | "blocks"
+    | "queuedMessages"
+    | "pendingQuestion"
+    | "worktreeRemoved"
   >[],
 ): void {
+  publishAgentActivity(sessions);
   const next = new Map<string, RunningWork>();
   for (const session of sessions) {
     const work = runningWork(session);
@@ -133,4 +143,69 @@ function snapshot(): number {
 export function useRunningWork(sessionId: string): RunningWork {
   useSyncExternalStore(subscribe, snapshot, snapshot);
   return counts.get(sessionId) ?? NONE;
+}
+
+// --- Store: how many agents are at it, for the games panel -------------------
+
+export type AgentActivity = {
+  /** Sessions busy on their own. */
+  working: number;
+  /** Sessions stopped on an approval or a question. */
+  waiting: number;
+};
+
+let activity: AgentActivity = { working: 0, waiting: 0 };
+const activityListeners = new Set<() => void>();
+
+export function agentActivity(
+  sessions: readonly Pick<
+    Session,
+    "busy" | "blocks" | "pendingQuestion" | "worktreeRemoved"
+  >[],
+): AgentActivity {
+  let working = 0;
+  let waiting = 0;
+  for (const session of sessions) {
+    if (session.worktreeRemoved) {
+      continue;
+    }
+    if (hasPendingApproval(session.blocks) || session.pendingQuestion != null) {
+      waiting += 1;
+    } else if (session.busy) {
+      working += 1;
+    }
+  }
+  return { working, waiting };
+}
+
+function publishAgentActivity(
+  sessions: Parameters<typeof agentActivity>[0],
+): void {
+  const next = agentActivity(sessions);
+  if (next.working === activity.working && next.waiting === activity.waiting) {
+    return;
+  }
+  activity = next;
+  for (const listener of activityListeners) {
+    listener();
+  }
+}
+
+function subscribeActivity(listener: () => void): () => void {
+  activityListeners.add(listener);
+  return () => {
+    activityListeners.delete(listener);
+  };
+}
+
+function activitySnapshot(): AgentActivity {
+  return activity;
+}
+
+export function useAgentActivity(): AgentActivity {
+  return useSyncExternalStore(
+    subscribeActivity,
+    activitySnapshot,
+    activitySnapshot,
+  );
 }

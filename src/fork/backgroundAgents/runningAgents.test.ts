@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Block } from "../../features/sessions/model/session";
-import { publishRunningWork, runningLabel, runningWork } from "./runningAgents";
+import {
+  agentActivity,
+  publishRunningWork,
+  runningLabel,
+  runningWork,
+} from "./runningAgents";
 
 let n = 0;
 function block(partial: Partial<Block>): Block {
@@ -67,5 +72,39 @@ describe("publishRunningWork", () => {
     expect(() =>
       publishRunningWork([{ id: "s1", busy: false, blocks: [] }]),
     ).not.toThrow();
+  });
+});
+
+describe("agentActivity", () => {
+  const session = (partial: object) => ({
+    busy: false,
+    blocks: [] as Block[],
+    ...partial,
+  });
+
+  it("counts busy sessions as working and blocked ones as waiting", () => {
+    const pending = block({
+      approval: { decided: false },
+    } as unknown as Partial<Block>);
+    expect(
+      agentActivity([
+        session({ busy: true }),
+        session({ busy: true, blocks: [pending] }),
+        session({ pendingQuestion: { id: "q" } }),
+        session({}),
+      ]),
+    ).toEqual({ working: 1, waiting: 2 });
+  });
+
+  it("ignores a session whose worktree is gone", () => {
+    expect(
+      agentActivity([
+        session({
+          busy: true,
+          pendingQuestion: { id: "q" },
+          worktreeRemoved: true,
+        }),
+      ]),
+    ).toEqual({ working: 0, waiting: 0 });
   });
 });

@@ -32,6 +32,8 @@ const BUBBLE_EASE = 0.2;
 const FRAME_MS = 33;
 /** The slide transition, plus a frame of slack, while both boards show. */
 const SLIDE_MS = 800;
+/** Fork: how often a paused host game repaints. */
+const PAUSED_PAINT_MS = 250;
 
 const HEADING: Record<string, { x: number; y: number }> = {
   ArrowUp: { x: 0, y: -1 },
@@ -42,6 +44,25 @@ const HEADING: Record<string, { x: number; y: number }> = {
   a: { x: -1, y: 0 },
   s: { x: 0, y: 1 },
   d: { x: 1, y: 0 },
+};
+
+/**
+ * Fork: a host (the games panel) that runs one board as a live game. It picks
+ * the game, mode and pause, and draws its own controls around the board.
+ */
+export type GridGameHost = {
+  gameId: string;
+  mode: ArcadeMode;
+  /** A new value starts a new game. */
+  runId: number;
+  paused: boolean;
+  /** The panel is on screen, so the board may take focus. */
+  active: boolean;
+  onStats(score: number, lives: number, over: boolean): void;
+  onExit(): void;
+  onFocusChange(focused: boolean): void;
+  /** Any key that reached the board, before the game sees it. */
+  onInput(): void;
 };
 
 type Board = {
@@ -151,7 +172,9 @@ function drawGhost(
   ctx.restore();
 }
 
-export function TerminalGridBackground() {
+export function TerminalGridBackground({
+  host,
+}: { host?: GridGameHost } = {}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const boardsRef = useRef<Board[] | null>(null);
@@ -160,7 +183,13 @@ export function TerminalGridBackground() {
   const scoreRef = useRef(0);
   const livesRef = useRef(0);
   const slideAtRef = useRef(0);
-  const [playing, setPlaying] = useState(false);
+  // Fork: host mode.
+  const hostRef = useRef(host);
+  hostRef.current = host;
+  const overRef = useRef(false);
+  const heldRef = useRef(new Map<string, { x: number; y: number }>());
+  const [over, setOver] = useState(false);
+  const [playing, setPlaying] = useState(!!host);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [mode, setMode] = useState<ArcadeMode>("mid");
@@ -218,6 +247,7 @@ export function TerminalGridBackground() {
     let rgb = parseContentRgb();
     let surfaceRgb = parseSurfaceRgb();
     let lastFrame = 0;
+    let lastPausedPaint = 0;
 
     const drawGrid = () => {
       if (!gridCtx || width <= 0 || height <= 0) return;
@@ -379,6 +409,15 @@ export function TerminalGridBackground() {
 
       const current = indexRef.current;
       const controlled = playingRef.current;
+      // Fork: a paused host game holds still, repainting only now and then
+      // so a resize or a theme change still shows.
+      if (hostRef.current?.paused) {
+        if (time - lastPausedPaint < PAUSED_PAINT_MS) return;
+        lastPausedPaint = time;
+        const held = boards[current];
+        if (held) paint(held, width, height);
+        return;
+      }
       // Only the board on screen needs pixels, bar mid-slide when two show.
       const sliding = time - slideAtRef.current < SLIDE_MS;
 
@@ -404,6 +443,11 @@ export function TerminalGridBackground() {
       if (nextLives !== livesRef.current) {
         livesRef.current = nextLives;
         setLives(nextLives);
+      }
+      const nextOver = active.arcade.gameOver();
+      if (nextOver !== overRef.current) {
+        overRef.current = nextOver;
+        setOver(nextOver);
       }
     }
 
@@ -435,12 +479,65 @@ export function TerminalGridBackground() {
     };
   }, []);
 
+  // Fork: every key still down lets go, so a jump or a run can't get stuck.
+  const releaseHeld = useCallback(() => {
+    const arcade = boardsRef.current?.[indexRef.current]?.arcade;
+    for (const heading of heldRef.current.values()) {
+      arcade?.steerEnd?.(heading.x, heading.y);
+    }
+    heldRef.current.clear();
+  }, []);
+
+  // Fork: the host's game and run decide what's on the board.
+  const hostGameId = host?.gameId;
+  const hostRunId = host?.runId;
+  useEffect(() => {
+    if (hostGameId === undefined) return;
+    const boards = boardsRef.current;
+    if (!boards) return;
+    releaseHeld();
+    boards[indexRef.current]?.arcade.releaseControl();
+    const next = Math.max(
+      0,
+      GRID_GAMES.findIndex((item) => item.id === hostGameId),
+    );
+    const board = boards[next];
+    indexRef.current = next;
+    setSlide({ index: next, dir: 1 });
+    board?.arcade.setMode(hostRef.current?.mode ?? "mid");
+    board?.arcade.takeControl();
+    scoreRef.current = 0;
+    livesRef.current = board?.arcade.lives() ?? 0;
+    overRef.current = false;
+    setScore(0);
+    setLives(livesRef.current);
+    setOver(false);
+    if (hostRef.current?.active) rootRef.current?.focus();
+  }, [hostGameId, hostRunId, releaseHeld]);
+
+  const hostMode = host?.mode;
+  useEffect(() => {
+    if (hostMode) boardsRef.current?.[indexRef.current]?.arcade.setMode(hostMode);
+  }, [hostMode]);
+
+  const hostActive = host?.active;
+  useEffect(() => {
+    if (hostActive) rootRef.current?.focus();
+  }, [hostActive]);
+
+  // Fork: tell the host about every score change, in one place.
+  useEffect(() => {
+    hostRef.current?.onStats(score, lives, over);
+  }, [score, lives, over]);
+
   const takeControl = useCallback(() => {
     const board = boardsRef.current?.[indexRef.current];
     board?.arcade.setMode(mode);
     board?.arcade.takeControl();
     scoreRef.current = 0;
     livesRef.current = board?.arcade.lives() ?? 0;
+    overRef.current = false;
+    setOver(false);
     setScore(0);
     setLives(livesRef.current);
     setPlaying(true);
@@ -455,11 +552,12 @@ export function TerminalGridBackground() {
   }, []);
 
   const releaseControl = useCallback(() => {
+    releaseHeld();
     boardsRef.current?.[indexRef.current]?.arcade.releaseControl();
     scoreRef.current = 0;
     setScore(0);
     setPlaying(false);
-  }, []);
+  }, [releaseHeld]);
 
   useEffect(() => {
     slideAtRef.current = performance.now();
@@ -508,27 +606,101 @@ export function TerminalGridBackground() {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        releaseControl();
+        // Fork: a host hides its panel instead of handing the board back.
+        if (hostRef.current) hostRef.current.onExit();
+        else releaseControl();
         return;
       }
+      const arcade = boardsRef.current?.[indexRef.current]?.arcade;
       const heading = HEADING[event.key] ?? HEADING[event.key.toLowerCase()];
-      if (!heading) return;
+      const isSpace = event.key === " ";
+      // Fork: while it's the board's turn, letters don't reach the app, where
+      // one could pull focus to the composer and pause the game.
+      if (hostRef.current && event.key.length === 1) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (!heading && !isSpace) {
+        if (hostRef.current && event.key.length === 1) hostRef.current.onInput();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
-      boardsRef.current?.[indexRef.current]?.arcade.steer(heading.x, heading.y);
+      // Fork: a key that dismisses a pause doesn't also play a move.
+      if (hostRef.current) {
+        const wasPaused = hostRef.current.paused;
+        hostRef.current.onInput();
+        if (wasPaused) return;
+      }
+      if (isSpace) {
+        if (event.repeat) return;
+        heldRef.current.set(event.code, HEADING.ArrowUp!);
+        arcade?.action?.();
+        return;
+      }
+      if (heading) {
+        heldRef.current.set(event.code, heading);
+        arcade?.steer(heading.x, heading.y);
+      }
+    };
+
+    // Fork: held movement needs to hear the key come back up.
+    const onKeyUp = (event: KeyboardEvent) => {
+      const heading = heldRef.current.get(event.code);
+      if (!heading) return;
+      heldRef.current.delete(event.code);
+      event.preventDefault();
+      event.stopPropagation();
+      boardsRef.current?.[indexRef.current]?.arcade.steerEnd?.(
+        heading.x,
+        heading.y,
+      );
     };
 
     window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", releaseHeld);
     return () => {
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", releaseHeld);
       root?.removeEventListener("wheel", onWheel);
     };
-  }, [playing, releaseControl]);
+  }, [playing, releaseControl, releaseHeld]);
+
+  // Fork: focus decides pause. The board holds focus when the window does, and
+  // loses it for the composer, another window, or a click elsewhere.
+  const hosted = !!host;
+  useEffect(() => {
+    if (!hosted) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const report = () =>
+      hostRef.current?.onFocusChange(
+        document.hasFocus() && document.activeElement === root,
+      );
+    const onBlur = () => {
+      releaseHeld();
+      hostRef.current?.onFocusChange(false);
+    };
+    root.addEventListener("focus", report);
+    root.addEventListener("blur", onBlur);
+    window.addEventListener("focus", report);
+    window.addEventListener("blur", onBlur);
+    report();
+    return () => {
+      root.removeEventListener("focus", report);
+      root.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", report);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [hosted, releaseHeld]);
 
   return (
     <div
       ref={rootRef}
       tabIndex={playing ? 0 : -1}
+      data-grid-board=""
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onMouseDown={() => {
@@ -571,13 +743,19 @@ export function TerminalGridBackground() {
         </div>
       </div>
 
-      {playing ? (
+      {host ? null : playing ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid grid-cols-3 items-center px-3 py-2 font-mono text-[11px] tracking-[0.14em] text-content/50">
           <span>
             score {score}
             {game.lives ? (
               <span className="ml-3 text-content/35">
                 {lives > 0 ? "•".repeat(lives) : "game over"}
+              </span>
+            ) : null}
+            {/* Fork: Space restarts these once they've ended. */}
+            {game.hasAction && over ? (
+              <span className="ml-3 text-content/70">
+                game over · space to retry
               </span>
             ) : null}
           </span>
