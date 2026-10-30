@@ -1,3 +1,11 @@
+// Fork: big pastes travel as files.
+import {
+  describeLargePaste,
+  isLargePaste,
+  pastedTextFile,
+  type LargePaste,
+} from "../../../fork/largePaste/largePaste";
+import { LargePasteNote } from "../../../fork/largePaste/LargePasteNote";
 import {
   ArrowUp,
   AiIdea,
@@ -494,6 +502,7 @@ export function Composer({
     onAttachedChange?.(attached);
   }, [attached, onAttachedChange]);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const [largePastes, setLargePastes] = useState<LargePaste[]>([]); // Fork
   const [plusOpen, setPlusOpen] = useState(false);
   const [planSelected, setPlanSelected] = useState(false);
   const [operatorSelected, setOperatorSelected] = useState(false);
@@ -1692,6 +1701,35 @@ export function Composer({
       // the native clipboard.
       if (!attachmentsSupported) return;
       const text = e.clipboardData.getData("text/plain");
+      // Fork: a huge paste becomes a file, so it can't flood the context.
+      if (text && !isFileReferenceText(text) && isLargePaste(text)) {
+        e.preventDefault();
+        const generation = pasteGenerationRef.current;
+        const captured = captureDraft(e.currentTarget);
+        rememberAttachmentRead(
+          attachmentsFromFiles([pastedTextFile(text)]).then((pasted) => {
+            if (pasteGenerationRef.current !== generation) {
+              pasted.forEach(revokeAttachment);
+              return;
+            }
+            // WebKit can insert the text despite preventDefault, as with a URI.
+            // Only then: the draft may already end with this very text.
+            if (captured && captured.field.value !== captured.value) {
+              dropPastedText(captured, text);
+            }
+            if (!pasted.length) {
+              if (captured) insertRestoredText(captured, text);
+              return;
+            }
+            addAttachments(pasted);
+            setLargePastes((current) => [
+              ...current,
+              describeLargePaste(pasted[0].id, text),
+            ]);
+          }),
+        );
+        return;
+      }
       // Prose and whitespace alike are the webview's to insert.
       if (text && !isFileReferenceText(text)) return;
       // A file URI becomes a chip, so it is kept out of the draft; with no text
@@ -2076,6 +2114,29 @@ export function Composer({
           ) : null}
           {workspaceBarOutside ? null : workspaceBar}
 
+          {/* Fork: a big paste's first line, and the way back to text. */}
+          {largePastes
+            .filter((paste) =>
+              attachments.some((file) => file.id === paste.attachmentId),
+            )
+            .map((paste) => (
+              <LargePasteNote
+                key={paste.attachmentId}
+                paste={paste}
+                onUseText={() => {
+                  removeAttachment(paste.attachmentId);
+                  setLargePastes((current) =>
+                    current.filter(
+                      (entry) => entry.attachmentId !== paste.attachmentId,
+                    ),
+                  );
+                  const field = ref.current;
+                  const captured = field ? captureDraft(field) : null;
+                  if (captured) insertRestoredText(captured, paste.text);
+                  field?.focus();
+                }}
+              />
+            ))}
           {attachments.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2">
               {attachments.map((file) => (

@@ -1,3 +1,4 @@
+import { findLargeInsert, pasteAttachment, pasteFirstLine } from "./largePaste";
 import { ChoiceMenu } from "@/ui/ChoiceMenu";
 import { Button, Host, HStack, Menu, Spacer } from "@expo/ui/swift-ui";
 import { accessibilityLabel, contentShape, frame, shapes } from "@expo/ui/swift-ui/modifiers";
@@ -47,6 +48,7 @@ const TOP_ROW = 46;
 /** The attachments' strip, under the context row as on the desktop. */
 const THUMB = 48;
 const STRIP = THUMB + 10;
+const PASTE_ROW = 32;
 const BOTTOM_ROW = BUTTON + EDGE * 2;
 const INPUT_MIN = 64;
 const INPUT_MAX = 160;
@@ -109,6 +111,11 @@ export function Composer({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [largePaste, setLargePaste] = useState<{
+    id: string;
+    text: string;
+    at: number;
+  } | null>(null);
   const [inputHeight, setInputHeight] = useState(INPUT_MIN);
   const [dictating, setDictating] = useState(false);
   // Where dictated words go: the cursor, or the selection they replace.
@@ -136,7 +143,9 @@ export function Composer({
     if (blocked) input.current?.blur();
   }, [blocked]);
 
-  const strip = attachments.length > 0 ? STRIP : 0;
+  const pasteShown =
+    !!largePaste && attachments.some((item) => item.id === largePaste.id);
+  const strip = attachments.length > 0 ? STRIP + (pasteShown ? PASTE_ROW : 0) : 0;
   const expandedHeight = TOP_ROW + strip + inputHeight + BOTTOM_ROW;
 
   const containerStyle = useAnimatedStyle(() => ({
@@ -200,6 +209,35 @@ export function Composer({
     });
   };
 
+  // A big paste becomes a file, so it can't flood the session's context.
+  const onChangeText = (next: string) => {
+    const large = findLargeInsert(text, next);
+    if (!large || attachments.length >= MAX_ATTACHMENTS) {
+      setText(next);
+      return;
+    }
+    const pasted = pasteAttachment(`paste-${Date.now()}`, large.inserted);
+    try {
+      setAttachments(merge(attachments, [pasted]));
+    } catch {
+      // Over the link's limit as a file: it stays as the text it was.
+      setText(next);
+      return;
+    }
+    setText(large.remaining);
+    setLargePaste({ id: pasted.id, text: large.inserted, at: large.at });
+  };
+
+  const restorePasteAsText = () => {
+    if (!largePaste) return;
+    setAttachments((current) => current.filter((item) => item.id !== largePaste.id));
+    setText(
+      (current) =>
+        current.slice(0, largePaste.at) + largePaste.text + current.slice(largePaste.at),
+    );
+    setLargePaste(null);
+  };
+
   const attach = async (pick: (room: number) => Promise<Attachment[]>) => {
     const room = MAX_ATTACHMENTS - attachments.length;
     if (room <= 0) {
@@ -259,7 +297,7 @@ export function Composer({
       </Animated.View>
 
       {attachments.length > 0 ? (
-        <Animated.View style={[styles.strip, expandedOnly]}>
+        <Animated.View style={[styles.strip, { height: strip }, expandedOnly]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -276,6 +314,18 @@ export function Composer({
               />
             ))}
           </ScrollView>
+          {largePaste && pasteShown ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={restorePasteAsText}
+              style={styles.pasteAsText}
+            >
+              <Text style={styles.pasteLine} numberOfLines={1}>
+                {pasteFirstLine(largePaste.text)}
+              </Text>
+              <Text style={styles.pasteAction}>Paste as text instead</Text>
+            </Pressable>
+          ) : null}
         </Animated.View>
       ) : null}
 
@@ -285,7 +335,7 @@ export function Composer({
           nativeID={COMPOSER_INPUT_ID}
           value={text}
           editable={!dictating && !blocked}
-          onChangeText={setText}
+          onChangeText={onChangeText}
           onSelectionChange={(event) => {
             selection.current = event.nativeEvent.selection;
           }}
@@ -522,6 +572,15 @@ function RoundButton({
 }
 
 const useStyles = themedStyles((colors) => ({
+  pasteAsText: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    height: PASTE_ROW,
+    paddingHorizontal: 12,
+  },
+  pasteLine: { flex: 1, minWidth: 0, color: colors.muted, fontSize: 12 },
+  pasteAction: { color: colors.accent, fontSize: 13, fontWeight: "500" },
   stop: {
     width: 12,
     height: 12,
