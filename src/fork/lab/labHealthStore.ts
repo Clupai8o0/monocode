@@ -14,8 +14,6 @@ import { getLabState, subscribeLab, type LabHost } from "./labStore";
 
 export const HEALTH_FAST_MS = 5000;
 export const HEALTH_SLOW_MS = 30_000;
-/** Longer than a passing hiccup, shorter than the desktop's 30 s default. */
-const HEALTH_TIMEOUT_MS = 10_000;
 /** The lab's check ran after this long, so its word on the host is fresh. */
 const RESUME_AFTER_MS = 30_000;
 
@@ -56,7 +54,7 @@ async function ask(machineId: string): Promise<void> {
   inFlight.add(machineId);
   const started = performance.now();
   try {
-    const health = await remoteRequest<LabHealth>(machineId, LAB_HEALTH_METHOD, {}, HEALTH_TIMEOUT_MS);
+    const health = await remoteRequest<LabHealth>(machineId, LAB_HEALTH_METHOD, {});
     hosts.set(machineId, {
       health,
       roundTripMs: performance.now() - started,
