@@ -1,3 +1,7 @@
+// Fork: auto worktrees and Merge back.
+import { noteUserWorkspaceChoice } from "../../../fork/autoWorktree/autoWorktree";
+import { useAutoWorktree } from "../../../fork/autoWorktree/useAutoWorktree";
+import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import {
@@ -663,6 +667,23 @@ const LocalSessionPane = memo(function LocalSessionPane({
     (!draftBlock && (!isEmpty || inSplit || !!session.inboxAsk || !!agent));
   const composerDockMotion = useComposerDockMotion(dockComposer);
   const draftRef = useRef<string | undefined>(getComposerDraft(session.id));
+  // Fork: blank sessions pick up a worktree when the setting says so.
+  const localDraft =
+    !remote &&
+    !session.inboxAsk &&
+    !session.worktreeRemoved &&
+    !managed &&
+    !agent &&
+    isEmpty &&
+    !session.worktreeCwd;
+  useAutoWorktree({
+    sessionId: session.id,
+    cwd: session.cwd,
+    draft: localDraft,
+    mode: session.workspaceMode,
+    branch: session.branch,
+    onChange: (mode, base) => onWorkspaceModeChange(session.id, mode, base),
+  });
   // Fork: the status strip sits under the composer, docked or centred.
   const composer = (
     <>
@@ -674,6 +695,25 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onOpenFile={onOpenFile}
       onOpenDiff={onOpenDiff}
     />
+    {/* Fork: the worktree's branch, and Merge back */}
+    {remote || session.worktreeRemoved || agent ? null : (
+      <WorktreeStrip
+        sessionId={session.id}
+        cwd={session.cwd}
+        worktreeCwd={session.worktreeCwd}
+        branch={session.branch}
+        busy={!!session.busy}
+        draft={localDraft && session.workspaceMode === "worktree"}
+        onStayInCheckout={() => {
+          noteUserWorkspaceChoice(session.id, session.cwd);
+          onWorkspaceModeChange(session.id, "current");
+        }}
+        onAskAgent={(prompt) => {
+          onSubmit(session.id, prompt, []);
+        }}
+        onOpenSettings={onManageWorktrees}
+      />
+    )}
     <Composer
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id}
@@ -740,9 +780,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }
       workspaceMode={session.workspaceMode}
       worktreeBase={session.worktreeBase}
-      onWorkspaceModeChange={(mode, base) =>
-        onWorkspaceModeChange(session.id, mode, base)
-      }
+      onWorkspaceModeChange={(mode, base) => {
+        noteUserWorkspaceChoice(session.id, session.cwd); // Fork
+        onWorkspaceModeChange(session.id, mode, base);
+      }}
       onWorktreeBaseChange={(base) => onWorktreeBaseChange(session.id, base)}
       worktreeRemoved={session.worktreeRemoved}
       onManageWorktrees={onManageWorktrees}

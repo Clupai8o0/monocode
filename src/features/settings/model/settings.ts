@@ -236,6 +236,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
       "mono reset soul name projects sessions sidebar visibility hidden show",
   },
   {
+    id: "auto-worktree",
+    section: "worktrees",
+    label: "New sessions get their own worktree",
+    keywords: "automatic smart always never parallel branch merge back",
+  },
+  {
     id: "project-worktrees",
     section: "worktrees",
     label: "Project worktrees",

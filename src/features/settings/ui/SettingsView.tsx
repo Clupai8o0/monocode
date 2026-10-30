@@ -435,6 +435,7 @@ import {
 import { SkillsPage } from "../../skills/ui/SkillsPage";
 import { ProjectNotificationSettings } from "../../notifications/ui/ProjectNotificationSettings";
 import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
+import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
 import {
   removeWorktree,
   type RemoveWorktree,
@@ -674,6 +675,7 @@ export function SettingsView({
               {section === "providers" ? (
                 <ProvidersPage cwd={cwd} recents={recents} />
               ) : null}
+              {section === "worktrees" ? <AutoWorktreeSetting /> : null}
               {section === "worktrees" ? (
                 <WorktreesPage
                   cwd={cwd}

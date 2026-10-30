@@ -1,3 +1,10 @@
+// Fork: new sessions get their own worktree when it helps.
+import {
+  publishBusySessions,
+  registerWorktreeRemover,
+  renamedWorktreeBranch,
+  sessionWorktreeBranchName,
+} from "../fork/autoWorktree/autoWorktree";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { useMobileWorkspace } from "../features/mobile/hooks/useMobileWorkspace";
 import { hasMobileAttachments, mobileAttachments } from "../features/mobile/model/mobileAttachments";
@@ -174,7 +181,6 @@ import {
   removeWorktree,
   renameWorktreeBranch,
   sessionInWorktree,
-  temporaryWorktreeBranchName,
   worktreeDeletedExternally,
   worktreeSessionIds,
   type Worktree,
@@ -6409,6 +6415,13 @@ function Workspace({
     [persistSession],
   );
 
+  // Fork: auto worktrees need to see busy sessions and use the removal flow.
+  useEffect(() => publishBusySessions(sessions), [sessions]);
+  useEffect(() => {
+    registerWorktreeRemover(onRemoveWorktree);
+    return () => registerWorktreeRemover(null);
+  }, [onRemoveWorktree]);
+
   const onWorkspaceModeChange = useCallback(
     (sessionId: string, mode: WorkspaceMode, base?: string) => {
       setSessions((prev) =>
@@ -8272,7 +8285,10 @@ function Workspace({
         if (createDraftWorktree) {
           const tree = await createWorktree(
             current.cwd,
-            temporaryWorktreeBranchName(),
+            // Fork: named after the request from the start, with a short id.
+            sessionWorktreeBranchName(
+              harnessText || attachments.map((file) => file.name).join(" "),
+            ),
             current.worktreeBase || "HEAD",
             false,
           );
@@ -8309,7 +8325,7 @@ function Workspace({
               const renamed = await renameWorktreeBranch(
                 current.cwd,
                 tree.path,
-                branch,
+                renamedWorktreeBranch(branch, tree.branch), // Fork
               );
               setSessions((prev) =>
                 prev.map((session) =>

@@ -3,6 +3,7 @@ import { formatInteger } from "../../../shared/lib/numbers";
 import { prettyCwd } from "../../../shared/lib/paths";
 import { Popover } from "../../../shared/ui/Popover";
 import { NO_BRANCH_LABEL } from "../../source-control/model/worktrees";
+import { BranchChip } from "../../../fork/autoWorktree/BranchChip"; // Fork
 import type { SessionSummary } from "../data/sessionStore";
 import { resolveModel } from "../model/models";
 import { sessionDisplayTitle } from "../model/session";
@@ -90,7 +91,14 @@ export function SessionCardPreview({
       <dl className="mt-2 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1.5 border-t border-stroke pt-2">
         {session.branch || session.worktreeRemoved ? (
           <Detail label="Branch">
-            {session.worktreeRemoved ? NO_BRANCH_LABEL : session.branch}
+            {/* Fork: a worktree's branch wears the project's colour. */}
+            {session.worktreeCwd && !session.worktreeRemoved && session.branch ? (
+              <BranchChip cwd={session.cwd} branch={session.branch} />
+            ) : session.worktreeRemoved ? (
+              NO_BRANCH_LABEL
+            ) : (
+              session.branch
+            )}
           </Detail>
         ) : null}
         <Detail
