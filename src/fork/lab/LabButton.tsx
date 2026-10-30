@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { OPEN_REMOTE_PROJECT_EVENT } from "../../features/connections/model/connections";
+import { openRemoteProjectOn } from "../../features/connections/model/connections";
 import { HomeLab, LoaderCircle } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "./agentTimeZone";
@@ -193,7 +193,7 @@ export function LabPanel({
               disabled={host.offline}
               onClick={() => {
                 onSettings?.();
-                window.dispatchEvent(new Event(OPEN_REMOTE_PROJECT_EVENT));
+                openRemoteProjectOn(host.machine.id);
               }}
             >
               New session on {hostTitle(host.machine.name)}

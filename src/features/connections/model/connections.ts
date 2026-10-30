@@ -24,6 +24,20 @@ let cachedMachines: RemoteMachine[] = [];
 let machinesLoaded = false;
 export const OPEN_CONNECTIONS_EVENT = "monocode:open-connections";
 export const OPEN_REMOTE_PROJECT_EVENT = "monocode:open-remote-project";
+
+// Fork: the Home lab's "New session on <host>" opens the dialog on that host.
+let remoteProjectMachine: string | undefined;
+
+export function openRemoteProjectOn(machineId: string): void {
+  remoteProjectMachine = machineId;
+  window.dispatchEvent(new Event(OPEN_REMOTE_PROJECT_EVENT));
+}
+
+export function takeRemoteProjectMachine(): string | undefined {
+  const machineId = remoteProjectMachine;
+  remoteProjectMachine = undefined;
+  return machineId;
+}
 export const refreshRemoteMachines = () =>
   window.dispatchEvent(new Event(CHANGE));
 const TAB_KEY = "monocode.remote-tabs.v2";

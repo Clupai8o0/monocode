@@ -175,6 +175,9 @@ export function sendLabel(count: number): string {
   return `Send to ${count} ${count === 1 ? "session" : "sessions"}`;
 }
 
+/** A session may first sync its project, so the answer can come later. */
+export type BroadcastSubmit = (id: string, text: string) => boolean | Promise<boolean>;
+
 export type BroadcastResult = {
   id: string;
   outcome: "sent" | "queued" | "failed";
@@ -189,25 +192,27 @@ export function sendBroadcast(
   chosen: ReadonlySet<string>,
   fresh: BroadcastPlan,
   text: string,
-  submit: (id: string, text: string) => boolean,
-): BroadcastResult[] {
+  submit: BroadcastSubmit,
+): Promise<BroadcastResult[]> {
   const byId = new Map(fresh.targets.map((target) => [target.id, target]));
-  return [...chosen].map((id): BroadcastResult => {
-    const target = byId.get(id);
-    if (!target) {
-      return { id, outcome: "failed", why: "It can't take this now" };
-    }
-    if (target.blocked) {
-      return { id, outcome: "failed", why: target.blocked };
-    }
-    try {
-      return submit(id, text)
-        ? { id, outcome: target.when === "now" ? "sent" : "queued" }
-        : { id, outcome: "failed", why: "It did not accept the message" };
-    } catch (error) {
-      return { id, outcome: "failed", why: String(error) };
-    }
-  });
+  return Promise.all(
+    [...chosen].map(async (id): Promise<BroadcastResult> => {
+      const target = byId.get(id);
+      if (!target) {
+        return { id, outcome: "failed", why: "It can't take this now" };
+      }
+      if (target.blocked) {
+        return { id, outcome: "failed", why: target.blocked };
+      }
+      try {
+        return (await submit(id, text))
+          ? { id, outcome: target.when === "now" ? "sent" : "queued" }
+          : { id, outcome: "failed", why: "It did not accept the message" };
+      } catch (error) {
+        return { id, outcome: "failed", why: String(error) };
+      }
+    }),
+  );
 }
 
 /** What App lends the bar, by answering BROADCAST_EVENT. */
@@ -215,7 +220,7 @@ export type BroadcastApp<S extends BroadcastSession = BroadcastSession> = {
   sessions: () => readonly S[];
   project: () => string | undefined;
   /** The same path as typing in that session's composer. */
-  submit: (id: string, text: string) => boolean;
+  submit: BroadcastSubmit;
 };
 
 export function connectBroadcast<S extends BroadcastSession>(): BroadcastApp<S> | null {

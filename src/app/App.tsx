@@ -8975,12 +8975,14 @@ function Workspace({
       (event as CustomEvent<(app: BroadcastApp<Session>) => void>).detail({
         sessions: () => sessionsRef.current,
         project: () => projectCwdRef.current,
-        submit: (id, text) => onSubmit(id, text, [], { followUpBehavior: "queue" }),
+        submit: (id, text) =>
+          !workspaceNavigation.isSwitching(id) &&
+          submitSession(id, text, [], { followUpBehavior: "queue" }),
       });
     };
     window.addEventListener(BROADCAST_EVENT, onBroadcast);
     return () => window.removeEventListener(BROADCAST_EVENT, onBroadcast);
-  }, [onSubmit]);
+  }, [submitSession, workspaceNavigation]);
 
   // onApproval is created once; it reaches the current helper through this.
   const decideMonoBlockRef = useRef<

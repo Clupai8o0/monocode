@@ -152,21 +152,24 @@ function BroadcastBar({
   const chosen = plan.targets.filter(
     (target) => !target.blocked && !unticked.has(target.id),
   );
-  const canSend = !!app && !!text.trim() && chosen.length > 0;
+  const [sending, setSending] = useState(false);
+  const canSend = !!app && !!text.trim() && chosen.length > 0 && !sending;
   const failed = [...results.values()].filter((result) => result.outcome === "failed");
 
-  const send = () => {
+  const send = async () => {
     const live = connectBroadcast<Session>();
     if (!live || !canSend) {
       return;
     }
     const fresh = planBroadcast(live.sessions(), factsFor(scope, live.project()));
-    const outcome = sendBroadcast(
+    setSending(true);
+    const outcome = await sendBroadcast(
       new Set(chosen.map((target) => target.id)),
       fresh,
       text,
       live.submit,
     );
+    setSending(false);
     setResults(new Map(outcome.map((result) => [result.id, result])));
     // A second click only tries the ones that failed.
     const failedIds = new Set(
@@ -304,9 +307,9 @@ function BroadcastBar({
           type="button"
           disabled={!canSend}
           className="rounded-md bg-accent px-2.5 py-1 font-medium text-white transition-opacity disabled:opacity-40"
-          onClick={send}
+          onClick={() => void send()}
         >
-          {sendLabel(chosen.length)}
+          {sending ? "Sending…" : sendLabel(chosen.length)}
         </button>
       </div>
     </div>

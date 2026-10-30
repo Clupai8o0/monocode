@@ -6,6 +6,7 @@ import { ChevronRight, Folder } from "../../../shared/ui/icons";
 import {
   OPEN_CONNECTIONS_EVENT,
   remoteRequest,
+  takeRemoteProjectMachine, // Fork
   useRemoteMachines,
 } from "../model/connections";
 import {
@@ -25,7 +26,7 @@ export function AddRemoteProjectDialog({
   onOpen: (key: string) => void;
 }) {
   const { machines, loaded } = useRemoteMachines();
-  const [machineId, setMachineId] = useState<string>();
+  const [machineId, setMachineId] = useState<string | undefined>(takeRemoteProjectMachine); // Fork
   const machine =
     machines.find((entry) => entry.id === machineId) ?? machines[0];
   const [path, setPath] = useState("");

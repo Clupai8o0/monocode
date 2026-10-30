@@ -35,11 +35,11 @@ test("sends only on the click, says what happened, and keeps the text if any fai
 
   await message.fill("Run the tests");
   await send.click();
+  await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toContainText("Sent");
   expect(await page.evaluate(() => (window as unknown as { sent: unknown[] }).sent)).toEqual([
     { id: "idle", text: "Run the tests" },
     { id: "busy", text: "Run the tests" },
   ]);
-  await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toContainText("Sent");
   await expect(bar.locator('[data-fork-broadcast-session="busy"]')).toContainText("Queued for after this turn");
   await expect(bar.locator('[data-fork-broadcast-session="refuses"]')).toContainText("It did not accept the message");
   await expect(message).toHaveValue("Run the tests");

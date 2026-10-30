@@ -157,32 +157,46 @@ describe("sendBroadcast", () => {
     facts(),
   );
 
-  it("says what became of each, and only sends what was chosen", () => {
+  it("says what became of each, and only sends what was chosen", async () => {
     const submit = vi.fn((id: string) => id !== "refuses");
-    const results = sendBroadcast(new Set(["idle", "busy", "refuses"]), plan, "go", submit);
+    const results = await sendBroadcast(new Set(["idle", "busy", "refuses"]), plan, "go", submit);
     expect(results).toEqual([
       { id: "idle", outcome: "sent" },
       { id: "busy", outcome: "queued" },
       { id: "refuses", outcome: "failed", why: "It did not accept the message" },
     ]);
-    expect(sendBroadcast(new Set(["idle"]), plan, "go", submit)).toHaveLength(1);
+    expect(await sendBroadcast(new Set(["idle"]), plan, "go", submit)).toHaveLength(1);
     expect(submit).toHaveBeenCalledWith("idle", "go");
     expect(submit).toHaveBeenCalledTimes(4);
   });
 
-  it("does not send to one that stopped being fit since the plan on screen", () => {
+  it("waits for a late answer, and reports a late refusal or rejection as failed", async () => {
+    const results = await sendBroadcast(new Set(["idle", "busy", "refuses"]), plan, "go", async (id) => {
+      if (id === "refuses") {
+        throw new Error("sync failed");
+      }
+      return id === "idle";
+    });
+    expect(results).toEqual([
+      { id: "idle", outcome: "sent" },
+      { id: "busy", outcome: "failed", why: "It did not accept the message" },
+      { id: "refuses", outcome: "failed", why: "Error: sync failed" },
+    ]);
+  });
+
+  it("does not send to one that stopped being fit since the plan on screen", async () => {
     const submit = vi.fn(() => true);
-    const results = sendBroadcast(new Set(["gone"]), plan, "go", submit);
+    const results = await sendBroadcast(new Set(["gone"]), plan, "go", submit);
     expect(results).toEqual([{ id: "gone", outcome: "failed", why: "It can't take this now" }]);
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it("does not send to a blocked one, and survives a throw", () => {
+  it("does not send to a blocked one, and survives a throw", async () => {
     const blocked = { targets: [{ id: "r", when: "now" as const, blocked: "No link" }], leftOut: {} };
-    expect(sendBroadcast(new Set(["r"]), blocked, "go", () => true)).toEqual([
+    expect(await sendBroadcast(new Set(["r"]), blocked, "go", () => true)).toEqual([
       { id: "r", outcome: "failed", why: "No link" },
     ]);
-    const results = sendBroadcast(new Set(["idle"]), plan, "go", () => {
+    const results = await sendBroadcast(new Set(["idle"]), plan, "go", () => {
       throw new Error("boom");
     });
     expect(results).toEqual([{ id: "idle", outcome: "failed", why: "Error: boom" }]);
