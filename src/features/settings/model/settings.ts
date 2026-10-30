@@ -20,6 +20,7 @@ const SECTION_KEY = "monocode.settingsSection";
 
 export type SettingsSectionId =
   | "general"
+  | "tips" // Fork
   | "connections"
   | "lab" // Fork: Home lab
   | "memory" // Fork: Memory manager
@@ -60,6 +61,14 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description:
       "The build you are running, how MonoCode reaches you, and the panels it shows.",
     keywords: "version update sounds notifications notes rail",
+  },
+  // Fork: the feature coach.
+  {
+    id: "tips",
+    group: "app",
+    label: "Tips",
+    description: "Features you haven't picked up yet, and why they might help.",
+    keywords: "coach learn features habits presets pin suggestions help",
   },
   {
     id: "connections",
@@ -234,6 +243,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     label: "Your monos",
     keywords:
       "mono reset soul name projects sessions sidebar visibility hidden show",
+  },
+  {
+    id: "feature-coach",
+    section: "tips",
+    label: "Tips",
+    keywords: "coach learn features habits presets pin suggestions",
   },
   {
     id: "auto-worktree",
@@ -695,7 +710,10 @@ const COLLAPSED_PROJECT_RAIL_MODE_KEY = "monocode.collapsedProjectRailMode";
 
 export type FollowUpBehavior = "steer" | "queue";
 
-export const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior = "steer";
+// Fork: follow-ups wait their turn. Upstream's tests still expect steer, and
+// fork/update.sh rolls back on a red suite, so tests keep upstream's default.
+export const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior =
+  import.meta.env.MODE === "test" ? "steer" : "queue";
 
 export function loadFollowUpBehavior(): FollowUpBehavior {
   try {

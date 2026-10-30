@@ -621,6 +621,7 @@ describe("settings navigation", () => {
     ]);
     expect(groups.flatMap((group) => group.sections.map((s) => s.id))).toEqual([
       "general",
+      "tips", // Fork: feature coach
       "connections",
       "lab", // Fork: Home lab
       "memory", // Fork: Memory manager

@@ -1,4 +1,5 @@
-// Fork: auto worktrees and Merge back.
+// Fork: auto worktrees, Merge back and the follow-up coach mark.
+import { FollowUpCoachMark } from "../../../fork/featureCoach/FollowUpCoachMark";
 import { noteUserWorkspaceChoice } from "../../../fork/autoWorktree/autoWorktree";
 import { useAutoWorktree } from "../../../fork/autoWorktree/useAutoWorktree";
 import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
@@ -667,6 +668,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
     (!draftBlock && (!isEmpty || inSplit || !!session.inboxAsk || !!agent));
   const composerDockMotion = useComposerDockMotion(dockComposer);
   const draftRef = useRef<string | undefined>(getComposerDraft(session.id));
+  const [draftTyped, setDraftTyped] = useState(() => !!draftRef.current?.trim()); // Fork
   // Fork: blank sessions pick up a worktree when the setting says so.
   const localDraft =
     !remote &&
@@ -695,6 +697,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onOpenFile={onOpenFile}
       onOpenDiff={onOpenDiff}
     />
+    {/* Fork: teaches queue and steer the first time it applies */}
+    <FollowUpCoachMark show={!!session.busy && !agent && !remote && draftTyped} />
     {/* Fork: the worktree's branch, and Merge back */}
     {remote || session.worktreeRemoved || agent ? null : (
       <WorktreeStrip
@@ -751,6 +755,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onDraftChange={(text) => {
         draftRef.current = text;
         setComposerDraft(session.id, text);
+        setDraftTyped(!!text.trim()); // Fork
       }}
       inboxCard={session.inboxCard}
       noteCard={session.noteCard}

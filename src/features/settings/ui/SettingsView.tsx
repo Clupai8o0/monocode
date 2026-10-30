@@ -436,6 +436,7 @@ import { SkillsPage } from "../../skills/ui/SkillsPage";
 import { ProjectNotificationSettings } from "../../notifications/ui/ProjectNotificationSettings";
 import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
 import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
+import { FeatureCoachPage } from "../../../fork/featureCoach/FeatureCoachPage"; // Fork
 import {
   removeWorktree,
   type RemoveWorktree,
@@ -653,6 +654,7 @@ export function SettingsView({
               {section === "general" ? (
                 <GeneralPage onOpenWhatsNew={onOpenWhatsNew} />
               ) : null}
+              {section === "tips" ? <FeatureCoachPage /> : null}
               {section === "connections" ? (
                 <div className="flex flex-col gap-10">
                   <ConnectionsSettings />
