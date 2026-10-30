@@ -1,6 +1,9 @@
 import type { GridArcade } from "./gridArcade";
 import { createPacmanArcade } from "./pacmanArcade";
 import { createSnakeArcade } from "./snakeArcade";
+import { createBlocksArcade } from "../../../fork/games/blocksArcade"; // Fork
+import { createPlatformerArcade } from "../../../fork/games/platformerArcade"; // Fork
+import { createRunnerArcade } from "../../../fork/games/runnerArcade"; // Fork
 
 /** How long an idle board stays up before the slider moves on. */
 export const SLIDE_HOLD_MS = 16_000;
@@ -16,6 +19,10 @@ export type GridGame = {
   idleDim: number;
   /** Whether the HUD should show lives. */
   lives: boolean;
+  /** Fork: the controls, one short line for the games panel. */
+  hint?: string;
+  /** Fork: Space does something, and retries once the game is over. */
+  hasAction?: boolean;
   create: () => GridArcade;
 };
 
@@ -30,6 +37,7 @@ export const GRID_GAMES: readonly GridGame[] = [
     playLabel: "Pac-man. Arrow keys or WASD to move. Escape to release.",
     idleDim: 0.2,
     lives: true,
+    hint: "arrows move",
     create: createPacmanArcade,
   },
   {
@@ -38,7 +46,42 @@ export const GRID_GAMES: readonly GridGame[] = [
     playLabel: "Snake. Arrow keys or WASD to move. Escape to release.",
     idleDim: 0.65,
     lives: false,
+    hint: "arrows steer",
     create: createSnakeArcade,
+  },
+  // Fork: the games panel plays these while agents work.
+  {
+    id: "blocks",
+    label: "blocks",
+    playLabel:
+      "Blocks. Left and right move, up rotates, down drops, Space hard drops. Escape to release.",
+    idleDim: 0.5,
+    lives: false,
+    hint: "up rotates · space drops",
+    hasAction: true,
+    create: createBlocksArcade,
+  },
+  {
+    id: "runner",
+    label: "agent run",
+    playLabel:
+      "Agent run. Space or up to jump, hold to jump higher. Escape to release.",
+    idleDim: 0.55,
+    lives: false,
+    hint: "space jumps · hold for height",
+    hasAction: true,
+    create: createRunnerArcade,
+  },
+  {
+    id: "platformer",
+    label: "mono bros",
+    playLabel:
+      "Mono bros. Left and right to run, Space or up to jump. Escape to release.",
+    idleDim: 0.45,
+    lives: true,
+    hint: "arrows run · space jumps",
+    hasAction: true,
+    create: createPlatformerArcade,
   },
 ];
 

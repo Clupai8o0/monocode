@@ -461,7 +461,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "empty-session-games",
     section: "chat",
     label: "Empty session games",
-    keywords: "pacman snake arcade grid fun",
+    keywords: "pacman snake blocks runner platformer arcade grid fun",
   },
   {
     id: "agent-clis",

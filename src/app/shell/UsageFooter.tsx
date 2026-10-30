@@ -50,6 +50,7 @@ import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fo
 import { UltrareviewButton } from "../../fork/ultrareview/UltrareviewButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
 import { LabButton } from "../../fork/lab/LabButton"; // Fork
+import { GamesButton } from "../../fork/games/GamesButton"; // Fork
 import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
@@ -188,6 +189,7 @@ export function UsageFooter({
           {/* Fork: no visible button; keeps File > Workspaces… working. */}
           <WorkspacesButton />
           <UltrareviewButton />
+          <GamesButton />
           <MessagesButton />
           <LabButton />
           <StacksButton />
