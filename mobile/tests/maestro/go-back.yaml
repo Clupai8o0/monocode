@@ -1,0 +1,14 @@
+# Shared step, not a test on its own. Maestro's `back` is Android only.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: "BackButton"

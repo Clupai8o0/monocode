@@ -1,0 +1,12 @@
+# Fresh install: the first screen, with nothing paired.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Monocode"
+- assertVisible: "Connect to computer"
+- assertVisible: "Paste a pairing link"
+- takeScreenshot: ${OUT}/01-connect
+- tapOn: "Paste a pairing link"
+- assertVisible: "Connect"
+- takeScreenshot: ${OUT}/01-pairing-sheet

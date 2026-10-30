@@ -1,3 +1,4 @@
+import { MONO } from "@/features/changes/diffTheme";
 import * as Clipboard from "expo-clipboard";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
@@ -505,7 +506,7 @@ const useStyles = themedStyles((colors) => ({
     color: colors.muted,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "monospace",
+    fontFamily: MONO,
     marginTop: 8,
     marginHorizontal: 16,
   },

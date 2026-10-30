@@ -1,0 +1,12 @@
+# Projects, the session list and a chat. Sends nothing, so it is safe to repeat.
+appId: ${APP_ID}
+---
+- launchApp
+- runFlow: open-project.yaml
+- takeScreenshot: ${OUT}/04-project
+- tapOn: ${SESSION}
+- assertVisible: "Session actions"
+- takeScreenshot: ${OUT}/04-chat
+- tapOn: "Session actions"
+- assertVisible: "Copy Session ID"
+- takeScreenshot: ${OUT}/04-session-menu

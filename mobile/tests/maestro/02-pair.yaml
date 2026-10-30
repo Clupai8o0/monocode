@@ -1,0 +1,21 @@
+# Pairs with the desktop. PAIR_LINK comes from Settings > Connections there.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- tapOn: "Paste a pairing link"
+- tapOn: "Pairing link"
+- inputText: ${PAIR_LINK}
+- tapOn: "Connect"
+- extendedWaitUntil:
+    notVisible: "Paste a pairing link"
+    timeout: 30000
+- takeScreenshot: ${OUT}/02-paired
+# A fresh pairing asks which projects to show on the phone.
+- tapOn: ${PROJECT}
+- takeScreenshot: ${OUT}/02-workspace-picker
+- tapOn: "Save"
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 30000
+- takeScreenshot: ${OUT}/02-project

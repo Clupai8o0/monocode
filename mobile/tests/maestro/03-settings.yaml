@@ -1,0 +1,29 @@
+# Every Settings screen, Appearance above all: SwiftUI on iOS, plain views on
+# Android, and the one that used to crash there.
+appId: ${APP_ID}
+---
+- launchApp
+- runFlow: open-project.yaml
+- tapOn: "Settings"
+- assertVisible: "Appearance"
+- takeScreenshot: ${OUT}/03-settings
+- tapOn: "Appearance"
+- assertVisible: "Color scheme"
+- takeScreenshot: ${OUT}/03-appearance
+- runFlow: go-back.yaml
+- tapOn: "Push notifications"
+- takeScreenshot: ${OUT}/03-push
+- runFlow: go-back.yaml
+- tapOn: "Providers"
+- takeScreenshot: ${OUT}/03-providers
+- runFlow: go-back.yaml
+- tapOn: "Permissions"
+- takeScreenshot: ${OUT}/03-permissions
+- runFlow: go-back.yaml
+- runFlow:
+    when:
+      visible: "Home lab"
+    commands:
+      - tapOn: "Home lab"
+      - takeScreenshot: ${OUT}/03-home-lab
+      - runFlow: go-back.yaml

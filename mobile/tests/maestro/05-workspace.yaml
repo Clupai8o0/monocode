@@ -1,0 +1,32 @@
+# Changes, Commit, Files and Terminal, all from the project's workspace menu.
+# Stops short of committing. Commit and Files are the Android crash suspects.
+appId: ${APP_ID}
+---
+- launchApp
+- runFlow: open-project.yaml
+- tapOn: ".*${BRANCH}"
+- assertVisible: "View changes"
+- takeScreenshot: ${OUT}/05-workspace-menu
+- tapOn: "View changes"
+- takeScreenshot: ${OUT}/05-changes
+- runFlow:
+    when:
+      visible: "Commit .*"
+    commands:
+      - tapOn: "Commit .*"
+      - assertVisible: "Commit message"
+      - takeScreenshot: ${OUT}/05-commit-sheet
+      - runFlow: close-sheet.yaml
+- tapOn: "Close"
+- tapOn: ".*${BRANCH}"
+- tapOn: "Browse files"
+- takeScreenshot: ${OUT}/05-files
+- tapOn: "Close"
+- tapOn: ".*${BRANCH}"
+- runFlow:
+    when:
+      visible: "Open terminal"
+    commands:
+      - tapOn: "Open terminal"
+      - assertVisible: "Command"
+      - takeScreenshot: ${OUT}/05-terminal
