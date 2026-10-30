@@ -643,6 +643,7 @@ import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
 import type { FileOpenOptions } from "../features/search/model/search"; // Fork
 import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
 import { LabWatcher } from "../fork/lab/labWatcher"; // Fork
+import { BROADCAST_EVENT, type BroadcastApp } from "../fork/broadcast/broadcastModel"; // Fork
 import {
   queueTerminalStartInput,
   ULTRAREVIEW_EVENT,
@@ -3429,7 +3430,7 @@ function Workspace({
     onOpenTerminal(terminalCwd);
   }, [terminalCwd, onOpenTerminal]);
 
-  // Fork: the footer's Ultrareview runs `claude ultrareview` in a new terminal here.
+  // Fork: the composer's Ultrareview runs `claude ultrareview` in a new terminal here.
   useEffect(() => {
     const onUltrareview = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
@@ -8967,6 +8968,19 @@ function Workspace({
     },
     [submitSession],
   );
+
+  // Fork: the footer's Send to all sends as a session's composer does.
+  useEffect(() => {
+    const onBroadcast = (event: Event) => {
+      (event as CustomEvent<(app: BroadcastApp<Session>) => void>).detail({
+        sessions: () => sessionsRef.current,
+        project: () => projectCwdRef.current,
+        submit: (id, text) => onSubmit(id, text, [], { followUpBehavior: "queue" }),
+      });
+    };
+    window.addEventListener(BROADCAST_EVENT, onBroadcast);
+    return () => window.removeEventListener(BROADCAST_EVENT, onBroadcast);
+  }, [onSubmit]);
 
   // onApproval is created once; it reaches the current helper through this.
   const decideMonoBlockRef = useRef<

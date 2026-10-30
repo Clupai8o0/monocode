@@ -8,12 +8,6 @@ import {
   setHarnessAvailability,
 } from "../../integrations/harness/core/availabilityState";
 import { HARNESSES } from "../../features/sessions/model/session";
-import { savePickerProviderVisible } from "../../features/sessions/model/models";
-import { setProjectProviderHidden } from "../../features/sessions/model/projectProviders";
-import {
-  saveProviderAccount,
-  selectProviderAccount,
-} from "../../features/providers/model/providerAccounts";
 import { clearCachedRateLimits } from "../../features/providers/model/rateLimitsCache";
 import { idleRateLimits } from "../../features/providers/model/rateLimits";
 import { saveShowRemainingUsage } from "../../features/settings/model/displayPrefs";
@@ -88,61 +82,29 @@ function codexChip() {
   );
 }
 
-it("shows Claude and Codex usage together while a Claude session is active", async () => {
+function claudeChip() {
+  return container.querySelector('[aria-label="Claude Code usage details"]');
+}
+
+it("shows only the active session's provider", async () => {
   await render();
-  const claude = container.querySelector(
-    '[aria-label="Claude Code usage details"]',
-  );
-  expect(claude).not.toBeNull();
-  expect(codexChip()).not.toBeNull();
-  expect(codexChip()?.textContent).toContain("5h");
-  expect(codexChip()?.textContent).toContain("wk");
-  expect(codexChip()?.innerHTML).toContain("width: 14%");
-  expect(codexChip()?.innerHTML).toContain("width: 49%");
+  expect(claudeChip()).not.toBeNull();
+  expect(codexChip()).toBeNull();
   expect(fetches.fetchClaudeRateLimits).toHaveBeenCalledTimes(1);
-  expect(fetches.fetchCodexRateLimits).toHaveBeenCalledTimes(1);
-});
-
-it("uses the project's Codex account without replacing the Claude session account", async () => {
-  saveProviderAccount({ id: "account-work", provider: "codex", label: "Work" });
-  selectProviderAccount("codex", "/repo", "account-work");
-  await render();
-  expect(fetches.fetchCodexRateLimits).toHaveBeenCalledWith("account-work");
-  expect(fetches.fetchClaudeRateLimits).toHaveBeenCalledWith("default");
-  expect(codexChip()?.textContent).toContain("Work");
-});
-
-it("follows installed providers and global/project visibility without extra fetches", async () => {
-  installed(false);
-  await render();
-  expect(codexChip()).toBeNull();
   expect(fetches.fetchCodexRateLimits).not.toHaveBeenCalled();
-  await act(async () => installed(true));
-  expect(codexChip()).not.toBeNull();
-  await act(async () => savePickerProviderVisible("codex", false));
-  expect(codexChip()).toBeNull();
-  await act(async () => savePickerProviderVisible("codex", true));
-  expect(codexChip()).not.toBeNull();
-  await act(async () => setProjectProviderHidden("/repo", "codex", true));
-  expect(codexChip()).toBeNull();
-  await act(async () => setProjectProviderHidden("/repo", "codex", false));
-  expect(codexChip()).not.toBeNull();
-  expect(fetches.fetchCodexRateLimits).toHaveBeenCalledTimes(1);
 });
 
-it("shows the actual unavailable state without fabricating usage windows", async () => {
-  fetches.fetchCodexRateLimits.mockResolvedValue({
-    ...idleRateLimits("codex"),
-    status: "unavailable",
-    error: "Codex not signed in",
-  });
-  await render();
-  expect(codexChip()?.textContent).toContain("not connected");
-  expect(codexChip()?.textContent).not.toContain("5h");
-  expect(codexChip()?.textContent).not.toContain("wk");
+it("shows no provider usage with no session open", async () => {
+  await act(async () =>
+    root.render(createElement(UsageFooter, { providers: [], project: "/repo" })),
+  );
+  expect(claudeChip()).toBeNull();
+  expect(codexChip()).toBeNull();
+  expect(fetches.fetchClaudeRateLimits).not.toHaveBeenCalled();
+  expect(fetches.fetchCodexRateLimits).not.toHaveBeenCalled();
 });
 
-it("keeps another active provider's sign-in control beside the plan balances", async () => {
+it("keeps another active provider's sign-in control, with no plan balances", async () => {
   await act(async () =>
     root.render(
       createElement(UsageFooter, {
@@ -152,7 +114,8 @@ it("keeps another active provider's sign-in control beside the plan balances", a
       }),
     ),
   );
-  expect(codexChip()).not.toBeNull();
+  expect(claudeChip()).toBeNull();
+  expect(codexChip()).toBeNull();
   expect(
     container.querySelector('[aria-label="Grok Build sign-in required"]'),
   ).not.toBeNull();

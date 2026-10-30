@@ -57,6 +57,9 @@ export function allNodes(graph: MapGraph) {
 export type Tone = "problem" | "held" | "waiting" | "delivered";
 
 export function toneOf(row: FeedRow): Tone {
+  if (row.settled) {
+    return "waiting";
+  }
   if (row.problem || row.status === "failed" || row.status === "dropped" || row.status === "expired") {
     return "problem";
   }

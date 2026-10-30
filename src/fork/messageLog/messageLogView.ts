@@ -72,6 +72,8 @@ export type FeedRow = {
   preview: string;
   /** Failed, dropped, expired, or waiting longer than PROBLEM_WAIT_MS. */
   problem: boolean;
+  /** Lost, but nothing is left to do: the target ended, or it was sent again. */
+  settled?: boolean;
   /** Both ends known and on different machines. */
   crossMachine: boolean;
 };

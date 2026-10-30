@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { GitPullRequest } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
+import { textControlClass } from "../../features/sessions/ui/ModelPicker";
 import { requestUltrareview, ultrareviewCommand } from "./ultrareview";
 
 /**
- * Fork: footer button for Claude Code's ultrareview. The popover takes an
+ * Fork: composer button for Claude Code's ultrareview. The popover takes an
  * optional PR number or base branch and runs `claude ultrareview` in a
  * terminal in the current project; the CLI asks before billing.
  */
@@ -23,11 +24,10 @@ function Ultrareview() {
         ref={anchor}
         type="button"
         data-fork-ultrareview=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open ? "text-accent" : "text-content/70 hover:text-content"
-        }`}
+        className={textControlClass(open, "shrink-0 gap-1.5 whitespace-nowrap")}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label="Ultrareview"
         title="Ultrareview: cloud code review of this branch or a PR"
         onClick={() => setOpen(!open)}
       >
@@ -36,13 +36,13 @@ function Ultrareview() {
           strokeWidth={1.75}
           aria-hidden
         />
-        <span className="hidden min-[1100px]:inline">Ultrareview</span>
+        <span className="hidden @min-[420px]/composer-toolbar:inline">Ultrareview</span>
       </button>
       {open ? (
         <Popover
           anchor={anchor}
           side="top"
-          align="end"
+          align="start"
           gap={6}
           width={300}
           ignore="[data-fork-ultrareview]"

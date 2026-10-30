@@ -1177,7 +1177,7 @@ export function ModelControlPills({
 }
 
 /** Trigger classes for a text-only control: a label that brightens on hover. */
-function textControlClass(open: boolean, extra = ""): string {
+export function textControlClass(open: boolean, extra = ""): string { // Fork: exported for UltrareviewButton
   return `flex h-6.5 min-w-0 items-center rounded-md px-1.5 text-[12px] transition-colors ${extra} ${
     open
       ? "bg-content/8 text-content"

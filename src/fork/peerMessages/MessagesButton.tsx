@@ -28,8 +28,8 @@ export const FORK_MESSAGES = import.meta.env.MODE !== "test";
  * Fork: footer button "Messages · N" (N unread). Opens every message other
  * sessions sent into MonoCode's sessions, newest first, with a filter per
  * project; a row opens the session it went to. A red count shows messages
- * between sessions that went wrong in the last hour, and the popover opens
- * the Messages window (src/fork/messageLog).
+ * between sessions that went wrong in the last hour; a row in the popover
+ * explains it and opens the Messages window (src/fork/messageLog) on them.
  */
 export function MessagesButton() {
   return FORK_MESSAGES ? (
@@ -134,7 +134,7 @@ function Messages() {
           ignore="[data-fork-messages]"
           onDismiss={() => setOpen(false)}
         >
-          <MessagesPanel rows={rows} onOpen={() => setOpen(false)} />
+          <MessagesPanel rows={rows} problems={problems} onOpen={() => setOpen(false)} />
         </Popover>
       ) : null}
     </>
@@ -143,9 +143,11 @@ function Messages() {
 
 function MessagesPanel({
   rows,
+  problems,
   onOpen,
 }: {
   rows: InboxRow[];
+  problems: number;
   onOpen: () => void;
 }) {
   const [project, setProject] = useState<string | null>(null);
@@ -164,12 +166,25 @@ function MessagesPanel({
         Open messages view
         <span className="text-[11px] font-normal text-content/45">Every session, every machine</span>
       </button>
-      <div className="flex items-center gap-2 px-1 pb-1">
-        <span className="font-semibold text-content">Messages</span>
-        <span className="text-content/45">{rows.length} in</span>
-      </div>
+      {problems ? (
+        <button
+          type="button"
+          data-fork-messages-problems-row=""
+          onClick={() => {
+            openMessagesWindow({ problemsOnly: true });
+            onOpen();
+          }}
+          className="mb-1 flex items-center gap-2 rounded-md bg-red-500/10 px-2 py-1.5 text-left font-medium text-content hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <span className="size-1.5 shrink-0 rounded-full bg-red-500" aria-hidden />
+          {problems} went wrong in the last hour
+        </button>
+      ) : null}
+      <div className="px-1 pb-1 font-semibold text-content">Messages</div>
       {rows.length === 0 ? (
-        <p className="px-1 pb-1 text-content/50">No session has messaged MonoCode's sessions yet.</p>
+        <p className="px-1 pb-1 text-content/50">
+          Nothing new for the sessions open here. The messages view has every message.
+        </p>
       ) : null}
       {projects.length > 1 ? (
         <div

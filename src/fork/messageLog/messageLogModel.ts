@@ -35,7 +35,12 @@
  *   place: "Sent <time>; can't tell where it went").
  * A receive's own row: delivered, "Received <time>".
  * problem = failed, dropped or expired; or waiting (not pending) for longer
- * than PROBLEM_WAIT_MS while the target's place answered.
+ * than PROBLEM_WAIT_MS while the target's place answered and the target is
+ * live and not busy.
+ * Not a problem, though the row still says what happened (`settled`): a send
+ * whose target's socket was gone, because that session has ended, and a lost
+ * send whose session sent the same text again within RESEND_MS, because the
+ * sender already dealt with it.
  *
  * Ends. from = the send's own session; for a receive's own row, its resolved
  * sender, else `fromName`, else unknown. to = the claimed receive's session,
@@ -133,7 +138,11 @@ export type BuildInput = {
 
 const HOUR_MS = 3_600_000;
 const PAIR_BEFORE_MS = 60_000;
-const PAIR_AFTER_MS = 10 * 60_000;
+// A busy session reads a message when its turn ends, which can be a while.
+const PAIR_AFTER_MS = 60 * 60_000;
+const RESEND_MS = 30 * 60_000;
+/** Connecting to a session's socket failed because the socket is gone. */
+const TARGET_ENDED = /\b(?:ENOENT|ECONNREFUSED)\b/;
 const HOP_MATCH_MS = 2 * 60_000;
 
 function byAtThenId(a: LogEvent, b: LogEvent): number {
@@ -408,9 +417,14 @@ function sendRow(
   let status: RowStatus;
   let statusText: string;
   let problem = false;
+  let settled = false;
   if (event.status === "failed") {
     status = "failed";
     statusText = event.error || "Not sent";
+    settled = TARGET_ENDED.test(statusText);
+    if (settled) {
+      statusText = "Not sent: that session has ended";
+    }
   } else if (event.status === "expired") {
     status = "expired";
     statusText = "Held, then not approved in time";
@@ -433,7 +447,14 @@ function sendRow(
   } else {
     status = "waiting";
     const time = input.formatTime(event.at);
-    if (targetOk) {
+    const session = to.sessionId
+      ? input.sources[targetSource]?.log?.sessions.find((entry) => entry.sessionId === to.sessionId)
+      : undefined;
+    if (targetOk && to.sessionId && !session) {
+      statusText = `Sent ${time}; ${to.label} has ended`;
+    } else if (targetOk && session?.status === "busy") {
+      statusText = `Sent ${time}; ${to.label} will see it after this turn`;
+    } else if (targetOk) {
       statusText = `Sent ${time}; not seen by ${to.label} yet`;
       problem = input.now - event.at > PROBLEM_WAIT_MS;
     } else if (to.place) {
@@ -442,7 +463,7 @@ function sendRow(
       statusText = `Sent ${time}; can't tell where it went`;
     }
   }
-  if (status === "failed" || status === "dropped" || status === "expired") {
+  if ((status === "failed" || status === "dropped" || status === "expired") && !settled) {
     problem = true;
   }
   const row: FeedRow = {
@@ -461,7 +482,41 @@ function sendRow(
   if (event.summary) {
     row.summary = event.summary;
   }
+  if (settled) {
+    row.settled = true;
+  }
   return row;
+}
+
+/** A lost send isn't a problem once its session sent the same text again. */
+function settleResent(
+  input: BuildInput,
+  sends: readonly Located<SendEvent>[],
+  rows: FeedRow[],
+): void {
+  const lost = (row: FeedRow) =>
+    row.status === "failed" || row.status === "dropped" || row.status === "expired";
+  rows.forEach((row, index) => {
+    if (!row.problem || !lost(row)) {
+      return;
+    }
+    const { event } = sends[index];
+    const again = sends.findIndex(
+      (other, otherIndex) =>
+        !lost(rows[otherIndex]) &&
+        other.source === sends[index].source &&
+        other.event.sessionId === event.sessionId &&
+        other.event.key === event.key &&
+        other.event.at > event.at &&
+        other.event.at - event.at <= RESEND_MS,
+    );
+    if (again >= 0) {
+      const next = rows[again];
+      row.problem = false;
+      row.settled = true;
+      row.statusText = `${row.statusText}. Sent again to ${next.to.label} at ${input.formatTime(next.at)}`;
+    }
+  });
 }
 
 function receiveRow(ctx: Ctx, receive: Located<ReceiveEvent>, hops: Hop[]): FeedRow {
@@ -590,8 +645,10 @@ export function buildMessageLogView(input: BuildInput): MessageLogView {
   const claims = pair(ctx, sends, receives);
   const claimed = new Set<Located<ReceiveEvent>>(claims.values());
   const cutoff = input.now - WINDOW_HOURS[input.window] * HOUR_MS;
+  const sendRows = sends.map((send) => sendRow(ctx, send, claims.get(send.event.id), hops));
+  settleResent(input, sends, sendRows);
   const all: FeedRow[] = [
-    ...sends.map((send) => sendRow(ctx, send, claims.get(send.event.id), hops)),
+    ...sendRows,
     ...receives
       .filter((receive) => !claimed.has(receive))
       .map((receive) => receiveRow(ctx, receive, hops)),

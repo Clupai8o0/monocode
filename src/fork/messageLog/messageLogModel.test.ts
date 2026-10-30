@@ -189,9 +189,9 @@ describe("buildMessageLogView", () => {
 
   it("covers every send status", () => {
     const view = build([mac([
-      send("f1", NOW - 50 * MIN, { status: "failed", error: "No session named ghost is running", to: "ghost" }),
-      send("f2", NOW - 49 * MIN, { status: "failed" }),
-      send("e1", NOW - 48 * MIN, { status: "expired" }),
+      send("f1", NOW - 50 * MIN, { status: "failed", error: "No session named ghost is running", to: "ghost", key: "k-f1" }),
+      send("f2", NOW - 49 * MIN, { status: "failed", key: "k-f2" }),
+      send("e1", NOW - 48 * MIN, { status: "expired", key: "k-e1" }),
       send("h1", NOW - 47 * MIN, { status: "held", target: LOCAL_BETA }),
       send("rel", NOW - 46 * MIN, { status: "released", updatedAt: NOW - 40 * MIN, key: "k-rel" }),
       send("p1", NOW - 45 * MIN, { status: "pending", key: "k-p" }),
@@ -214,6 +214,66 @@ describe("buildMessageLogView", () => {
     expect(by["w-noplace"].to.key).toBe("?:zz");
     expect(by["w-name"].statusText).toBe("Sent T-30; can't tell where it went");
     expect(view.counts.problems).toBe(4);
+  });
+
+  it("does not call it a problem when the target ended or is busy", () => {
+    const events = [
+      send("gone", NOW - 30 * MIN, { target: { machine: "mac-dev", sessionId: "s-ended" }, to: "old", key: "k-1" }),
+      send("busy", NOW - 30 * MIN, { target: { machine: "mac-dev", sessionId: "s-busy" }, to: "worker", key: "k-2" }),
+    ];
+    const view = build([mac(events, {
+      log: log("mac-dev", events, {
+        sessions: [{ sessionId: "s-busy", account: "cx", name: "worker", cwd: "/w", project: "w", status: "busy" }],
+      }),
+    })]);
+    const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
+    expect(by.gone).toMatchObject({ status: "waiting", statusText: "Sent T-30; old has ended", problem: false });
+    expect(by.busy).toMatchObject({ status: "waiting", statusText: "Sent T-30; worker will see it after this turn", problem: false });
+    expect(view.recentProblems).toBe(0);
+  });
+
+  it("settles a send whose socket is gone", () => {
+    const view = build([mac([
+      send("f1", NOW - 5 * MIN, { status: "failed", error: "Failed to send to uds:…: ENOENT: no such file or directory, lstat '…'", key: "k-1" }),
+      send("f2", NOW - 5 * MIN, { status: "failed", error: "Refused: that session is not accepting messages", key: "k-2" }),
+    ])]);
+    const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
+    expect(by.f1).toMatchObject({ status: "failed", statusText: "Not sent: that session has ended", problem: false, settled: true });
+    expect(by.f2).toMatchObject({ status: "failed", problem: true });
+    expect(view.recentProblems).toBe(1);
+  });
+
+  it("settles a failed send only when the same session sends the same text again soon", () => {
+    const view = build([mac([
+      send("retried", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-1" }),
+      send("retry", NOW - 19 * MIN, { status: "sent", to: "new", key: "k-1" }),
+      send("other-text", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-2" }),
+      send("too-late", NOW - 55 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-3" }),
+      send("late-retry", NOW - 5 * MIN, { status: "sent", to: "new", key: "k-3" }),
+      send("other-session", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-4" }),
+      send("not-theirs", NOW - 19 * MIN, { status: "sent", sessionId: "s-beta", to: "new", key: "k-4" }),
+      send("fails-too", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-5" }),
+      send("fails-again", NOW - 19 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-5" }),
+    ])]);
+    const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
+    expect(by.retried).toMatchObject({
+      status: "failed",
+      statusText: "No agent named old. Sent again to new at T-19",
+      problem: false,
+      settled: true,
+    });
+    for (const id of ["other-text", "too-late", "other-session", "fails-too", "fails-again"]) {
+      expect(by[id].problem).toBe(true);
+    }
+  });
+
+  it("pairs a message a busy session read long after it was sent", () => {
+    const view = build([mac([
+      send("s1", NOW - 50 * MIN, { key: "k-1" }),
+      recv("r1", NOW - 5 * MIN, { key: "k-1" }),
+    ])]);
+    expect(view.rows).toHaveLength(1);
+    expect(view.rows[0]).toMatchObject({ id: "s1", status: "delivered", problem: false });
   });
 
   it("joins a Mac send through a relay copy with the host's receive, with its trail", () => {

@@ -20,6 +20,11 @@ import {
   type PressureState,
   type ResourceSample,
 } from "../model/resourcePressure";
+import {
+  publishResourcePressure,
+  setRunningWorkOpener,
+  useMemoryChipShown,
+} from "../../../fork/memory/pressureStore"; // Fork
 
 type OwnedProcess = {
   pid: number;
@@ -59,9 +64,24 @@ export function ResourcePressureNotice({
   const [stopError, setStopError] = useState("");
   const [stopping, setStopping] = useState<string>();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
+  // Fork: the Memory chip carries this notice while it is on screen.
+  const memoryChipShown = useMemoryChipShown();
   useEffect(() => {
     onPressureChange?.(pressure.active);
   }, [pressure.active, onPressureChange]);
+
+  // Fork: the Memory chip reads these.
+  const reasonWords = pressure.reasons.map(pressureReasonWords);
+  useEffect(() => {
+    publishResourcePressure({ active: pressure.active, reasons: reasonWords });
+  }, [pressure.active, reasonWords.join()]);
+  useEffect(() => {
+    setRunningWorkOpener(() => setOpen(true));
+    return () => {
+      setRunningWorkOpener(null);
+      publishResourcePressure({ active: false, reasons: [] });
+    };
+  }, []);
 
   useEffect(() => {
     if (!chipHost) setOpen(false);
@@ -193,16 +213,10 @@ export function ResourcePressureNotice({
     if (group) group.push(process);
     else groups.set(process.sessionId, [process]);
   }
-  const reasons = pressure.reasons.map((reason) =>
-    reason === "CPU saturation"
-      ? "High CPU usage"
-      : reason === "Memory pressure"
-        ? "Low available memory"
-        : "Slow response",
-  );
+  const reasons = reasonWords; // Fork
   return (
     <>
-      {pressure.active && chipHost
+      {pressure.active && chipHost && !memoryChipShown /* Fork */
         ? createPortal(
             <button
               type="button"
@@ -422,6 +436,14 @@ export function ResourcePressureNotice({
       ) : null}
     </>
   );
+}
+
+function pressureReasonWords(reason: string): string {
+  return reason === "CPU saturation"
+    ? "High CPU usage"
+    : reason === "Memory pressure"
+      ? "Low available memory"
+      : "Slow response";
 }
 
 function formatMemory(bytes: number): string {

@@ -33,6 +33,8 @@ export type ExternalSessionsState = {
  * tests start no timers.
  */
 export const FORK_EXTERNAL_SESSIONS = import.meta.env.MODE !== "test";
+/** Stands for "every project" where a target needs a project id. */
+const ALL_PROJECTS = "*all-projects";
 
 const LOCAL_POLL_MS = 10_000;
 const REMOTE_POLL_MS = 20_000;
@@ -448,6 +450,41 @@ export function useExternalSessions(
     supported: machine.supported,
     refresh,
   };
+}
+
+/**
+ * Fork: what each paired machine's host lists, every project and every row.
+ * A machine that has not answered, or has no such method, has no entry.
+ */
+export function useRemoteSessions(
+  machineIds: readonly string[],
+): ReadonlyMap<string, readonly ExternalSession[]> {
+  const key = machineIds.join("\0");
+  useEffect(() => {
+    if (!FORK_EXTERNAL_SESSIONS) {
+      return;
+    }
+    const targets = machineIds.map(
+      (machineId): ExternalSessionsTarget => ({
+        kind: "remote",
+        machineId,
+        projectId: ALL_PROJECTS,
+      }),
+    );
+    targets.forEach(addTarget);
+    return () => targets.forEach(removeTarget);
+    // The key stands for the ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  useSyncExternalStore(subscribe, getVersion, getVersion);
+  const out = new Map<string, readonly ExternalSession[]>();
+  for (const machineId of machineIds) {
+    const machine = machines.get(`remote:${machineId}`);
+    if (machine?.loaded && machine.supported && !machine.error) {
+      out.set(machineId, machine.rows);
+    }
+  }
+  return out;
 }
 
 /** One page of a session's turns; the newest page when `before` is absent. */

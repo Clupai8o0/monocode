@@ -32,10 +32,18 @@ import {
   useParkedSessions,
 } from "./memoryStore";
 import { MemoryPanel, PRESSURE_DOT } from "./MemoryPanel";
+import {
+  reviewRunningWork,
+  setMemoryChipShown,
+  useResourcePressure,
+} from "./pressureStore";
 
 const POLL_OPEN_MS = 4_000;
 const POLL_CLOSED_MS = 15_000;
 const NOTICE_MS = 10_000;
+
+/** Off under the test runner, so the "High usage" chip's tests still see it. */
+const FORK_PRESSURE_ON_MEMORY = import.meta.env.MODE !== "test";
 
 type Props = {
   sessions: RefObject<Session[]>;
@@ -83,6 +91,7 @@ export function MemoryWatcher({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ titles: string[]; freed: number }>();
   const parked = useParkedSessions();
+  const pressure = useResourcePressure();
   const anchor = useRef<HTMLButtonElement>(null);
   const auto = useRef<AutoParkState>({});
   const foreground = useRef(isForeground);
@@ -204,9 +213,16 @@ export function MemoryWatcher({
     }
   }, [chipHost]);
 
+  const chipOn = FORK_PRESSURE_ON_MEMORY && !!report && !!chipHost;
+  useEffect(() => {
+    setMemoryChipShown(chipOn);
+    return () => setMemoryChipShown(false);
+  }, [chipOn]);
+
   if (!report) {
     return null;
   }
+  const highUsage = FORK_PRESSURE_ON_MEMORY && pressure.active;
   const total = totalSessionBytes(rows);
   const suggestion = suggestParks(rows, report);
   const openParked = [...parked.values()].filter((entry) =>
@@ -230,7 +246,7 @@ export function MemoryWatcher({
               data-fork-memory=""
               aria-haspopup="dialog"
               aria-expanded={open}
-              title={`${pressureWord} · sessions use ${formatBytes(total)}`}
+              title={`${highUsage ? `${pressure.reasons.join(" · ")} · ` : ""}${pressureWord} · sessions use ${formatBytes(total)}`}
               onClick={() => setOpen(!open)}
               className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap ${insetChip ? "rounded-full px-2" : "rounded-md px-1.5"} transition-colors hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent ${
                 open ? "bg-content/8 text-content" : "text-content/55"
@@ -238,8 +254,14 @@ export function MemoryWatcher({
             >
               <Gauge className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
               <span className="tabular-nums">{label}</span>
+              {highUsage ? <span className="sr-only">High usage</span> : null}
               <span
-                className={`size-1.5 shrink-0 rounded-full ${PRESSURE_DOT[report.pressure]}`}
+                className={`size-1.5 shrink-0 rounded-full ${
+                  // Red stays red: memory running out is the louder message.
+                  PRESSURE_DOT[
+                    highUsage && report.pressure === "normal" ? "warn" : report.pressure
+                  ]
+                }`}
                 aria-hidden
               />
             </button>,
@@ -265,6 +287,11 @@ export function MemoryWatcher({
             error={error}
             onPark={(row) => void park([row])}
             onParkSuggested={() => void park(suggestion.rows)}
+            pressureReasons={highUsage ? pressure.reasons : undefined}
+            onReviewWork={() => {
+              setOpen(false);
+              reviewRunningWork();
+            }}
           />
         </Popover>
       ) : null}

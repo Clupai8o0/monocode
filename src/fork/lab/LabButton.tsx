@@ -1,10 +1,20 @@
 import { useRef, useState, type ReactNode } from "react";
+import { OPEN_REMOTE_PROJECT_EVENT } from "../../features/connections/model/connections";
 import { HomeLab, LoaderCircle } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "./agentTimeZone";
 import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import { LabHealthSection } from "./LabHealthSection";
-import { labChip, remoteDesktopView, uresourcedView, type LabChip } from "./labModel";
+import { useRemoteSessions } from "../externalSessions/externalSessionsStore";
+import {
+  hostRunningLine,
+  hostTitle,
+  labChip,
+  remoteDesktopView,
+  runningCount,
+  uresourcedView,
+  type LabChip,
+} from "./labModel";
 import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
 import {
   actionKey,
@@ -24,10 +34,11 @@ import {
 import { CopyButton, Segmented, Toggle, useNow } from "./labUi";
 
 /**
- * Fork: footer chip for the home lab. Shows the Remote Control scope and the
- * relay in a few words, with an amber dot when something needs the owner
+ * Fork: footer chip for the home lab. Shows how many sessions run on the lab
+ * in a few words (scope and relay in its hover text), with an amber dot when something needs the owner
  * (a host offline, uresourced looping, remote desktop on). Opens a popover
- * that switches each Home lab setting in one click. Hidden until a lab host
+ * that starts a session on a host and switches each Home lab setting in one
+ * click. Hidden until a lab host
  * is paired, and under the test runner.
  */
 export const FORK_LAB_BUTTON = import.meta.env.MODE !== "test";
@@ -36,9 +47,16 @@ export function LabButton() {
   return FORK_LAB_BUTTON ? <Lab /> : null;
 }
 
-export function chipFor(state: LabState): LabChip {
+type RunningByHost = ReadonlyMap<string, number>;
+
+export function chipFor(state: LabState, running: RunningByHost = new Map()): LabChip {
   return labChip(
-    state.hosts.map((host) => ({ name: host.machine.name, status: host.status, offline: host.offline })),
+    state.hosts.map((host) => ({
+      name: host.machine.name,
+      status: host.status,
+      offline: host.offline,
+      running: running.get(host.machine.id),
+    })),
     state.local?.scope,
   );
 }
@@ -49,10 +67,14 @@ function Lab() {
   const anchor = useRef<HTMLButtonElement>(null);
   // Escape in the zone search closes the search, not the popover.
   const pickerOpen = useZonePickerOpen();
+  const sessions = useRemoteSessions(state.hosts.map((host) => host.machine.id));
   if (!state.hosts.length) {
     return null;
   }
-  const chip = chipFor(state);
+  const running = new Map(
+    [...sessions].map(([machineId, rows]) => [machineId, runningCount(rows)]),
+  );
+  const chip = chipFor(state, running);
   const attention = chip.attention.length > 0;
   return (
     <>
@@ -96,7 +118,7 @@ function Lab() {
             }
           }}
         >
-          <LabPanel state={state} onSettings={() => setOpen(false)} />
+          <LabPanel state={state} running={running} onSettings={() => setOpen(false)} />
         </Popover>
       ) : null}
     </>
@@ -111,7 +133,15 @@ const SCOPE_OPTIONS: { value: RemoteControlScope; label: string; title: string }
 const small =
   "rounded px-1.5 py-0.5 text-[11px] font-medium text-content/70 bg-content/6 hover:bg-content/10 hover:text-content disabled:cursor-not-allowed disabled:opacity-40";
 
-export function LabPanel({ state, onSettings }: { state: LabState; onSettings?: () => void }) {
+export function LabPanel({
+  state,
+  running,
+  onSettings,
+}: {
+  state: LabState;
+  running: RunningByHost;
+  onSettings?: () => void;
+}) {
   const now = useNow();
   const reachable = state.hosts.filter((host) => host.status && !host.offline);
   const scope = reachable[0]?.status?.remoteControl.desired.scope ?? state.local?.scope;
@@ -142,6 +172,29 @@ export function LabPanel({ state, onSettings }: { state: LabState; onSettings?: 
         >
           Settings
         </button>
+      </div>
+
+      <div className="flex flex-col gap-1.5" aria-label="Work on the lab">
+        {state.hosts.map((host) => (
+          <div key={host.machine.id} className="flex min-w-0 flex-col gap-1">
+            <span data-fork-lab-running="" className="min-w-0 truncate tabular-nums text-content">
+              {host.offline
+                ? `${hostTitle(host.machine.name)} · offline`
+                : hostRunningLine(host.machine.name, running.get(host.machine.id))}
+            </span>
+            <button
+              type="button"
+              className="self-start rounded-md bg-accent/15 px-2 py-1 text-[12px] font-medium text-content transition-colors hover:bg-accent/25 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"
+              disabled={host.offline}
+              onClick={() => {
+                onSettings?.();
+                window.dispatchEvent(new Event(OPEN_REMOTE_PROJECT_EVENT));
+              }}
+            >
+              New session on {hostTitle(host.machine.name)}
+            </button>
+          </div>
+        ))}
       </div>
 
       <LabHealthSection hosts={state.hosts} heading={several} />

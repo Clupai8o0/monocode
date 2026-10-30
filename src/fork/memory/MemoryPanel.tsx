@@ -6,6 +6,7 @@ import {
   type MemoryRow,
   type Suggestion,
 } from "./memoryModel";
+import { CircleAlert } from "../../shared/ui/icons";
 import type { ParkedSession } from "./memoryStore";
 
 export const PRESSURE_DOT: Record<MemoryPressure, string> = {
@@ -29,6 +30,9 @@ type Props = {
   error?: string;
   onPark: (row: MemoryRow) => void;
   onParkSuggested: () => void;
+  /** Set while the machine is under pressure: what is high, in plain words. */
+  pressureReasons?: readonly string[];
+  onReviewWork?: () => void;
 };
 
 const parkButton =
@@ -47,6 +51,8 @@ export function MemoryPanel({
   error,
   onPark,
   onParkSuggested,
+  pressureReasons,
+  onReviewWork,
 }: Props) {
   const available =
     report.totalBytes > 0
@@ -54,6 +60,23 @@ export function MemoryPanel({
       : "";
   return (
     <div className="flex flex-col gap-3 p-3 text-[12px]" aria-label="Memory">
+      {pressureReasons?.length ? (
+        <button
+          type="button"
+          data-fork-review-work=""
+          className="flex items-center gap-2 rounded-lg bg-amber-500/12 px-3 py-1.5 text-left text-[12px] text-content transition-colors hover:bg-amber-500/20"
+          onClick={onReviewWork}
+        >
+          <CircleAlert
+            className="size-3.5 shrink-0 text-amber-500 dark:text-amber-400"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          <span className="min-w-0">
+            {pressureReasons.join(" · ")} · Review running work
+          </span>
+        </button>
+      ) : null}
       <div className="flex items-center gap-2">
         <span
           className={`size-2 shrink-0 rounded-full ${PRESSURE_DOT[report.pressure]}`}

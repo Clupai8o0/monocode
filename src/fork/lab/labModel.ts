@@ -486,10 +486,16 @@ export function errorKind(step: string, reason: unknown): string {
 }
 
 /** One lab host as the footer chip sees it. */
-export type ChipHost = { name: string; status?: LabStatus; offline: boolean };
+export type ChipHost = {
+  name: string;
+  status?: LabStatus;
+  offline: boolean;
+  /** Sessions running there; unknown until the host has answered. */
+  running?: number;
+};
 
 export type LabChip = {
-  /** Short words for the footer, "All · Relay on"; "Home lab" before any answer. */
+  /** Short words for the footer, "Vivobook · 3 running"; "Home lab" before any answer. */
   words: string;
   /** The full state in one or two sentences, for the title and screen readers. */
   sentence: string;
@@ -498,12 +504,26 @@ export type LabChip = {
 };
 
 /** "Every machine" in the chip's few words. */
-function scopeWord(scope: RemoteControlScope): string {
-  return scope === "lab" ? "Lab only" : "All";
-}
-
 /** The footer chip's words, sentence and warnings. The scope comes from the
  * first host that answered, else this Mac's own choice. */
+/** "vivobook" reads as "Vivobook". */
+export function hostTitle(name: string): string {
+  return name ? name[0].toUpperCase() + name.slice(1) : name;
+}
+
+/** Sessions running in what a host listed. */
+export function runningCount(sessions: readonly { state: string }[]): number {
+  return sessions.filter((session) => session.state === "running").length;
+}
+
+/** "Vivobook · 3 sessions running"; just the name until the host has answered. */
+export function hostRunningLine(name: string, running: number | undefined): string {
+  const title = hostTitle(name);
+  return running === undefined
+    ? title
+    : `${title} · ${running} ${running === 1 ? "session" : "sessions"} running`;
+}
+
 export function labChip(hosts: ChipHost[], localScope?: RemoteControlScope): LabChip {
   const attention: string[] = [];
   for (const host of hosts) {
@@ -529,7 +549,6 @@ export function labChip(hosts: ChipHost[], localScope?: RemoteControlScope): Lab
     };
   }
   const on = online.filter((host) => host.status?.relay.enabled);
-  const relayWord = on.length === online.length ? "Relay on" : on.length === 0 ? "Relay off" : "Relay mixed";
   const relayPhrase =
     on.length === online.length
       ? "relay on"
@@ -537,7 +556,11 @@ export function labChip(hosts: ChipHost[], localScope?: RemoteControlScope): Lab
         ? "relay off"
         : `relay on for ${on.map((host) => host.name).join(", ")} only`;
   const scopePhrase = scope === "lab" ? "Remote Control on lab machines only" : "Remote Control on every machine";
-  const words = scope ? `${scopeWord(scope)} · ${relayWord}` : relayWord;
+  const counts = online.map((host) => host.running);
+  const place = online.length === 1 ? hostTitle(online[0].name) : "Lab";
+  const words = counts.every((count) => count === undefined)
+    ? place
+    : `${place} · ${counts.reduce<number>((sum, count) => sum + (count ?? 0), 0)} running`;
   const sentence = [`Home lab: ${scope ? `${scopePhrase}, ` : ""}${relayPhrase}.`, ...attention].join(" ");
   return { words, sentence, attention };
 }

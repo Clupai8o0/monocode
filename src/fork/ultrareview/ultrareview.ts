@@ -1,6 +1,6 @@
 /**
  * Fork: run Claude Code's ultrareview (a billed, cloud-hosted multi-agent
- * review) from the footer. The footer asks App to open a project terminal
+ * review) from the composer. The button asks App to open a project terminal
  * and queues `claude ultrareview [target]` for it; the terminal types the
  * command once its shell has started, so the CLI's own prompts still reach
  * the user.

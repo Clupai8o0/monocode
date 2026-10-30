@@ -46,12 +46,11 @@ import {
 import { PiUsage } from "./PiUsage";
 import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
+import { BroadcastButton } from "../../fork/broadcast/BroadcastButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
-import { UltrareviewButton } from "../../fork/ultrareview/UltrareviewButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
 import { LabButton } from "../../fork/lab/LabButton"; // Fork
 import { GamesButton } from "../../fork/games/GamesButton"; // Fork
-import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
 import { useAutoAccountUsage } from "../../fork/accounts/autoResolver"; // Fork
@@ -119,11 +118,10 @@ export function UsageFooter({
   /** Receives the slot beside the terminal button for the pressure chip. */
   pressureSlot?: (element: HTMLSpanElement | null) => void;
 }) {
-  const footerProviders = useFooterProviders(providers, project); // Fork
   const opencode = useCachedRateLimits("opencode");
   const showUsage =
-    footerProviders.some((provider) => provider !== "opencode") ||
-    (footerProviders.includes("opencode") && opencode.status !== "unavailable");
+    providers.some((provider) => provider !== "opencode") ||
+    (providers.includes("opencode") && opencode.status !== "unavailable");
   const showTerminals = terminals.length > 0;
   const showTerminalButton = Boolean(
     onNewTerminal || onToggleProjectTerminal,
@@ -155,7 +153,7 @@ export function UsageFooter({
       }`}
     >
       <UsageChips
-        providers={footerProviders}
+        providers={providers}
         session={session}
         project={project}
         onSelectAccount={onSelectAccount}
@@ -171,15 +169,6 @@ export function UsageFooter({
           ) : null
         }
       />
-      {/* Fork: companion balances must not hide another agent's sign-in. */}
-      {showUsage && session && session.harness !== "pi" &&
-      !footerProviders.some((provider) => provider === session.harness) ? (
-        <SessionChip
-          key={session.id ?? session.harness}
-          session={session}
-          inset={inset}
-        />
-      ) : null}
       {/* Fork: every account's usage, whichever agent this session runs. */}
       <AllUsageChip className={USAGE_CHIP_CLASSES[inset ? "inset" : "footer"]} />
       {/* Fork: the Stacks button always shows, so the right-hand group does too. */}
@@ -188,8 +177,8 @@ export function UsageFooter({
           <RingButton />
           {/* Fork: no visible button; keeps File > Workspaces… working. */}
           <WorkspacesButton />
-          <UltrareviewButton />
           <GamesButton />
+          <BroadcastButton />
           <MessagesButton />
           <LabButton />
           <StacksButton />

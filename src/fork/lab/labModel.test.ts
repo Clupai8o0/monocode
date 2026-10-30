@@ -10,6 +10,7 @@ import {
   formatFingerprint,
   hasLabCapability,
   hasTimeZoneCapability,
+  hostRunningLine,
   labChip,
   localRelayLine,
   machineRows,
@@ -17,6 +18,7 @@ import {
   parseLocalRemoteControl,
   relayLine,
   remoteDesktopView,
+  runningCount,
   timeAgo,
   uresourcedView,
   type LocalRemoteControl,
@@ -352,6 +354,15 @@ describe("relay", () => {
   });
 });
 
+describe("hostRunningLine", () => {
+  it("counts running sessions only and reads as plain words", () => {
+    expect(runningCount([{ state: "running" }, { state: "idle" }, { state: "handed-over" }])).toBe(1);
+    expect(hostRunningLine("vivobook", 3)).toBe("Vivobook · 3 sessions running");
+    expect(hostRunningLine("vivobook", 1)).toBe("Vivobook · 1 session running");
+    expect(hostRunningLine("vivobook", undefined)).toBe("Vivobook");
+  });
+});
+
 describe("labChip", () => {
   const ures: NonNullable<LabStatus["uresourced"]> = {
     installed: true,
@@ -378,9 +389,18 @@ describe("labChip", () => {
   };
   const on = (name: string, overrides: Partial<LabStatus> = {}) => ({ name, offline: false, status: status(overrides) });
 
-  it("says the scope and the relay in a few words", () => {
-    const chip = labChip([on("vivobook", { relay: { enabled: true, updatedAt: 0, peers: [], sessions: 0 } })]);
-    expect(chip.words).toBe("Lab only · Relay on");
+  it("says what is running in a few words, and the scope and relay in the sentence", () => {
+    const relay = { relay: { enabled: true, updatedAt: 0, peers: [], sessions: 0 } };
+    const chip = labChip([{ ...on("vivobook", relay), running: 3 }]);
+    expect(chip.words).toBe("Vivobook · 3 running");
+    expect(labChip([{ ...on("vivobook", relay), running: 0 }]).words).toBe("Vivobook · 0 running");
+    expect(labChip([on("vivobook", relay)]).words).toBe("Vivobook");
+    expect(
+      labChip([
+        { ...on("vivobook", relay), running: 3 },
+        { ...on("pi", relay), running: 1 },
+      ]).words,
+    ).toBe("Lab · 4 running");
     expect(chip.sentence).toBe("Home lab: Remote Control on lab machines only, relay on.");
   });
 
@@ -389,7 +409,6 @@ describe("labChip", () => {
       on("vivobook", { relay: { enabled: true, updatedAt: 0, peers: [], sessions: 0 } }),
       on("pi", { relay: { enabled: false, updatedAt: 0, peers: [], sessions: 0 } }),
     ]);
-    expect(chip.words).toBe("Lab only · Relay mixed");
     expect(chip.sentence).toContain("relay on for vivobook only");
   });
 
