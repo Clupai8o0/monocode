@@ -28,6 +28,7 @@ import {
   pickCoinX,
   RUNNER_INSET,
   RUNNER_SIZE,
+  RUNNER_SPEED_PX,
   poseAt,
   recoilAlong,
   scaleTrackX,
@@ -50,6 +51,14 @@ import {
   resolveTabGroupMascot,
 } from "../../workspace/model/tabGroups";
 import { ProjectMascot } from "../../projects/ui/ProjectMascot";
+import { projectMascot } from "../../projects/model/projectMascots";
+// Fork
+import {
+  FORK_RUNNER_PLAY,
+  INERT_RUNNER_PLAY,
+  PLAY_NO_CLIP_PX,
+  createRunnerPlay,
+} from "../../../fork/runnerPlay/runnerPlayController";
 
 type Props = {
   boxRef: RefObject<HTMLElement | null>;
@@ -80,6 +89,7 @@ export function ComposerRunner({
   const spriteRef = useRef<HTMLDivElement>(null);
   const coinsRef = useRef<HTMLDivElement>(null);
   const starsRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null); // Fork
   const busyRef = useRef(busy);
   const enabledRef = useRef(enabled);
   const onExitedRef = useRef(onExited);
@@ -101,6 +111,9 @@ export function ComposerRunner({
       ),
     };
   }, [key, project]);
+  // Fork: what the play controller needs to draw over the sprite.
+  const mascotRef = useRef({ project, appearance });
+  mascotRef.current = { project, appearance };
 
   useLayoutEffect(() => {
     const layer = layerRef.current;
@@ -135,6 +148,22 @@ export function ComposerRunner({
       "(prefers-reduced-motion: reduce)",
     ).matches;
     let learned = reduced;
+    // Fork: picking it up, throwing it, petting it. See src/fork/runnerPlay.
+    const body = bodyRef.current;
+    const play =
+      FORK_RUNNER_PLAY && body
+        ? createRunnerPlay({
+            layer,
+            body,
+            reduced,
+            mascotRows: () => {
+              const { project, appearance } = mascotRef.current;
+              return projectMascot(project, appearance.name).rest;
+            },
+            color: () => mascotRef.current.appearance.color,
+          })
+        : INERT_RUNNER_PLAY;
+    let playStun = false; // Fork: a stun from a landing teaches nothing.
     const starEls = Array.from({ length: STAR_COUNT }, () => {
       const el = document.createElement("div");
       el.className = "absolute top-0 left-0";
@@ -174,7 +203,15 @@ export function ComposerRunner({
         `${Math.round(boxTop - RUNNER_SIZE - y + 1 + shakeY)}px`,
       );
       sprite.style.setProperty("--runner-facing", String(facing));
-      sprite.style.setProperty("--runner-clip", `${spriteClipBottom(y)}px`);
+      // Fork: don't sink-clip it while it's in the air or in hand.
+      sprite.style.setProperty(
+        "--runner-clip",
+        `${play.offLedge() ? PLAY_NO_CLIP_PX : spriteClipBottom(y)}px`,
+      );
+      play.placeHit(
+        Math.round(boxLeft + x - RUNNER_SIZE / 2 + shakeX),
+        Math.round(boxTop - RUNNER_SIZE - y + 1 + shakeY),
+      );
     };
 
     const hideStars = () => {
@@ -214,6 +251,7 @@ export function ComposerRunner({
 
     const endStun = () => {
       stunning = false;
+      playStun = false; // Fork
       sprite.classList.remove("mascot-stunned");
       hideStars();
     };
@@ -231,6 +269,7 @@ export function ComposerRunner({
       if (!enabledRef.current) {
         showLayer(false);
         endStun();
+        play.stop(now); // Fork
         if (!busyRef.current && !finished) {
           finished = true;
           clearCoins();
@@ -302,14 +341,23 @@ export function ComposerRunner({
         }
         finished = false;
         if (!reduced && !stunning) {
-          const stepped = stepAlong(along, facing, dt, insetTrack);
+          // Fork: play sets the pace (0 while it's being held or petted).
+          const stepped = stepAlong(
+            along,
+            facing,
+            dt,
+            insetTrack,
+            RUNNER_SPEED_PX * play.speed(now),
+          );
           along = stepped.along;
           facing = stepped.facing;
         }
-      } else if (!exiting && !finished) {
+      } else if (!exiting && !finished && !play.settling()) {
+        // Fork: settling above: it comes down first if it's held or in the air.
         exiting = true;
         exitAt = now;
         endStun();
+        play.stop(now); // Fork
         const current = poseAt(along, facing, track.width, null, []);
         frozenX = current.x;
         frozenFacing = current.facing;
@@ -321,6 +369,7 @@ export function ComposerRunner({
       if (exiting) {
         const t = reduced ? 1 : Math.min(1, (now - exitAt) / EXIT_MS);
         const y = reduced ? -EXIT_SINK : exitJumpY(t);
+        play.stop(now); // Fork: lets the last effects fade.
         placeSprite(track.left, track.top, frozenX, y, frozenFacing);
         for (const coin of [...coins]) {
           const pop = Math.min(1, (now - (coin.collectedAt ?? now)) / COLLECT_POP_MS);
@@ -343,8 +392,14 @@ export function ComposerRunner({
         along = recoilAlong(hitAlong, hitFacing, now - stunAt, insetTrack);
         facing = hitFacing;
         if (stunDone(now - stunAt)) {
-          learned = true;
-          endStun();
+          // Fork: a shake earns more rounds of stars; a landing teaches nothing.
+          if (play.staysDizzy()) {
+            stunAt = now;
+            hitAlong = along;
+          } else {
+            learned ||= !playStun;
+            endStun();
+          }
         }
       }
 
@@ -359,15 +414,40 @@ export function ComposerRunner({
       // Keep grabbed coins in the pose so the hop finishes instead of snapping
       // back to the rim the frame they are collected. Skip the chevron hop
       // until the mascot has bonked it once this turn.
-      const pose = poseAt(
-        along,
-        facing,
-        track.width,
-        learned ? obstacle : null,
-        stunning ? [] : coins,
+      // Fork: play may lift it off the ledge or override the pose. No chevron
+      // arc while stunned: a landing can stun it right under one.
+      const pose = play.frame(
+        now,
+        dt,
+        poseAt(
+          along,
+          facing,
+          track.width,
+          learned && !stunning ? obstacle : null,
+          stunning ? [] : coins,
+        ),
+        track,
+        obstacle,
+        busyRef.current,
+        stunning,
       );
+      // Fork: back on the ledge, and maybe stunned by it.
+      const landed = play.takeLanding();
+      if (landed) {
+        along = landed.along;
+        if (landed.stun) {
+          stunning = true;
+          stunAt = now;
+          hitAlong = along;
+          hitFacing = facing;
+          playStun = landed.stun !== "bonk";
+          sprite.classList.add("mascot-stunned");
+        }
+      }
+      if (stunning && play.offLedge()) endStun(); // Fork
       if (
         !stunning &&
+        !play.offLedge() && // Fork
         hitsChevron(pose.x, pose.y, pose.facing, obstacle, learned)
       ) {
         stunning = true;
@@ -392,7 +472,13 @@ export function ComposerRunner({
       }
       const hasLive = coins.some((coin) => coin.collectedAt == null);
 
-      if (!reduced && !stunning && !hasLive && now >= nextCoinAt) {
+      if (
+        !reduced &&
+        !stunning &&
+        !hasLive &&
+        now >= nextCoinAt &&
+        busyRef.current // Fork: not while it settles after the turn.
+      ) {
         const x = pickCoinX(track.width, pose.x, obstacle);
         if (x != null) {
           const el = document.createElement("div");
@@ -424,6 +510,7 @@ export function ComposerRunner({
         ) {
           coin.collectedAt = now;
           nextCoinAt = now + nextCoinDelay(false);
+          if (play.coinTaken(now)) coin.el.style.visibility = "hidden"; // Fork
         }
 
         const bob =
@@ -474,6 +561,7 @@ export function ComposerRunner({
       cancelAnimationFrame(raf);
       clearCoins();
       showLayer(false);
+      play.destroy(); // Fork
     };
   }, [boxRef]);
 
@@ -495,16 +583,20 @@ export function ComposerRunner({
           height: RUNNER_SIZE,
           transform:
             "translate3d(var(--runner-x, -64px), var(--runner-y, -64px), 0) scaleX(var(--runner-facing, 1))",
-          clipPath: "inset(0 0 var(--runner-clip, 0px) 0)",
+          // Fork: only the bottom sinks; a flip or kick may leave the box.
+          clipPath: "inset(-24px -24px var(--runner-clip, 0px) -24px)",
         }}
       >
-        <ProjectMascot
-          project={project}
-          name={appearance.name}
-          color={appearance.color}
-          className="size-4"
-          active
-        />
+        {/* Fork: a wrapper the play controller turns, squashes and dresses. */}
+        <div ref={bodyRef} style={{ position: "relative", width: RUNNER_SIZE, height: RUNNER_SIZE }}>
+          <ProjectMascot
+            project={project}
+            name={appearance.name}
+            color={appearance.color}
+            className="size-4"
+            active
+          />
+        </div>
       </div>
       <div ref={starsRef} className="absolute inset-0" />
     </div>,

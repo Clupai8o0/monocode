@@ -1,0 +1,49 @@
+/* The blob's two mascot frames, held still or sped up while you play with it. */
+.runner-still-rest .mascot-active,
+.runner-still-rest .mascot-rest,
+.runner-still-rest .mascot-talk,
+.runner-still-talk .mascot-active,
+.runner-still-talk .mascot-rest,
+.runner-still-talk .mascot-talk {
+  animation: none;
+}
+
+.runner-still-rest .mascot-rest,
+.runner-still-talk .mascot-talk {
+  opacity: 1;
+}
+
+.runner-still-rest .mascot-talk,
+.runner-still-talk .mascot-rest {
+  opacity: 0;
+}
+
+.runner-kick-a {
+  animation: mascot-rest 160ms infinite;
+}
+
+.runner-kick-b {
+  animation: mascot-talk 160ms infinite;
+}
+
+.runner-cross svg {
+  animation: runner-cross-flash 200ms infinite;
+}
+
+@keyframes runner-cross-flash {
+  0%,
+  49.99% {
+    color: #e5484d;
+  }
+  50%,
+  100% {
+    color: #ffa59c;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runner-cross svg {
+    animation: none;
+    color: #e5484d !important;
+  }
+}
