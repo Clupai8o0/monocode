@@ -1,0 +1,140 @@
+/* Fork: see EffortMeter.tsx. Only transform and opacity move. */
+.effort-meter {
+  position: relative;
+  display: flex;
+  height: 1.625rem;
+  flex-shrink: 0;
+  align-items: flex-end;
+  gap: 2px;
+  border-radius: 0.375rem;
+  padding: 0.3125rem 0.375rem;
+}
+
+.effort-meter:hover {
+  background-color: var(--color-selection);
+}
+
+.effort-meter:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.effort-meter[data-level="low"] {
+  --effort-meter-color: color-mix(in srgb, var(--color-content) 62%, transparent);
+}
+.effort-meter[data-level="medium"] {
+  --effort-meter-color: #38bdf8;
+}
+.effort-meter[data-level="high"] {
+  --effort-meter-color: #34d399;
+}
+.effort-meter[data-level="xhigh"] {
+  --effort-meter-color: #fb923c;
+}
+.effort-meter[data-level="max"] {
+  --effort-meter-color: #f4b942;
+}
+
+.effort-meter-step {
+  position: relative;
+  display: block;
+  width: 3px;
+  border-radius: 1px;
+  background-color: color-mix(in srgb, var(--color-content) 14%, transparent);
+}
+
+.effort-meter-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--effort-meter-color);
+  transform: scaleY(0);
+  transform-origin: bottom;
+  opacity: 0;
+  transition:
+    transform 150ms var(--motion-ease-out),
+    opacity 150ms var(--motion-ease-out),
+    background-color 150ms ease;
+}
+
+.effort-meter-fill[data-on] {
+  transform: scaleY(1);
+  opacity: 1;
+  /* A little overshoot on the way up only, so a fill reads as a spring. */
+  transition:
+    transform 150ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    opacity 150ms var(--motion-ease-out),
+    background-color 150ms ease;
+}
+
+.effort-meter[data-ultracode] .effort-meter-fill[data-on] {
+  box-shadow: 0 0 5px 1px color-mix(in srgb, #a855f7 75%, transparent);
+}
+
+.effort-meter[data-busy] .effort-meter-fill[data-on] {
+  animation: effort-meter-shimmer 1800ms ease-in-out infinite;
+  animation-delay: calc(var(--effort-step) * 120ms);
+}
+
+@keyframes effort-meter-shimmer {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.effort-meter-chip {
+  position: absolute;
+  bottom: 0.1875rem;
+  left: calc(100% + 0.25rem);
+  z-index: 1;
+  border-radius: 0.25rem;
+  background-color: var(--color-background-base);
+  padding: 0.0625rem 0.25rem;
+  font-size: 11px;
+  line-height: 1rem;
+  white-space: nowrap;
+  color: var(--effort-meter-color);
+  pointer-events: none;
+  animation: effort-meter-chip var(--effort-chip-ms) var(--motion-ease-out) both;
+}
+
+@keyframes effort-meter-chip {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  10%,
+  75% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes effort-meter-chip-still {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  10%,
+  75% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .effort-meter-fill,
+  .effort-meter-fill[data-on] {
+    transition: none;
+  }
+
+  .effort-meter[data-busy] .effort-meter-fill[data-on] {
+    animation: none;
+  }
+
+  .effort-meter-chip {
+    animation-name: effort-meter-chip-still;
+  }
+}

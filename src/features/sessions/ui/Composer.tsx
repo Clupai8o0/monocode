@@ -118,6 +118,7 @@ import { InboxMiniCard } from "../../inbox/ui/InboxMiniCard";
 import { NoteMiniCard } from "../../notes/ui/NoteMiniCard";
 import { HandoffMiniCard } from "./HandoffMiniCard";
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
+import { EffortMeter } from "../../../fork/effortAsk/EffortMeter"; // Fork
 import { QuestionForm } from "./QuestionForm";
 import { MessageQueue } from "./MessageQueue";
 import { SkillPicker } from "../../skills/ui/SkillPicker";
@@ -2426,6 +2427,15 @@ export function Composer({
                   }
                   onClose={() => ref.current?.focus()}
                 />
+                {!compact ? (
+                  <EffortMeter
+                    sessionId={sessionId}
+                    harness={harness}
+                    model={model}
+                    values={modelSettings}
+                    busy={busy}
+                  />
+                ) : null}
                 {controlsBeside ? (
                   <ModelControlPills
                     harness={harness}
