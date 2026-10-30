@@ -158,6 +158,7 @@ function MessagesPanel({
       <button
         type="button"
         onClick={() => {
+          setMessageLogWindow("24h");
           openMessagesWindow();
           onOpen();
         }}
@@ -171,6 +172,8 @@ function MessagesPanel({
           type="button"
           data-fork-messages-problems-row=""
           onClick={() => {
+            // The same hour as the count, so the list and the number agree.
+            setMessageLogWindow("1h");
             openMessagesWindow({ problemsOnly: true });
             onOpen();
           }}

@@ -14,6 +14,7 @@ import { projectName } from "../../shared/lib/paths";
 import { Send } from "../../shared/ui/icons";
 import { Segmented } from "../lab/labUi";
 import {
+  broadcastProjects,
   connectBroadcast,
   leftOutLine,
   planBroadcast,
@@ -31,9 +32,12 @@ export const FORK_BROADCAST = import.meta.env.MODE !== "test";
 
 const REFRESH_MS = 1_000;
 
-const SCOPES: { value: BroadcastScope; label: string }[] = [
+type ScopeChoice = "project" | "all" | "one";
+
+const SCOPES: { value: ScopeChoice; label: string }[] = [
   { value: "project", label: "This project" },
   { value: "all", label: "All projects" },
+  { value: "one", label: "One project" },
 ];
 
 const OUTCOME: Record<BroadcastResult["outcome"], string> = {
@@ -115,7 +119,8 @@ function BroadcastBar({
   onText: (text: string) => void;
   onClose: () => void;
 }) {
-  const [scope, setScope] = useState<BroadcastScope>("project");
+  const [choice, setChoice] = useState<ScopeChoice>("project");
+  const [picked, setPicked] = useState<string>();
   const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
   const [results, setResults] = useState<ReadonlyMap<string, BroadcastResult>>(new Map());
   const [app, setApp] = useState<BroadcastApp<Session> | null>(() => connectBroadcast<Session>());
@@ -130,9 +135,19 @@ function BroadcastBar({
   }, []);
 
   const sessions = app?.sessions() ?? [];
-  const planNow = (): BroadcastPlan =>
-    planBroadcast(sessions, factsFor(scope, app?.project()));
-  const plan = planNow();
+  const projects = broadcastProjects(sessions, {
+    sameProject: sameProjectPath,
+    isMono: isMonoSession,
+  });
+  // One that emptied out stays listed, so the choice doesn't jump elsewhere.
+  const pickedPath = picked ?? app?.project() ?? projects[0];
+  const pickable =
+    pickedPath && !projects.some((path) => sameProjectPath(path, pickedPath))
+      ? [pickedPath, ...projects]
+      : projects;
+  const scope: BroadcastScope =
+    choice === "one" ? (pickedPath ? { path: pickedPath } : "project") : choice;
+  const plan: BroadcastPlan = planBroadcast(sessions, factsFor(scope, app?.project()));
   const byId = new Map(sessions.map((session) => [session.id, session]));
   const chosen = plan.targets.filter(
     (target) => !target.blocked && !unticked.has(target.id),
@@ -205,7 +220,21 @@ function BroadcastBar({
         className="min-h-12 resize-none rounded-lg bg-content/5 px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-content/35 focus:bg-content/8"
       />
       <div className="flex items-center gap-2">
-        <Segmented label="Which sessions" options={SCOPES} value={scope} onChange={setScope} />
+        <Segmented label="Which sessions" options={SCOPES} value={choice} onChange={setChoice} />
+        {choice === "one" ? (
+          <select
+            aria-label="Project"
+            value={pickedPath ?? ""}
+            onChange={(event) => setPicked(event.target.value)}
+            className="min-w-0 max-w-40 shrink rounded-md bg-content/5 px-1.5 py-1 text-[12px] text-content outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {pickable.map((path) => (
+              <option key={path} value={path}>
+                {projectName(path)}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <span className="min-w-0 flex-1 truncate text-[11px] text-content/45" title={leftOut}>
           {leftOut}
         </span>

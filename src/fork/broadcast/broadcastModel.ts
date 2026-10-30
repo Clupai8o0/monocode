@@ -6,7 +6,8 @@
 
 export const BROADCAST_EVENT = "monocode:fork-broadcast";
 
-export type BroadcastScope = "project" | "all";
+/** The project on screen, every project, or one picked by its folder. */
+export type BroadcastScope = "project" | "all" | { path: string };
 
 /** The parts of a session this decides on. */
 export type BroadcastSession = {
@@ -82,24 +83,49 @@ function leftOutReason(
   return undefined;
 }
 
+/** Not really open: gone from the sidebar, and never counted as left out. */
+function hidden(session: BroadcastSession): boolean {
+  return !!(
+    session.archived ||
+    session.sidebarHidden ||
+    session.inboxAsk ||
+    session.worktreeRemoved
+  );
+}
+
+function inScope(session: BroadcastSession, facts: BroadcastFacts): boolean {
+  if (facts.scope === "all") {
+    return true;
+  }
+  const path = facts.scope === "project" ? facts.project : facts.scope.path;
+  return !!path && facts.sameProject(session.cwd, path);
+}
+
+/** The folders that can be picked as one project, each once, in session order. */
+export function broadcastProjects(
+  sessions: readonly BroadcastSession[],
+  facts: Pick<BroadcastFacts, "sameProject" | "isMono">,
+): string[] {
+  const paths: string[] = [];
+  for (const session of sessions) {
+    if (
+      !hidden(session) &&
+      !facts.isMono(session.id) &&
+      !paths.some((path) => facts.sameProject(path, session.cwd))
+    ) {
+      paths.push(session.cwd);
+    }
+  }
+  return paths;
+}
+
 export function planBroadcast(
   sessions: readonly BroadcastSession[],
   facts: BroadcastFacts,
 ): BroadcastPlan {
   const plan: BroadcastPlan = { targets: [], leftOut: {} };
   for (const session of sessions) {
-    if (
-      session.archived ||
-      session.sidebarHidden ||
-      session.inboxAsk ||
-      session.worktreeRemoved
-    ) {
-      continue;
-    }
-    if (
-      facts.scope === "project" &&
-      !(facts.project && facts.sameProject(session.cwd, facts.project))
-    ) {
+    if (hidden(session) || !inScope(session, facts)) {
       continue;
     }
     const reason = leftOutReason(session, facts);

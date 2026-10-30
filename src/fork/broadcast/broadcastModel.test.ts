@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  broadcastProjects,
   leftOutLine,
   planBroadcast,
   sendBroadcast,
@@ -44,6 +45,39 @@ describe("planBroadcast", () => {
     expect(planBroadcast(sessions, facts({ scope: "project" })).targets.map((t) => t.id)).toEqual(["a"]);
     expect(planBroadcast(sessions, facts({ scope: "all" })).targets.map((t) => t.id)).toEqual(["a", "b"]);
     expect(planBroadcast(sessions, facts({ scope: "project", project: undefined })).targets).toEqual([]);
+  });
+
+  it("keeps to one picked project, whichever is on screen, with the same exclusions", () => {
+    const sessions = [
+      session("a"),
+      session("b", { cwd: "/q" }),
+      session("c", { cwd: "/q", busy: true }),
+      session("d", { cwd: "/q", blocks: [] }),
+    ];
+    const plan = planBroadcast(sessions, facts({ scope: { path: "/q" } }));
+    expect(plan.targets).toEqual([
+      { id: "b", when: "now" },
+      { id: "c", when: "after this turn" },
+    ]);
+    expect(plan.leftOut).toEqual({ "not started": 1 });
+    expect(planBroadcast(sessions, facts({ scope: { path: "/none" } })).targets).toEqual([]);
+  });
+
+  it("lists each open project once to pick from, without Monos or hidden sessions", () => {
+    const paths = broadcastProjects(
+      [
+        session("a"),
+        session("b", { cwd: "/q" }),
+        session("c", { cwd: "/q/" }),
+        session("mono", { cwd: "/mono" }),
+        session("gone", { cwd: "/archived", archived: true }),
+      ],
+      {
+        sameProject: (a, b) => a.replace(/\/$/, "") === b.replace(/\/$/, ""),
+        isMono: (id) => id === "mono",
+      },
+    );
+    expect(paths).toEqual(["/p", "/q"]);
   });
 
   it("leaves out each kind, and counts why", () => {

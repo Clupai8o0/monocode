@@ -15,6 +15,12 @@ test("sends only on the click, says what happened, and keeps the text if any fai
   await expect(bar.locator('[data-fork-broadcast-session="busy"]')).toContainText("after this turn");
   await expect(bar.locator('[data-fork-broadcast-session="other"]')).toHaveCount(0);
 
+  await bar.getByRole("radio", { name: "One project" }).click();
+  await bar.getByLabel("Project").selectOption("/other");
+  await expect(send).toHaveText("Send to 1 session");
+  await expect(bar.locator('[data-fork-broadcast-session="other"]')).toBeVisible();
+  await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toHaveCount(0);
+
   await bar.getByRole("radio", { name: "All projects" }).click();
   await expect(send).toHaveText("Send to 4 sessions");
   await bar.locator('[data-fork-broadcast-session="other"] input').uncheck();
