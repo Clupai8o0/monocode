@@ -53,6 +53,7 @@ import FolderTreeIcon from "@hugeicons/core-free-icons/FolderTreeIcon";
 import GaugeIcon from "@hugeicons/core-free-icons/GaugeIcon";
 import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
 import GitCompareIcon from "@hugeicons/core-free-icons/GitCompareIcon";
+import GameController01Icon from "@hugeicons/core-free-icons/GameController01Icon"; // Fork
 import GitMergeIcon from "@hugeicons/core-free-icons/GitMergeIcon";
 import GitPullRequestClosedIcon from "@hugeicons/core-free-icons/GitPullRequestClosedIcon";
 import GitPullRequestDraftIcon from "@hugeicons/core-free-icons/GitPullRequestDraftIcon";
@@ -224,6 +225,7 @@ export const ChartBreakoutSquare = wrap(
 export const GitBranch = wrap(GitBranchIcon, "GitBranch");
 export const GitCompare = wrap(GitCompareIcon, "GitCompare");
 export const GitMerge = wrap(GitMergeIcon, "GitMerge");
+export const GameController = wrap(GameController01Icon, "GameController"); // Fork
 export const GitPullRequest = wrap(GitPullRequestIcon, "GitPullRequest");
 export const GitPullRequestClosed = wrap(
   GitPullRequestClosedIcon,

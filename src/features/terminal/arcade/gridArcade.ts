@@ -62,6 +62,10 @@ export type GridArcade = {
   takeControl(): void;
   releaseControl(): void;
   steer(x: number, y: number): void;
+  /** Fork: the key for a heading came back up; held movement stops here. */
+  steerEnd?(x: number, y: number): void;
+  /** Fork: Space. Hard drop, jump, or retry once the game is over. */
+  action?(): void;
   setMode(next: ArcadeMode): void;
   mode(): ArcadeMode;
   controlled(): boolean;
