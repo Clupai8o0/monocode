@@ -103,6 +103,11 @@ export function isStomp(
   return velocity < 0 && feet > enemyY + enemyHeight * 0.4;
 }
 
+/** A pit has nothing under it at all, so a fall can run out of the world. */
+export function isTerrain(height: number, row: number) {
+  return height > 0 && row < height;
+}
+
 export function jumpHeight() {
   return (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * GRAVITY);
 }
@@ -167,7 +172,7 @@ export function createPlatformerArcade(
   const groundAt = (column: number) => ground[column] ?? 0;
 
   const solid = (column: number, row: number) =>
-    row < groundAt(column) || tiles.has(key(column, row));
+    isTerrain(groundAt(column), row) || tiles.has(key(column, row));
 
   /** One flat stretch, then a change of height or a gap to the next. */
   const buildSegment = () => {

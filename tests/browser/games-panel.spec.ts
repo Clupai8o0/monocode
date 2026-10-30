@@ -107,7 +107,8 @@ test("mono bros runs on a held key", async ({ page }) => {
   await page.keyboard.down("ArrowRight");
   await expect.poll(() => score(page), { timeout: 8000 }).toBeGreaterThan(0);
   await page.keyboard.up("ArrowRight");
-  await expect(page.getByLabel("3 lives")).toBeVisible();
+  // Unseeded level: the run may already have met a pit.
+  await expect(page.getByLabel(/[123] lives/)).toBeVisible();
 });
 
 test("typing in the composer pauses, a click resumes, Esc hides and keeps the game", async ({

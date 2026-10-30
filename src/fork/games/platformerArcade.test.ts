@@ -4,6 +4,7 @@ import {
   MAX_STEP,
   createPlatformerArcade,
   isStomp,
+  isTerrain,
   jumpHeight,
 } from "./platformerArcade";
 import { seeded } from "./seeded";
@@ -33,6 +34,14 @@ describe("mono bros level", () => {
 });
 
 describe("mono bros arcade", () => {
+  it("has no floor under a pit", () => {
+    expect(isTerrain(0, -1)).toBe(false);
+    expect(isTerrain(0, 0)).toBe(false);
+    expect(isTerrain(2, 1)).toBe(true);
+    expect(isTerrain(2, -1)).toBe(true);
+    expect(isTerrain(2, 2)).toBe(false);
+  });
+
   it("idle brain makes real headway over a minute", () => {
     for (const seed of [11, 12, 13]) {
       const arcade = createPlatformerArcade(seeded(seed));
