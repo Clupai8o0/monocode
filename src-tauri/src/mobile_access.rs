@@ -762,6 +762,8 @@ async fn handle(
             "project.gitAction",
             "session.start",
             "conversation.send",
+            "session.answerQuestion",
+            "session.keepQuestionOpen",
             "session.cancel",
             "session.rename",
             "session.delete",
