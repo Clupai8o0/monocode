@@ -169,8 +169,18 @@ export function rivalShares(mine: number, others: Record<string, number>) {
   if (total === 0) {
     return shares;
   }
+  // Whole tokens that add up exactly: the first in line takes what rounding left.
+  const size = Math.abs(mine);
+  let left = size;
   for (const [id, net] of side) {
-    shares[id] = Math.round((mine * Math.abs(net)) / total);
+    const share = Math.floor((size * Math.abs(net)) / total);
+    shares[id] = share;
+    left -= share;
+  }
+  const first = side[0]![0];
+  shares[first]! += left;
+  for (const [id] of side) {
+    shares[id] = Math.sign(mine) * shares[id]!;
   }
   return shares;
 }

@@ -92,5 +92,7 @@ describe("tokens", () => {
     expect(rivalShares(300, { a: -200, b: -100, c: 50 })).toEqual({ a: 200, b: 100 });
     expect(rivalShares(-300, { a: 200, b: 100, c: -50 })).toEqual({ a: -200, b: -100 });
     expect(rivalShares(0, { a: 10 })).toEqual({});
+    expect(rivalShares(25, { a: -25, b: -25, c: 25 })).toEqual({ a: 13, b: 12 });
+    expect(rivalShares(-25, { a: 25, b: 25 })).toEqual({ a: -13, b: -12 });
   });
 });
