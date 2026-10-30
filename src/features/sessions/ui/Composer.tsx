@@ -263,6 +263,7 @@ type Props = {
   queuedMessages?: QueuedMessage[];
   queueStatus?: MessageQueueStatus;
   usageLimit?: UsageLimit;
+  usageLimitAction?: ReactNode; // Fork
   hotkeys?: boolean;
   onFocus: () => void;
   onCwdChange: (cwd: string) => void;
@@ -394,6 +395,7 @@ export function Composer({
   queuedMessages = [],
   queueStatus,
   usageLimit,
+  usageLimitAction,
   onFocus,
   onCwdChange,
   onBranchChange,
@@ -1907,14 +1909,17 @@ export function Composer({
           onResumeAtReset={onUsageLimitResumeAtReset}
           onDismiss={onUsageLimitDismiss}
           modelPicker={
-            onUsageLimitAccountChange ? (
-              <UsageLimitAccountPicker
-                harness={harness}
-                accountId={providerAccountId}
-                onSelect={onUsageLimitAccountChange}
-                variant="composer"
-              />
-            ) : undefined
+            <>
+              {onUsageLimitAccountChange ? (
+                <UsageLimitAccountPicker
+                  harness={harness}
+                  accountId={providerAccountId}
+                  onSelect={onUsageLimitAccountChange}
+                  variant="composer"
+                />
+              ) : null}
+              {usageLimitAction /* Fork: Continue in Codex */}
+            </>
           }
         />
       ) : null}

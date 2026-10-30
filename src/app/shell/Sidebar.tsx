@@ -1,3 +1,8 @@
+// Fork: Continue in Codex.
+import {
+  continueHost,
+  continueLabel,
+} from "../../fork/continueElsewhere/continueElsewhere";
 import { BranchChip } from "../../fork/autoWorktree/BranchChip"; // Fork
 import { NO_BRANCH_LABEL } from "../../features/source-control/model/worktrees";
 import {
@@ -1571,6 +1576,22 @@ function SidebarComponent({
           },
         ]
       : []),
+    // Fork: carry the session over to the other provider.
+    ...(!multipleMenuSessions &&
+    menuSessions[0] &&
+    continueLabel(menuSessions[0].harness)
+      ? [
+          {
+            kind: "item" as const,
+            id: "continue-elsewhere",
+            label: continueLabel(menuSessions[0].harness)!,
+            disabled: !continueHost()?.canContinue(menuSessions[0].id),
+            description: continueHost()?.canContinue(menuSessions[0].id)
+              ? undefined
+              : "Open the session first",
+          },
+        ]
+      : []),
     ...(!multipleMenuSessions
       ? [
           {
@@ -1729,6 +1750,10 @@ function SidebarComponent({
         saveReminderSessionsCollapsed(cwd, false);
         onSetReminders?.(sessionIds, dueAt);
       }
+      return;
+    }
+    if (id === "continue-elsewhere") {
+      continueHost()?.continueSession(sessionIds[0]);
       return;
     }
     if (id === "pin") {

@@ -1,4 +1,8 @@
-// Fork: auto worktrees, Merge back and the follow-up coach mark.
+// Fork: auto worktrees, Merge back, the follow-up coach mark, Continue in Codex.
+import {
+  ContinuedFromCard,
+  ContinueElsewhereButton,
+} from "../../../fork/continueElsewhere/ContinueElsewhere";
 import { FollowUpCoachMark } from "../../../fork/featureCoach/FollowUpCoachMark";
 import { noteUserWorkspaceChoice } from "../../../fork/autoWorktree/autoWorktree";
 import { useAutoWorktree } from "../../../fork/autoWorktree/useAutoWorktree";
@@ -862,6 +866,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }
       onResumeQueue={() => onResumeQueue(session.id)}
       usageLimit={session.usageLimit}
+      usageLimitAction={
+        remote || agent ? undefined : (
+          <ContinueElsewhereButton sessionId={session.id} harness={session.harness} />
+        )
+      }
       onUsageLimitResume={() => onUsageLimitResume(session.id)}
       onUsageLimitResumeAtReset={(enabled) =>
         onUsageLimitResumeAtReset(session.id, enabled)
@@ -1009,6 +1018,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                 }
               />
             ) : null}
+            {/* Fork: where a handed-over session came from */}
+            {remote || agent ? null : <ContinuedFromCard sessionId={session.id} />}
             {remoteSessionLoading ? null : isEmpty ? (
               agent ? (
                 <div className="scrollbar-none h-full min-h-0 overflow-y-auto">

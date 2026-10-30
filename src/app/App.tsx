@@ -1,5 +1,12 @@
 // Fork: new sessions get their own worktree when it helps.
 // Fork: the feature coach in Settings > Tips.
+// Fork: carry a session over to the other provider.
+import {
+  continueTarget,
+  registerContinueHost,
+  saveContinuedOrigin,
+  withTranscriptPointer,
+} from "../fork/continueElsewhere/continueElsewhere";
 import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
 import {
   recordFeatureUse,
@@ -440,6 +447,8 @@ import {
   mergeModelSettings,
   nativeModelId,
   preferredModelSettings,
+  defaultModelId,
+  defaultModelSettings,
   resolveModel,
   saveLastModelSettings,
   saveRecentModelChoice,
@@ -5355,6 +5364,7 @@ function Workspace({
     [invalidateLoadedSession, stopSessionForRemoval],
   );
 
+  const onSelectHistorySessionRef = useRef<(sessionId: string) => void>(() => {}); // Fork
   const onSelectHistorySession = useCallback(
     async (sessionId: string) => {
       workspaceNavigation.cancel();
@@ -5404,6 +5414,7 @@ function Workspace({
       revealLinkedSessionUpdate,
     ],
   );
+  onSelectHistorySessionRef.current = onSelectHistorySession; // Fork
 
   const onOpenMonoLaunchedSession = useCallback(
     async (sessionId: string) => {
@@ -10852,15 +10863,59 @@ function Workspace({
         handoffCard: buildHandoffComposerCard({
           from,
           to: harness,
-          brief: buildDeterministicHandoff(sliced),
+          // Fork: says where the full transcript is.
+          brief: withTranscriptPointer(buildDeterministicHandoff(sliced), sourceId),
           userRequest,
           files,
         }),
       };
+      // Fork: the new session shows where it came from.
+      saveContinuedOrigin(session.id, {
+        sessionId: sourceId,
+        from,
+        to: harness,
+        title: display,
+        files: files.length,
+      });
       openSessionBeside(sourceId, session, source.cwd, true);
     },
     [openSessionBeside],
   );
+
+  // Fork: "Continue in Codex", from the usage-limit bar and the session menu.
+  // Not for remote sessions: their new session wouldn't receive the brief yet.
+  useEffect(() => {
+    const continuableTarget = (sessionId: string) => {
+      const source = sessionsRef.current.find((s) => s.id === sessionId);
+      if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
+        return null;
+      }
+      const target = continueTarget(source.harness);
+      return target && isLiveHarness(target) ? target : null;
+    };
+    registerContinueHost({
+      canContinue: (sessionId) => continuableTarget(sessionId) !== null,
+      continueSession: (sessionId) => {
+        const source = sessionsRef.current.find((s) => s.id === sessionId);
+        const target = continuableTarget(sessionId);
+        if (!source || !target) return;
+        const model = defaultModelId(target);
+        onHandoff(
+          sessionId,
+          {
+            harness: target,
+            model,
+            modelSettings: defaultModelSettings(resolveModel(target, model)),
+          },
+          source.blocks,
+        );
+      },
+      openSession: (sessionId) => {
+        onSelectHistorySessionRef.current(sessionId);
+      },
+    });
+    return () => registerContinueHost(null);
+  }, [onHandoff]);
 
   const autoContinueKey = sessions
     .filter(
