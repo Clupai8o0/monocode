@@ -62,7 +62,9 @@ export type HostRelayOptions = {
 };
 
 /** A peer that stops syncing for this long is gone. */
-export const PEER_TTL_MS = 45_000;
+// Longer than a desktop's failed sync (30 s timeout, then 30 s backoff) twice
+// over, so one bad patch of network does not drop its sessions and queues.
+export const PEER_TTL_MS = 120_000;
 const SYNC_ON_MS = 3_000;
 const SYNC_OFF_MS = 20_000;
 const SWEEP_MS = 3_000;

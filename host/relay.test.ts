@@ -343,7 +343,7 @@ describe("HostRelay", () => {
     expect(text).not.toContain(String(pS1));
     expect(text).not.toContain(String(pT1));
 
-    // The Mac goes silent: its proxies here go after 45 s.
+    // The Mac goes silent: its proxies here go after PEER_TTL_MS.
     clock += PEER_TTL_MS / 2;
     await sync(AIR, "air", [{ sessionId: U1, account: ".claude-exec", name: "air-work", cwd: "/Users/sam/air" }]);
     clock += PEER_TTL_MS / 2 + 1;
