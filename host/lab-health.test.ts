@@ -167,6 +167,21 @@ describe("transcript usage", () => {
     expect(tail.waitingOn()).toBe("model");
   });
 
+  it("gives the same rate however often it's asked", () => {
+    const lines = (asked: boolean) => {
+      const tail = new TranscriptTail();
+      tail.line(user(T0));
+      tail.line(assistant(T0 + 50_000, "m1", 700));
+      if (asked) {
+        tail.rate(T0 + 115_000);
+      }
+      tail.line(assistant(T0 + 120_000, "m1", 700, true));
+      return tail.rate(T0 + 121_000);
+    };
+    expect(lines(true)).toEqual(lines(false));
+    expect(lines(true).tokensPerSecond).toBe(5.8);
+  });
+
   it("skips noise, sidechains and broken lines", () => {
     const tail = new TranscriptTail();
     tail.line('{"type":"attachment","x":"assistant"}');
@@ -321,6 +336,27 @@ describe("a read", () => {
     const next = await health.read();
     expect(next).not.toBe(one);
     expect(next.sessions[0]).toMatchObject({ tokensPerSecond: 10, modelSeconds: 10 });
+  });
+
+  it("forgets a running tool when a burst too big to read skips its answer", async () => {
+    const { root, home, file } = tree();
+    let now = T0;
+    file(join(home, ".claude/sessions/1.json"), JSON.stringify({ pid: 1, sessionId: "a", cwd: "/w/a", status: "busy" }));
+    const transcript = join(home, ".claude/projects/-w-a/a.jsonl");
+    file(transcript, `${user(T0 - 3000)}\n${assistant(T0 - 1000, "m1", 100, "big")}\n`);
+    const health = new HostLabHealth({
+      root,
+      home,
+      now: () => now,
+      cores: 4,
+      sampleTimer: false,
+      isAlive: () => true,
+      gateStatus: async () => null,
+    });
+    expect((await health.read()).sessions[0]?.waitingOn).toBe("tool");
+    now += 5000;
+    appendFileSync(transcript, `{"type":"attachment","pad":"${"x".repeat(3 * 1024 * 1024)}"}\n${assistant(now - 1000, "m2", 50)}\n`);
+    expect((await health.read()).sessions[0]?.waitingOn).toBe("model");
   });
 
   it("copes with a machine that has none of this", async () => {

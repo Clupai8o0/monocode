@@ -140,6 +140,7 @@ export class TranscriptTail {
   private readonly replies = new Map<string, TranscriptReply>();
   /** Tools started and not answered yet; several can run side by side. */
   private readonly tools = new Set<string>();
+  private currentReply: string | null = null;
   private waiting: "model" | "tool" | null = null;
   lastAt: number | null = null;
 
@@ -194,6 +195,7 @@ export class TranscriptTail {
     const id = typeof message.id === "string" ? message.id : `${at}`;
     const reply = this.replies.get(id) ?? { tokens: 0, spans: [] };
     this.replies.set(id, reply);
+    this.currentReply = id;
     reply.tokens = Math.max(reply.tokens, typeof output === "number" ? output : 0);
     if (this.waiting === "model" && this.lastAt !== null && at > this.lastAt) {
       reply.spans.push({ from: this.lastAt, to: at });
@@ -221,13 +223,11 @@ export class TranscriptTail {
     let modelMs = 0;
     for (const [id, reply] of this.replies) {
       const newest = reply.spans[reply.spans.length - 1];
-      if (!newest) {
-        // A tail that began mid-reply has no time to spread it over.
-        this.replies.delete(id);
-        continue;
-      }
-      if (newest.to < from) {
-        this.replies.delete(id);
+      if (!newest || newest.to < from) {
+        // The newest may still gain lines, and needs its whole time when it does.
+        if (id !== this.currentReply) {
+          this.replies.delete(id);
+        }
         continue;
       }
       let total = 0;
@@ -546,6 +546,8 @@ export class HostLabHealth {
       from = Math.max(0, size - TAIL_BYTES);
       skipFirst = from > 0;
       tracked.partial = Buffer.alloc(0);
+      // Lines were skipped, maybe a tool's answer: what it knew may be wrong.
+      tracked.tail = new TranscriptTail();
     }
     if (size > from) {
       const handle = await open(path, "r");
