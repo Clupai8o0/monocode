@@ -2,11 +2,10 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AppWindow, Globe, Pencil, Trash2 } from "../../shared/ui/icons";
+import { Globe, Pencil, Trash2 } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { currentWorkspaceSlug } from "./workspaceWindow";
 import {
@@ -17,30 +16,23 @@ import {
   openWorkspace,
   openWorkspaceChrome,
   renameWorkspace,
-  subscribeWorkspaceName,
-  workspaceName,
   type WorkspaceRow,
 } from "./workspaces";
 
 /**
- * Fork: footer button naming this window's workspace. Opens the list of
- * workspaces: open or bring one forward, start a new one in its own window,
- * rename, forget a closed one, or open a Chrome window with its own profile.
- * File > New Workspace… and File > Workspaces… open the same list.
+ * Fork: the list of workspaces, opened from File > New Workspace… and
+ * File > Workspaces…: open or bring one forward, start a new one in its own
+ * window, rename, forget a closed one, or open a Chrome window with its own
+ * profile. Mounted in the footer with no visible button.
  */
 export function WorkspacesButton() {
   return FORK_WORKSPACES ? <Workspaces /> : null;
 }
 
 function Workspaces() {
-  const name = useSyncExternalStore(
-    subscribeWorkspaceName,
-    workspaceName,
-    workspaceName,
-  );
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const unlisten = [
@@ -60,31 +52,14 @@ function Workspaces() {
 
   return (
     <>
-      <button
+      {/* Not shown in the footer (owner, 29 Oct 2026); only anchors the
+          list that File > New Workspace… and File > Workspaces… open. */}
+      <span
         ref={anchor}
-        type="button"
         data-fork-workspaces=""
-        className={`inline-flex h-5 min-w-0 max-w-[160px] shrink items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open
-            ? "text-accent"
-            : name
-              ? "text-content/70 hover:text-content"
-              : "text-content/40 hover:text-content"
-        }`}
-        aria-expanded={open}
-        title={name ? `Workspace: ${name}` : "Workspaces: one window each"}
-        onClick={() => {
-          setCreating(false);
-          setOpen(!open);
-        }}
-      >
-        <AppWindow
-          className="size-3.5 shrink-0"
-          strokeWidth={1.75}
-          aria-hidden
-        />
-        <span className="truncate">{name ?? "Workspaces"}</span>
-      </button>
+        className="-ml-2 h-5 w-0 shrink-0"
+        aria-hidden
+      />
       {open ? (
         <Popover
           anchor={anchor}

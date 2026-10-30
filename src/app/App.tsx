@@ -618,6 +618,10 @@ import type { FileOpenOptions } from "../features/search/model/search"; // Fork
 import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
 import { LabWatcher } from "../fork/lab/labWatcher"; // Fork
 import {
+  queueTerminalStartInput,
+  ULTRAREVIEW_EVENT,
+} from "../fork/ultrareview/ultrareview"; // Fork
+import {
   canCloseForMemory,
   planSessionClose,
   referencedSessionIds,
@@ -3395,6 +3399,18 @@ function Workspace({
 
   const onNewTerminal = useCallback(() => {
     onOpenTerminal(terminalCwd);
+  }, [terminalCwd, onOpenTerminal]);
+
+  // Fork: the footer's Ultrareview runs `claude ultrareview` in a new terminal here.
+  useEffect(() => {
+    const onUltrareview = (event: Event) => {
+      const command = (event as CustomEvent<string>).detail;
+      if (typeof command !== "string") return;
+      queueTerminalStartInput(terminalCwd, command);
+      onOpenTerminal(terminalCwd);
+    };
+    window.addEventListener(ULTRAREVIEW_EVENT, onUltrareview);
+    return () => window.removeEventListener(ULTRAREVIEW_EVENT, onUltrareview);
   }, [terminalCwd, onOpenTerminal]);
 
   const onNewTerminalInSession = useCallback(

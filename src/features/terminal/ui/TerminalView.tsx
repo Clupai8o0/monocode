@@ -28,6 +28,7 @@ import {
   type TerminalFitMode,
 } from "../model/terminalLayout";
 import { IS_MAC } from "../../../platform/tauri/platform";
+import { takeTerminalStartInput } from "../../../fork/ultrareview/ultrareview"; // Fork
 import "@xterm/xterm/css/xterm.css";
 
 type Props = {
@@ -276,6 +277,9 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       .then(start)
       .then(() => {
         if (!closed) spawned.current = true;
+        // Fork: a command queued for this new terminal (ultrareview).
+        const input = closed ? undefined : takeTerminalStartInput(cwd);
+        if (input) void writePty(id, input).catch(() => undefined);
       })
       .catch((error) => {
         spawned.current = false;

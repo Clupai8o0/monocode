@@ -47,6 +47,7 @@ import { PiUsage } from "./PiUsage";
 import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
+import { UltrareviewButton } from "../../fork/ultrareview/UltrareviewButton"; // Fork
 import { RingButton } from "../../fork/location/RingButton"; // Fork
 import { LabButton } from "../../fork/lab/LabButton"; // Fork
 import { useFooterProviders } from "../../fork/usage/useFooterProviders"; // Fork
@@ -184,7 +185,9 @@ export function UsageFooter({
       {showTerminals || showTerminalButton || pressureSlot || FORK_STACKS ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <RingButton />
+          {/* Fork: no visible button; keeps File > Workspaces… working. */}
           <WorkspacesButton />
+          <UltrareviewButton />
           <MessagesButton />
           <LabButton />
           <StacksButton />
