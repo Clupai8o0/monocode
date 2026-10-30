@@ -215,6 +215,8 @@ export type Turn = {
   copyText?: string;
   /** Token accounting for the footer's metrics button; Monos leave it out. */
   metrics?: TurnMetrics;
+  /** Fork: the recorded checkpoint, for the footer's change chip. */
+  checkpointTurnId?: string;
   durationMs?: number;
 };
 

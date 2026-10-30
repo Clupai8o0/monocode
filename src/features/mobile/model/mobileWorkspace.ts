@@ -1,3 +1,4 @@
+import { loadTurnChanges, loadTurnFileDiff } from "../../../fork/turnDiff/turnDiff"; // Fork
 import { invoke } from "@tauri-apps/api/core";
 import {
   gitCommit,
@@ -640,6 +641,53 @@ export function mobileFileHighlight(job: string, from: number) {
 
 /** The uncommitted changes in the project's checkout, or in one of its
  *  worktrees when the phone names it. */
+/**
+ * Fork: what one turn changed, read-only. Only for a turn of a session in a
+ * project this phone can see, like everything else it reads.
+ */
+export async function mobileTurnChanges(
+  conversationId: string,
+  turnId: string,
+  live: readonly Session[],
+) {
+  const session =
+    live.find((entry) => entry.id === conversationId) ??
+    (await readSaved(conversationId));
+  if (
+    !session ||
+    !mobileProjectPaths().some(
+      (path) => pathKey(path) === pathKey(session.cwd),
+    ) ||
+    !session.blocks.some((block) => block.checkpointTurnId === turnId)
+  ) {
+    throw new Error("This turn is no longer available");
+  }
+  const changes = await loadTurnChanges(conversationId, turnId);
+  let budget = 1_000_000;
+  const files = [];
+  for (const file of changes.files) {
+    let lines: ReturnType<typeof buildUnifiedFile>["lines"] = [];
+    if (budget > 0 && files.length < 30) {
+      const diff = await loadTurnFileDiff(
+        conversationId,
+        turnId,
+        file.relative,
+      ).catch(() => null);
+      if (
+        diff &&
+        !diff.binary &&
+        !diff.tooLarge &&
+        diff.original.length + diff.current.length <= budget
+      ) {
+        budget -= diff.original.length + diff.current.length;
+        lines = buildUnifiedFile(diff.original, diff.current).lines;
+      }
+    }
+    files.push({ ...file, lines });
+  }
+  return { ...changes, files };
+}
+
 export async function mobileProjectChanges(projectId: string, worktreePath?: string) {
   const path = await mobileRoot(projectId, worktreePath);
   const index = await gitDiffFiles(path);

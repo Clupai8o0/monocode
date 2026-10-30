@@ -1016,6 +1016,13 @@ function sanitizeBlock(
     isPersistableId(block.providerTurnId)
   )
     next.providerTurnId = block.providerTurnId;
+  // Fork: keeps a turn's change chip after a reload.
+  if (
+    block.role === "user" &&
+    typeof block.checkpointTurnId === "string" &&
+    isPersistableId(block.checkpointTurnId)
+  )
+    next.checkpointTurnId = block.checkpointTurnId;
   if (
     block.role === "user" &&
     typeof block.orchestrationLeadId === "string" &&

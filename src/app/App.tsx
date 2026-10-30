@@ -1,5 +1,6 @@
 // Fork: new sessions get their own worktree when it helps.
 // Fork: the feature coach in Settings > Tips.
+import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
 import {
   recordFeatureUse,
   registerCoachHost,
@@ -8466,10 +8467,24 @@ function Workspace({
           }
           applyTurnEvent(event);
         };
+        const markCheckpointTurn = (turnId: string) => {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    blocks: withCheckpointTurn(session.blocks, turnId),
+                  }
+                : session,
+            ),
+          );
+        };
         const acceptEditedResend = () => {
           if (!editedResend || editedResend.isAccepted()) return;
           flushSync(commitSubmittedTurn);
           editedResend.markAccepted();
+          // Fork: the replacement message only exists from here on.
+          if (checkpointTurnId) markCheckpointTurn(checkpointTurnId);
           for (const event of pendingEditedEvents) applyTurnEvent(event);
           pendingEditedEvents.length = 0;
         };
@@ -8506,6 +8521,11 @@ function Workspace({
             });
           }
           return;
+        }
+        // Fork: ties this turn's checkpoint to its message, for the change chip.
+        // An edited resend waits until the provider accepts its replacement.
+        if (checkpointTurnId && !editedResend) {
+          markCheckpointTurn(checkpointTurnId);
         }
         let buildSucceeded = false;
         try {

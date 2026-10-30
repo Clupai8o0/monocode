@@ -1,3 +1,4 @@
+import { TurnChangeChip } from "../../../fork/turnDiff/TurnChangeChip"; // Fork
 import {
   ArrowUp,
   Check,
@@ -1712,6 +1713,13 @@ function AgentTranscriptComponent({
               {isLastTurn && latestTurnAccessory && !parked
                 ? latestTurnAccessory
                 : null}
+              {/* Fork: what this reply changed; opens its own diff. */}
+              {settled && userBlock?.checkpointTurnId ? (
+                <TurnChangeChip
+                  turnId={userBlock.checkpointTurnId}
+                  busy={!!busy}
+                />
+              ) : null}
               {settled &&
               !reactedOnly &&
               (durationMs != null ||

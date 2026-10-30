@@ -6,6 +6,7 @@ import {
   mobileConversation,
   mobileModels,
   mobileProjectChanges,
+  mobileTurnChanges,
   mobileExternalSessions,
   mobileProjectWorktrees,
   mobileProjectFiles,
@@ -276,6 +277,13 @@ export function useMobileWorkspace(options: Options) {
               result = await mobileAccountUsage(
                 payload.params.provider,
                 payload.params.refresh === true,
+              );
+            } else if (payload.method === "session.turnChanges") {
+              // Fork: the phone's read-only turn diff.
+              result = await mobileTurnChanges(
+                String(payload.params.conversationId ?? ""),
+                String(payload.params.turnId ?? ""),
+                current.current.sessions,
               );
             } else if (payload.method === "project.changes") {
               result = await mobileProjectChanges(

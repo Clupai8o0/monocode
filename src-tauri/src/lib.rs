@@ -23,6 +23,7 @@ mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
+mod fork_turn_diff; // Fork: one turn's changes, and restoring from it.
 mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
 mod fork_memory; // Fork: the Memory manager's per-session RAM report.
@@ -616,6 +617,10 @@ pub fn run() {
             checkpoint::session_checkpoint_file_diff,
             checkpoint::session_checkpoint_undo,
             checkpoint::session_checkpoint_keep,
+            checkpoint::fork_turn_changes,         // Fork
+            checkpoint::fork_turn_file_diff,       // Fork
+            checkpoint::fork_turn_restore_preview, // Fork
+            checkpoint::fork_turn_restore,         // Fork
             set_traffic_lights_visible,
             set_window_background_blur,
             set_dock_badge,

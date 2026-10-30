@@ -327,6 +327,10 @@ export function mobileTranscript(
                 : turn,
             ),
             ...(durationMs != null ? { durationMs } : {}),
+            // Fork: the footer's change chip reads it by this id.
+            ...(userBlock?.checkpointTurnId
+              ? { checkpointTurnId: userBlock.checkpointTurnId }
+              : {}),
             ...(!inlineWork && userBlock?.turnMetrics
               ? { metrics: userBlock.turnMetrics }
               : {}),

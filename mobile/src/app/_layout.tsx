@@ -166,6 +166,7 @@ function LinkedWorkspace() {
             <Stack.Screen name="settings" options={screens.modal} />
             <Stack.Screen name="models" options={screens.modal} />
             <Stack.Screen name="changes" options={screens.changes} />
+            <Stack.Screen name="turn" options={screens.changes} />
             <Stack.Screen name="files" options={screens.changes} />
             <Stack.Screen name="terminal" options={screens.changes} />
           </Stack>

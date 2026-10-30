@@ -781,6 +781,84 @@ pub async fn session_checkpoint_undo(
     .map_err(|e| e.to_string())?
 }
 
+// Fork: one turn's changes and restoring from it. See fork_turn_diff.rs.
+#[tauri::command]
+pub async fn fork_turn_changes(
+    store: State<'_, CheckpointStore>,
+    session_id: String,
+    turn_id: String,
+) -> Result<crate::fork_turn_diff::TurnChanges, String> {
+    validate_id(&session_id, "session")?;
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.exclusive(|store| {
+            crate::fork_turn_diff::turn_changes(&store.session_dir(&session_id), &turn_id)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn fork_turn_file_diff(
+    store: State<'_, CheckpointStore>,
+    session_id: String,
+    turn_id: String,
+    relative: String,
+) -> Result<crate::fork_turn_diff::TurnFileDiff, String> {
+    validate_id(&session_id, "session")?;
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.exclusive(|store| {
+            crate::fork_turn_diff::turn_file_diff(
+                &store.session_dir(&session_id),
+                &turn_id,
+                &relative,
+            )
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn fork_turn_restore_preview(
+    store: State<'_, CheckpointStore>,
+    session_id: String,
+    turn_id: String,
+) -> Result<crate::fork_turn_diff::RestorePreview, String> {
+    validate_id(&session_id, "session")?;
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.exclusive(|store| {
+            crate::fork_turn_diff::restore_preview(&store.session_dir(&session_id), &turn_id)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn fork_turn_restore(
+    store: State<'_, CheckpointStore>,
+    session_id: String,
+    turn_id: String,
+) -> Result<crate::fork_turn_diff::RestorePreview, String> {
+    validate_id(&session_id, "session")?;
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.exclusive(|store| {
+            crate::fork_turn_diff::restore_turn(
+                &store.session_dir(&session_id),
+                &session_id,
+                &turn_id,
+            )
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn session_checkpoint_keep(
     store: State<'_, CheckpointStore>,

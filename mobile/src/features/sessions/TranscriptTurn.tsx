@@ -1,3 +1,4 @@
+import { TurnChangeChip } from "@/features/changes/TurnChangeChip";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { createContext, memo, use, useEffect, useRef, useState } from "react";
@@ -117,6 +118,9 @@ export const TranscriptTurn = memo(function TranscriptTurn({
             );
         }
       })}
+      {turn.footer && turn.checkpointTurnId ? (
+        <TurnChangeChip turnId={turn.checkpointTurnId} />
+      ) : null}
       {turn.footer ? <TurnFooter turn={turn} /> : null}
     </View>
   );
