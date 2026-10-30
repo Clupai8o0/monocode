@@ -19,7 +19,13 @@ import { createMobileHandler } from "./mobile";
 import { hostShows, showsListening } from "./shows";
 import { hostLab } from "./lab";
 import { hostRelay } from "./relay";
-import { LAB_CAPABILITY, LAB_TZ_CAPABILITY, RELAY_CAPABILITY } from "../src/fork/lab/labProtocol";
+import {
+  LAB_CAPABILITY,
+  LAB_HEALTH_CAPABILITY,
+  LAB_TZ_CAPABILITY,
+  RELAY_CAPABILITY,
+} from "../src/fork/lab/labProtocol";
+import { hostLabHealth } from "./lab-health";
 import { MESSAGES_CAPABILITY, RELAY_TRAFFIC_CAPABILITY } from "../src/fork/messageLog/messageLogProtocol";
 import { listMessages } from "./messages";
 import { hostOsName } from "./os-name";
@@ -390,6 +396,7 @@ export function createHostServer(
                 ...(showsListening() ? ["shows"] : []),
                 LAB_CAPABILITY,
                 LAB_TZ_CAPABILITY,
+                LAB_HEALTH_CAPABILITY,
                 RELAY_CAPABILITY,
                 MESSAGES_CAPABILITY,
                 RELAY_TRAFFIC_CAPABILITY,
@@ -758,6 +765,9 @@ export function createHostServer(
               device: engine.store.device(token),
               surface: "rpc",
             });
+            break;
+          case "lab.health":
+            result = await hostLabHealth().read();
             break;
           case "messages.list":
             result = await listMessages(

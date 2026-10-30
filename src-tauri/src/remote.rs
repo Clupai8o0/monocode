@@ -537,6 +537,7 @@ fn supported_remote_method(method: &str) -> bool {
             | "lab.uresourced.set"
             | "lab.remoteDesktop.set"
             | "lab.report"
+            | "lab.health"
     )
 }
 

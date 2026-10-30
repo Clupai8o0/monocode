@@ -4,6 +4,7 @@ import { remoteRequest } from "../../features/connections/model/connections";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
 import {
   errorText,
+  hasCapability,
   hasLabCapability,
   hasTimeZoneCapability,
   localMachineName,
@@ -11,7 +12,7 @@ import {
   type LocalRelayStatus,
   type LocalRemoteControl,
 } from "./labModel";
-import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
+import { LAB_HEALTH_CAPABILITY, type LabParams, type LabStatus, type RemoteControlScope } from "./labProtocol";
 import {
   LAB_CHANGED,
   LAB_SYNCED,
@@ -41,6 +42,8 @@ export type LabHost = {
   machine: RemoteMachine;
   /** Its describe lists lab.tz.v1. */
   timeZone: boolean;
+  /** Its describe lists lab.health.v1. */
+  health: boolean;
   /** The last lab.status it answered; kept while it is offline. */
   status?: LabStatus;
   /** Its last lab.status failed. */
@@ -86,7 +89,7 @@ export function hostErrors(state: LabState, machineId: string): string[] {
 
 // ---- state ----
 
-type Known = { lab: boolean; timeZone: boolean };
+type Known = { lab: boolean; timeZone: boolean; health: boolean };
 
 let machines: RemoteMachine[] = [];
 let machinesLoaded = false;
@@ -123,6 +126,7 @@ function build(): LabState {
       {
         machine,
         timeZone: entry.timeZone,
+        health: entry.health,
         status: statuses.get(machine.id),
         offline: offline.has(machine.id),
         loading: (loading.get(machine.id) ?? 0) > 0,
@@ -213,7 +217,11 @@ async function describe(machine: RemoteMachine): Promise<void> {
   publish();
   try {
     const answer = await remoteRequest<unknown>(machine.id, "environment.describe", {});
-    known.set(machine.id, { lab: hasLabCapability(answer), timeZone: hasTimeZoneCapability(answer) });
+    known.set(machine.id, {
+      lab: hasLabCapability(answer),
+      timeZone: hasTimeZoneCapability(answer),
+      health: hasCapability(answer, LAB_HEALTH_CAPABILITY),
+    });
     describedAt.set(machine.id, Date.now());
     failed.delete(machine.id);
   } catch {

@@ -3,6 +3,7 @@ import { HomeLab, LoaderCircle } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "./agentTimeZone";
 import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
+import { LabHealthSection } from "./LabHealthSection";
 import { labChip, remoteDesktopView, uresourcedView, type LabChip } from "./labModel";
 import type { LabParams, LabStatus, RemoteControlScope } from "./labProtocol";
 import {
@@ -142,6 +143,8 @@ export function LabPanel({ state, onSettings }: { state: LabState; onSettings?: 
           Settings
         </button>
       </div>
+
+      <LabHealthSection hosts={state.hosts} heading={several} />
 
       <Row
         title="Remote Control"

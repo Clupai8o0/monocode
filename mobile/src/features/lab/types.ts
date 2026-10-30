@@ -144,3 +144,79 @@ export const LAB_PHONE_METHODS = [
   "lab.remoteDesktop.set",
 ] as const satisfies readonly LabMethod[];
 export type LabPhoneMethod = (typeof LAB_PHONE_METHODS)[number];
+
+/** The host answers lab.health. */
+export const LAB_HEALTH_CAPABILITY = "lab.health.v1";
+export const LAB_HEALTH_METHOD = "lab.health";
+
+/** Share of time something was held up, in percent (/proc/pressure). */
+export type LabPressure = {
+  someAvg10: number;
+  someAvg60: number;
+  fullAvg10: number;
+  fullAvg60: number;
+};
+
+/** One Claude session on the host. */
+export type LabHealthSession = {
+  sessionId: string;
+  name: string;
+  busy: boolean;
+  /** Since its transcript last gained a message; null without a transcript. */
+  quietMs: number | null;
+  /** Output tokens per second of model time over the last minute; time spent
+   *  in tools doesn't count. Null when the model had no time in that minute. */
+  tokensPerSecond: number | null;
+  /** How much of the last minute the model had, in seconds. */
+  modelSeconds: number;
+  /** How long this turn has run; null when idle. */
+  turnMs: number | null;
+  /** What a busy session waits on now: a reply, or a tool it started. */
+  waitingOn: "model" | "tool" | null;
+};
+
+export type LabHealthGate = {
+  running: number;
+  max: number;
+  waiting: number;
+  agents: { name: string; memoryGb: number }[];
+  /** When agent-gate last answered, ms since epoch. */
+  sampledAt: number;
+};
+
+/** One point of the 10 minute history. */
+export type LabHealthPoint = {
+  at: number;
+  /** Percent of all cores; null for the first point. */
+  cpu: number | null;
+  /** Percent of memory available. */
+  memoryAvailable: number;
+};
+
+/** lab.health's answer. Whatever the machine can't tell is null. */
+export type LabHealth = {
+  version: 1;
+  machine: string;
+  /** The host's clock, ms since epoch. */
+  at: number;
+  cpu: {
+    percent: number | null;
+    load1: number;
+    load5: number;
+    cores: number;
+  };
+  memory: { totalMb: number; availableMb: number };
+  pressure: {
+    memory: LabPressure | null;
+    cpu: LabPressure | null;
+    io: LabPressure | null;
+  };
+  /** climbMbPerMin: how fast swap use rose over the last few minutes. */
+  swap: { totalMb: number; usedMb: number; climbMbPerMin: number };
+  temperatureC: number | null;
+  power: { source: "ac" | "battery" | null; batteryPercent: number | null };
+  /** Null where agent-gate isn't installed, or before it first answers. */
+  gate: LabHealthGate | null;
+  sessions: LabHealthSession[];
+  history: LabHealthPoint[];
+};

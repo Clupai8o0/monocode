@@ -42,6 +42,49 @@ const status = {
   timeZone: { zone: "Asia/Kolkata" as string | null, updatedAt: Date.now() - 60_000, hostZone: "Australia/Melbourne" },
 };
 
+// ?health=ok|lag|strained|down: lab.health's answer; without it the host doesn't
+// offer lab.health.
+const healthKind = new URLSearchParams(location.search).get("health");
+function healthAnswer(kind: string) {
+  const at = Date.now();
+  const hot = kind === "strained";
+  const history = Array.from({ length: 60 }, (_, index) => ({
+    at: at - (59 - index) * 10_000,
+    cpu: Math.round(25 + 20 * Math.sin(index / 5) + (hot ? 40 : 0)),
+    memoryAvailable: hot ? 10 + (index % 3) : 45 + (index % 4),
+  }));
+  const base = { busy: true, modelSeconds: 40, turnMs: 300_000, waitingOn: "model" };
+  const sessions = [
+    { ...base, sessionId: "a", name: "monocode-table", quietMs: 4000, tokensPerSecond: 38 },
+    { ...base, sessionId: "b", name: "t3-phases", quietMs: 12_000, tokensPerSecond: 92, waitingOn: "tool" },
+    { ...base, sessionId: "c", name: "monocode-idle", busy: false, quietMs: 900_000, tokensPerSecond: null, modelSeconds: 0, turnMs: null, waitingOn: null },
+    ...(kind === "lag"
+      ? [
+          { ...base, sessionId: "d", name: "monocode-footer-tidy", quietMs: 15_000, tokensPerSecond: 3 },
+          { ...base, sessionId: "e", name: "monocode-crossmachine", quietMs: 240_000, tokensPerSecond: null },
+        ]
+      : []),
+  ];
+  return {
+    version: 1,
+    machine: "vivobook",
+    at,
+    cpu: { percent: hot ? 88 : 31, load1: hot ? 26 : 3.5, load5: 3, cores: 20 },
+    memory: { totalMb: 23_707, availableMb: hot ? 2400 : 9800 },
+    pressure: {
+      memory: { someAvg10: 0, someAvg60: hot ? 14 : 0, fullAvg10: 0, fullAvg60: 0 },
+      cpu: null,
+      io: null,
+    },
+    swap: { totalMb: 8192, usedMb: 2300, climbMbPerMin: hot ? 80 : 0 },
+    temperatureC: hot ? 94 : 62,
+    power: { source: "ac", batteryPercent: 79 },
+    gate: { running: 10, max: 10, waiting: 1, agents: [{ name: "a", memoryGb: 0.3 }], sampledAt: at },
+    sessions,
+    history,
+  };
+}
+
 // The Mac's agent time zone: null follows the Mac.
 let agentZone: string | null = null;
 function zoneAnswer() {
@@ -50,7 +93,15 @@ function zoneAnswer() {
 
 function answer(method: string, params: Record<string, unknown>): unknown {
   if (method === "environment.describe") {
-    return { capabilities: ["lab.v1", "lab.tz.v1"] };
+    return { capabilities: ["lab.v1", "lab.tz.v1", ...(healthKind ? ["lab.health.v1"] : [])] };
+  }
+  if (method === "lab.health") {
+    const win = window as unknown as { __healthAsks?: number };
+    win.__healthAsks = (win.__healthAsks ?? 0) + 1;
+    if (healthKind === "down") {
+      throw new Error("timed out");
+    }
+    return healthAnswer(healthKind ?? "ok");
   }
   if (method === "lab.remoteControl.set") {
     status.remoteControl.desired = { scope: params.scope as string, updatedAt: Date.now(), by: "Mac" };
