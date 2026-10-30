@@ -507,6 +507,7 @@ function settleResent(
         other.source === sends[index].source &&
         other.event.sessionId === event.sessionId &&
         other.event.key === event.key &&
+        other.event.preview === event.preview &&
         other.event.at > event.at &&
         other.event.at - event.at <= RESEND_MS,
     );

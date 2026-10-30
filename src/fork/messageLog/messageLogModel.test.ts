@@ -254,6 +254,8 @@ describe("buildMessageLogView", () => {
       send("not-theirs", NOW - 19 * MIN, { status: "sent", sessionId: "s-beta", to: "new", key: "k-4" }),
       send("fails-too", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-5" }),
       send("fails-again", NOW - 19 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-5" }),
+      send("long-first", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-6", preview: "same start, one ending" }),
+      send("long-second", NOW - 19 * MIN, { status: "sent", to: "new", key: "k-6", preview: "same start, other ending" }),
     ])]);
     const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
     expect(by.retried).toMatchObject({
@@ -262,7 +264,7 @@ describe("buildMessageLogView", () => {
       problem: false,
       settled: true,
     });
-    for (const id of ["other-text", "too-late", "other-session", "fails-too", "fails-again"]) {
+    for (const id of ["other-text", "too-late", "other-session", "fails-too", "fails-again", "long-first"]) {
       expect(by[id].problem).toBe(true);
     }
   });

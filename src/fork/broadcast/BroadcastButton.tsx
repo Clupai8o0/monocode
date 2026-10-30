@@ -214,6 +214,7 @@ function BroadcastBar({
         autoFocus
         rows={2}
         value={text}
+        readOnly={sending}
         aria-label="Message"
         placeholder="Message for these sessions"
         onChange={(event) => {
