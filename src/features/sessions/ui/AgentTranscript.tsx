@@ -120,6 +120,7 @@ import { useBottomChatMotion } from "../hooks/useBottomChatMotion";
 import { useTranscriptSelection } from "../hooks/useTranscriptSelection";
 import type { TranscriptLayout } from "../../settings/model/appearance";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { TaskPicksReply } from "../../../fork/taskPicks/TaskPicks";
 import { MonoWorkTicker } from "./MonoWorkTicker";
 import { monoWorkStatus } from "../model/monoWorkStatus";
 import { isEmojiOnlyMessage } from "../model/emojiMessage";
@@ -2505,15 +2506,17 @@ const TranscriptBlock = memo(function TranscriptBlock({
       data-chat-message-role="assistant"
       className={`min-w-0 pb-1 text-content ${embedded ? "" : "px-4"} ${underLine ? "pt-1" : "pt-3"}`}
     >
-      <AgentMarkdown
-        text={block.text}
-        measurement={streamMeasurement(block)}
-        streaming={block.streaming}
-        revealOnMount={revealOnMount}
-        cwd={cwd}
-        onOpenFile={onOpenFile}
-        localMedia={localMedia}
-      />
+      <TaskPicksReply blockId={block.id} streaming={!!block.streaming}>
+        <AgentMarkdown
+          text={block.text}
+          measurement={streamMeasurement(block)}
+          streaming={block.streaming}
+          revealOnMount={revealOnMount}
+          cwd={cwd}
+          onOpenFile={onOpenFile}
+          localMedia={localMedia}
+        />
+      </TaskPicksReply>
     </div>
   );
 });

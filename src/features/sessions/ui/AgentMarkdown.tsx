@@ -64,6 +64,12 @@ import {
 } from "./documentImageSources";
 import { rehypeHardBreaks } from "./hardBreaks";
 import {
+  MarkdownTaskInput,
+  TaskMarkdownBlock,
+  TaskPicksContext,
+} from "../../../fork/taskPicks/TaskPicks";
+import { rehypeTaskLabels } from "../../../fork/taskPicks/picksStore";
+import {
   pacedRevealPreferred,
   rehypeWordFade,
   useCadenceFade,
@@ -598,6 +604,8 @@ const MARKDOWN_COMPONENTS = {
   a: MarkdownLink,
   code: MarkdownCode,
   img: MarkdownImage,
+  // Fork: a task box in a reply can be ticked; see fork/taskPicks.
+  input: MarkdownTaskInput,
   source: MarkdownPictureSource,
 } satisfies Components;
 
@@ -622,7 +630,11 @@ function DirectionalBlock({ dir, ...props }: BlockProps) {
   // elements, so removing its spans can reconcile the existing block.
   // A fade-end key change also tears down nested code/media in lists and can
   // briefly collapse the reply, clamping the transcript's scroll position.
-  const block = <Block {...props} />;
+  const block = (
+    <TaskMarkdownBlock.Provider value={props.index}>
+      <Block {...props} />
+    </TaskMarkdownBlock.Provider>
+  );
   return dir ? (
     <div dir={dir} className="agent-markdown-block">
       {block}
@@ -758,11 +770,13 @@ export const AgentMarkdown = memo(function AgentMarkdown({
         : MARKDOWN_REHYPE_PLUGINS;
   // Hard breaks go last, so nothing after them undoes them, and after the word
   // fade, whose word spans would otherwise hide the newlines from them.
-  const rehypePlugins = useMemo(
-    () =>
-      hardBreaks ? [...baseRehypePlugins, rehypeHardBreaks] : baseRehypePlugins,
-    [baseRehypePlugins, hardBreaks],
-  );
+  const tickable = !!useContext(TaskPicksContext);
+  const rehypePlugins = useMemo(() => {
+    const labelled = tickable
+      ? [...baseRehypePlugins, rehypeTaskLabels]
+      : baseRehypePlugins;
+    return hardBreaks ? [...labelled, rehypeHardBreaks] : labelled;
+  }, [baseRehypePlugins, hardBreaks, tickable]);
 
   const onFileMenuPick = (id: string) => {
     if (!fileMenu) return;

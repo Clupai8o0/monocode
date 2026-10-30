@@ -2519,6 +2519,49 @@ html:not(.theme-light) .markdown-code-token {
   opacity: 1;
 }
 
+/* Fork: a task box in a reply, which can be ticked; see fork/taskPicks. */
+.agent-markdown input.task-pick {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  vertical-align: -2px;
+  cursor: pointer;
+  border: 1.5px solid color-mix(in srgb, var(--color-content) 40%, transparent);
+  border-radius: 4px;
+  background: transparent center / 11px no-repeat;
+}
+
+.agent-markdown input.task-pick:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-content) 70%, transparent);
+}
+
+.agent-markdown input.task-pick:checked {
+  border-color: var(--user-accent-color, var(--color-accent));
+  background-color: var(--user-accent-color, var(--color-accent));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.8l4.5-5.3' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.agent-markdown input.task-pick:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.agent-markdown input.task-pick:focus-visible {
+  outline: 2px solid var(--user-accent-color, var(--color-accent));
+  outline-offset: 1px;
+}
+
+.agent-markdown li:has(> input.task-pick:not(:disabled)),
+.agent-markdown li:has(> p > input.task-pick:not(:disabled)) {
+  cursor: pointer;
+}
+
+.agent-markdown li:has(> input.task-pick:checked),
+.agent-markdown li:has(> p > input.task-pick:checked) {
+  color: var(--color-content);
+}
+
 .agent-reasoning.agent-markdown p,
 .agent-reasoning.agent-markdown li {
   color: color-mix(in srgb, var(--color-content) 48%, transparent);
