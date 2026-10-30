@@ -138,6 +138,8 @@ type TranscriptReply = { tokens: number; spans: { from: number; to: number }[] }
 /** What the tail of one transcript says: reads whole lines, in order. */
 export class TranscriptTail {
   private readonly replies = new Map<string, TranscriptReply>();
+  /** Tools started and not answered yet; several can run side by side. */
+  private readonly tools = new Set<string>();
   private waiting: "model" | "tool" | null = null;
   lastAt: number | null = null;
 
@@ -165,7 +167,21 @@ export class TranscriptTail {
       return;
     }
     if (entry.type === "user") {
-      this.waiting = "model";
+      const content = (entry.message as { content?: unknown } | undefined)?.content;
+      const results = Array.isArray(content)
+        ? content.filter((block) => (block as { type?: unknown } | null)?.type === "tool_result")
+        : [];
+      if (results.length === 0) {
+        // A new prompt: anything still open was interrupted.
+        this.tools.clear();
+      }
+      for (const block of results) {
+        const id = (block as { tool_use_id?: unknown }).tool_use_id;
+        if (typeof id === "string") {
+          this.tools.delete(id);
+        }
+      }
+      this.waiting = this.tools.size > 0 ? "tool" : "model";
       this.lastAt = at;
       return;
     }
@@ -182,12 +198,15 @@ export class TranscriptTail {
     if (this.waiting === "model" && this.lastAt !== null && at > this.lastAt) {
       reply.spans.push({ from: this.lastAt, to: at });
     }
-    const usesTool =
-      Array.isArray(message.content) &&
-      message.content.some(
-        (block) => (block as { type?: unknown } | null)?.type === "tool_use",
-      );
-    this.waiting = usesTool ? "tool" : "model";
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        const item = block as { type?: unknown; id?: unknown } | null;
+        if (item?.type === "tool_use") {
+          this.tools.add(typeof item.id === "string" ? item.id : `${at}`);
+        }
+      }
+    }
+    this.waiting = this.tools.size > 0 ? "tool" : "model";
     this.lastAt = at;
   }
 
@@ -285,6 +304,7 @@ export class HostLabHealth {
   private timer: ReturnType<typeof setInterval> | null = null;
   private askedAt = -Infinity;
   private readonly tracked = new Map<string, Tracked>();
+  private reading: Promise<LabHealth> | null = null;
 
   constructor(options: LabHealthOptions = {}) {
     this.root = options.root ?? "/";
@@ -592,7 +612,16 @@ export class HostLabHealth {
     };
   }
 
-  async read(): Promise<LabHealth> {
+  /** Callers at the same moment share one read: two at once would read the
+   * same new end of a transcript and count it twice. */
+  read(): Promise<LabHealth> {
+    this.reading ??= this.readNow().finally(() => {
+      this.reading = null;
+    });
+    return this.reading;
+  }
+
+  private async readNow(): Promise<LabHealth> {
     const now = this.now();
     this.watch(now);
     void this.refreshGate(now);

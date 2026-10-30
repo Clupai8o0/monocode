@@ -85,14 +85,14 @@ function user(at: number, extra = {}): string {
   return JSON.stringify({ type: "user", timestamp: new Date(at).toISOString(), message: { role: "user", content: "x" }, ...extra });
 }
 
-function assistant(at: number, id: string, output: number, tool = false, extra = {}): string {
+function assistant(at: number, id: string, output: number, tool: boolean | string = false, extra = {}): string {
   return JSON.stringify({
     type: "assistant",
     timestamp: new Date(at).toISOString(),
     message: {
       id,
       usage: { output_tokens: output },
-      content: tool ? [{ type: "tool_use", id: "t" }] : [{ type: "text", text: "hi" }],
+      content: tool ? [{ type: "tool_use", id: tool === true ? `t-${id}` : tool }] : [{ type: "text", text: "hi" }],
     },
     ...extra,
   });
@@ -114,7 +114,7 @@ describe("transcript usage", () => {
     const tail = new TranscriptTail();
     tail.line(user(T0));
     tail.line(assistant(T0 + 2000, "m1", 200, true));
-    tail.line(user(T0 + 42_000, { message: { content: [{ type: "tool_result" }] } }));
+    tail.line(user(T0 + 42_000, { message: { content: [{ type: "tool_result", tool_use_id: "t-m1" }] } }));
     expect(tail.waitingOn()).toBe("model");
     tail.line(assistant(T0 + 44_000, "m2", 200));
     expect(tail.rate(T0 + 45_000)).toEqual({ tokensPerSecond: 100, modelSeconds: 4 });
@@ -144,6 +144,27 @@ describe("transcript usage", () => {
     const { tokensPerSecond } = tail.rate(T0 + 202_000);
     expect(tokensPerSecond).toBeGreaterThan(140);
     expect(tokensPerSecond).toBeLessThan(150);
+  });
+
+  it("keeps waiting on tools until every one running side by side has answered", () => {
+    const result = (id: string) => ({ message: { content: [{ type: "tool_result", tool_use_id: id }] } });
+    const tail = new TranscriptTail();
+    tail.line(user(T0));
+    tail.line(assistant(T0 + 1000, "m1", 100, "a"));
+    tail.line(assistant(T0 + 2000, "m1", 100, "b"));
+    tail.line(user(T0 + 3000, result("a")));
+    expect(tail.waitingOn()).toBe("tool");
+    tail.line(user(T0 + 200_000, result("b")));
+    expect(tail.waitingOn()).toBe("model");
+  });
+
+  it("a new prompt ends tools that never answered", () => {
+    const tail = new TranscriptTail();
+    tail.line(user(T0));
+    tail.line(assistant(T0 + 1000, "m1", 100, "a"));
+    expect(tail.waitingOn()).toBe("tool");
+    tail.line(user(T0 + 5000));
+    expect(tail.waitingOn()).toBe("model");
   });
 
   it("skips noise, sidechains and broken lines", () => {
@@ -279,6 +300,27 @@ describe("a read", () => {
     finish(null);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await health.read()).gate?.waiting).toBe(1);
+  });
+
+  it("shares one read between callers, so nothing is counted twice", async () => {
+    const { root, home, file } = tree();
+    file(join(home, ".claude/sessions/1.json"), JSON.stringify({ pid: 1, sessionId: "a", cwd: "/w/a", status: "busy" }));
+    file(join(home, ".claude/projects/-w-a/a.jsonl"), `${user(T0 - 10_000)}\n${assistant(T0, "m1", 100)}\n`);
+    const health = new HostLabHealth({
+      root,
+      home,
+      now: () => T0 + 1000,
+      cores: 4,
+      sampleTimer: false,
+      isAlive: () => true,
+      gateStatus: async () => null,
+    });
+    const [one, two] = await Promise.all([health.read(), health.read()]);
+    expect(two).toBe(one);
+    expect(one.sessions[0]).toMatchObject({ tokensPerSecond: 10, modelSeconds: 10 });
+    const next = await health.read();
+    expect(next).not.toBe(one);
+    expect(next.sessions[0]).toMatchObject({ tokensPerSecond: 10, modelSeconds: 10 });
   });
 
   it("copes with a machine that has none of this", async () => {
