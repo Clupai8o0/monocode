@@ -10,7 +10,7 @@
  */
 
 /** Lines kept; older ones scroll away. */
-const MAX_LINES = 2_000;
+const MAX_LINES = 5_000;
 /** Longer lines wrap, so output with no newlines still scrolls away. */
 const MAX_LINE_CHARS = 4_096;
 /** An escape sequence longer than this is garbage, not one to wait for. */

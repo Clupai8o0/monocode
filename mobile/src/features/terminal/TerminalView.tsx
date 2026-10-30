@@ -1,5 +1,10 @@
+import {
+  rememberTerminalScroll,
+  restoreTarget,
+  savedTerminalScroll,
+} from "./terminalScroll";
 import * as Haptics from "expo-haptics";
-import { memo, useRef, useState } from "react";
+import { useEffect, memo, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -81,15 +86,31 @@ export function TerminalView({
   const { width, height } = useWindowDimensions();
   const cols = Math.max(20, Math.floor((width - PADDING * 2) / CHAR_WIDTH));
   const rows = Math.max(10, Math.floor(height / (FONT_SIZE * 1.4)));
-  const { text, started, alive, exitCode, error, send, restart } = useTerminal(
-    projectId,
-    worktreePath,
-    { cols, rows },
-  );
+  const { terminalId, replaying, text, started, alive, exitCode, error, send, restart } =
+    useTerminal(projectId, worktreePath, { cols, rows });
   const [input, setInput] = useState("");
   const scroll = useRef<ScrollView>(null);
   // Follow new output only while the end is in view, so scrolling back holds.
   const following = useRef(true);
+  const [away, setAway] = useState(false);
+  // Where this shell was left, put back as its history comes in again.
+  const restoring = useRef<number | null>(null);
+  const restoredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!terminalId || restoredFor.current === terminalId) return;
+    restoredFor.current = terminalId;
+    restoring.current = savedTerminalScroll(terminalId);
+    if (restoring.current === null) return;
+    following.current = false;
+    scroll.current?.scrollTo({ y: restoring.current, animated: false });
+  }, [terminalId]);
+  const viewport = useRef(0);
+  // All the history is in. If the place is gone, this is as close as it gets.
+  useEffect(() => {
+    if (replaying || restoring.current === null) return;
+    restoring.current = null;
+    setAway(true);
+  }, [replaying]);
 
   const submit = () => {
     void send(`${input}\r`);
@@ -112,11 +133,36 @@ export function TerminalView({
         contentContainerStyle={[styles.outputContent, { paddingTop: top + 8 }]}
         onScroll={({ nativeEvent }) => {
           const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+          viewport.current = layoutMeasurement.height;
+          // The replay's own scrolling isn't the person's.
+          if (restoring.current !== null) return;
           following.current =
             contentOffset.y + layoutMeasurement.height >= contentSize.height - 40;
+          setAway(!following.current);
+          if (terminalId) {
+            rememberTerminalScroll(
+              terminalId,
+              following.current ? null : contentOffset.y,
+            );
+          }
         }}
         scrollEventThrottle={100}
-        onContentSizeChange={() => {
+        onScrollBeginDrag={() => {
+          restoring.current = null;
+        }}
+        onLayout={({ nativeEvent }) => {
+          viewport.current = nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_width, height) => {
+          if (restoring.current !== null) {
+            const target = restoreTarget(restoring.current, height, viewport.current);
+            scroll.current?.scrollTo({ y: target.y, animated: false });
+            if (target.done) {
+              restoring.current = null;
+              setAway(true);
+            }
+            return;
+          }
           if (following.current) scroll.current?.scrollToEnd({ animated: false });
         }}
         keyboardShouldPersistTaps="handled"
@@ -143,6 +189,22 @@ export function TerminalView({
           </Text>
         ) : null}
       </ScrollView>
+      {away ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Jump to the latest output"
+          onPress={() => {
+            following.current = true;
+            setAway(false);
+            if (terminalId) rememberTerminalScroll(terminalId, null);
+            scroll.current?.scrollToEnd({ animated: true });
+          }}
+          style={styles.latest}
+        >
+          <Icon name="chevronDown" size={14} color={colors.background} />
+          <Text style={styles.latestLabel}>Latest</Text>
+        </Pressable>
+      ) : null}
 
       {error ? (
         <Text style={styles.error} numberOfLines={2}>
@@ -214,6 +276,19 @@ export function TerminalView({
 }
 
 const useStyles = themedStyles((colors) => ({
+  latest: {
+    position: "absolute",
+    right: 16,
+    bottom: 108,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: colors.content,
+  },
+  latestLabel: { color: colors.background, fontSize: 13, fontWeight: "600" },
   root: {
     flex: 1,
     backgroundColor: colors.background,

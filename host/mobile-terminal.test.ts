@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   createMobileTerminals,
+  MAX_READ_CHARS,
+  outputOverflow,
   terminalCommand,
   terminalEnv,
 } from "./mobile-terminal";
@@ -176,3 +178,54 @@ it.runIf(process.platform === "linux")(
   },
   60_000,
 );
+
+const lines = (count: number) => "line\n".repeat(count);
+
+it("keeps the last 5,000 lines", () => {
+  expect(outputOverflow(lines(5_000), 5_000)).toBe(0);
+  expect(outputOverflow(lines(5_001), 5_001)).toBe("line\n".length);
+  expect(outputOverflow(lines(5_003), 5_003)).toBe("line\n".length * 3);
+});
+
+it("caps a terminal's output by size too, for very long lines", () => {
+  expect(outputOverflow("x".repeat(100), 0, 5_000, 40)).toBe(60);
+  // Dropping by size also drops the lines in that part.
+  expect(outputOverflow(`${lines(3)}${"x".repeat(100)}`, 3, 2, 100)).toBe(15);
+});
+
+it("replays a long history in pieces, with nothing lost", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "mobile-terminal-"));
+  const terminals = createMobileTerminals();
+  try {
+    const opened = terminals.open(cwd, {});
+    const count = 200_000;
+    await terminals.write({
+      terminalId: opened.terminalId,
+      data: `python3 -c "print('y'*${count * 6})"\r`,
+    });
+    let seen = opened.output;
+    let cursor = opened.cursor;
+    let sawMore = false;
+    const deadline = Date.now() + 20_000;
+    while (seen.length < count * 6 && Date.now() < deadline) {
+      const read = await terminals.read({
+        terminalId: opened.terminalId,
+        cursor,
+        timeoutMs: 500,
+      });
+      expect(read.output.length).toBeLessThanOrEqual(MAX_READ_CHARS);
+      sawMore ||= read.more;
+      seen += read.output;
+      cursor = read.cursor;
+    }
+    expect(seen.length).toBeGreaterThan(count * 6);
+    // The cursors join up exactly: the whole line of y's arrived.
+    expect(seen).toContain("y".repeat(count * 6));
+    const again = terminals.open(cwd, {});
+    expect(again.output.length).toBe(MAX_READ_CHARS);
+    expect(again.more).toBe(true);
+  } finally {
+    await terminals.close({ terminalId: terminals.open(cwd, {}).terminalId });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}, 30_000);

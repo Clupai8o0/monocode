@@ -13,12 +13,17 @@ type TerminalRead = {
   output: string;
   cursor: number;
   dropped: boolean;
+  /** A long replay is still arriving; absent from an older host. */
+  more?: boolean;
   alive: boolean;
   exitCode: number | null;
 };
 
 type Shown = {
   key: string;
+  terminalId: string | null;
+  /** History is still arriving. */
+  replaying: boolean;
   text: TerminalText;
   /** A shell was opened, so not being alive means it has stopped. */
   started: boolean;
@@ -29,6 +34,8 @@ type Shown = {
 
 const blank = (key: string): Shown => ({
   key,
+  terminalId: null,
+  replaying: true,
   text: emptyTerminalText(),
   started: false,
   alive: false,
@@ -84,6 +91,8 @@ export function useTerminal(
               : current.text,
           read.dropped && !fresh ? `\n…\n${read.output}` : read.output,
         ),
+        terminalId: read.terminalId,
+        replaying: !!read.more,
         started: true,
         alive: read.alive,
         exitCode: read.exitCode,
@@ -105,7 +114,7 @@ export function useTerminal(
             cursor = opened.cursor;
             reopen = false;
             apply(opened, true);
-            if (!opened.alive) return;
+            if (!opened.alive && !opened.more) return;
           }
           const read = await command<TerminalRead>("terminal.read", {
             terminalId: terminal.current,
@@ -115,7 +124,7 @@ export function useTerminal(
           if (stopped) return;
           cursor = read.cursor;
           apply(read, false);
-          if (!read.alive) return;
+          if (!read.alive && !read.more) return;
         } catch (failure) {
           if (stopped) return;
           const message =
@@ -163,6 +172,17 @@ export function useTerminal(
     await command("terminal.close", { terminalId }).catch(() => {});
   }, [command]);
 
-  const { text, started, alive, exitCode, error } = shown;
-  return { text, started, alive, exitCode, error, send, restart, end };
+  const { terminalId, replaying, text, started, alive, exitCode, error } = shown;
+  return {
+    terminalId,
+    replaying,
+    text,
+    started,
+    alive,
+    exitCode,
+    error,
+    send,
+    restart,
+    end,
+  };
 }

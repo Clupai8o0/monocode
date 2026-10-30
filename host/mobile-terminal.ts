@@ -17,7 +17,10 @@ import { StringDecoder } from "node:string_decoder";
  */
 
 /** Output kept per terminal; older output is dropped from the front. */
-const MAX_OUTPUT_CHARS = 256 * 1024;
+export const MAX_OUTPUT_LINES = 5_000;
+export const MAX_OUTPUT_CHARS = 8 * 1024 * 1024;
+/** Sent in one reply, so a long replay can't stall the phone or the link. */
+export const MAX_READ_CHARS = 512 * 1024;
 /** The longest a read waits for output before answering with none. */
 const READ_MAX_MS = 15_000;
 /** Input accepted in one write. */
@@ -36,6 +39,8 @@ type Terminal = {
   output: string;
   /** Characters dropped from the front of `output` so far. */
   start: number;
+  /** Newlines in `output`, so trimming needn't count them on every chunk. */
+  lines: number;
   alive: boolean;
   exitCode: number | null;
   used: number;
@@ -49,9 +54,36 @@ export type TerminalRead = {
   cursor: number;
   /** Output between the asked cursor and this reply was dropped. */
   dropped: boolean;
+  /** More output is ready now: a long replay, arriving in pieces. */
+  more: boolean;
   alive: boolean;
   exitCode: number | null;
 };
+
+const countLines = (text: string) => {
+  let count = 0;
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1))
+    count++;
+  return count;
+};
+
+/** How many characters to drop from the front to stay within both limits. */
+export function outputOverflow(
+  output: string,
+  lines: number,
+  maxLines = MAX_OUTPUT_LINES,
+  maxChars = MAX_OUTPUT_CHARS,
+): number {
+  let drop = Math.max(0, output.length - maxChars);
+  let left = lines - (drop ? countLines(output.slice(0, drop)) : 0);
+  while (left > maxLines) {
+    const next = output.indexOf("\n", drop);
+    if (next === -1) break;
+    drop = next + 1;
+    left--;
+  }
+  return drop;
+}
 
 /** Gives a command a terminal of its own, for systems without `script`. */
 const PYTHON_PTY =
@@ -216,11 +248,16 @@ export function createMobileTerminals(
     const asked =
       typeof cursor === "number" && Number.isFinite(cursor) ? cursor : 0;
     const from = Math.min(Math.max(asked, terminal.start), end);
+    let to = Math.min(end, from + MAX_READ_CHARS);
+    // Never split a surrogate pair across two replies.
+    const last = terminal.output.charCodeAt(to - terminal.start - 1);
+    if (to < end && last >= 0xd800 && last <= 0xdbff) to--;
     return {
       terminalId: terminal.id,
-      output: terminal.output.slice(from - terminal.start),
-      cursor: end,
+      output: terminal.output.slice(from - terminal.start, to - terminal.start),
+      cursor: to,
       dropped: asked < terminal.start,
+      more: to < end,
       alive: terminal.alive,
       exitCode: terminal.exitCode,
     };
@@ -265,6 +302,7 @@ export function createMobileTerminals(
       child,
       output: "",
       start: 0,
+      lines: 0,
       alive: true,
       exitCode: null,
       used: Date.now(),
@@ -272,9 +310,12 @@ export function createMobileTerminals(
     };
     const decoder = new StringDecoder("utf8");
     const append = (chunk: Buffer) => {
-      terminal.output += decoder.write(chunk);
-      const over = terminal.output.length - MAX_OUTPUT_CHARS;
+      const text = decoder.write(chunk);
+      terminal.output += text;
+      terminal.lines += countLines(text);
+      const over = outputOverflow(terminal.output, terminal.lines);
       if (over > 0) {
+        terminal.lines -= countLines(terminal.output.slice(0, over));
         terminal.output = terminal.output.slice(over);
         terminal.start += over;
       }

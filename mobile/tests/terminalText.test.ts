@@ -38,10 +38,10 @@ describe("terminal text", () => {
     expect(feed("a\tb")).toEqual(["a       b"]);
   });
 
-  it("keeps the last two thousand lines, runs in step", () => {
-    const text = state("x\n".repeat(2_500));
-    expect(text.lines).toHaveLength(2_000);
-    expect(text.runs).toHaveLength(2_000);
+  it("keeps the last five thousand lines, runs in step", () => {
+    const text = state("x\n".repeat(5_500));
+    expect(text.lines).toHaveLength(5_000);
+    expect(text.runs).toHaveLength(5_000);
   });
 
   it("strips cursor positioning, the alternate screen and charset picks", () => {
