@@ -4052,17 +4052,9 @@ function SubagentPanel({
   const state = toolCallState(block);
   const active = live && state === "pending";
   const steps = block.agentRun?.steps ?? [];
-  // The run's trail as transcript blocks, so the panel groups it the way the
-  // main transcript groups the agent's own work: what it said, then the calls
-  // that line introduced, folding behind it once it moves on.
-  const stepBlocks = useMemo(
-    () => steps.map((step) => agentStepBlock(step, block.id)),
-    [steps, block.id],
-  );
   const status = subagentStatusLine(block, steps);
   const output = useToolDetail(block, open);
   const report = subagentReport(block, output.detail);
-  const failed = state === "rejected";
 
   // The name takes the room it needs and gives the rest back: a provider that
   // names a run with its whole brief must not push the row off the pane.
@@ -4146,31 +4138,13 @@ function SubagentPanel({
            * second window around them nests one 17.5rem scroller inside
            * another, and the inner one can never reach its own last row.
            */
-          <div className="flex min-w-0 flex-col pb-1">
-            <ActivityPhases
-              blocks={stepBlocks}
-              cwd={cwd}
-              done={!active}
-              padded={false}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenDiff}
-            />
-            {report ? (
-              <div className="zen-phase-step py-1">
-                {failed ? (
-                  <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-red-400/80">
-                    {report}
-                  </pre>
-                ) : (
-                  <AgentMarkdown
-                    text={report}
-                    cwd={cwd}
-                    onOpenFile={onOpenFile}
-                  />
-                )}
-              </div>
-            ) : null}
-          </div>
+          <SubagentTrail
+            block={block}
+            cwd={cwd}
+            active={active}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+          />
         ) : null}
       </div>
     </div>
@@ -4178,11 +4152,68 @@ function SubagentPanel({
 }
 
 /**
+ * What a delegated run did and handed back, once its row is open.
+ * Fork: split out of SubagentPanel and exported for the parallel agents board
+ * (src/fork/backgroundAgents).
+ */
+export const SubagentTrail = memo(function SubagentTrail({
+  block,
+  cwd,
+  active,
+  onOpenFile,
+  onOpenDiff,
+}: {
+  block: Block;
+  cwd?: string;
+  active: boolean;
+  onOpenFile?: (path: string) => void;
+  onOpenDiff?: (path: string) => void;
+}) {
+  const steps = block.agentRun?.steps ?? EMPTY_AGENT_STEPS;
+  // The run's trail as transcript blocks, so the panel groups it the way the
+  // main transcript groups the agent's own work: what it said, then the calls
+  // that line introduced, folding behind it once it moves on.
+  const stepBlocks = useMemo(
+    () => steps.map((step) => agentStepBlock(step, block.id)),
+    [steps, block.id],
+  );
+  const output = useToolDetail(block, true);
+  const report = subagentReport(block, output.detail);
+  const failed = toolCallState(block) === "rejected";
+  return (
+    <div className="flex min-w-0 flex-col pb-1">
+      <ActivityPhases
+        blocks={stepBlocks}
+        cwd={cwd}
+        done={!active}
+        padded={false}
+        onOpenFile={onOpenFile}
+        onOpenDiff={onOpenDiff}
+      />
+      {report ? (
+        <div className="zen-phase-step py-1">
+          {failed ? (
+            <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-red-400/80">
+              {report}
+            </pre>
+          ) : (
+            <AgentMarkdown text={report} cwd={cwd} onOpenFile={onOpenFile} />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+const EMPTY_AGENT_STEPS: AgentStep[] = [];
+
+/**
  * The pixel mascot standing in for a subagent, hopping while it works. The
  * sprite is hashed off the agent's name, so the same reviewer keeps the same
  * face across a session and two agents in a row are told apart at a glance.
  */
-function SubagentMascot({
+// Fork: exported for the parallel agents board (src/fork/backgroundAgents).
+export function SubagentMascot({
   name,
   state,
   active = false,

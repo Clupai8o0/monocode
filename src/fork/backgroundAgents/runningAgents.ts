@@ -8,6 +8,7 @@ import {
   isSubagentBlock,
   toolCallState,
 } from "../../features/sessions/model/transcriptActivity";
+import { currentTurnBlocks, recordBoardTimings } from "./agentBoard";
 
 /**
  * Fork feature: what a session has running beside its own reply. Subagents it
@@ -29,30 +30,16 @@ export function runningWork(
   if (!session.busy) {
     return NONE;
   }
-  const queued = new Set(
-    session.queuedMessages?.map((message) => message.blockId) ?? [],
-  );
   const agents: Block[] = [];
   const commands: Block[] = [];
-  for (let i = session.blocks.length - 1; i >= 0; i--) {
-    const block = session.blocks[i];
-    // A message steered or queued into the running turn does not start a new
-    // one: the work spawned before it is still running.
-    if (
-      block.role === "user" &&
-      !block.draft &&
-      !block.sentAt &&
-      !queued.has(block.id)
-    ) {
-      break;
-    }
+  for (const block of currentTurnBlocks(session)) {
     if (toolCallState(block) !== "pending") {
       continue;
     }
     if (isSubagentBlock(block)) {
-      agents.unshift(block);
+      agents.push(block);
     } else if (block.tool?.background) {
-      commands.unshift(block);
+      commands.push(block);
     }
   }
   return agents.length || commands.length ? { agents, commands } : NONE;
@@ -103,6 +90,7 @@ export function publishRunningWork(
   >[],
 ): void {
   publishAgentActivity(sessions);
+  recordBoardTimings(sessions);
   const next = new Map<string, RunningWork>();
   for (const session of sessions) {
     const work = runningWork(session);

@@ -668,6 +668,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
     <>
     {/* Fork: subagents and background commands still running */}
     <BackgroundAgentsBar
+      key={session.id}
       session={session}
       cwd={workCwd}
       onOpenFile={onOpenFile}
