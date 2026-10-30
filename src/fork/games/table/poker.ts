@@ -24,8 +24,8 @@ export type PokerSeat = {
   /** No chips when the hand began, so not dealt in. */
   out: boolean;
   acted: boolean;
-  /** Spent once it acts, and given back only by a full raise. */
-  mayRaise: boolean;
+  /** The bet it last acted at this street; a seat may re-raise once it grows by a full raise. */
+  actedAt: number | null;
 };
 
 export type PotResult = {
@@ -62,8 +62,6 @@ export type PokerState = {
   currentBet: number;
   /** The smallest legal raise on top of `currentBet`. */
   minRaise: number;
-  /** The bet when betting last reopened: short all-ins add up from here. */
-  reopenedAt: number;
   result: PokerResult | null;
 };
 
@@ -123,7 +121,7 @@ export function startHand(
     allIn: false,
     out: stack <= 0,
     acted: false,
-    mayRaise: true,
+    actedAt: null,
   }));
   const live = seats.filter((seat) => !seat.out).length;
   if (live < 2) {
@@ -159,7 +157,6 @@ export function startHand(
     toAct: -1,
     currentBet: bigBlind,
     minRaise: bigBlind,
-    reopenedAt: bigBlind,
     result: null,
   };
   state.toAct = firstToAct(state, bbSeat);
@@ -208,7 +205,10 @@ export function legalActions(state: PokerState, index = state.toAct): Legal {
   return {
     canCheck: owed === 0,
     callAmount: Math.min(owed, seat.stack),
-    canRaise: seat.mayRaise && someoneToBet && maxRaiseTo > state.currentBet,
+    canRaise:
+      (seat.actedAt === null || state.currentBet - seat.actedAt >= state.minRaise) &&
+      someoneToBet &&
+      maxRaiseTo > state.currentBet,
     minRaiseTo,
     maxRaiseTo,
   };
@@ -285,16 +285,10 @@ export function applyAction(
     const raisedBy = to - state.currentBet;
     post(seat, to - seat.bet);
     next.currentBet = to;
-    // A full raise reopens the betting for everyone still in. So do short
-    // all-ins once together they add up to one, without changing the raise size.
-    if (to - state.reopenedAt >= state.minRaise) {
-      next.reopenedAt = to;
-      if (raisedBy >= state.minRaise) {
-        next.minRaise = raisedBy;
-      }
-      for (const other of seats) {
-        other.mayRaise = true;
-      }
+    // Only a full raise sets the next raise's size. Short all-ins count too, in
+    // that a seat may re-raise once the bet has grown a full raise since it acted.
+    if (raisedBy >= state.minRaise) {
+      next.minRaise = raisedBy;
     }
     // Short or not, everyone else has to answer it.
     for (const other of seats) {
@@ -302,7 +296,7 @@ export function applyAction(
     }
   }
   seat.acted = true;
-  seat.mayRaise = false;
+  seat.actedAt = next.currentBet;
 
   const inHand = seats.filter((other) => !other.out && !other.folded);
   if (inHand.length === 1) {
@@ -331,7 +325,7 @@ export function advance(state: PokerState): PokerState {
   for (const seat of seats) {
     seat.bet = 0;
     seat.acted = false;
-    seat.mayRaise = true;
+    seat.actedAt = null;
   }
   const next: PokerState = {
     ...state,
@@ -346,7 +340,6 @@ export function advance(state: PokerState): PokerState {
           : "river",
     currentBet: 0,
     minRaise: state.bigBlind,
-    reopenedAt: 0,
     toAct: -1,
   };
   // Heads-up too, the first to act after the flop is left of the button.

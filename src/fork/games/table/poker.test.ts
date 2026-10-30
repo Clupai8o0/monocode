@@ -31,7 +31,7 @@ function seat(total: number, folded = false): PokerSeat {
     allIn: false,
     out: false,
     acted: true,
-    mayRaise: false,
+    actedAt: null,
   };
 }
 
@@ -153,6 +153,41 @@ describe("raises", () => {
     expect(state.toAct).toBe(4);
     expect(legalActions(state).canRaise).toBe(true);
     expect(state.minRaise).toBe(90);
+  });
+
+  it("counts short all-ins from when each seat last acted", () => {
+    // Seat order: 1 small blind, 2 big blind, 3 raises, 4 shoves, 0 calls, 5 shoves.
+    let state = hand([1000, 1000, 1000, 1000, 150, 200], 5);
+    expect(state.button).toBe(0);
+    expect(state.toAct).toBe(3);
+    state = applyAction(state, { type: "raise", to: 100 }); // Seat 3, by 90.
+    state = applyAction(state, { type: "raise", to: 150 }); // Seat 4 all in, +50.
+    state = applyAction(state, { type: "raise", to: 200 }); // Seat 5 all in, +50.
+    state = applyAction(state, { type: "call" }); // Seat 0 calls 200.
+    state = applyAction(state, { type: "fold" }); // Seat 1.
+    state = applyAction(state, { type: "fold" }); // Seat 2.
+    // Seat 3 acted at 100, and the bet's grown by 100: it may raise.
+    expect(state.toAct).toBe(3);
+    expect(legalActions(state).canRaise).toBe(true);
+  });
+
+  it("doesn't reopen for a seat that called the first short all-in", () => {
+    let state = hand([200, 1000, 1000, 1000, 150, 1000], 5);
+    expect(state.toAct).toBe(3);
+    state = applyAction(state, { type: "raise", to: 100 }); // Seat 3, by 90.
+    state = applyAction(state, { type: "raise", to: 150 }); // Seat 4 all in, +50.
+    state = applyAction(state, { type: "call" }); // Seat 5 calls at 150.
+    state = applyAction(state, { type: "raise", to: 200 }); // Seat 0 all in, +50.
+    state = applyAction(state, { type: "fold" }); // Seat 1.
+    state = applyAction(state, { type: "fold" }); // Seat 2.
+    // Seat 3 acted at 100: 100 more is a full raise, so it may raise.
+    expect(state.toAct).toBe(3);
+    expect(legalActions(state).canRaise).toBe(true);
+    state = applyAction(state, { type: "call" });
+    // Seat 5 acted at 150: only 50 more, so it may only call or fold.
+    expect(state.toAct).toBe(5);
+    expect(legalActions(state).canRaise).toBe(false);
+    expect(legalActions(state).callAmount).toBe(50);
   });
 
   it("keeps the betting shut while short all-ins fall short of a full raise", () => {

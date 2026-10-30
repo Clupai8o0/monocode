@@ -191,7 +191,7 @@ export function ChessTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (!active) {
       return;
     }
-    const moved = position.current.history.length >= 2;
+    const moved = position.current.history.length >= (you === WHITE ? 1 : 2);
     if (!ending && moved) {
       tokenStore.addRival(playing, { losses: 1 });
     }

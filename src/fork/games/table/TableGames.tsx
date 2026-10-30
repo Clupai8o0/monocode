@@ -62,22 +62,25 @@ export function TableGames({
     onExit,
     onInput,
   });
-  const shown = (id: string) => (gameId === id ? undefined : { display: "none" as const });
+  const shown = (id: string) => ({
+    style: gameId === id ? undefined : { display: "none" as const },
+    "data-table-active": gameId === id ? "" : undefined,
+  });
 
   return (
     <>
       {visited.has("poker") ? (
-        <div className="absolute inset-0" style={shown("poker")}>
+        <div className="absolute inset-0" {...shown("poker")}>
           <PokerTable {...tableProps("poker")} />
         </div>
       ) : null}
       {visited.has("blackjack") ? (
-        <div className="absolute inset-0" style={shown("blackjack")}>
+        <div className="absolute inset-0" {...shown("blackjack")}>
           <BlackjackTable {...tableProps("blackjack")} />
         </div>
       ) : null}
       {visited.has("chess") ? (
-        <div className="absolute inset-0" style={shown("chess")}>
+        <div className="absolute inset-0" {...shown("chess")}>
           <ChessTable {...tableProps("chess")} />
         </div>
       ) : null}

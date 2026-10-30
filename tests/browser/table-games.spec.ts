@@ -217,6 +217,11 @@ test("keys belong to the board only while it has focus; notices still show", asy
   await page.locator('[data-table-board="Poker table"]').click({ position: { x: 5, y: 5 } });
   await expect(page.getByRole("status").filter({ hasText: "An agent needs you" })).toHaveCount(0);
 
+  // New game hands the keys back to the table, not the composer.
+  await composer.click();
+  await page.getByRole("button", { name: "New game" }).click();
+  await expect(page.locator('[data-table-board="Poker table"]')).toBeFocused();
+
   // Esc hides the panel.
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Games" })).toBeHidden();

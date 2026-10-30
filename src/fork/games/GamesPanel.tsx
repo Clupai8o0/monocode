@@ -120,7 +120,11 @@ export function GamesPanel() {
   const resume = () => setNotice(null);
 
   const focusBoard = () => {
-    root.current?.querySelector<HTMLElement>("[data-grid-board]")?.focus();
+    root.current
+      ?.querySelector<HTMLElement>(
+        atTable ? "[data-table-active] [data-table-board]" : "[data-grid-board]",
+      )
+      ?.focus();
   };
 
   const pickGame = (id: string) => {
