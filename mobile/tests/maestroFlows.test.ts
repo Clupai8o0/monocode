@@ -32,7 +32,10 @@ describe("Maestro flows", () => {
       ...text.matchAll(
         /(?:tapOn|assertVisible|visible|notVisible):\s*"([^"]+)"/g,
       ),
-    ].map((match) => match[1].replace(/ \.\*$/, ""));
+    ]
+      .map((match) => match[1].replace(/ \.\*$/, ""))
+      // Values from the runner, like a branch name, aren't the app's text.
+      .filter((literal) => !literal.includes("${"));
     for (const literal of literals) {
       expect(source, `${name}: "${literal}"`).toContain(literal);
     }
