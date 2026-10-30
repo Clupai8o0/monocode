@@ -9,6 +9,7 @@ import { PROJECT_MASCOTS } from "../../features/projects/model/projectMascots";
 import { ensureStarterMono, seedStarterMonos, starterMonoId } from "./starterMono";
 import { KICKOFF_MONO } from "./kickoffMono";
 import { MONO_MAKER } from "./makerMono";
+import { SWEEP_MONO } from "./sweepMono";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke, convertFileSrc: (path: string) => path }));
@@ -72,14 +73,17 @@ function chatOf(monoId: string, mode: Session["runtimeMode"] = "full-access"): S
 
 describe("starter Monos", () => {
   it("are made once each, with their look and instructions, and no projects", async () => {
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER]);
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER]);
-    expect(listMonos()).toHaveLength(2);
+    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO]);
+    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO]);
+    expect(listMonos()).toHaveLength(3);
     const kickoff = findMono(starterMonoId(KICKOFF_MONO)!)!;
     expect(kickoff).toMatchObject({ name: "Kickoff", mascot: "rocket", projects: [] });
     expect(kickoff.instructions).toMatch(/You are Kickoff/);
     expect(findMono(starterMonoId(MONO_MAKER)!)).toMatchObject({ name: "Maker", mascot: "anvil" });
-    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil"]));
+    const sweep = findMono(starterMonoId(SWEEP_MONO)!)!;
+    expect(sweep).toMatchObject({ name: "Sweep", mascot: "broom", projects: [] });
+    expect(sweep.instructions).toMatch(/You are Sweep/);
+    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom"]));
   });
 
   it("stays deleted once the user deletes it", () => {

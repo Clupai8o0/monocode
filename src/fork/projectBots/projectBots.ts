@@ -322,6 +322,33 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 2],
     ]),
   },
+  // Sweep (src/fork/starterMonos): a face on a broom head.
+  broom: {
+    rest: [
+      "...##...",
+      "...##...",
+      ".######.",
+      ".#.##.#.",
+      ".######.",
+      "########",
+      "#.#..#.#",
+      "#.#..#.#",
+    ],
+    talk: [
+      "...##...",
+      "...##...",
+      ".######.",
+      ".#.##.#.",
+      ".##..##.",
+      "########",
+      "#.#..#.#",
+      "#.#..#.#",
+    ],
+    eyes: same([
+      [2, 3],
+      [5, 3],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(
