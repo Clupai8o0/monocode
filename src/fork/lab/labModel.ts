@@ -511,11 +511,6 @@ export function hostTitle(name: string): string {
   return name ? name[0].toUpperCase() + name.slice(1) : name;
 }
 
-/** Sessions running in what a host listed. */
-export function runningCount(sessions: readonly { state: string }[]): number {
-  return sessions.filter((session) => session.state === "running").length;
-}
-
 /** "Vivobook · 3 sessions running"; just the name until the host has answered. */
 export function hostRunningLine(name: string, running: number | undefined): string {
   const title = hostTitle(name);

@@ -5,13 +5,12 @@ import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "./agentTimeZone";
 import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import { LabHealthSection } from "./LabHealthSection";
-import { useRemoteSessions } from "../externalSessions/externalSessionsStore";
+import { liveSessions, useRemoteSessions } from "../externalSessions/externalSessionsStore";
 import {
   hostRunningLine,
   hostTitle,
   labChip,
   remoteDesktopView,
-  runningCount,
   uresourcedView,
   type LabChip,
 } from "./labModel";
@@ -72,7 +71,7 @@ function Lab() {
     return null;
   }
   const running = new Map(
-    [...sessions].map(([machineId, rows]) => [machineId, runningCount(rows)]),
+    [...sessions].map(([machineId, rows]) => [machineId, liveSessions(rows).length]),
   );
   const chip = chipFor(state, running);
   const attention = chip.attention.length > 0;

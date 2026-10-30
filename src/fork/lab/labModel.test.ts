@@ -18,7 +18,6 @@ import {
   parseLocalRemoteControl,
   relayLine,
   remoteDesktopView,
-  runningCount,
   timeAgo,
   uresourcedView,
   type LocalRemoteControl,
@@ -355,8 +354,7 @@ describe("relay", () => {
 });
 
 describe("hostRunningLine", () => {
-  it("counts running sessions only and reads as plain words", () => {
-    expect(runningCount([{ state: "running" }, { state: "idle" }, { state: "handed-over" }])).toBe(1);
+  it("reads as plain words", () => {
     expect(hostRunningLine("vivobook", 3)).toBe("Vivobook · 3 sessions running");
     expect(hostRunningLine("vivobook", 1)).toBe("Vivobook · 1 session running");
     expect(hostRunningLine("vivobook", undefined)).toBe("Vivobook");

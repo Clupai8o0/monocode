@@ -33,8 +33,6 @@ export type ExternalSessionsState = {
  * tests start no timers.
  */
 export const FORK_EXTERNAL_SESSIONS = import.meta.env.MODE !== "test";
-/** Stands for "every project" where a target needs a project id. */
-const ALL_PROJECTS = "*all-projects";
 
 const LOCAL_POLL_MS = 10_000;
 const REMOTE_POLL_MS = 20_000;
@@ -481,7 +479,7 @@ export function useRemoteSessions(
   for (const machineId of machineIds) {
     const machine = machines.get(`remote:${machineId}`);
     if (machine?.loaded && machine.supported && !machine.error) {
-      out.set(machineId, machine.rows);
+      out.set(machineId, [...machine.rows, ...machine.unfiled]);
     }
   }
   return out;
