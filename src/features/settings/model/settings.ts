@@ -226,6 +226,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "claude tools connections oauth authenticate login add remove",
   },
   {
+    id: "mcp-access",
+    section: "mcp",
+    label: "Let outside agents use MonoCode",
+    keywords: "codex dsh grok server token client scope log activity access",
+  },
+  {
     id: "monos-enabled",
     section: "monos",
     label: "Show monos",

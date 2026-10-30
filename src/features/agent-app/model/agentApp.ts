@@ -1141,6 +1141,10 @@ export async function handleAgentApp(
         host.isHabitRun?.(id)
       )
         throw new Error("Only regular project sessions can be managed here");
+      // Fork: an outside agent can't touch a session above its level.
+      if (source.id.startsWith("mcp-")) {
+        requireAgentRuntimeMode(source.runtimeMode, target.runtimeMode);
+      }
       if (action === "sessions.stop") {
         await host.stop(id);
         return { sessionId: id, stopped: true };

@@ -41,6 +41,7 @@ mod checkpoint;
 mod codex_mono_store;
 mod control;
 pub mod control_cli;
+pub mod fork_mcp; // Fork: an MCP server for outside agents.
 mod cursor_store;
 mod devin_config;
 mod devin_usage;
@@ -721,6 +722,10 @@ pub fn run() {
             fork_shows::fork_shows_cache_prune, // Fork
             fork_shows::fork_shows_cache_root,  // Fork
             fork_cost::fork_cost_report, // Fork
+            fork_mcp::fork_mcp_clients,       // Fork
+            fork_mcp::fork_mcp_create_client, // Fork
+            fork_mcp::fork_mcp_revoke_client, // Fork
+            fork_mcp::fork_mcp_log,           // Fork
             fork_worktree_merge::fork_worktree_merge_status, // Fork
             fork_worktree_merge::fork_worktree_merge_back,   // Fork
             fork_worktree_merge::fork_worktree_delete_merged_branch, // Fork

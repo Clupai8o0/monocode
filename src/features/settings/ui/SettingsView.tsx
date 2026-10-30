@@ -437,6 +437,7 @@ import { ProjectNotificationSettings } from "../../notifications/ui/ProjectNotif
 import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
 import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
 import { FeatureCoachPage } from "../../../fork/featureCoach/FeatureCoachPage"; // Fork
+import { McpAccessSection } from "../../../fork/mcpAccess/McpAccessSection"; // Fork
 import {
   removeWorktree,
   type RemoveWorktree,
@@ -672,7 +673,10 @@ export function SettingsView({
               {section === "keybindings" ? <KeybindingsPage /> : null}
               {section === "monos" ? <MonosPage /> : null}
               {section === "mcp" ? (
-                <McpSettings cwd={cwd} recents={recents} />
+                <>
+                  <McpSettings cwd={cwd} recents={recents} />
+                  <McpAccessSection recents={recents} />
+                </>
               ) : null}
               {section === "providers" ? (
                 <ProvidersPage cwd={cwd} recents={recents} />

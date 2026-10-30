@@ -1,6 +1,8 @@
 // Fork: new sessions get their own worktree when it helps.
 // Fork: the feature coach in Settings > Tips.
 // Fork: carry a session over to the other provider.
+// Fork: outside agents reach the app's actions through MCP.
+import { resolveMcpCall, type McpCaller } from "../fork/mcpAccess/mcpAccess";
 import {
   continueTarget,
   registerContinueHost,
@@ -11625,6 +11627,7 @@ function Workspace({
       requestId: string;
       action: string;
       input: Record<string, unknown>;
+      mcpCaller?: McpCaller; // Fork
     }>("monocode-control-request", ({ payload }) => {
       const handle = async () => {
         if (payload.namespace === "control") {
@@ -11635,11 +11638,23 @@ function Workspace({
             payload.input,
           );
         }
-        if (payload.namespace !== "app")
+        // Fork: an outside agent. No session stands behind it, so one is made up
+        // for this call, in the project it asked for and at its level.
+        const mcpCall =
+          payload.namespace === "mcp" && payload.mcpCaller
+            ? resolveMcpCall(payload.mcpCaller, payload.action, payload.input)
+            : null;
+        if (payload.namespace !== "app" && !mcpCall)
           throw new Error("Unknown CLI namespace");
-        const source = sessionsRef.current.find(
-          (session) => session.id === payload.sessionId,
-        );
+        if (mcpCall) payload.input = mcpCall.input;
+        const source = mcpCall
+          ? {
+              ...newDefaultSession(mcpCall.cwd, mcpCall.runtimeMode),
+              id: `mcp-${payload.sessionId}`,
+            }
+          : sessionsRef.current.find(
+              (session) => session.id === payload.sessionId,
+            );
         if (
           !source ||
           source.inboxAsk ||

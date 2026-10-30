@@ -14,5 +14,9 @@ fn main() {
             std::env::args().skip(2).collect(),
         ));
     }
+    // Fork: the MCP server for outside agents, over stdio.
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        std::process::exit(monocode_lib::fork_mcp::run_stdio());
+    }
     monocode_lib::run()
 }

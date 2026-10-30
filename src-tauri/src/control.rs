@@ -156,6 +156,9 @@ struct Event {
     request_id: String,
     action: String,
     input: Value,
+    // Fork: set for an outside agent, whose scope the app enforces too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_caller: Option<crate::fork_mcp::Caller>,
 }
 
 fn request_grant(host: &Inner, namespace: &str, token: &str) -> Result<Grant, String> {
@@ -186,6 +189,10 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .to_string();
     let inner = Arc::new(Mutex::new(Inner::default()));
+    // Fork: lets `monocode mcp` find this launch's port.
+    if let Ok(dir) = app.path().app_data_dir() {
+        crate::fork_mcp::publish_endpoint(&dir, &endpoint);
+    }
     app.manage(ControlHost {
         endpoint,
         inner: inner.clone(),
@@ -234,11 +241,43 @@ fn serve(mut stream: TcpStream, app: &AppHandle, inner: &Arc<Mutex<Inner>>) {
         {
             return Err("Invalid input or request ID".into());
         }
+        // Fork: an outside agent, with its own token and scope. No session stands
+        // behind it, so it runs in the main window. Refusals are logged too.
+        let mcp = if request.namespace == "mcp" {
+            let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let client = crate::fork_mcp::identify(&dir, &request.token)?;
+            if let Err(error) = crate::fork_mcp::check_action(&client, &request.action) {
+                crate::fork_mcp::log_call(
+                    &dir,
+                    &client,
+                    &request.action,
+                    &request.input,
+                    Err(&error),
+                );
+                return Err(error);
+            }
+            if crate::fork_mcp::is_whoami(&request.action) {
+                return Ok(json!({"ok": true, "result": {"level": client.level}}));
+            }
+            Some((dir, client))
+        } else {
+            None
+        };
+        let logged_action = request.action.clone();
+        let logged_input = request.input.clone();
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::channel();
         let grant = {
             let mut host = inner.lock().map_err(|_| "Control service unavailable")?;
-            let grant = request_grant(&host, &request.namespace, &request.token)?;
+            let grant = match &mcp {
+                Some((_, client)) => Grant {
+                    window: "main".to_string(),
+                    session: client.id.clone(),
+                    cwd: String::new(),
+                    token: String::new(),
+                },
+                None => request_grant(&host, &request.namespace, &request.token)?,
+            };
             if host.pending.len() >= 24 {
                 return Err("Too many pending control requests".into());
             }
@@ -258,6 +297,7 @@ fn serve(mut stream: TcpStream, app: &AppHandle, inner: &Arc<Mutex<Inner>>) {
             request_id: request.request_id,
             action: request.action,
             input: request.input,
+            mcp_caller: mcp.as_ref().map(|(_, client)| client.into()),
         };
         let delivered = app.emit_to(grant.window.as_str(), "monocode-control-request", event);
         let result = if delivered.is_err() {
@@ -268,6 +308,13 @@ fn serve(mut stream: TcpStream, app: &AppHandle, inner: &Arc<Mutex<Inner>>) {
         };
         if let Ok(mut host) = inner.lock() {
             host.pending.remove(&id);
+        }
+        if let Some((dir, client)) = &mcp {
+            let outcome: Result<&Value, &str> = match &result {
+                Ok(reply) => Ok(reply),
+                Err(error) => Err(error),
+            };
+            crate::fork_mcp::log_call(dir, client, &logged_action, &logged_input, outcome);
         }
         result
     })();
