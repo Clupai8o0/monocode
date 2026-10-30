@@ -219,7 +219,7 @@ function BroadcastBar({
         }}
         className="min-h-12 resize-none rounded-lg bg-content/5 px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-content/35 focus:bg-content/8"
       />
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 whitespace-nowrap">
         <Segmented label="Which sessions" options={SCOPES} value={choice} onChange={setChoice} />
         {choice === "one" ? (
           <select
@@ -235,10 +235,8 @@ function BroadcastBar({
             ))}
           </select>
         ) : null}
-        <span className="min-w-0 flex-1 truncate text-[11px] text-content/45" title={leftOut}>
-          {leftOut}
-        </span>
       </div>
+      {leftOut ? <p className="text-[11px] text-content/45">{leftOut}</p> : null}
       <ul aria-label="Sessions it will reach" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
         {plan.targets.map((target) => {
           const session = byId.get(target.id);

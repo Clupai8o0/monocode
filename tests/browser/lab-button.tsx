@@ -105,7 +105,7 @@ function answer(method: string, params: Record<string, unknown>): unknown {
   }
   if (method === "externalSessions.list") {
     const row = (id: string, state: string) => ({ id, projectId: "p", source: "claude", cwd: "/p", state, hasTranscript: true });
-    return { sessions: [row("a", "running"), row("b", "running"), row("c", "running"), row("d", "idle")] };
+    return { sessions: [row("a", "running"), row("b", "running"), row("c", "running"), row("d", "idle"), row("e", "handed-over")] };
   }
   if (method === "lab.remoteControl.set") {
     status.remoteControl.desired = { scope: params.scope as string, updatedAt: Date.now(), by: "Mac" };

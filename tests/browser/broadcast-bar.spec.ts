@@ -26,7 +26,7 @@ test("sends only on the click, says what happened, and keeps the text if any fai
   await bar.locator('[data-fork-broadcast-session="other"] input').uncheck();
   await expect(send).toHaveText("Send to 3 sessions");
 
-  const message = bar.getByLabel("Message");
+  const message = bar.getByLabel("Message", { exact: true });
   await message.fill("Run the tests");
   await message.press("Enter");
   await message.press("Control+Enter");

@@ -101,6 +101,11 @@ function FeedItem({
           >
             {row.preview}
           </span>
+          {tone === "problem" && !open ? (
+            <span className="line-clamp-2 break-words text-[11.5px] leading-[1.4] text-red-700 dark:text-red-300">
+              {row.statusText}
+            </span>
+          ) : null}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
           <span
