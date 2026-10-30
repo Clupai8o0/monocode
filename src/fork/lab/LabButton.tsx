@@ -5,6 +5,7 @@ import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "./agentTimeZone";
 import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import { LabHealthSection } from "./LabHealthSection";
+import { useLabHealthDot } from "./labHealthStore";
 import { liveSessions, useRemoteSessions } from "../externalSessions/externalSessionsStore";
 import {
   hostRunningLine,
@@ -67,6 +68,8 @@ function Lab() {
   // Escape in the zone search closes the search, not the popover.
   const pickerOpen = useZonePickerOpen();
   const sessions = useRemoteSessions(state.hosts.map((host) => host.machine.id));
+  // Polls every 30 s while the chip is on screen, every 5 s while it's open.
+  const health = useLabHealthDot(open);
   if (!state.hosts.length) {
     return null;
   }
@@ -75,6 +78,8 @@ function Lab() {
   );
   const chip = chipFor(state, running);
   const attention = chip.attention.length > 0;
+  const hover = health.reason ? `${chip.sentence} ${health.reason}` : chip.sentence;
+  const dot = health.tone === "red" ? "bg-red-500" : attention || health.tone ? "bg-amber-400" : "invisible";
   return (
     <>
       <button
@@ -86,8 +91,8 @@ function Lab() {
         }`}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={chip.sentence}
-        title={chip.sentence}
+        aria-label={hover}
+        title={hover}
         onClick={() => {
           if (!open) {
             void refreshLab();
@@ -97,7 +102,8 @@ function Lab() {
       >
         <HomeLab className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
         <span className="hidden tabular-nums min-[1100px]:inline">{chip.words}</span>
-        {attention ? <span className="size-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden /> : null}
+        {/* Always there, so the chip keeps its width when the dot comes on. */}
+        <span data-fork-lab-dot={health.tone ?? ""} className={`size-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
       </button>
       {open ? (
         <Popover
