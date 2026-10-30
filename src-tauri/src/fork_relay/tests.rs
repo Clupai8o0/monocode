@@ -497,7 +497,7 @@ fn a_copy_that_cannot_be_written_is_tried_alone_and_still_cleared() {
 #[test]
 fn a_failed_sync_retries_soon_enough_to_stay_counted_in() {
     assert_eq!(failed_sync_wait(Some(Duration::from_secs(3))), Duration::from_secs(5));
-    assert_eq!(failed_sync_wait(Some(Duration::from_secs(60))), Duration::from_secs(30));
+    assert_eq!(failed_sync_wait(Some(Duration::from_secs(130))), Duration::from_secs(30));
     assert_eq!(failed_sync_wait(None), Duration::from_secs(30));
 }
 

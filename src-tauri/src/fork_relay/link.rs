@@ -31,8 +31,8 @@ const SYNC_BACKOFF: Duration = Duration::from_secs(30);
 /// SILENT_LIMIT, or every session's row goes.
 const SYNC_RETRY: Duration = Duration::from_secs(5);
 /// Past this without a sync the host counts this Mac gone, so its proxies
-/// go too.
-const SILENT_LIMIT: Duration = Duration::from_secs(45);
+/// go too. Matches `PEER_TTL_MS` in host/relay.ts.
+const SILENT_LIMIT: Duration = Duration::from_secs(120);
 /// Claude's sender closes about 150 ms after writing; the relay does the same.
 const CLOSE_AFTER: Duration = Duration::from_millis(200);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
