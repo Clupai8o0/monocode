@@ -100,6 +100,8 @@ const STOP_POLLS = 150;
 const STOP_POLL_MS = 100;
 const SETTLE_MS = 5_000;
 const STALE_MS = 24 * 60 * 60_000;
+// Beside a move's folder, so its `done` leaves it: dropped with the stale ones.
+const RESTART_SUFFIX = ".restart";
 const SEARCH_DEPTH = 3;
 const SEARCH_MAX = 400;
 const ROOM_CAP = 90;
@@ -1088,15 +1090,28 @@ async function confirm(env: SessionMoveEnv, params: Record<string, unknown>): Pr
   return { state: "starting" };
 }
 
-/** Puts a lab session back after a failed move. Its transcript never left. */
+/**
+ * Puts a lab session back after a failed move. Its transcript never left.
+ * The window it starts is kept outside the move's folder, which `done` clears
+ * first: a retry whose last reply was lost finds that window, queued or running,
+ * instead of opening a second one on the same conversation.
+ */
 async function restart(env: SessionMoveEnv, params: Record<string, unknown>): Promise<StartResult> {
   const sessionId = sessionIdParam(params);
   const base = nameParam(params);
   const cwd = stringParam(params, "cwd");
-  if ((await liveRecord(env, sessionId)) !== null) return { name: base };
+  const record = typeof params.moveId === "string" ? `${moveFolder(env, params)}${RESTART_SUFFIX}` : null;
+  const saved = record ? await readFile(join(record, "window"), "utf8").catch(() => "") : "";
+  if ((await liveRecord(env, sessionId)) !== null) return { name: saved || base };
+  if (saved && ((await ownWindow(env, saved, cwd)) || (await inGateQueue(env, saved)))) return { name: saved };
   const found = await findTranscript(env, cwd, sessionId);
   const account = found?.account === "cx" ? "cx" : "main";
-  return { name: await startWindow(env, cwd, sessionId, base, account) };
+  const name = await startWindow(env, cwd, sessionId, base, account, async (next) => {
+    if (!record) return;
+    await mkdir(record, { recursive: true });
+    await writeFile(join(record, "window"), next);
+  });
+  return { name };
 }
 
 /** Removes what this move made here. Only that: never anything older. */
@@ -1122,10 +1137,19 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
       if (await ownWindow(env, made.window, made.worktree)) throw new Error("The copy's window there would not close");
     }
   }
+  // Asked first: an unanswered check keeps everything, record included, for a retry.
+  let moved = false;
+  if (made.repo && made.worktree && made.branch && made.head) {
+    try {
+      moved = await movedOn(env, made, made.head);
+    } catch (error) {
+      throw new Error(`Could not check ${made.worktree} for new commits (${(error as Error).message}), so nothing was removed`);
+    }
+  }
   for (const file of made.files) await rm(file, { force: true }).catch(() => undefined);
   for (const old of made.replaced ?? []) await copyFile(old.backup, old.path);
   // Someone committed there after the move: that work stays, worktree and branch both.
-  if (made.repo && made.worktree && made.branch && made.head && (await movedOn(env, made, made.head))) {
+  if (moved) {
     await rm(folder, { recursive: true, force: true });
     return { kept: `New commits were made in ${made.worktree} on that machine, so it was kept` };
   }
@@ -1162,14 +1186,21 @@ async function addedByThisMove(env: SessionMoveEnv, repo: string | undefined, pe
   return false;
 }
 
-/** The branch or the worktree's HEAD is no longer at the commit the move made it at. */
+/**
+ * The branch or the worktree's HEAD is no longer at the commit the move made it at.
+ * Throws when either can't be read: nothing is removed on a guess.
+ */
 async function movedOn(env: SessionMoveEnv, made: Made, head: string) {
   const tip = await git(env, made.repo!, ["rev-parse", "--verify", "--quiet", `refs/heads/${made.branch}`]);
-  if (tip.code === 0 && tip.stdout.trim() !== head) return true;
+  if (tip.code === 0) {
+    if (tip.stdout.trim() !== head) return true;
+  } else if (tip.code !== 1 || tip.timedOut || tip.stderr.trim()) {
+    // A missing branch fails quietly; anything else is a check that didn't run.
+    throw new Error(firstLine(tip.stderr, tip.timedOut ? "git timed out" : "git rev-parse failed"));
+  }
   // Without its own .git, git would answer for the repository above it.
   if (!(await stat(join(made.worktree!, ".git")).catch(() => null))) return false;
-  const at = await git(env, made.worktree!, ["rev-parse", "--verify", "--quiet", "HEAD"]);
-  return at.code === 0 && at.stdout.trim() !== head;
+  return (await gitOut(env, made.worktree!, ["rev-parse", "--verify", "--quiet", "HEAD"])).trim() !== head;
 }
 
 /** Removes a folder only if it is empty. */

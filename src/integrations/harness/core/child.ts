@@ -124,6 +124,11 @@ export function sessionIdForPid(pid: number): string | undefined {
   return undefined;
 }
 
+// Fork: the live child's pid, so a session move can wait for its group to end.
+export function childPid(sessionId: string): number | undefined {
+  return livePid.get(sessionId);
+}
+
 /** True when this exit belongs to the child we currently have spawned. */
 export function isCurrentChildExit(
   expectedPid: number | undefined,

@@ -1,5 +1,28 @@
 # Move a session: report for the Mac orchestrator
 
+## Fixes from the Mac review (31 Oct, round 9, the last)
+
+**All 3 fixed, each with a test. No Codex pass, as asked.**
+
+| # | Fix | Test |
+|---|---|---|
+| 1 | Undo asks for new commits before it removes anything. If the branch or the worktree's HEAD can't be read (timeout, git error), undo stops with "nothing was removed" and keeps the record, so it can be retried. Only a branch that is quietly missing counts as an answer | Host and Rust: a failed or timed-out check keeps the worktree, branch and record; once git answers, undo goes ahead |
+| 2 | `restart` takes the move id and saves the window name it starts, beside the move's folder (which `done` clears first). A retry finds that window, queued in the gate or running in that folder, and returns it instead of opening `name-2`. The record is dropped with stale folders after 24 h | Host: a lost reply, then retries while queued and while running, start nothing new; once it's gone from both, it starts again |
+| 3 | The Mac stop now reads the session's PID first, stops it, then waits (new `waitGone` op, up to 10 s) until the process and its whole process group are gone. If they don't go, the move rolls back with "It would not stop here" | Store: order is pid, stop, wait; a group that won't go fails. Rust: waits for a child left in the group after the leader exits; gives up on one that won't go |
+
+**Known limits:** locks on archived sessions past 500 records are left as they are (as asked).
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | Clean |
+| Vitest `src/fork/sessionMove` | 50 passed |
+| Vitest `src/integrations/harness/core` (`child.ts` gained `childPid`) | 197 passed |
+| Vitest host `session-move` | 36 passed, 2 skipped |
+| Rust module, scratch crate | 24 passed, 2 ignored. `rustfmt` clean |
+| `tests/browser/session-move.spec.ts` | Chromium 2 passed. WebKit isn't installed here |
+
+`cargo check --lib` and `cargo test --lib fork_` still need the Mac: `GitOut` gained a `code` field and the module gained `wait_gone`.
+
 ## Fixes from the Mac review and DeepSeek (31 Oct, round 8)
 
 **All 13 fixed (6 from the Mac, 7 from DeepSeek), each with a test. No Codex pass, as asked.**

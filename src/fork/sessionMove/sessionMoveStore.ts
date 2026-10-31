@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { remoteRequest } from "../../features/connections/model/connections";
 import type { Block, Session } from "../../features/sessions/model/session";
 import { sessionWorkCwd } from "../../features/sessions/model/session";
+import { childPid } from "../../integrations/harness/core/child";
 import { getHarness } from "../../integrations/harness/core/registry";
 import { loadAccountHomes } from "../accounts/accountHomes";
 import { knownLocalProjectPaths, readExternalSession } from "../externalSessions/externalSessionsStore";
@@ -159,6 +160,19 @@ const localCall: MoveCall = (op, params) =>
     op,
     params: op === "check" || op === "unpackCode" ? { ...params, projects: knownLocalProjectPaths() } : params,
   });
+
+/**
+ * Stops a tab's session and waits for its process group to be gone: the stop
+ * only sends SIGTERM, and a tool still running could change files while they're packed.
+ */
+export async function stopUntilGone(sessionId: string, stop: (sessionId: string) => Promise<void> | undefined) {
+  // Read first: the stop forgets it.
+  const pid = childPid(sessionId);
+  await stop(sessionId);
+  if (pid === undefined) return;
+  const { gone } = await localCall<{ gone: boolean }>("waitGone", { pid });
+  if (!gone) throw new Error("It would not stop here");
+}
 
 /** A long step starts and is asked after, so it can outlast one request. */
 async function hostLongCall<T>(machineId: string, op: string, params: Record<string, unknown>): Promise<T> {
@@ -409,7 +423,7 @@ export function moveTabToHost(sessionId: string, machineId: string, machineName:
       stopSource: async () => {
         const now = current();
         if (!now || now.busy) return false;
-        await getHarness(now.harness)?.stopSession(sessionId);
+        await stopUntilGone(sessionId, (id) => getHarness(now.harness)?.stopSession(id));
         return true;
       },
       // The conversation never left; its next turn resumes it.
@@ -504,7 +518,8 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
           return (await remote<{ stopped: boolean }>("stop", { sessionId: session.id })).stopped;
         },
         resumeSource: async () => {
-          await remote("restart", { sessionId: session.id, name, cwd: session.cwd });
+          // With the move's id, so a retry after a lost reply finds the window it started.
+          await remote("restart", { moveId, sessionId: session.id, name, cwd: session.cwd });
         },
         startTarget: async ({ repo, cwd, branch, account: landed }) => {
           tabId =
@@ -569,6 +584,7 @@ async function recoverEntry(entry: MoveJournal): Promise<false | { kept?: string
       resumeSource: async () => {
         if (!toHost) {
           await remote("restart", {
+            moveId: entry.plan.moveId,
             sessionId: entry.plan.providerSessionId,
             name: entry.plan.name,
             cwd: entry.plan.cwd,

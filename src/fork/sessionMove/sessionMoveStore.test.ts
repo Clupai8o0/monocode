@@ -21,6 +21,8 @@ vi.mock("@tauri-apps/api/core", () => ({
         return { repo: "/r", cwd: "/r/.claude/worktrees/moved-s", branch: "moved/s" };
       case "unpackConversation":
         return { account: "main" };
+      case "waitGone":
+        return { gone: !calls.fail.has("waitGone") };
       default:
         return {};
     }
@@ -55,9 +57,24 @@ vi.mock("../externalSessions/externalSessionsStore", () => ({
 }));
 vi.mock("../accounts/accountHomes", () => ({ loadAccountHomes: async () => ({ accounts: [] }) }));
 vi.mock("../../integrations/harness/core/registry", () => ({ getHarness: () => undefined }));
+vi.mock("../../integrations/harness/core/child", () => ({
+  childPid: (id: string) => {
+    calls.log.push("pid");
+    return id === "running" ? 77 : undefined;
+  },
+}));
 
 import type { ExternalSession } from "../externalSessions/externalSessionsModel";
-import { isMoveLocked, isSessionMoved, labKey, moveLabToMac, registerMoveHost, useMoveView, type MoveHost } from "./sessionMoveStore";
+import {
+  isMoveLocked,
+  isSessionMoved,
+  labKey,
+  moveLabToMac,
+  registerMoveHost,
+  stopUntilGone,
+  useMoveView,
+  type MoveHost,
+} from "./sessionMoveStore";
 
 let next = 0;
 
@@ -142,5 +159,29 @@ describe("undoing moves after a restart", () => {
     release();
     await vi.waitFor(() => expect(store.isMoveLocked(key)).toBe(false), { timeout: 5_000 });
     calls.hold.clear();
+  });
+});
+
+describe("stopping a tab's session to move it", () => {
+  beforeEach(() => {
+    calls.log.length = 0;
+    calls.fail.clear();
+  });
+
+  const stop = async () => void calls.log.push("stop");
+
+  it("returns only once its process group is gone", async () => {
+    await stopUntilGone("running", stop);
+    expect(calls.log).toEqual(["pid", "stop", "mac:waitGone"]);
+  });
+
+  it("fails when the group outlives the stop", async () => {
+    calls.fail.add("waitGone");
+    await expect(stopUntilGone("running", stop)).rejects.toThrow(/would not stop/);
+  });
+
+  it("has nothing to wait for without a running process", async () => {
+    await stopUntilGone("idle", stop);
+    expect(calls.log).toEqual(["pid", "stop"]);
   });
 });
