@@ -5,6 +5,7 @@ import { CodeTable, type RunCode } from "../../src/fork/games/code/CodeTable";
 import { gamesPanel } from "../../src/fork/games/gamesPanelStore";
 import {
   OPEN_DOJO_EVENT,
+  type CodeRunResult,
   type Drill,
 } from "../../src/fork/games/code/codeModel";
 
@@ -46,6 +47,18 @@ const drills: Drill[] = [
     hints: ["Strings have toUpperCase().", "Join with +."],
     solution: "function shout(word) {\n  return word.toUpperCase() + \"!\";\n}\n",
   },
+  {
+    id: "py-add",
+    title: "Add two numbers in Python",
+    topic: "logic",
+    level: "easy",
+    language: "python",
+    task: "Write add(a, b) so it gives back a plus b.",
+    starter: "def add(a, b):\n  return 0\n",
+    tests: [{ call: "add(1, 2)", expect: "3" }],
+    hints: ["Return the sum.", "return a + b"],
+    solution: "def add(a, b):\n    return a + b\n",
+  },
 ];
 
 const runCode: RunCode = async (_language, source) => {
@@ -76,9 +89,28 @@ const runCode: RunCode = async (_language, source) => {
 // The lab runner always reports cut output, so the notice has some output
 // to sit above.
 const labRunCode: RunCode = async (language, source) => {
+  if (scriptedRun) {
+    return scriptedRun;
+  }
   const outcome = await runCode(language, source);
   return { ...outcome, stdout: `earlier lines\n${outcome.stdout}`, truncated: true };
 };
+
+// A check can hand the table the exact stdout and stderr a run would produce.
+let scriptedRun: CodeRunResult | null = null;
+
+function setScriptedRun(result: Partial<CodeRunResult> | null) {
+  scriptedRun = result
+    ? {
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        exitCode: 0,
+        truncated: false,
+        ...result,
+      }
+    : null;
+}
 
 // Stands in for the panel's game keys: editor typing must never reach it.
 const page = window as unknown as {
@@ -116,6 +148,7 @@ type Lab = {
   newRun: () => void;
   setDojoTitle: (title: string) => void;
   setDojoAvailable: (available: boolean) => void;
+  setRunResult: (result: Partial<CodeRunResult> | null) => void;
   openPanel: () => void;
   panelOpen: () => boolean;
   loads: () => number;
@@ -140,6 +173,7 @@ function LabHarness() {
       extra.current = [dojoDrill(title)];
     },
     setDojoAvailable,
+    setRunResult: setScriptedRun,
     openPanel: () => {
       gamesPanel.hide();
       gamesPanel.toggle();

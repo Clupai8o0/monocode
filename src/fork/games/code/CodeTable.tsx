@@ -5,17 +5,19 @@ import { readTextFile, writeTextFile } from "../../../platform/tauri/fs";
 import { DOJO_FOLDER, DOJO_MONO } from "../../starterMonos/dojoMono";
 import { starterMonoId } from "../../starterMonos/starterMono";
 import { gamesPanel } from "../gamesPanelStore";
+import { CodeConsole } from "./CodeConsole";
+import { CodeEditor, type CodeEditorHandle } from "./CodeEditor";
 import { BUILTIN_DRILLS } from "./codeDrills";
 import {
   CODE_PROGRESS_EVENT,
   OPEN_DOJO_EVENT,
   buildSource,
-  indentText,
   levelForMode,
   loadProgress,
   makeMarker,
   mergeDrills,
   parseResults,
+  parseRunError,
   pickNextDrill,
   recordRun,
   saveProgress,
@@ -27,6 +29,7 @@ import {
   type Drill,
   type DrillLanguage,
   type DrillLevel,
+  type RunErrorSummary,
   type TestResult,
 } from "./codeModel";
 
@@ -98,6 +101,9 @@ type LastRun = {
   truncated: boolean;
   score: number;
   allPassed: boolean;
+  /** The code as it was run: run-file line N is this code's line N. */
+  codeLines: string[];
+  errorSummary: RunErrorSummary | null;
 };
 
 type Session = { tries: number; failed: number };
@@ -150,6 +156,8 @@ export function CodeTable({
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [syntaxErrors, setSyntaxErrors] = useState(0);
+  const editorRef = useRef<CodeEditorHandle>(null);
 
   const drill = drills.find((item) => item.id === currentId) ?? drills[0] ?? null;
   const code = drill ? (codeById[drill.id] ?? drill.starter) : "";
@@ -250,13 +258,16 @@ export function CodeTable({
     onInput?.();
     setRunning(true);
     setRunError(null);
+    editorRef.current?.clearErrorLine();
     const marker = makeMarker();
+    const codeLines = code.split("\n");
     const source = buildSource(drill, code, marker);
     const tries = session.tries + 1;
     try {
       const outcome = await runCode(drill.language, source);
       const lines = outcome.stdout.split("\n");
       const results = parseResults(outcome.stdout, marker, drill.tests.length);
+      const errorSummary = parseRunError(drill.language, outcome.stderr, codeLines);
       const allPassed = results.every((result) => result.pass);
       // Another window may have scored since this one last saved, so start
       // from the store's copy instead of overwriting those points.
@@ -290,8 +301,13 @@ export function CodeTable({
           truncated: outcome.truncated,
           score: recorded.score,
           allPassed,
+          codeLines,
+          errorSummary,
         },
       }));
+      if (errorSummary?.where === "code" && errorSummary.line !== null) {
+        editorRef.current?.markErrorLine(errorSummary.line);
+      }
     } catch (error) {
       setSessionById((current) => ({
         ...current,
@@ -300,30 +316,6 @@ export function CodeTable({
       setRunError(error instanceof Error ? error.message : String(error));
     } finally {
       setRunning(false);
-    }
-  };
-
-  const onEditorKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Nothing typed here may reach the panel's game keys.
-    event.stopPropagation();
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      void run();
-      return;
-    }
-    if (event.key === "Tab") {
-      event.preventDefault();
-      if (!drill) {
-        return;
-      }
-      const box = event.currentTarget;
-      const indent = drill.language === "python" ? "    " : "  ";
-      const next = indentText(box.value, box.selectionStart, box.selectionEnd, indent);
-      setCodeById((current) => ({ ...current, [drill.id]: next.value }));
-      requestAnimationFrame(() => {
-        box.selectionStart = next.start;
-        box.selectionEnd = next.end;
-      });
     }
   };
 
@@ -345,7 +337,7 @@ export function CodeTable({
   return (
     <div
       data-fork-code-table=""
-      className="flex h-full flex-col gap-2 overflow-y-auto px-3 pt-1 pb-3"
+      className="flex h-full flex-col gap-2 overflow-hidden px-3 pt-1 pb-3"
       onKeyDown={(event) => event.stopPropagation()}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -409,18 +401,19 @@ export function CodeTable({
         </p>
       ) : null}
 
-      <textarea
-        data-table-board=""
-        data-fork-code-editor=""
-        aria-label="Your code"
-        spellCheck={false}
-        className="h-44 w-full shrink-0 resize-none rounded bg-content/5 p-2 font-mono text-[12px] leading-relaxed text-content outline-none"
-        value={code}
-        onChange={(event) =>
-          setCodeById((current) => ({ ...current, [drill.id]: event.target.value }))
-        }
-        onKeyDown={onEditorKeyDown}
-      />
+      <div className="flex min-h-44 flex-1 flex-col">
+        <CodeEditor
+          ref={editorRef}
+          drillId={drill.id}
+          language={drill.language}
+          value={code}
+          onChange={(next) =>
+            setCodeById((current) => ({ ...current, [drill.id]: next }))
+          }
+          onRun={() => void run()}
+          onSyntaxErrors={setSyntaxErrors}
+        />
+      </div>
 
       <div className="flex flex-wrap items-center gap-0.5">
         <button
@@ -432,6 +425,14 @@ export function CodeTable({
         >
           {running ? "Running…" : "Run"}
         </button>
+        {syntaxErrors > 0 ? (
+          <span
+            data-fork-code-syntax-errors=""
+            className="px-1 text-[11px] text-content/45"
+          >
+            {syntaxErrors} syntax {syntaxErrors === 1 ? "error" : "errors"}
+          </span>
+        ) : null}
         <button
           type="button"
           tabIndex={-1}
@@ -445,6 +446,15 @@ export function CodeTable({
           }
         >
           Hint
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          data-fork-code-format=""
+          className={`${CHIP} ${CHIP_OFF}`}
+          onClick={() => void editorRef.current?.format()}
+        >
+          Format
         </button>
         <button
           type="button"
@@ -484,86 +494,82 @@ export function CodeTable({
         </button>
       </div>
 
-      {drill.hints.slice(0, hintsShown).map((hint, index) => (
-        <p key={index} className="text-[12px] leading-relaxed text-content/65">
-          Hint: {hint}
-        </p>
-      ))}
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+        {drill.hints.slice(0, hintsShown).map((hint, index) => (
+          <p key={index} className="text-[12px] leading-relaxed text-content/65">
+            Hint: {hint}
+          </p>
+        ))}
 
-      {runError ? (
-        <p role="alert" className="text-[12px] text-content/80">
-          {runError}
-        </p>
-      ) : null}
+        {runError ? (
+          <p role="alert" className="text-[12px] text-content/80">
+            {runError}
+          </p>
+        ) : null}
 
-      {lastRun ? (
-        <div className="flex flex-col gap-1" data-fork-code-results="">
-          {lastRun.allPassed ? (
-            <p
-              role="status"
-              className="text-[12px] font-medium text-content"
-              data-fork-code-score={lastRun.score}
-            >
-              Solved. {lastRun.score} points.
-            </p>
-          ) : null}
-          {lastRun.timedOut ? (
-            <p className="text-[12px] text-content/80">
-              It ran too long and was stopped.
-            </p>
-          ) : null}
-          {lastRun.hadResults
-            ? lastRun.results.map((result) => (
-                <p
-                  key={result.index}
-                  className="font-mono text-[11px] leading-relaxed text-content/70"
-                  data-fork-code-result={result.index}
-                  data-pass={result.pass ? "" : undefined}
-                >
-                  {result.pass ? "Pass" : "Fail"} — {drill.tests[result.index]?.call}
-                  {!result.pass && result.error
-                    ? `: ${result.error}`
-                    : !result.pass
-                      ? `: expected ${result.expect ?? drill.tests[result.index]?.expect}, got ${result.actual ?? "nothing"}`
-                      : ""}
-                </p>
-              ))
-            : null}
-          {!lastRun.hadResults && lastRun.stderr ? (
-            <pre className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/75">
-              {lastRun.stderr.split("\n").slice(-6).join("\n")}
-            </pre>
-          ) : null}
-          {!lastRun.hadResults && !lastRun.stderr && !lastRun.timedOut ? (
-            <p className="text-[12px] text-content/80">
-              No test results came back. Check the code runs at all.
-            </p>
-          ) : null}
-          {lastRun.output ? (
-            <div>
-              <p className="text-[11px] text-content/45">Your output</p>
-              <pre
-                data-fork-code-output=""
-                className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/75"
+        {lastRun ? (
+          <div className="flex flex-col gap-1" data-fork-code-results="">
+            {lastRun.allPassed ? (
+              <p
+                role="status"
+                className="text-[12px] font-medium text-content"
+                data-fork-code-score={lastRun.score}
               >
-                {lastRun.truncated
-                  ? "Earlier output was cut; this is the last 64 KB.\n"
-                  : ""}
-                {lastRun.output.slice(0, 2000)}
-              </pre>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                Solved. {lastRun.score} points.
+              </p>
+            ) : null}
+            {lastRun.timedOut ? (
+              <p className="text-[12px] text-content/80">
+                It ran too long and was stopped.
+              </p>
+            ) : null}
+            {lastRun.hadResults
+              ? lastRun.results.map((result) => (
+                  <p
+                    key={result.index}
+                    className="font-mono text-[11px] leading-relaxed text-content/70"
+                    data-fork-code-result={result.index}
+                    data-pass={result.pass ? "" : undefined}
+                  >
+                    {result.pass ? "Pass" : "Fail"} — {drill.tests[result.index]?.call}
+                    {!result.pass && result.error
+                      ? `: ${result.error}`
+                      : !result.pass
+                        ? `: expected ${result.expect ?? drill.tests[result.index]?.expect}, got ${result.actual ?? "nothing"}`
+                        : ""}
+                  </p>
+                ))
+              : null}
+            {!lastRun.hadResults && !lastRun.stderr && !lastRun.timedOut ? (
+              <p className="text-[12px] text-content/80">
+                No test results came back. Check the code runs at all.
+              </p>
+            ) : null}
+            {lastRun.output || lastRun.stderr || lastRun.truncated ? (
+              <CodeConsole
+                key={`${drill.id}:${session.tries}`}
+                language={drill.language}
+                stdout={lastRun.output}
+                stderr={lastRun.stderr}
+                truncated={lastRun.truncated}
+                codeLines={lastRun.codeLines}
+                summary={lastRun.errorSummary}
+                openOnErrors={!lastRun.hadResults}
+                onGoToLine={(line) => editorRef.current?.goToLine(line)}
+              />
+            ) : null}
+          </div>
+        ) : null}
 
-      {showSolution && canSeeSolution ? (
-        <pre
-          data-fork-code-solution=""
-          className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/80"
-        >
-          {drill.solution}
-        </pre>
-      ) : null}
+        {showSolution && canSeeSolution ? (
+          <pre
+            data-fork-code-solution=""
+            className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/80"
+          >
+            {drill.solution}
+          </pre>
+        ) : null}
+      </div>
     </div>
   );
 }

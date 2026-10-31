@@ -41,6 +41,20 @@ export type TestResult = {
   error?: string;
 };
 
+export type RunErrorWhere = "code" | "tests";
+
+/** The one line at the top of the Errors console after a failed run. */
+export type RunErrorSummary = {
+  type: string;
+  message: string;
+  /** 1-based line in the run file, or null when no run-file frame is there. */
+  line: number | null;
+  /** 1-based column, when the interpreter points at one. */
+  column: number | null;
+  /** Whether that line is the user's code or the test harness below it. */
+  where: RunErrorWhere | null;
+};
+
 /** Ask Dojo asks App to open the Dojo Mono with this event. */
 export const OPEN_DOJO_EVENT = "monocode:fork-open-dojo";
 
@@ -174,6 +188,222 @@ export function parseResults(stdout: string, marker: string, count: number): Tes
   }
   return Array.from({ length: count }, (_, index) =>
     found.get(index) ?? { index, pass: false, error: "No result came back for this test." },
+  );
+}
+
+/** A path the runner wrote the drill to, not the editor's fake drillPath. */
+function isRunFile(path: string): boolean {
+  return /(?:^|[/\\])(?:drill|main)\.(?:js|py)$/.test(path);
+}
+
+/**
+ * A run-file path in a trace, with Node's `:line` and `:column` when they are
+ * on the same token. Python puts its line after the quote instead.
+ */
+const RUN_FILE_PATH_SOURCE = String.raw`(?:file:\/\/\/?)?[^\s"()'<>]*?(?:drill|main)\.(?:js|py)(?::(\d+)(?::(\d+))?)?`;
+
+const NODE_HEADER = new RegExp(
+  String.raw`^(?:file:\/\/\/?)?[^\s"()'<>]*?(?:drill|main)\.(?:js|py):(\d+)(?::(\d+))?$`,
+);
+const NODE_FRAME = new RegExp(
+  String.raw`(?:file:\/\/\/?)?[^\s"()'<>]*?(?:drill|main)\.(?:js|py):(\d+):(\d+)`,
+);
+const NODE_ERROR =
+  /^((?:[A-Za-z_$][\w$]*)?(?:Error|Exception))(?:\s*(\[[^\]]*\]))?(?::\s?(.*))?$/;
+const PY_FRAME = /^\s*File "([^"]+)", line (\d+)/;
+const PY_ERROR =
+  /^((?:[A-Za-z_][\w.]*)?(?:Error|Exception|Interrupt|Exit|Iteration|Warning|Group))(?::\s?(.*))?$/;
+
+/** The column a `^` (or Python's `~`) points at, 1-based. */
+function caretColumn(line: string): number | null {
+  if (!/^\s*[\^~]+\s*$/.test(line)) {
+    return null;
+  }
+  const found = /[\^~]/.exec(line);
+  return found ? found.index + 1 : null;
+}
+
+function parseNodeRunError(
+  stderr: string,
+  codeLines: readonly string[],
+): RunErrorSummary | null {
+  const lines = stderr.split("\n");
+  let header: { line: number; column: number | null; index: number } | null =
+    null;
+  let frame: { line: number; column: number } | null = null;
+  let error: { type: string; message: string } | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index].trim();
+    if (!header) {
+      const match = NODE_HEADER.exec(text);
+      if (match) {
+        header = {
+          line: Number(match[1]),
+          column: match[2] ? Number(match[2]) : null,
+          index,
+        };
+      }
+    }
+    if (!frame) {
+      const match = NODE_FRAME.exec(lines[index]);
+      if (match) {
+        frame = { line: Number(match[1]), column: Number(match[2]) };
+      }
+    }
+    if (!error) {
+      const match = NODE_ERROR.exec(text);
+      if (match) {
+        const code = match[2] ? `${match[2]}:` : "";
+        const detail = (match[3] ?? "").trim();
+        error = {
+          type: match[1],
+          message: [code, detail].filter(Boolean).join(" ").trim(),
+        };
+      }
+    }
+  }
+  if (!error) {
+    return null;
+  }
+  let caret: number | null = null;
+  if (header) {
+    for (let index = header.index + 1; index < lines.length; index += 1) {
+      const found = caretColumn(lines[index]);
+      if (found !== null) {
+        caret = found;
+        break;
+      }
+      if (/^\s+at\s/.test(lines[index])) {
+        break;
+      }
+    }
+  }
+  const line = header?.line ?? frame?.line ?? null;
+  const column =
+    frame && (line === null || frame.line === line)
+      ? frame.column
+      : (caret ?? header?.column ?? null);
+  return {
+    type: error.type,
+    message: error.message,
+    line,
+    column,
+    where: line === null ? null : line <= codeLines.length ? "code" : "tests",
+  };
+}
+
+function parsePythonRunError(
+  stderr: string,
+  codeLines: readonly string[],
+): RunErrorSummary | null {
+  const lines = stderr.split("\n");
+  let frame: { line: number; index: number } | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = PY_FRAME.exec(lines[index]);
+    if (match && isRunFile(match[1])) {
+      frame = { line: Number(match[2]), index };
+    }
+  }
+  let error: { type: string; message: string } | null = null;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const match = PY_ERROR.exec(lines[index].trim());
+    if (match) {
+      error = { type: match[1], message: (match[2] ?? "").trim() };
+      break;
+    }
+  }
+  if (!error) {
+    return null;
+  }
+  let column: number | null = null;
+  if (frame) {
+    for (let index = frame.index + 1; index < lines.length; index += 1) {
+      if (PY_FRAME.test(lines[index])) {
+        break;
+      }
+      const found = caretColumn(lines[index]);
+      if (found !== null) {
+        column = found;
+        break;
+      }
+    }
+  }
+  const line = frame?.line ?? null;
+  return {
+    type: error.type,
+    message: error.message,
+    line,
+    column,
+    where: line === null ? null : line <= codeLines.length ? "code" : "tests",
+  };
+}
+
+/**
+ * Reads the first useful line of a failed run: the error type and message,
+ * plus the place in the run file the trace points at. Lines past the user's
+ * code belong to the test harness. Null when stderr holds no error at all.
+ */
+export function parseRunError(
+  language: DrillLanguage,
+  stderr: string,
+  codeLines: readonly string[],
+): RunErrorSummary | null {
+  if (!stderr.trim()) {
+    return null;
+  }
+  return language === "python"
+    ? parsePythonRunError(stderr, codeLines)
+    : parseNodeRunError(stderr, codeLines);
+}
+
+/**
+ * Writes `your code` or `tests` where the temp run file's path was, so the
+ * trace reads in the drill's own words. Line numbers stay where they are.
+ */
+export function rewriteRunPaths(
+  text: string,
+  language: DrillLanguage,
+  codeLines: readonly string[],
+): string {
+  const pattern = new RegExp(RUN_FILE_PATH_SOURCE, "g");
+  return text
+    .split("\n")
+    .map((line) => {
+      const inline = language === "python" ? /line (\d+)/.exec(line) : null;
+      return line.replace(pattern, (_match, linePart, columnPart) => {
+        const number = linePart
+          ? Number(linePart)
+          : inline
+            ? Number(inline[1])
+            : null;
+        const target =
+          number !== null && number > codeLines.length ? "tests" : "your code";
+        return linePart
+          ? `${target}:${linePart}${columnPart ? `:${columnPart}` : ""}`
+          : target;
+      });
+    })
+    .join("\n");
+}
+
+/** Node's own frames and Python's stdlib frames are trace, not drill code. */
+export function isInternalFrame(
+  line: string,
+  language: DrillLanguage,
+): boolean {
+  if (language === "javascript") {
+    return /node:internal\//.test(line);
+  }
+  const match = /^\s*File\s+"([^"]*)"/.exec(line);
+  if (!match) {
+    return false;
+  }
+  const path = match[1];
+  return (
+    path.startsWith("<frozen ") ||
+    /\/lib\/python[\d.]*\//.test(path) ||
+    /\/python3(?:\.\d+)?\//.test(path) ||
+    /\/site-packages\//.test(path)
   );
 }
 
@@ -348,26 +578,6 @@ export function streakDays(progress: CodeProgress, now: number): number {
     cursor = dayBefore(cursor);
   }
   return streak;
-}
-
-/** Tab in the editor: a caret gets one indent, a selection indents its whole lines. */
-export function indentText(
-  value: string,
-  start: number,
-  end: number,
-  indent: string,
-): { value: string; start: number; end: number } {
-  if (start === end) {
-    const caret = start + indent.length;
-    return { value: value.slice(0, start) + indent + value.slice(end), start: caret, end: caret };
-  }
-  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-  const block = value.slice(lineStart, end).replace(/^(?=[\s\S])/gm, indent);
-  return {
-    value: value.slice(0, lineStart) + block + value.slice(end),
-    start: start + indent.length,
-    end: lineStart + block.length,
-  };
 }
 
 export function solvedTodayCount(progress: CodeProgress, now: number): number {

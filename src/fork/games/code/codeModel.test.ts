@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   REVIEW_DAYS,
   buildSource,
-  indentText,
   dayKey,
   emptyProgress,
   isDue,
+  isInternalFrame,
   levelForMode,
   loadProgress,
   makeMarker,
   mergeDrills,
   parseProgress,
   parseResults,
+  parseRunError,
   pickNextDrill,
   recordRun,
+  rewriteRunPaths,
   saveProgress,
   scoreFor,
   solvedTodayCount,
@@ -382,18 +384,215 @@ describe("drills.json handling", () => {
   });
 });
 
-describe("indentText", () => {
-  it("adds one indent at a caret", () => {
-    expect(indentText("ab", 1, 1, "  ")).toEqual({ value: "a  b", start: 3, end: 3 });
+// Captured from real runs: Node.js v26.4.0 (CommonJS) and Python 3.14.7.
+const RUN_JS = "/tmp/monocode-code-run-8f3a/main.js";
+const RUN_PY = "/tmp/monocode-code-run-8f3a/main.py";
+
+const NODE_SYNTAX = `${RUN_JS}:4
+console.log(add(1, 2);
+                    ^
+
+SyntaxError: missing ) after argument list
+    at wrapSafe (node:internal/modules/cjs/loader:1876:18)
+    at Module._compile (node:internal/modules/cjs/loader:1918:20)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v26.4.0`;
+
+const NODE_THROW = `${RUN_JS}:2
+  throw new Error("boom");
+  ^
+
+Error: boom
+    at boom (${RUN_JS}:2:9)
+    at Object.<anonymous> (${RUN_JS}:4:1)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v26.4.0`;
+
+const NODE_REFERENCE = `${RUN_JS}:2
+  console.log(missing);
+              ^
+
+ReferenceError: missing is not defined
+    at f (${RUN_JS}:2:15)
+    at Object.<anonymous> (${RUN_JS}:4:1)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v26.4.0`;
+
+const PY_INDENTATION = `  File "${RUN_PY}", line 2
+    return a + b
+    ^^^^^^
+IndentationError: expected an indented block after function definition on line 1`;
+
+const PY_NAME = `Traceback (most recent call last):
+  File "${RUN_PY}", line 3, in <module>
+    f()
+    ~^^
+  File "${RUN_PY}", line 2, in f
+    print(missing)
+          ^^^^^^^
+NameError: name 'missing' is not defined`;
+
+describe("parseRunError", () => {
+  const jsCode = [
+    "function add(a, b) {",
+    "  return a + b;",
+    "}",
+    "console.log(add(1, 2);",
+  ];
+
+  it("reads a Node syntax error and its caret", () => {
+    expect(parseRunError("javascript", NODE_SYNTAX, jsCode)).toEqual({
+      type: "SyntaxError",
+      message: "missing ) after argument list",
+      line: 4,
+      column: 21,
+      where: "code",
+    });
   });
 
-  it("indents the selected lines and deletes nothing", () => {
-    const next = indentText("one\ntwo\nthree", 5, 9, "  ");
-    expect(next.value).toBe("one\n  two\n  three");
-    expect(next.value.slice(next.start, next.end)).toBe("wo\n  t");
+  it("reads a thrown Node error from its first run-file frame", () => {
+    expect(parseRunError("javascript", NODE_THROW, jsCode)).toEqual({
+      type: "Error",
+      message: "boom",
+      line: 2,
+      column: 9,
+      where: "code",
+    });
   });
 
-  it("leaves the next line alone when the selection ends at its start", () => {
-    expect(indentText("one\ntwo", 0, 4, "  ").value).toBe("  one\ntwo");
+  it("reads a Node ReferenceError and points at the name", () => {
+    expect(parseRunError("javascript", NODE_REFERENCE, jsCode)).toEqual({
+      type: "ReferenceError",
+      message: "missing is not defined",
+      line: 2,
+      column: 15,
+      where: "code",
+    });
+  });
+
+  it("reads a Python IndentationError and its caret", () => {
+    expect(
+      parseRunError("python", PY_INDENTATION, [
+        "def add(a, b):",
+        "return a + b",
+      ]),
+    ).toEqual({
+      type: "IndentationError",
+      message: "expected an indented block after function definition on line 1",
+      line: 2,
+      column: 5,
+      where: "code",
+    });
+  });
+
+  it("reads a Python NameError from the last run-file frame", () => {
+    expect(
+      parseRunError("python", PY_NAME, [
+        "def f():",
+        "    print(missing)",
+        "f()",
+      ]),
+    ).toEqual({
+      type: "NameError",
+      message: "name 'missing' is not defined",
+      line: 2,
+      column: 11,
+      where: "code",
+    });
+  });
+
+  it("puts a frame past the user's code in the tests", () => {
+    expect(
+      parseRunError("javascript", NODE_REFERENCE, ["function add() {}"])?.where,
+    ).toBe("tests");
+  });
+
+  it("says nothing when stderr has no error", () => {
+    expect(
+      parseRunError("javascript", "a warning, maybe\n", jsCode),
+    ).toBeNull();
+    expect(parseRunError("python", "", jsCode)).toBeNull();
+  });
+});
+
+describe("rewriteRunPaths", () => {
+  const codeLines = ["function add(a, b) {", "  return a + b;", "}"];
+
+  it("names the user's code and keeps Node's line and column", () => {
+    const trace = `${RUN_JS}:2\n    at boom (${RUN_JS}:2:9)`;
+    expect(rewriteRunPaths(trace, "javascript", codeLines)).toBe(
+      "your code:2\n    at boom (your code:2:9)",
+    );
+  });
+
+  it("says tests past the last line of the user's code", () => {
+    expect(rewriteRunPaths(`${RUN_JS}:9`, "javascript", codeLines)).toBe(
+      "tests:9",
+    );
+  });
+
+  it("rewrites Python's File path without moving its line", () => {
+    expect(
+      rewriteRunPaths(`  File "${RUN_PY}", line 2, in f`, "python", codeLines),
+    ).toBe(`  File "your code", line 2, in f`);
+    expect(
+      rewriteRunPaths(`  File "${RUN_PY}", line 9, in f`, "python", codeLines),
+    ).toBe(`  File "tests", line 9, in f`);
+  });
+
+  it("handles a file:// path from an ESM run", () => {
+    expect(
+      rewriteRunPaths(
+        `    at f (file://${RUN_JS}:2:15)`,
+        "javascript",
+        codeLines,
+      ),
+    ).toBe("    at f (your code:2:15)");
+  });
+});
+
+describe("isInternalFrame", () => {
+  it("dims Node internals but not the run file", () => {
+    expect(
+      isInternalFrame(
+        "    at wrapSafe (node:internal/modules/cjs/loader:1876:18)",
+        "javascript",
+      ),
+    ).toBe(true);
+    expect(isInternalFrame(`    at boom (${RUN_JS}:2:9)`, "javascript")).toBe(
+      false,
+    );
+  });
+
+  it("dims Python's stdlib frames", () => {
+    expect(
+      isInternalFrame(
+        '  File "/usr/lib/python3.14/traceback.py", line 1, in <module>',
+        "python",
+      ),
+    ).toBe(true);
+    expect(isInternalFrame(`  File "${RUN_PY}", line 2, in f`, "python")).toBe(
+      false,
+    );
   });
 });
