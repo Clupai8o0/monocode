@@ -96,3 +96,30 @@ describe("badges", () => {
     ).toEqual(["a"]);
   });
 });
+
+describe("staleClosed", () => {
+  it("picks Safe and Handover sessions untouched for 12 hours", async () => {
+    const { staleClosed, AUTO_ARCHIVE_AFTER_MS } = await import("./CloseBadges");
+    const now = 10 * AUTO_ARCHIVE_AFTER_MS;
+    const old = now - AUTO_ARCHIVE_AFTER_MS;
+    const fresh = now - AUTO_ARCHIVE_AFTER_MS + 1;
+    setCloseState("auto-safe", old, { kind: "safe", detail: "" });
+    setCloseState("auto-handover", old, { kind: "handover", detail: "h.md" });
+    setCloseState("auto-unsafe", old, { kind: "unsafe", detail: "running" });
+    setCloseState("auto-fresh", fresh, { kind: "safe", detail: "" });
+    setCloseState("auto-moved-on", old, { kind: "safe", detail: "" });
+    expect(
+      staleClosed(
+        [
+          { id: "auto-safe", updatedAt: old },
+          { id: "auto-handover", updatedAt: old },
+          { id: "auto-unsafe", updatedAt: old },
+          { id: "auto-fresh", updatedAt: fresh },
+          { id: "auto-moved-on", updatedAt: old + 5 },
+          { id: "auto-unknown", updatedAt: old },
+        ],
+        now,
+      ),
+    ).toEqual(["auto-safe", "auto-handover"]);
+  });
+});

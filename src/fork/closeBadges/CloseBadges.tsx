@@ -70,6 +70,68 @@ export function safeToClose(candidates: readonly CloseCandidate[]): string[] {
     .map((c) => c.id);
 }
 
+/** How long a Safe or Handover session sits before it is archived on its own. */
+export const AUTO_ARCHIVE_AFTER_MS = 12 * 60 * 60 * 1000;
+const AUTO_ARCHIVE_CHECK_MS = 10 * 60 * 1000;
+
+/**
+ * The candidates whose last reply said "Safe to close" (with or without a
+ * handover) and that have not been touched for `AUTO_ARCHIVE_AFTER_MS`.
+ */
+export function staleClosed(
+  candidates: readonly CloseCandidate[],
+  now: number,
+): string[] {
+  return candidates
+    .filter((c) => {
+      const kind = cachedCloseState(c.id, c.updatedAt)?.kind;
+      return (
+        (kind === "safe" || kind === "handover") &&
+        now - c.updatedAt >= AUTO_ARCHIVE_AFTER_MS
+      );
+    })
+    .map((c) => c.id);
+}
+
+// "id@updatedAt" already handed to onArchive this run, so a slow archive is
+// not repeated and one restored by hand stays put until it is used again.
+const autoArchived = new Set<string>();
+
+/**
+ * Archives Safe and Handover sessions left for 12 hours, checked when the
+ * list or a badge changes and every 10 minutes. Archived sessions stay in the
+ * archive, so nothing is lost.
+ */
+function useAutoArchiveClosed(
+  candidates: readonly CloseCandidate[],
+  onArchive: (sessionIds: string[]) => void,
+  version: number,
+) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), AUTO_ARCHIVE_CHECK_MS);
+    return () => clearInterval(id);
+  }, []);
+  const key = candidates.map((c) => `${c.id}@${c.updatedAt}`).join(",");
+  const latest = useRef({ candidates, onArchive });
+  latest.current = { candidates, onArchive };
+  useEffect(() => {
+    const savedAt = new Map(
+      latest.current.candidates.map((c) => [c.id, `${c.id}@${c.updatedAt}`]),
+    );
+    const ids = staleClosed(latest.current.candidates, Date.now()).filter(
+      (id) => !autoArchived.has(savedAt.get(id)!),
+    );
+    if (ids.length === 0) {
+      return;
+    }
+    for (const id of ids) {
+      autoArchived.add(savedAt.get(id)!);
+    }
+    latest.current.onArchive(ids);
+  }, [tick, version, key]);
+}
+
 /**
  * Archives every listed session that is safe to close. The first click asks;
  * a second within a few seconds closes them.
@@ -81,7 +143,8 @@ export function CloseAllSafeButton({
   candidates: readonly CloseCandidate[];
   onArchive: (sessionIds: string[]) => void;
 }) {
-  useCloseStatesVersion();
+  const version = useCloseStatesVersion();
+  useAutoArchiveClosed(candidates, onArchive, version);
   const [asking, setAsking] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
