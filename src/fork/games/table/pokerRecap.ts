@@ -14,11 +14,22 @@ export type BettingStreet = Exclude<Street, "done">;
 export type LoggedAction = {
   street: BettingStreet;
   seat: number;
-  kind: "fold" | "check" | "call" | "bet" | "raise";
-  /** Chips a call put in, or the raise-to. 0 for a fold or check. */
+  kind: "blind" | "fold" | "check" | "call" | "bet" | "raise";
+  /** Chips a blind or call put in, or the raise-to. 0 for a fold or check. */
   amount: number;
   allIn: boolean;
 };
+
+/** The blinds as posted; a short stack posts less than the full blind. */
+export function logBlinds(start: PokerState): LoggedAction[] {
+  return [start.sbSeat, start.bbSeat].map((seat) => ({
+    street: "preflop",
+    seat,
+    kind: "blind",
+    amount: start.seats[seat]!.bet,
+    allIn: start.seats[seat]!.allIn,
+  }));
+}
 
 /** The log entry for a legal action, read before it is applied. */
 export function logAction(state: PokerState, action: PokerAction): LoggedAction | null {
@@ -103,6 +114,9 @@ export function recapHand(state: PokerState, log: readonly LoggedAction[], names
   const spoken = (entry: LoggedAction) => {
     const who = name(entry.seat);
     const amount = formatTokens(entry.amount);
+    if (entry.kind === "blind") {
+      return `${who} ${amount}${entry.allIn ? " (all in)" : ""}`;
+    }
     if (entry.kind === "fold" || entry.kind === "check") {
       return `${who} ${verb(entry.seat, entry.kind)}`;
     }
@@ -120,11 +134,15 @@ export function recapHand(state: PokerState, log: readonly LoggedAction[], names
   const streets: string[] = [];
   for (const { street, name: label, from, to } of STREETS) {
     const cards = state.board.slice(from, to);
-    const actions = log.filter((entry) => entry.street === street).map(spoken);
+    const entries = log.filter((entry) => entry.street === street);
+    const actions = entries.filter((entry) => entry.kind !== "blind").map(spoken);
     if (street === "preflop") {
-      actions.unshift(
-        `blinds ${name(state.sbSeat)} ${formatTokens(state.smallBlind)}, ${name(state.bbSeat)} ${formatTokens(state.bigBlind)}`,
-      );
+      const blinds = entries.filter((entry) => entry.kind === "blind");
+      const posted =
+        blinds.length > 0
+          ? blinds.map(spoken).join(", ")
+          : `${name(state.sbSeat)} ${formatTokens(state.smallBlind)}, ${name(state.bbSeat)} ${formatTokens(state.bigBlind)}`;
+      actions.unshift(`blinds ${posted}`);
     } else if (cards.length === 0) {
       continue;
     }
@@ -143,11 +161,26 @@ export function recapHand(state: PokerState, log: readonly LoggedAction[], names
     const amount = formatTokens(pot.amount);
     if (pot.eligible.length === 1) {
       const only = pot.eligible[0]!;
-      results.push(
-        contested.length === 0
-          ? `${capital(name(only))} ${verb(only, "take")} ${amount}: everyone else folded.`
-          : `${capital(name(only))} ${only === 0 ? "get" : "gets"} ${amount} back: nobody else could match it.`,
+      if (contested.length === 0) {
+        results.push(`${capital(name(only))} ${verb(only, "take")} ${amount}: everyone else folded.`);
+        continue;
+      }
+      // Chips nobody matched go back; the rest of this pot came from seats that folded.
+      const matched = Math.max(
+        0,
+        ...state.seats.flatMap((seat, index) => (index === only ? [] : [seat.total])),
       );
+      const unmatched = Math.min(pot.amount, Math.max(0, state.seats[only]!.total - matched));
+      const who = capital(name(only));
+      if (unmatched >= pot.amount) {
+        results.push(`${who} ${only === 0 ? "get" : "gets"} ${amount} back: nobody else could match it.`);
+      } else if (unmatched > 0) {
+        results.push(
+          `Side pot ${amount}: ${name(only)} ${verb(only, "take")} it, ${formatTokens(unmatched)} of it unmatched chips back.`,
+        );
+      } else {
+        results.push(`Side pot ${amount}: ${name(only)} ${verb(only, "take")} it, the others in it folded.`);
+      }
       continue;
     }
     const label =

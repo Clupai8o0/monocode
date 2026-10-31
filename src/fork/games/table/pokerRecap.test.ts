@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { seeded } from "../seeded";
 import { parseCards } from "./cards";
 import { advance, applyAction, startHand, type PokerAction, type PokerState } from "./poker";
-import { cardText, handScores, logAction, recapHand, type LoggedAction } from "./pokerRecap";
+import { cardText, handScores, logAction, logBlinds, recapHand, type LoggedAction } from "./pokerRecap";
 
 const NAMES = ["you", "Claude", "Codex"];
 
@@ -27,7 +27,7 @@ function rigged(stacks: number[], holes: string[], board: string): PokerState {
 /** Plays the actions in turn, dealing streets between them, and logs each. */
 function play(start: PokerState, actions: PokerAction[]) {
   let state = start;
-  const log: LoggedAction[] = [];
+  const log: LoggedAction[] = logBlinds(start);
   for (const action of actions) {
     while (state.toAct < 0 && state.street !== "done") {
       state = advance(state);
@@ -36,6 +36,9 @@ function play(start: PokerState, actions: PokerAction[]) {
     state = applyAction(state, action);
   }
   while (state.street !== "done") {
+    if (state.toAct >= 0) {
+      throw new Error("The hand still wants an action");
+    }
     state = advance(state);
   }
   return { state, log };
@@ -133,6 +136,30 @@ describe("hand recap", () => {
       { type: "check" },
     ]);
     expect(recapHand(state, log, NAMES).results).toEqual(["Pot 30 split: you and Claude tie with high card."]);
+  });
+
+  it("a short blind shows what it really posted", () => {
+    const start = rigged([1000, 1000, 6], ["As Ad", "Ks Kd", "7c 2h"], "Ah 9c 4d 3s 8h");
+    const checks: PokerAction[] = Array.from({ length: 6 }, () => ({ type: "check" }));
+    const { state, log } = play(start, [{ type: "call" }, { type: "call" }, ...checks]);
+    expect(recapHand(state, log, NAMES).streets[0]).toBe(
+      "Preflop: blinds Claude 5, Codex 6 (all in), you call 10, Claude calls 5.",
+    );
+  });
+
+  it("a side pot fed by a folded seat is won, not only handed back", () => {
+    const start = rigged([100, 1000, 1000], ["As Ad", "Ks Kd", "Qs Qd"], "2h 9c 4d 3s 8h");
+    const { state, log } = play(start, [
+      { type: "raise", to: 100 },
+      { type: "raise", to: 300 },
+      { type: "call" },
+      { type: "raise", to: 200 },
+      { type: "fold" },
+    ]);
+    expect(recapHand(state, log, NAMES).results).toEqual([
+      "Pot 300: you win with pair, beating Claude's pair on higher cards.",
+      "Side pot 600: Claude takes it, 200 of it unmatched chips back.",
+    ]);
   });
 
   it("writes cards short", () => {

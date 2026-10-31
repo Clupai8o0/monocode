@@ -51,7 +51,7 @@ import {
   startGame,
   type PokerGame,
 } from "./pokerGame";
-import { handScores, logAction, recapHand, type LoggedAction } from "./pokerRecap";
+import { handScores, logAction, logBlinds, recapHand, type LoggedAction } from "./pokerRecap";
 import { BUTTON_MARK } from "./sprites";
 import { chipsInPlay, formatTokens, rivalShares, tokenStore } from "./tokens";
 
@@ -267,8 +267,8 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     button.current = start.button;
     bluffs.current.clear();
     setLastWords("");
-    logRef.current = [];
-    setLog([]);
+    logRef.current = logBlinds(start);
+    setLog(logRef.current);
     putGame({
       ...run,
       hands: handNumber,
