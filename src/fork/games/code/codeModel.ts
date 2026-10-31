@@ -200,7 +200,8 @@ function isRunFile(path: string): boolean {
  * A run-file path in a trace, with Node's `:line` and `:column` when they are
  * on the same token. Python puts its line after the quote instead.
  */
-const RUN_FILE_PATH_SOURCE = String.raw`(?:file:\/\/\/?)?[^\s"()'<>]*?(?:drill|main)\.(?:js|py)(?::(\d+)(?::(\d+))?)?`;
+// A folder must come first, so a printed `main.js` or `domain.js` is left alone.
+const RUN_FILE_PATH_SOURCE = String.raw`(?:file:\/\/\/?)?[^\s"()'<>]*[\/\\](?:drill|main)\.(?:js|py)(?::(\d+)(?::(\d+))?)?`;
 
 const NODE_HEADER = new RegExp(
   String.raw`^(?:file:\/\/\/?)?[^\s"()'<>]*?(?:drill|main)\.(?:js|py):(\d+)(?::(\d+))?$`,
@@ -215,6 +216,10 @@ const PY_ERROR =
   /^((?:[A-Za-z_][\w.]*)?(?:Error|Exception|Interrupt|Exit|Iteration|Warning|Group))(?::\s?(.*))?$/;
 
 /** The column a `^` (or Python's `~`) points at, 1-based. */
+function leadingSpace(line: string): number {
+  return /^\s*/.exec(line)![0].length;
+}
+
 function caretColumn(line: string): number | null {
   if (!/^\s*[\^~]+\s*$/.test(line)) {
     return null;
@@ -323,7 +328,14 @@ function parsePythonRunError(
       }
       const found = caretColumn(lines[index]);
       if (found !== null) {
-        column = found;
+        // Python shows the line re-indented by 4; map the caret back onto
+        // the line as written.
+        const shown = lines[index - 1] ?? "";
+        const written = codeLines[frame.line - 1] ?? "";
+        column = Math.max(
+          1,
+          found - leadingSpace(shown) + leadingSpace(written),
+        );
         break;
       }
     }

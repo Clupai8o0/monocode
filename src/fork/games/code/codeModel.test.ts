@@ -500,7 +500,7 @@ describe("parseRunError", () => {
       type: "IndentationError",
       message: "expected an indented block after function definition on line 1",
       line: 2,
-      column: 5,
+      column: 1,
       where: "code",
     });
   });
@@ -537,6 +537,11 @@ describe("parseRunError", () => {
 
 describe("rewriteRunPaths", () => {
   const codeLines = ["function add(a, b) {", "  return a + b;", "}"];
+
+  it("leaves printed file names alone", () => {
+    const printed = "main.js domain.js main.py drill.js:3";
+    expect(rewriteRunPaths(printed, "javascript", codeLines)).toBe(printed);
+  });
 
   it("names the user's code and keeps Node's line and column", () => {
     const trace = `${RUN_JS}:2\n    at boom (${RUN_JS}:2:9)`;

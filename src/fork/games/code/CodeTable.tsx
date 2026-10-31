@@ -164,6 +164,10 @@ export function CodeTable({
   const session: Session = (drill && sessionById[drill.id]) || { tries: 0, failed: 0 };
   const hintsShown = drill ? (hintsById[drill.id] ?? 0) : 0;
   const lastRun = drill ? lastRunById[drill.id] : undefined;
+  // What the editor shows now, so a run that ends after a drill switch or an
+  // edit doesn't mark a line in code it never ran.
+  const shownRef = useRef({ id: drill?.id, code });
+  shownRef.current = { id: drill?.id, code };
 
   // Dojo's drills load whenever this tab is shown. The panel keeps it
   // mounted, so a drill Dojo writes later would otherwise never appear.
@@ -305,7 +309,12 @@ export function CodeTable({
           errorSummary,
         },
       }));
-      if (errorSummary?.where === "code" && errorSummary.line !== null) {
+      if (
+        errorSummary?.where === "code" &&
+        errorSummary.line !== null &&
+        shownRef.current.id === drill.id &&
+        shownRef.current.code === code
+      ) {
         editorRef.current?.markErrorLine(errorSummary.line);
       }
     } catch (error) {

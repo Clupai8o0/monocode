@@ -44,6 +44,22 @@ describe("finishPythonSource", () => {
     expect(finishPythonSource(messy)).toBe("def add(a, b):\n    return a + b\n");
   });
 
+  it("keeps spaces inside a multi-line string", () => {
+    const original = 's = """a  \n  b"""  \n';
+    const reindented = 's = """a  \nb"""  \n';
+    expect(
+      finishPythonSource(
+        reindented,
+        [
+          { start: false, end: true },
+          { start: true, end: false },
+          { start: false, end: false },
+        ],
+        original,
+      ),
+    ).toBe('s = """a  \n  b"""\n');
+  });
+
   it("leaves a single newline for empty code", () => {
     expect(finishPythonSource("")).toBe("\n");
     expect(finishPythonSource("   ")).toBe("\n");

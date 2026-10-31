@@ -26,6 +26,13 @@ import type { DrillLanguage } from "./codeModel";
  * The app's own file editor is untouched; this borrows its extensions.
  */
 
+type SyntaxNodeLike = {
+  name: string;
+  from: number;
+  to: number;
+  parent: SyntaxNodeLike | null;
+};
+
 export type CodeEditorHandle = {
   format: () => Promise<void>;
   focus: () => void;
@@ -105,7 +112,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         { Compartment, EditorState, Prec, StateEffect, StateField },
         { indentWithTab },
         { minimalSetup },
-        { indentRange, indentUnit },
+        { ensureSyntaxTree, indentRange, indentUnit, syntaxTree },
         { languageForPath, schemeExtensions },
         { editorMatching, editorTyping },
         { editorAutocomplete },
@@ -160,6 +167,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           const line = state.doc.line(
             Math.min(Math.max(1, lineNumber), state.doc.lines),
           );
+          // An empty line has nothing to underline, and an empty mark throws.
+          if (line.from === line.to) {
+            return Decoration.none;
+          }
           return Decoration.set([
             Decoration.mark({ class: "cm-drill-error-line" }).range(
               line.from,
@@ -363,12 +374,30 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           next = result.formatted;
           cursor = result.cursorOffset;
         } else {
-          const reindented = indentRange(
-            active.state,
-            0,
-            active.state.doc.length,
-          ).apply(active.state.doc);
-          next = finishPythonSource(reindented.toString());
+          const state = active.state;
+          const tree =
+            ensureSyntaxTree(state, state.doc.length, 500) ?? syntaxTree(state);
+          const inside = (pos: number) => {
+            for (
+              let node: SyntaxNodeLike | null = tree.resolveInner(pos, 1);
+              node;
+              node = node.parent
+            ) {
+              if (/String/.test(node.name) && node.from < pos && node.to > pos) {
+                return true;
+              }
+            }
+            return false;
+          };
+          const edges = [];
+          for (let number = 1; number <= state.doc.lines; number += 1) {
+            const line = state.doc.line(number);
+            edges.push({ start: inside(line.from), end: inside(line.to) });
+          }
+          const reindented = indentRange(state, 0, state.doc.length).apply(
+            state.doc,
+          );
+          next = finishPythonSource(reindented.toString(), edges, before);
           cursor = Math.min(anchor, next.length);
         }
         if (

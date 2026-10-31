@@ -167,10 +167,25 @@ export function completionWords(language: DrillLanguage, text: string): string[]
   return words;
 }
 
+/** Whether a line starts and ends inside a multi-line string. */
+export type StringEdges = { start: boolean; end: boolean };
+
 /**
  * Python's last formatting pass: no trailing whitespace, no run of blank lines
- * at the end, and exactly one final newline.
+ * at the end, and exactly one final newline. Text inside a string is its
+ * value, so a line that starts in one keeps its `original` indent and a line
+ * that ends in one keeps its trailing spaces.
  */
-export function finishPythonSource(source: string): string {
-  return `${source.replace(/[ \t]+$/gm, "").replace(/\n+$/, "")}\n`;
+export function finishPythonSource(
+  source: string,
+  inString: readonly StringEdges[] = [],
+  original?: string,
+): string {
+  const before = original?.split("\n");
+  const lines = source.split("\n").map((line, index) => {
+    const edges = inString[index];
+    const kept = edges?.start && before?.[index] !== undefined ? before[index] : line;
+    return edges?.end ? kept : kept.replace(/[ \t]+$/, "");
+  });
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
 }
