@@ -96,10 +96,11 @@ describe("buildSource and parseResults", () => {
         { call: "new Date(0)", expect: "new Date(5)" },
         { call: "({})", expect: "new Map()" },
         { call: "new Map([[1, 2]])", expect: "new Map([[1, 2]])" },
+        { call: "new Set([1, 2])", expect: "new Set([2, 1])" },
       ],
     });
-    const results = parseResults(runJs(buildSource(kinds, "", marker)), marker, 4);
-    expect(results.map((result) => result.pass)).toEqual([false, false, false, true]);
+    const results = parseResults(runJs(buildSource(kinds, "", marker)), marker, 5);
+    expect(results.map((result) => result.pass)).toEqual([false, false, false, true, true]);
   });
 
   it("fails a list with an extra empty slot", () => {
@@ -390,5 +391,9 @@ describe("indentText", () => {
     const next = indentText("one\ntwo\nthree", 5, 9, "  ");
     expect(next.value).toBe("one\n  two\n  three");
     expect(next.value.slice(next.start, next.end)).toBe("wo\n  t");
+  });
+
+  it("leaves the next line alone when the selection ends at its start", () => {
+    expect(indentText("one\ntwo", 0, 4, "  ").value).toBe("  one\ntwo");
   });
 });

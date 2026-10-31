@@ -122,7 +122,11 @@ function __same(a, b) {
   if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
   if (a instanceof Date) return a.getTime() === b.getTime();
   if (a instanceof RegExp) return String(a) === String(b);
-  if (a instanceof Map || a instanceof Set) return __same([...a], [...b]);
+  if (a instanceof Map || a instanceof Set) {
+    const listA = [...a];
+    const listB = [...b];
+    return listA.length === listB.length && listA.every((x) => listB.some((y) => __same(x, y)));
+  }
   if (Array.isArray(a) && a.length !== b.length) return false;
   const keysA = Object.keys(a);
   const keysB = Object.keys(b);
@@ -358,7 +362,7 @@ export function indentText(
     return { value: value.slice(0, start) + indent + value.slice(end), start: caret, end: caret };
   }
   const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-  const block = value.slice(lineStart, end).replace(/^/gm, indent);
+  const block = value.slice(lineStart, end).replace(/^(?=[\s\S])/gm, indent);
   return {
     value: value.slice(0, lineStart) + block + value.slice(end),
     start: start + indent.length,
