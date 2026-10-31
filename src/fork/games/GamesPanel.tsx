@@ -135,7 +135,7 @@ export function GamesPanel() {
   const [dockWanted, setDockWanted] = useState(
     () => loadDockWidth() ?? Math.round(window.innerWidth * 0.45),
   );
-  const dockWidth = clampDockWidth(dockWanted, bounds.width + MARGIN * 2, MIN_WIDTH);
+  const dockWidth = clampDockWidth(dockWanted, bounds.width, MIN_WIDTH);
 
   // Fork: a table game leaves the grid board parked on its last game.
   const atTable = isTableGame(gameId);
@@ -295,7 +295,8 @@ export function GamesPanel() {
     if (session.docked) {
       const width = clampDockWidth(
         session.startSize.width + session.startX - event.clientX,
-        window.innerWidth,
+        // The margins come out first, so the app keeps its full minimum.
+        window.innerWidth - MARGIN * 2,
         MIN_WIDTH,
       );
       session.size = { width, height: 0 };
