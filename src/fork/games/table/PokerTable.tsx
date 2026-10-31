@@ -51,6 +51,7 @@ import {
   startGame,
   type PokerGame,
 } from "./pokerGame";
+import { handScores, logAction, logBlinds, recapHand, type LoggedAction } from "./pokerRecap";
 import { BUTTON_MARK } from "./sprites";
 import { chipsInPlay, formatTokens, rivalShares, tokenStore } from "./tokens";
 
@@ -61,7 +62,6 @@ const MAX_AGENTS = 5;
 const MIN_AGENTS = 2;
 const EQUITY_RUNS = 300;
 const STREET_MS = 700;
-const AUTO_DEAL_MS = 2500;
 
 const seatSelector = (id: string) => `[data-seat="${id}"]`;
 
@@ -97,6 +97,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   const [thinking, setThinking] = useState<AgentId | null>(null);
   const [raiseTo, setRaiseTo] = useState(0);
   const [lastWords, setLastWords] = useState("");
+  const [log, setLog] = useState<LoggedAction[]>([]);
 
   const root = useRef<HTMLDivElement>(null);
   const shoe = useRef<HTMLDivElement>(null);
@@ -112,6 +113,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   modeRef.current = mode;
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
+  const logRef = useRef<LoggedAction[]>([]);
 
   const stakes = POKER_STAKES[mode];
   const seated = hand ? ids : picked;
@@ -143,6 +145,19 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
+  );
+
+  /** A seat's action: written into the hand's log, then played. */
+  const act = useCallback(
+    (current: PokerState, action: PokerAction) => {
+      const entry = logAction(current, action);
+      if (entry) {
+        logRef.current = [...logRef.current, entry];
+        setLog(logRef.current);
+      }
+      commit(applyAction(current, action));
+    },
+    [commit],
   );
 
   const settle = (done: PokerState, seatIds: string[]) => {
@@ -252,6 +267,8 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     button.current = start.button;
     bluffs.current.clear();
     setLastWords("");
+    logRef.current = logBlinds(start);
+    setLog(logRef.current);
     putGame({
       ...run,
       hands: handNumber,
@@ -281,6 +298,8 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     setHand(null);
     setIds([]);
     setLastWords("");
+    logRef.current = [];
+    setLog([]);
     putGame(null);
     tilt.current.clear();
     bluffs.current.clear();
@@ -321,7 +340,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
       say(id, "thinking", 0.15);
     }
 
-    const act = (equity: number) => {
+    const decide = (equity: number) => {
       if (cancelled) {
         return;
       }
@@ -339,7 +358,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
       }
       setThinking(null);
       speak(id, action, hand, say);
-      commit(applyAction(hand, action));
+      act(hand, action);
     };
 
     const pump = () => {
@@ -352,7 +371,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
         return;
       }
       const left = Math.max(0, delay - (performance.now() - started));
-      timer = setTimeout(() => act(step.value), left);
+      timer = setTimeout(() => decide(step.value), left);
     };
     timer = setTimeout(pump, 0);
     return () => {
@@ -360,23 +379,10 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
       clearTimeout(timer);
       setThinking(null);
     };
-  }, [hand, active, ids, commit, aiRandom, say]);
+  }, [hand, active, ids, commit, act, aiRandom, say]);
 
   const running = game?.result === "playing";
   const ended = !!game && game.result !== "playing";
-
-  // Between hands the next one deals itself; a hidden or paused table waits.
-  useEffect(() => {
-    if (!active || !running || hand?.street !== "done") {
-      return;
-    }
-    const timer = setTimeout(() => {
-      if (gameRef.current?.result === "playing") {
-        dealNext();
-      }
-    }, AUTO_DEAL_MS);
-    return () => clearTimeout(timer);
-  }, [active, running, hand, dealNext]);
 
   const yourTurn = !!hand && hand.street !== "done" && hand.toAct === 0;
   const legal = yourTurn && hand ? legalActions(hand, 0) : null;
@@ -402,12 +408,12 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (!current || current.toAct !== 0 || current.street === "done") {
       return;
     }
-    commit(applyAction(current, legalize(current, action)));
+    act(current, legalize(current, action));
   };
   const fold = () => {
     const current = handRef.current;
     if (current?.toAct === 0 && current.street !== "done") {
-      commit(applyAction(current, { type: "fold" }));
+      act(current, { type: "fold" });
     }
   };
   const raiseNow = (to: number) => {
@@ -494,7 +500,12 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   const you = hand?.seats[0];
   const shown = hand?.result?.shown ?? {};
   const winners = new Set(hand?.result?.pots.flatMap((item) => item.winners) ?? []);
-  const yourScore = shown[0];
+  const done = hand?.street === "done";
+  // Once a hand is over every seat's cards turn up, folded ones too.
+  const scores = done && hand ? handScores(hand) : shown;
+  const yourScore = scores[0];
+  const recap =
+    done && hand ? recapHand(hand, log, [YOU, ...ids.map((id) => AGENTS[id].name)]) : null;
 
   return (
     <TableFrame active={active} onKey={onKey} onExit={onExit} onInput={onInput} label="Poker table">
@@ -509,7 +520,9 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
               const inHand = seat && !seat.out;
               const isOut = !!seat && (seat.out || (hand?.street === "done" && seat.stack <= 0));
               const isThinking = thinking === id;
-              const reveal = seat && shown[seatIndex] !== undefined;
+              const reveal = !!seat && (done || shown[seatIndex] !== undefined);
+              const label =
+                done && seat?.folded ? "folded" : scores[seatIndex] !== undefined ? handName(scores[seatIndex]!) : null;
               return (
                 <div
                   key={id}
@@ -532,7 +545,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                     ) : null}
                   </div>
                   <div className="flex h-[42px] gap-0.5">
-                    {inHand && !seat.folded
+                    {inHand && (!seat.folded || done)
                       ? seat.hole.map((card, index) => (
                           <PixelCard
                             key={index}
@@ -544,9 +557,9 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                       : null}
                   </div>
                   <div className="flex h-3.5 items-center gap-1 font-mono text-[10px] tabular-nums text-content/70">
-                    {reveal ? (
+                    {reveal && label ? (
                       <span className={winners.has(seatIndex) ? "text-[var(--table-win)]" : ""}>
-                        {handName(shown[seatIndex]!)}
+                        {label}
                       </span>
                     ) : seat && seat.bet > 0 ? (
                       <>
@@ -600,6 +613,22 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                 ""
               )}
             </div>
+            {recap ? (
+              <ol
+                data-hand-recap=""
+                aria-label="What happened this hand"
+                className="min-h-0 w-full max-w-[460px] shrink overflow-y-auto px-4 font-mono text-[10px] leading-[14px] text-content/60"
+              >
+                {recap.streets.map((line, index) => (
+                  <li key={`street-${index}`}>{line}</li>
+                ))}
+                {recap.results.map((line, index) => (
+                  <li key={`result-${index}`} className="text-content/85">
+                    {line}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
           </div>
 
           <div className="relative z-10 flex h-[122px] shrink-0 items-end gap-3 px-3 pb-2.5">

@@ -119,7 +119,7 @@ for (const theme of THEMES) {
     await expect(page.locator("[data-table-status]").first()).not.toBeEmpty();
 
     // Tokens are what's on the table: the stack, the bankroll, the score row agree.
-    // Read both in one go, so an auto-dealt next hand can't land in between.
+    // Read both in one go.
     const after = await page.evaluate(() => ({
       saved: JSON.parse(localStorage.getItem("monocode.fork.games.tokens")!).tokens,
       score: Number(
@@ -226,7 +226,7 @@ for (const theme of THEMES) {
   });
 }
 
-test("a stack carries into the next hand, and the next hand deals itself", async ({ page }) => {
+test("a stack carries into the next hand, and the finished hand waits to be read", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, "poker");
   await page.keyboard.press(" ");
@@ -242,11 +242,21 @@ test("a stack carries into the next hand, and the next hand deals itself", async
     page.locator('[data-table-board="Poker table"] [data-table-status]'),
   ).toContainText("blinds 25/50 · hand 2");
 
-  // A known carried stack, and no key: the next hand deals itself from it.
+  // The hand stays up: every seat's cards face up, and what happened in words.
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-seat]:not([data-seat="you"]) [data-card="back"]'),
+  ).toHaveCount(0);
+  const recap = page.locator("[data-hand-recap] li");
+  await expect(recap.first()).toContainText(/^Preflop: blinds /);
+  await expect(recap.last()).toContainText(/(win|wins|take|takes|split|back)/);
+  await page.waitForTimeout(4000);
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done");
+
+  // A known carried stack: Space deals the next hand from it.
   await setPokerStacks(page, [4200, 5000, 5000, 5000, 5000]);
-  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop", {
-    timeout: 8000,
-  });
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop");
+  await expect(page.locator("[data-hand-recap]")).toHaveCount(0);
   expect((await youStack(page)) + (await youBet(page))).toBe(4200);
 });
 
@@ -283,7 +293,7 @@ test("a game played to the end shows the result and New game", async ({ page }) 
     timeout: 60_000,
   });
 
-  // Park the table so the auto-deal cannot start a hand under the seam.
+  // Park the table while the seam sets the stacks.
   await pickGame(page, "blackjack");
   await setPokerStacks(page, [9200, 0, 0, 0, 0], 31);
   await pickGame(page, "poker");
