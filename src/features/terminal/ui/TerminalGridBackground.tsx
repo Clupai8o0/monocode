@@ -65,6 +65,8 @@ export type GridGameHost = {
   onInput(): void;
   /** Fork: P, before any game key. */
   onPauseKey?(): void;
+  /** Fork: F, before any game key. */
+  onFullscreenKey?(): void;
 };
 
 type Board = {
@@ -623,6 +625,15 @@ export function TerminalGridBackground({
         event.stopPropagation();
         // A held P toggles once.
         if (!event.repeat) pauseKey();
+        return;
+      }
+      // Fork: F fills the panel, without playing a move.
+      const fullscreenKey = hostRef.current?.onFullscreenKey;
+      if ((event.key === "f" || event.key === "F") && fullscreenKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        // A held F toggles once.
+        if (!event.repeat) fullscreenKey();
         return;
       }
       // Fork: while it's the board's turn, letters don't reach the app, where

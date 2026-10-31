@@ -211,10 +211,11 @@ test("keys belong to the board only while it has focus; notices still show", asy
   await expect(page.locator('[data-action="fold"]')).toBeVisible();
 
   // An agent's waiting: the notice shows, and a seated agent passes it on.
-  await page.locator('[data-table-board="Poker table"]').click({ position: { x: 5, y: 5 } });
+  // Click clear of the panel's resize edges, which own its outer pixels.
+  await page.locator('[data-table-board="Poker table"]').click({ position: { x: 30, y: 30 } });
   await page.evaluate(() => (window as never as { __setAgents: (a: number, b: number) => void }).__setAgents(1, 1));
   await expect(page.getByRole("status").filter({ hasText: "An agent needs you" })).toBeVisible();
-  await page.locator('[data-table-board="Poker table"]').click({ position: { x: 5, y: 5 } });
+  await page.locator('[data-table-board="Poker table"]').click({ position: { x: 30, y: 30 } });
   await expect(page.getByRole("status").filter({ hasText: "An agent needs you" })).toHaveCount(0);
 
   // New game hands the keys back to the table, not the composer.
@@ -385,4 +386,68 @@ test("only one card game holds chips at a time, and New game leaves a parked gri
   await page.getByRole("button", { name: "New game" }).click();
   await page.getByRole("tab", { name: "agent run" }).click();
   expect(await tokens(page)).toBeGreaterThanOrEqual(before);
+});
+
+test("full screen gives poker the window, with every control inside", async ({
+  page,
+}, testInfo) => {
+  const dir = process.env.GAME_SHOTS ?? testInfo.outputDir;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const panel = await open(page, "poker");
+  const chip = page.locator("[data-fork-games-fullscreen]");
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+
+  const box = (await panel.boundingBox())!;
+  expect(box.x).toBe(10);
+  expect(box.y).toBe(10);
+  expect(box.width).toBe(1260);
+  expect(box.height).toBe(756);
+  const footer = (await page.locator("footer").boundingBox())!;
+  expect(footer.y).toBeGreaterThanOrEqual(box.y + box.height);
+
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-action="fold"]')).toBeVisible({
+    timeout: 30_000,
+  });
+  await shoot(page, "poker-full-screen", dir);
+
+  // Every control the hand offers sits inside the panel, not clipped by it.
+  const controls = page.locator(
+    '[data-fork-games-panel] [data-action], [data-fork-games-panel] [data-you-cards]',
+  );
+  const count = await controls.count();
+  expect(count).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    const control = controls.nth(i);
+    if (!(await control.isVisible())) {
+      continue;
+    }
+    const at = (await control.boundingBox())!;
+    expect(at.x).toBeGreaterThanOrEqual(box.x);
+    expect(at.y).toBeGreaterThanOrEqual(box.y);
+    expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width);
+    expect(at.y + at.height).toBeLessThanOrEqual(box.y + box.height);
+  }
+});
+
+test("F folds in poker, and never goes full screen there", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const panel = await open(page, "poker");
+  const chip = page.locator("[data-fork-games-fullscreen]");
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-action="fold"]')).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.keyboard.press("f");
+  await expect(phase(page, "Poker table")).toHaveAttribute(
+    "data-table-phase",
+    "done",
+    { timeout: 60_000 },
+  );
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+  expect((await panel.boundingBox())!.width).toBe(720);
 });

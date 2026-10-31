@@ -24,6 +24,34 @@ const score = async (page: Page) =>
 
 const board = (page: Page) => page.locator("[data-grid-board]");
 const pauseChip = (page: Page) => page.locator("[data-fork-games-pause]");
+const panel = (page: Page) => page.getByRole("dialog", { name: "Games" });
+const fullscreenChip = (page: Page) =>
+  page.locator("[data-fork-games-fullscreen]");
+const grip = (page: Page) => page.locator("[data-fork-games-resize]");
+
+const canvasSize = (page: Page) =>
+  board(page)
+    .locator("canvas")
+    .first()
+    .evaluate((canvas) => {
+      const { width, height } = canvas as HTMLCanvasElement;
+      return { width, height };
+    });
+
+/** Drags the grip by a screen delta, staying inside the viewport. */
+async function dragGrip(page: Page, dx: number, dy: number) {
+  const box = (await grip(page).boundingBox())!;
+  const fromX = box.x + box.width / 2;
+  const fromY = box.y + box.height / 2;
+  await page.mouse.move(fromX, fromY);
+  await page.mouse.down();
+  await page.mouse.move(
+    Math.max(1, Math.min(1279, fromX + dx)),
+    Math.max(1, Math.min(799, fromY + dy)),
+    { steps: 8 },
+  );
+  await page.mouse.up();
+}
 
 /** Cells lit on the live canvas: the board's own proof it is drawing. */
 const litPixels = (page: Page) =>
@@ -220,4 +248,159 @@ test("agents finishing or waiting stop the game until a key", async ({ page }, t
   await expect(page.getByRole("status")).toHaveText("Agents finished");
   await board(page).click();
   await expect(page.getByRole("status")).toHaveCount(0);
+});
+
+test("Full screen fills the window above the footer, and back", async ({ page }) => {
+  await open(page);
+  await fullscreenChip(page).click();
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(fullscreenChip(page)).toHaveText("Exit full screen");
+
+  const full = (await panel(page).boundingBox())!;
+  expect(full.x).toBe(10);
+  expect(full.y).toBe(10);
+  expect(full.width).toBe(1260);
+  expect(full.height).toBe(756);
+  // The footer keeps its room, and the resize chrome steps out of the way.
+  const footer = (await page.locator("footer").boundingBox())!;
+  expect(footer.y).toBeGreaterThanOrEqual(full.y + full.height);
+  await expect(grip(page)).toHaveCount(0);
+
+  await fullscreenChip(page).click();
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(fullscreenChip(page)).toHaveText("Full screen");
+  const back = (await panel(page).boundingBox())!;
+  expect(back.width).toBe(600);
+  expect(back.height).toBe(548);
+});
+
+test("F toggles full screen on a grid game, and Esc still hides", async ({ page }) => {
+  await open(page);
+  await expect(board(page)).toBeFocused();
+  await page.keyboard.press("f");
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "true");
+  expect((await panel(page).boundingBox())!.width).toBe(1260);
+  await page.keyboard.press("f");
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "false");
+
+  await page.keyboard.press("f");
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toBeHidden();
+
+  // The choice is kept, so reopening comes back full screen.
+  await page.reload();
+  await page.locator("[data-fork-games]").click();
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "true");
+  expect((await panel(page).boundingBox())!.width).toBe(1260);
+});
+
+test("dragging the grip grows the panel and the board, without resuming", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(board(page)).toBeFocused();
+  await page.keyboard.press("p");
+  await expect(page.getByRole("status")).toHaveText(
+    "paused · P or click to resume",
+  );
+  await expect.poll(async () => (await canvasSize(page)).width).toBeGreaterThan(0);
+  const before = (await panel(page).boundingBox())!;
+  const canvas = await canvasSize(page);
+
+  await dragGrip(page, -100, -60);
+
+  const after = (await panel(page).boundingBox())!;
+  expect(after.width).toBe(before.width + 100);
+  expect(after.height).toBe(before.height + 60);
+  await expect(page.getByRole("status")).toHaveText(
+    "paused · P or click to resume",
+  );
+  await expect
+    .poll(async () => (await canvasSize(page)).width)
+    .toBeGreaterThan(canvas.width);
+  await expect
+    .poll(async () => (await canvasSize(page)).height)
+    .toBeGreaterThan(canvas.height);
+});
+
+test("a dragged size is kept after hiding, reopening and reloading", async ({
+  page,
+}) => {
+  await open(page);
+  await dragGrip(page, -80, -40);
+  const grown = (await panel(page).boundingBox())!;
+  expect(grown.width).toBe(680);
+  expect(grown.height).toBe(588);
+
+  await page.getByRole("button", { name: "Hide" }).click();
+  await expect(panel(page)).toBeHidden();
+  await page.locator("[data-fork-games]").click();
+  await expect(panel(page)).toBeVisible();
+  const reopened = (await panel(page).boundingBox())!;
+  expect(reopened.width).toBe(680);
+  expect(reopened.height).toBe(588);
+
+  await page.reload();
+  await page.locator("[data-fork-games]").click();
+  await expect(panel(page)).toBeVisible();
+  const reloaded = (await panel(page).boundingBox())!;
+  expect(reloaded.width).toBe(680);
+  expect(reloaded.height).toBe(588);
+});
+
+test("the panel stops at its minimum size", async ({ page }) => {
+  await open(page);
+  const before = (await panel(page).boundingBox())!;
+  await dragGrip(page, 900, 900);
+  const after = (await panel(page).boundingBox())!;
+  expect(after.width).toBe(420);
+  expect(after.height).toBe(360);
+  // Anchored bottom-right, so it grew towards the window's corner.
+  expect(after.x - before.x).toBe(before.width - 420);
+  expect(after.y - before.y).toBe(before.height - 360);
+});
+
+test("double-clicking the grip resets the grid default", async ({ page }) => {
+  await open(page);
+  await dragGrip(page, -100, -60);
+  expect((await panel(page).boundingBox())!.width).toBe(700);
+  await grip(page).dblclick();
+  await expect
+    .poll(async () => (await panel(page).boundingBox())!.width)
+    .toBe(600);
+  expect((await panel(page).boundingBox())!.height).toBe(548);
+});
+
+test("a smaller window takes the room back", async ({ page }) => {
+  await open(page);
+  await dragGrip(page, -100, -60);
+  expect((await panel(page).boundingBox())!.width).toBe(700);
+
+  await page.setViewportSize({ width: 640, height: 500 });
+  await expect
+    .poll(async () => (await panel(page).boundingBox())!.width)
+    .toBe(640 - 20);
+  const box = (await panel(page).boundingBox())!;
+  expect(box.x).toBe(10);
+  expect(box.y).toBe(10);
+  expect(box.y + box.height).toBe(500 - 34);
+});
+
+test("grid and table sizes are kept apart", async ({ page }) => {
+  await open(page);
+  await dragGrip(page, -80, -40);
+  expect((await panel(page).boundingBox())!.width).toBe(680);
+
+  await page.getByRole("tab", { name: "poker" }).click();
+  await expect
+    .poll(async () => (await panel(page).boundingBox())!.width)
+    .toBe(720);
+  expect((await panel(page).boundingBox())!.height).toBe(560);
+
+  await page.getByRole("tab", { name: "blocks" }).click();
+  await expect
+    .poll(async () => (await panel(page).boundingBox())!.width)
+    .toBe(680);
+  expect((await panel(page).boundingBox())!.height).toBe(588);
 });
