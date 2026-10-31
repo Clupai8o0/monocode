@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import {
   ContinuedFromView,
   ContinueElsewhereButton,
-} from "../../src/fork/continueElsewhere/ContinueElsewhere";
+} from "../../src/fork/continueElsewhere/ContinueElsewhereUi";
 import { UsageLimitNotice } from "../../src/features/sessions/ui/UsageLimitNotice";
 import "../../src/styles/index.css";
 

@@ -74,7 +74,7 @@ function Lab() {
     return null;
   }
   const running = new Map(
-    [...sessions].map(([machineId, rows]) => [machineId, liveSessions(rows).length]),
+    [...sessions].map(([machineId, rows]) => [machineId, liveSessions(rows).filter((row) => row.state === "running").length]),
   );
   const chip = chipFor(state, running);
   const attention = chip.attention.length > 0;

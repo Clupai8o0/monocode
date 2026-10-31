@@ -3,7 +3,7 @@ import { DevicePanel } from "../../../fork/device/DevicePanel";
 import {
   ContinuedFromCard,
   ContinueElsewhereButton,
-} from "../../../fork/continueElsewhere/ContinueElsewhere";
+} from "../../../fork/continueElsewhere/ContinueElsewhereUi";
 import { FollowUpCoachMark } from "../../../fork/featureCoach/FollowUpCoachMark";
 import { noteUserWorkspaceChoice } from "../../../fork/autoWorktree/autoWorktree";
 import { useAutoWorktree } from "../../../fork/autoWorktree/useAutoWorktree";
