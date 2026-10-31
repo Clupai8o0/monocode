@@ -457,6 +457,60 @@ test("a LeetCode problem becomes a drill, and an unsupported one says why", asyn
   await page.screenshot({ path: `${dir}/code-leetcode.png` });
 });
 
+test("a connected LeetCode account shows what you solved, Dojo's picks and your submissions", async ({
+  page,
+}, testInfo) => {
+  const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
+  await page.goto("/tests/browser/code-drills.html");
+  const account = page.locator("[data-fork-leetcode-account]");
+  await expect(account.getByRole("button", { name: "Connect account" })).toBeVisible();
+
+  await account.getByRole("button", { name: "Paste" }).click();
+  await page.getByLabel("LEETCODE_SESSION").fill("bad");
+  await page.getByLabel("csrftoken").fill("x");
+  await page.locator("[data-fork-leetcode-paste]").getByRole("button", { name: "Connect" }).click();
+  await expect(page.locator("[data-fork-code-note]")).toContainText("did not accept");
+
+  await page.getByLabel("LEETCODE_SESSION").fill("good");
+  await page.locator("[data-fork-leetcode-paste]").getByRole("button", { name: "Connect" }).click();
+  await expect(account.getByRole("button", { name: "@sam" })).toBeVisible();
+  await expect(page.locator("[data-fork-leetcode-paste]")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { dojoLeetcode?: string }).dojoLeetcode ?? ""))
+    .toContain('"3sum"');
+
+  await account.getByRole("button", { name: "@sam" }).click();
+  await expect(page.locator("[data-fork-leetcode-summary]")).toContainText("1 solved");
+  await expect(page.locator("[data-fork-leetcode-summary]")).toContainText("1 tried");
+
+  // Dojo's pick is marked solved, and loads as a drill.
+  const picks = page.locator("[data-fork-leetcode-picks]");
+  await expect(picks).toContainText("Two Sum ✓");
+  await picks.getByRole("button", { name: /Two Sum/ }).click();
+  await expect(page.locator(table)).toContainText("1. Two Sum");
+  await expect(page.locator('[data-fork-leetcode-state="solved"]')).toBeVisible();
+
+  // A past JavaScript answer opens in the editor; C++ has no Open.
+  await page.locator("[data-fork-leetcode-submissions-toggle]").click();
+  const list = page.locator("[data-fork-leetcode-submissions]");
+  await expect(list).toContainText("Accepted");
+  await expect(list).toContainText("Wrong Answer");
+  await expect(list.getByRole("button", { name: "Open" })).toHaveCount(1);
+  await list.getByRole("button", { name: "Open" }).click();
+  await expect(page.locator(".cm-content")).toContainText("my old answer");
+  await expect(page.locator("[data-fork-code-note]")).toContainText("accepted submission");
+
+  await account.getByRole("button", { name: "Pick for me" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { dojoPrompt?: string }).dojoPrompt ?? ""))
+    .toContain("leetcode-picks.json");
+  await page.screenshot({ path: `${dir}/code-leetcode-account.png` });
+
+  // The account line is still open from before.
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await expect(account.getByRole("button", { name: "Connect account" })).toBeVisible();
+});
+
 test("a misspelled variable is flagged and the quick fix clears it", async ({
   page,
 }) => {

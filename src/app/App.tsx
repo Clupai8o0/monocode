@@ -8994,15 +8994,23 @@ function Workspace({
 
   // Fork: the Games panel's Code tab opens the Dojo Mono from its Ask Dojo button.
   useEffect(() => {
-    const onOpenDojo = () => {
+    // A prompt in the event's detail (Pick for me) is sent to Dojo's chat.
+    const onOpenDojo = (event: Event) => {
       const dojoId = starterMonoId(DOJO_MONO);
-      if (dojoId) {
-        void onOpenMono(dojoId);
+      if (!dojoId) {
+        return;
       }
+      const prompt = (event as CustomEvent<{ prompt?: string } | null>).detail?.prompt;
+      void onOpenMono(dojoId).then(() => {
+        const sessionId = monoViewIdRef.current;
+        if (prompt && sessionId) {
+          void submitSession(sessionId, prompt, [], { followUpBehavior: "queue" });
+        }
+      });
     };
     window.addEventListener(OPEN_DOJO_EVENT, onOpenDojo);
     return () => window.removeEventListener(OPEN_DOJO_EVENT, onOpenDojo);
-  }, [onOpenMono]);
+  }, [onOpenMono, submitSession]);
 
   // onApproval is created once; it reaches the current helper through this.
   const decideMonoBlockRef = useRef<

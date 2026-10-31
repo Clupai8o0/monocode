@@ -1,7 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/styles/index.css";
-import { CodeTable, type RunCode } from "../../src/fork/games/code/CodeTable";
+import {
+  CodeTable,
+  type LeetcodeAccountApi,
+  type RunCode,
+} from "../../src/fork/games/code/CodeTable";
 import { gamesPanel } from "../../src/fork/games/gamesPanelStore";
 import type { LeetcodeFetch } from "../../src/fork/games/code/leetcode";
 import {
@@ -64,6 +68,81 @@ const drills: Drill[] = [
 
 // Stands in for fork_leetcode_fetch: two-sum works, tree is turned away.
 const fetchLeetcode: LeetcodeFetch = async (kind, value) => {
+  if (kind === "progress") {
+    return {
+      userProgressQuestionList: {
+        totalNum: 2,
+        questions: [
+          {
+            titleSlug: "two-sum",
+            title: "Two Sum",
+            frontendId: "1",
+            questionStatus: "SOLVED",
+            difficulty: "EASY",
+            numSubmitted: 3,
+            topicTags: [{ name: "Array" }],
+          },
+          {
+            titleSlug: "3sum",
+            title: "3Sum",
+            frontendId: "15",
+            questionStatus: "ATTEMPTED",
+            difficulty: "MEDIUM",
+            numSubmitted: 2,
+            topicTags: [{ name: "Array" }],
+          },
+        ],
+      },
+    };
+  }
+  if (kind === "recent") {
+    return { submissionList: { hasNext: false, submissions: [] } };
+  }
+  if (kind === "profile") {
+    return {
+      matchedUser: {
+        submitStatsGlobal: {
+          acSubmissionNum: [
+            { difficulty: "All", count: 1 },
+            { difficulty: "Easy", count: 1 },
+          ],
+        },
+        tagProblemCounts: { fundamental: [{ tagName: "Array", problemsSolved: 1 }] },
+      },
+    };
+  }
+  if (kind === "submissions") {
+    return {
+      questionSubmissionList: {
+        submissions: [
+          {
+            id: "101",
+            title: "Two Sum",
+            titleSlug: value,
+            statusDisplay: "Accepted",
+            lang: "javascript",
+            timestamp: String(Math.floor(Date.now() / 1000) - 7200),
+          },
+          {
+            id: "100",
+            title: "Two Sum",
+            titleSlug: value,
+            statusDisplay: "Wrong Answer",
+            lang: "cpp",
+            timestamp: String(Math.floor(Date.now() / 1000) - 9000),
+          },
+        ],
+      },
+    };
+  }
+  if (kind === "submission") {
+    return {
+      submissionDetails: {
+        code: "var twoSum = function(nums, target) {\n  // my old answer\n  return [0, 1];\n};\n",
+        lang: { name: "javascript" },
+      },
+    };
+  }
   if (kind !== "question") {
     return {};
   }
@@ -162,6 +241,29 @@ function setScriptedRun(result: Partial<CodeRunResult> | null) {
     : null;
 }
 
+// Stands in for the keychain and the sign-in window: "good" is the only
+// session LeetCode takes, and Dojo has picked two-sum.
+let connected: string | null = null;
+const leetcodeAccount: LeetcodeAccountApi = {
+  current: async () => connected,
+  connect: async () => undefined,
+  paste: async (session) => {
+    if (session !== "good") {
+      throw new Error("LeetCode did not accept that session. Sign in again.");
+    }
+    connected = "sam";
+    return connected;
+  },
+  disconnect: async () => {
+    connected = null;
+  },
+  onChange: () => () => undefined,
+  writeForDojo: async (text) => {
+    (window as unknown as { dojoLeetcode: string }).dojoLeetcode = text;
+  },
+  readPicks: async () => JSON.stringify([{ slug: "two-sum", why: "warm-up on hashing" }]),
+};
+
 // Stands in for the panel's game keys: editor typing must never reach it.
 const page = window as unknown as {
   gameKeys: string[];
@@ -173,8 +275,11 @@ page.dojoOpened = false;
 window.addEventListener("keydown", (event) => {
   page.gameKeys.push(event.key);
 });
-window.addEventListener(OPEN_DOJO_EVENT, () => {
+window.addEventListener(OPEN_DOJO_EVENT, (event) => {
   page.dojoOpened = true;
+  (window as unknown as { dojoPrompt?: string }).dojoPrompt = (
+    event as CustomEvent<{ prompt?: string } | null>
+  ).detail?.prompt;
 });
 
 /** One drill Dojo writes after the tab was first opened. */
@@ -264,6 +369,7 @@ createRoot(document.getElementById("root")!).render(
         drills={drills}
         hasDojo={() => true}
         fetchLeetcode={fetchLeetcode}
+        leetcodeAccount={leetcodeAccount}
       />
     </div>
   ),

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 import { readTextFile, writeTextFile } from "../../../platform/tauri/fs";
 import { DOJO_FOLDER, DOJO_MONO } from "../../starterMonos/dojoMono";
@@ -17,6 +18,25 @@ import {
   type LeetcodeFetch,
   type LeetcodeRequest,
 } from "./leetcode";
+import {
+  LEETCODE_ACCOUNT_EVENT,
+  SYNC_EVERY_MS,
+  ago,
+  drillLanguageFor,
+  drillSlug,
+  loadSnapshot,
+  loadSubmissionCode,
+  loadSubmissions,
+  parsePicks,
+  pickPrompt,
+  problemState,
+  saveSnapshot,
+  snapshotForDojo,
+  syncLeetcode,
+  type LeetcodePick,
+  type LeetcodeSnapshot,
+  type LeetcodeSubmission,
+} from "./leetcodeAccount";
 import {
   CODE_PROGRESS_EVENT,
   OPEN_DOJO_EVENT,
@@ -67,6 +87,57 @@ const nativeRunCode: RunCode = (language, source) =>
 
 const nativeFetchLeetcode: LeetcodeFetch = (kind, value) =>
   invoke<unknown>("fork_leetcode_fetch", { kind, value });
+
+/** The account side of LeetCode: sign-in, sign-out, and Dojo's files. */
+export type LeetcodeAccountApi = {
+  /** The connected username, or null. */
+  current: () => Promise<string | null>;
+  /** Opens the sign-in window; the account arrives through onChange. */
+  connect: () => Promise<void>;
+  /** A pasted LEETCODE_SESSION and csrftoken; gives back the username. */
+  paste: (session: string, csrf: string) => Promise<string>;
+  disconnect: () => Promise<void>;
+  onChange: (listener: (event: { username?: string | null; error?: string | null }) => void) => () => void;
+  /** leetcode.json for Dojo, only while its folder exists. */
+  writeForDojo: (text: string) => Promise<void>;
+  /** Dojo's leetcode-picks.json, or "" when there is none. */
+  readPicks: () => Promise<string>;
+};
+
+async function dojoFolderExists(): Promise<boolean> {
+  const found = await invoke<{ isDir: boolean }[]>("inspect_paths", { paths: [DOJO_FOLDER] });
+  return found.some((entry) => entry.isDir);
+}
+
+const nativeLeetcodeAccount: LeetcodeAccountApi = {
+  current: () => invoke<string | null>("fork_leetcode_account"),
+  connect: () => invoke<void>("fork_leetcode_connect"),
+  paste: (session, csrf) => invoke<string>("fork_leetcode_connect_paste", { session, csrf }),
+  disconnect: () => invoke<void>("fork_leetcode_disconnect"),
+  onChange: (listener) => {
+    const pending = listen<{ username?: string | null; error?: string | null }>(
+      LEETCODE_ACCOUNT_EVENT,
+      ({ payload }) => listener(payload),
+    );
+    // Outside the app (tests) there is nothing to listen to.
+    pending.catch(() => undefined);
+    return () => {
+      void pending.then((unlisten) => unlisten()).catch(() => undefined);
+    };
+  },
+  writeForDojo: async (text) => {
+    if (await dojoFolderExists()) {
+      await writeTextFile(`${DOJO_FOLDER}/leetcode.json`, text);
+    }
+  },
+  readPicks: async () => {
+    try {
+      return await readTextFile(`${DOJO_FOLDER}/leetcode-picks.json`);
+    } catch {
+      return "";
+    }
+  },
+};
 
 /** Ask Dojo only closes the panel while its Mono is still there. */
 const hasDojoMono = () => starterMonoId(DOJO_MONO) !== undefined;
@@ -131,6 +202,7 @@ export function CodeTable({
   saveProgressFile = saveDojoProgress,
   hasDojo = hasDojoMono,
   fetchLeetcode = nativeFetchLeetcode,
+  leetcodeAccount = nativeLeetcodeAccount,
 }: {
   mode: ArcadeMode;
   runId: number;
@@ -144,6 +216,7 @@ export function CodeTable({
   saveProgressFile?: typeof saveDojoProgress;
   hasDojo?: () => boolean;
   fetchLeetcode?: LeetcodeFetch;
+  leetcodeAccount?: LeetcodeAccountApi;
 }) {
   const [progress, setProgress] = useState<CodeProgress>(loadProgress);
   const progressRef = useRef(progress);
@@ -177,6 +250,17 @@ export function CodeTable({
   const [leetcodeText, setLeetcodeText] = useState("");
   const [leetcodeBusy, setLeetcodeBusy] = useState(false);
   const [nameWarnings, setNameWarnings] = useState(0);
+  // The connected LeetCode account: undefined until the keychain answers.
+  const [lcUser, setLcUser] = useState<string | null | undefined>(undefined);
+  const [lcSnapshot, setLcSnapshot] = useState<LeetcodeSnapshot | null>(loadSnapshot);
+  const [lcSyncing, setLcSyncing] = useState(false);
+  const [lcPanel, setLcPanel] = useState<"account" | "paste" | null>(null);
+  const [lcPaste, setLcPaste] = useState({ session: "", csrf: "" });
+  const [lcPicks, setLcPicks] = useState<LeetcodePick[]>([]);
+  const [lcSubmissions, setLcSubmissions] = useState<{
+    slug: string;
+    list: LeetcodeSubmission[] | null;
+  } | null>(null);
   const editorRef = useRef<CodeEditorHandle>(null);
 
   const drill = drills.find((item) => item.id === currentId) ?? drills[0] ?? null;
@@ -274,6 +358,171 @@ export function CodeTable({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, active]);
+
+  const syncAccount = async (username: string) => {
+    setLcSyncing(true);
+    try {
+      const snapshot = await syncLeetcode(fetchLeetcode, username);
+      setLcSnapshot(snapshot);
+      saveSnapshot(snapshot);
+      await leetcodeAccount.writeForDojo(snapshotForDojo(snapshot)).catch(() => undefined);
+      return true;
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally {
+      setLcSyncing(false);
+    }
+  };
+
+  const onConnected = (username: string) => {
+    setLcUser(username);
+    setLcPanel(null);
+    setLcPaste({ session: "", csrf: "" });
+    setNote(`Connected to LeetCode as ${username}. Loading your problems…`);
+    void syncAccount(username).then((ok) => {
+      if (ok) {
+        setNote(null);
+      }
+    });
+  };
+  const onConnectedRef = useRef(onConnected);
+  onConnectedRef.current = onConnected;
+
+  // Who is connected, and the sign-in window's answer when it comes.
+  useEffect(() => {
+    let live = true;
+    void leetcodeAccount
+      .current()
+      .then((name) => {
+        if (live) {
+          setLcUser(name);
+        }
+      })
+      .catch(() => {
+        if (live) {
+          setLcUser(null);
+        }
+      });
+    const stop = leetcodeAccount.onChange(({ username, error }) => {
+      if (username) {
+        onConnectedRef.current(username);
+      } else if (error) {
+        setNote(error);
+      }
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [leetcodeAccount]);
+
+  // A stale sync runs again, and Dojo's picks are read, whenever the tab shows.
+  useEffect(() => {
+    if (active === false || !lcUser) {
+      return;
+    }
+    let live = true;
+    if (!lcSnapshot || lcSnapshot.username !== lcUser || Date.now() - lcSnapshot.syncedAt > SYNC_EVERY_MS) {
+      void syncAccount(lcUser);
+    }
+    void leetcodeAccount
+      .readPicks()
+      .then((text) => {
+        if (live) {
+          setLcPicks(parsePicks(text));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // syncAccount reads the props of the moment; showing the tab is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, lcUser]);
+
+  const connectAccount = () => {
+    onInput?.();
+    setNote("Sign in on the LeetCode window. It closes by itself once you are in.");
+    leetcodeAccount.connect().catch((error: unknown) => {
+      setNote(error instanceof Error ? error.message : String(error));
+    });
+  };
+
+  const pasteAccount = () => {
+    onInput?.();
+    setNote("Checking with LeetCode…");
+    leetcodeAccount
+      .paste(lcPaste.session, lcPaste.csrf)
+      .then(onConnected)
+      .catch((error: unknown) => {
+        setNote(error instanceof Error ? error.message : String(error));
+      });
+  };
+
+  const disconnectAccount = () => {
+    onInput?.();
+    void leetcodeAccount
+      .disconnect()
+      .then(() => {
+        setLcUser(null);
+        setLcSnapshot(null);
+        saveSnapshot(null);
+        setLcPanel(null);
+        setLcSubmissions(null);
+        setNote("Disconnected from LeetCode.");
+      })
+      .catch((error: unknown) => {
+        setNote(error instanceof Error ? error.message : String(error));
+      });
+  };
+
+  const askDojo = (prompt?: string) => {
+    onInput?.();
+    if (!hasDojo()) {
+      setNote("Dojo was removed.");
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(OPEN_DOJO_EVENT, { detail: prompt ? { prompt } : null }));
+    // Dojo's chat on the left, this drill on the right.
+    gamesPanel.dock(true);
+  };
+
+  const showSubmissions = async (slug: string) => {
+    if (lcSubmissions?.slug === slug) {
+      setLcSubmissions(null);
+      return;
+    }
+    onInput?.();
+    setLcSubmissions({ slug, list: null });
+    try {
+      const list = await loadSubmissions(fetchLeetcode, slug);
+      setLcSubmissions((current) => (current?.slug === slug ? { slug, list } : current));
+    } catch (error) {
+      setLcSubmissions(null);
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** Puts a past submission's code into the drill of its language. */
+  const openSubmission = async (slug: string, submission: LeetcodeSubmission) => {
+    const target = drillLanguageFor(submission.lang);
+    const id = target ? `lc-${slug}-${target === "python" ? "py" : "js"}` : null;
+    const into = id ? drillsRef.current.find((item) => item.id === id) : undefined;
+    if (!into) {
+      setNote(`The Code tab can't run ${submission.lang || "that language"}.`);
+      return;
+    }
+    onInput?.();
+    try {
+      const { code: past } = await loadSubmissionCode(fetchLeetcode, submission.id);
+      setCodeById((current) => ({ ...current, [into.id]: past }));
+      goTo(into);
+      setNote(`Loaded your ${submission.status.toLowerCase()} submission from ${ago(submission.time)}.`);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const fetchFromLeetcode = async (request: LeetcodeRequest | null) => {
     if (leetcodeBusy) {
@@ -393,6 +642,8 @@ export function CodeTable({
   const now = Date.now();
   const streak = streakDays(progress, now);
   const canSeeSolution = session.failed >= 2;
+  const slug = drillSlug(drill.id);
+  const slugState = slug ? problemState(lcSnapshot, slug) : null;
 
   return (
     <div
@@ -492,14 +743,207 @@ export function CodeTable({
         >
           {leetcodeBusy ? "Fetching…" : "Load"}
         </button>
+        <span className="ml-auto flex items-center gap-0.5" data-fork-leetcode-account="">
+          {lcUser ? (
+            <>
+              <button
+                type="button"
+                tabIndex={-1}
+                title="Dojo picks your next problems from your LeetCode history"
+                className={`${CHIP} ${CHIP_OFF}`}
+                data-fork-leetcode-pick=""
+                onClick={() => askDojo(pickPrompt(DOJO_FOLDER))}
+              >
+                Pick for me
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-pressed={lcPanel === "account"}
+                className={`${CHIP} ${lcPanel === "account" ? CHIP_ON : CHIP_OFF}`}
+                onClick={() => setLcPanel(lcPanel === "account" ? null : "account")}
+              >
+                {lcSyncing ? "Syncing…" : `@${lcUser}`}
+              </button>
+            </>
+          ) : lcUser === null ? (
+            <>
+              <button
+                type="button"
+                tabIndex={-1}
+                className={`${CHIP} ${CHIP_OFF}`}
+                data-fork-leetcode-connect=""
+                onClick={connectAccount}
+              >
+                Connect account
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-pressed={lcPanel === "paste"}
+                title="Paste your LeetCode session instead of signing in here"
+                className={`${CHIP} ${lcPanel === "paste" ? CHIP_ON : CHIP_OFF}`}
+                onClick={() => setLcPanel(lcPanel === "paste" ? null : "paste")}
+              >
+                Paste
+              </button>
+            </>
+          ) : null}
+        </span>
       </div>
+
+      {lcPanel === "account" && lcUser ? (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-content/60"
+          data-fork-leetcode-summary=""
+        >
+          {lcSnapshot ? (
+            <span>
+              {lcSnapshot.solved.length} solved ({lcSnapshot.solvedCount.easy} easy,{" "}
+              {lcSnapshot.solvedCount.medium} medium, {lcSnapshot.solvedCount.hard} hard),{" "}
+              {lcSnapshot.attempted.length} tried, synced {ago(lcSnapshot.syncedAt / 1000, now)}
+            </span>
+          ) : (
+            <span>Not synced yet.</span>
+          )}
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={lcSyncing}
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+            onClick={() => void syncAccount(lcUser)}
+          >
+            Sync
+          </button>
+          <button
+            type="button"
+            tabIndex={-1}
+            className={`${CHIP} ${CHIP_OFF}`}
+            onClick={disconnectAccount}
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : null}
+
+      {lcPanel === "paste" && !lcUser ? (
+        <form
+          className="flex flex-wrap items-center gap-1 text-[11px] text-content/60"
+          data-fork-leetcode-paste=""
+          onSubmit={(event) => {
+            event.preventDefault();
+            pasteAccount();
+          }}
+        >
+          <span>From leetcode.com cookies:</span>
+          <input
+            type="password"
+            value={lcPaste.session}
+            placeholder="LEETCODE_SESSION"
+            aria-label="LEETCODE_SESSION"
+            className="h-6 w-36 rounded bg-content/5 px-1.5 text-[11px] text-content placeholder:text-content/35 focus:outline-none"
+            onChange={(event) => setLcPaste({ ...lcPaste, session: event.target.value })}
+          />
+          <input
+            type="password"
+            value={lcPaste.csrf}
+            placeholder="csrftoken"
+            aria-label="csrftoken"
+            className="h-6 w-28 rounded bg-content/5 px-1.5 text-[11px] text-content placeholder:text-content/35 focus:outline-none"
+            onChange={(event) => setLcPaste({ ...lcPaste, csrf: event.target.value })}
+          />
+          <button
+            type="submit"
+            tabIndex={-1}
+            disabled={!lcPaste.session.trim() || !lcPaste.csrf.trim()}
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+          >
+            Connect
+          </button>
+        </form>
+      ) : null}
+
+      {lcUser && lcPicks.length ? (
+        <div className="flex flex-wrap items-center gap-0.5" data-fork-leetcode-picks="">
+          <span className="pr-1 text-[11px] text-content/45">Dojo picks</span>
+          {lcPicks.map((pick) => {
+            const state = problemState(lcSnapshot, pick.slug);
+            const known =
+              lcSnapshot?.solved.find((item) => item.slug === pick.slug) ??
+              lcSnapshot?.attempted.find((item) => item.slug === pick.slug);
+            return (
+              <button
+                key={pick.slug}
+                type="button"
+                tabIndex={-1}
+                disabled={leetcodeBusy}
+                title={pick.why || undefined}
+                className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+                onClick={() => void fetchFromLeetcode({ kind: "question", slug: pick.slug })}
+              >
+                {known?.title ?? pick.slug}
+                {state === "solved" ? " ✓" : state === "tried" ? " ·" : ""}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="flex items-baseline gap-2">
         <h3 className="text-[13px] font-medium text-content">{drill.title}</h3>
         <span className="text-[11px] text-content/45">
           {drill.topic} · {drill.level}
         </span>
+        {lcUser && slug ? (
+          <span className="ml-auto flex items-baseline gap-1">
+            {slugState ? (
+              <span className="text-[11px] text-content/45" data-fork-leetcode-state={slugState}>
+                {slugState === "solved" ? "solved on LeetCode" : "tried on LeetCode"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-pressed={lcSubmissions?.slug === slug}
+              className={`${CHIP} ${lcSubmissions?.slug === slug ? CHIP_ON : CHIP_OFF}`}
+              data-fork-leetcode-submissions-toggle=""
+              onClick={() => void showSubmissions(slug)}
+            >
+              Your submissions
+            </button>
+          </span>
+        ) : null}
       </div>
+      {lcSubmissions && lcSubmissions.slug === slug ? (
+        <div className="flex max-h-28 shrink-0 flex-col gap-0.5 overflow-y-auto" data-fork-leetcode-submissions="">
+          {lcSubmissions.list === null ? (
+            <p className="text-[11px] text-content/50">Loading your submissions…</p>
+          ) : lcSubmissions.list.length === 0 ? (
+            <p className="text-[11px] text-content/50">No submissions on LeetCode yet.</p>
+          ) : (
+            lcSubmissions.list.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 text-[11px] text-content/65">
+                <span className={item.status === "Accepted" ? "text-content" : "text-content/55"}>
+                  {item.status}
+                </span>
+                <span className="text-content/45">
+                  {item.lang} · {ago(item.time, now)}
+                </span>
+                {drillLanguageFor(item.lang) ? (
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    className={`${CHIP} ${CHIP_OFF} ml-auto`}
+                    onClick={() => void openSubmission(slug, item)}
+                  >
+                    Open
+                  </button>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
       <p className="max-h-40 shrink-0 overflow-y-auto text-[12px] leading-relaxed whitespace-pre-wrap text-content/75">
         {drill.task}
       </p>
@@ -597,16 +1041,7 @@ export function CodeTable({
           type="button"
           tabIndex={-1}
           className={`${CHIP} ${CHIP_OFF} ml-auto`}
-          onClick={() => {
-            onInput?.();
-            if (!hasDojo()) {
-              setNote("Dojo was removed.");
-              return;
-            }
-            window.dispatchEvent(new Event(OPEN_DOJO_EVENT));
-            // Dojo's chat on the left, this drill on the right.
-            gamesPanel.dock(true);
-          }}
+          onClick={() => askDojo()}
         >
           Ask Dojo
         </button>
