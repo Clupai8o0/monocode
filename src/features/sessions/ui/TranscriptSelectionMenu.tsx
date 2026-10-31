@@ -2,12 +2,15 @@ import { FilePlusCorner, MessageSquarePlus } from "../../../shared/ui/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "../../../shared/ui/Popover";
 import { type TranscriptSelection } from "../model/transcriptSelection";
+import { useOnlyOpenMenu } from "../../../fork/askChat/useOnlyOpenMenu"; // Fork
 
 type Props = {
   selection: TranscriptSelection | null;
   onAddToChat?: (text: string) => void;
   onAddToNotes?: (text: string) => void | Promise<void>;
   onDismiss: () => void;
+  /** Fork: extra classes for the menu surface, for src/fork/askChat. */
+  surfaceClassName?: string;
 };
 
 export function TranscriptSelectionMenu({
@@ -15,9 +18,11 @@ export function TranscriptSelectionMenu({
   onAddToChat,
   onAddToNotes,
   onDismiss,
+  surfaceClassName,
 }: Props) {
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
+  useOnlyOpenMenu(!!selection, onDismiss); // Fork
 
   // Scrolling or resizing moves the text out from under the menu, so the
   // selection it acts on is gone; drop it rather than chase the range.
@@ -45,7 +50,7 @@ export function TranscriptSelectionMenu({
       }}
       role="toolbar"
       aria-label="Selected text actions"
-      className="p-1"
+      className={surfaceClassName ? `p-1 ${surfaceClassName}` : "p-1"}
     >
       <div className="flex min-w-36 flex-col items-stretch gap-0.5">
         {onAddToChat ? (

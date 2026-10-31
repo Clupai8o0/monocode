@@ -44,7 +44,8 @@ function clampToResponse(range: Range, root: HTMLElement): Range {
   return clamped;
 }
 
-function firstRangeRect(range: Range): DOMRect | null {
+// Fork: exported for src/fork/askChat.
+export function firstRangeRect(range: Range): DOMRect | null {
   const rects = range.getClientRects();
   for (let index = 0; index < rects.length; index += 1) {
     const rect = rects.item(index);

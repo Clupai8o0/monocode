@@ -162,11 +162,11 @@ describe("HTML file preview", () => {
 
   it("shows native errors and retries instead of remaining on a spinner", async () => {
     invoke.mockRejectedValueOnce(
-      new Error("HTML preview supports files up to 4 MB."),
+      new Error("HTML preview supports files up to 8 MB."),
     );
     await render("Too big");
     expect(container.querySelector('[role="alert"]')!.textContent).toContain(
-      "4 MB",
+      "8 MB",
     );
     const retry = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Try again",

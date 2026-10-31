@@ -8,8 +8,9 @@ use std::path::{Component, Path};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{Manager, State, WebviewWindow};
 
-const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+// Matches MAX_TEXT_FILE_BYTES in fs.rs: the editor cannot read a larger file.
+const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PREVIEWS: usize = 64;
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: u64 = 512 * 1024 * 1024;
@@ -96,9 +97,10 @@ impl HtmlPreviews {
         cwd: &str,
     ) -> Result<PreviewLocation, String> {
         if source.len() > MAX_SOURCE_BYTES {
-            return Err(
-                "HTML preview supports files up to 4 MB. Open Code to read this file.".into(),
-            );
+            return Err(format!(
+                "HTML preview supports files up to {} MB. Open Code to read this file.",
+                MAX_SOURCE_BYTES / (1024 * 1024)
+            ));
         }
         let (document, project) =
             local_project(path, cwd).unwrap_or_else(|| ("index.html".into(), None));
@@ -657,6 +659,22 @@ mod tests {
             store.create("main", String::new(), "", "").unwrap();
         }
         assert!(store.create("main", String::new(), "", "").is_err());
+    }
+
+    #[test]
+    fn five_mb_source_is_accepted_and_oversized_error_says_8_mb() {
+        let store = HtmlPreviews::default();
+        assert!(store
+            .create("main", "x".repeat(5 * 1024 * 1024), "", "")
+            .is_ok());
+        let error = store
+            .create("main", "x".repeat(MAX_SOURCE_BYTES + 1), "", "")
+            .err()
+            .expect("oversized source must be rejected");
+        assert_eq!(
+            error,
+            "HTML preview supports files up to 8 MB. Open Code to read this file."
+        );
     }
 
     #[test]

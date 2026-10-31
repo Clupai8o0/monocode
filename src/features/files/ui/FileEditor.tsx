@@ -97,6 +97,8 @@ import { editorSearch } from "../editor/editorSearch";
 import { editorScrollbar } from "../editor/editorScrollbar";
 import { FilePreviewSearch } from "./FilePreviewSearch";
 import { isDelimitedPath } from "../../../fork/table/csv";
+import { AskChatRegion } from "../../../fork/askChat/AskChatRegion"; // Fork
+import { describeHeading } from "../../../fork/askChat/askChatDescribe"; // Fork
 import { CsvPreview } from "../../../fork/table/CsvPreview";
 import { SvgView } from "../../../fork/svg/SvgView";
 import { isNotebookPath } from "../../../fork/notebook/notebookModel";
@@ -494,6 +496,7 @@ export function FileEditor({
           }}
           preview={
             markdown ? (
+              <AskChatRegion describe={describeHeading(relativePath)}>{/* Fork */}
               <FilePreviewSearch
                 active={active && mode === "preview"}
                 contentVersion={draft}
@@ -506,6 +509,7 @@ export function FileEditor({
                   documentPath={path}
                 />
               </FilePreviewSearch>
+              </AskChatRegion>
             ) : html ? (
               <HtmlPreview
                 source={draft}
@@ -515,9 +519,9 @@ export function FileEditor({
                 active={visible}
               />
             ) : table ? (
-              <CsvPreview path={path} source={draft} />
+              <CsvPreview path={path} source={draft} cwd={cwd} />
             ) : notebook ? (
-              <NotebookView source={draft} cwd={cwd} onOpenFile={onOpenFile} />
+              <NotebookView source={draft} cwd={cwd} onOpenFile={onOpenFile} file={relativePath} />
             ) : latex ? (
               <LatexPreview
                 key={path}
