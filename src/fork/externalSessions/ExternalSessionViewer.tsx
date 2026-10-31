@@ -3,6 +3,7 @@ import { AgentMarkdown } from "../../features/sessions/ui/AgentMarkdown";
 import { copyText } from "../../platform/tauri/clipboard";
 import { Modal } from "../../shared/ui/Modal";
 import { continueFromHandoff } from "../handoff/handoffStore";
+import { MoveToMacButton } from "../sessionMove/SessionMoveUi"; // Fork
 import { sessionLabel, sourceLabel } from "./ElsewhereGroup";
 import type {
   ExternalSession,
@@ -307,6 +308,9 @@ export function ExternalSessionViewer({
             {tabButton("transcript", "Transcript")}
           </div>
           <span className="ml-auto flex items-center gap-1.5">
+            {target.kind === "remote" ? (
+              <MoveToMacButton session={session} machineId={target.machineId} />
+            ) : null}
             {hasHandoff && cwd ? (
               <button
                 type="button"

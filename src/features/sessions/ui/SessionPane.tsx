@@ -11,6 +11,8 @@ import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
+import { MovedCard, MoveLine } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
+import { isMoveLocked, useMovedRecord, useMoveView } from "../../../fork/sessionMove/sessionMoveStore"; // Fork
 import {
   offersSafeClose,
   withRunningLeads,
@@ -708,8 +710,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
     offersSafeClose(session, withRunningLeads(NO_SESSIONS, orchestrationRuns)) ? (
       <CloseSessionButton onClose={() => onArchiveSession(session.id, true)} />
     ) : undefined;
+  // Fork: a moved session has a card here instead; a moving one a line above.
+  const movedHere = useMovedRecord(session.id);
+  useMoveView(session.id);
   // Fork: the status strip sits under the composer, docked or centred.
-  const composer = (
+  const composer = movedHere ? <MovedCard sessionId={session.id} /> : (
     <>
     {/* Fork: subagents and background commands still running */}
     <BackgroundAgentsBar
@@ -740,9 +745,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
         onOpenSettings={onManageWorktrees}
       />
     )}
+    <MoveLine sessionId={session.id} />
     <Composer
       key={session.id}
-      disabled={workspaceSwitchingSessionId === session.id}
+      disabled={workspaceSwitchingSessionId === session.id || isMoveLocked(session.id)}
       remoteSession={remoteSession}
       remoteFeatures={remoteFeatures}
       allowedModelHarnesses={allowedModelHarnesses}

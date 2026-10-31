@@ -361,6 +361,7 @@ import {
   compactHarnessContext,
   rewindHarnessLastTurn,
   forgetHarnessSession,
+  getHarness, // Fork
   generateHarnessTitle,
   generateHarnessBranchName,
   migrateMonoCodexSession,
@@ -629,6 +630,7 @@ import {
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
+import { isMoveLocked, isSessionMoved, registerMoveHost } from "../fork/sessionMove/sessionMoveStore"; // Fork
 import { publishMonoSessions } from "../fork/messageLog/messageLogStore"; // Fork
 import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
 import { NotificationPopups } from "../fork/notifications/NotificationPopups"; // Fork
@@ -2308,7 +2310,9 @@ function Workspace({
   // Fork: running subagents per session, for the sidebar's badge.
   useEffect(() => {
     publishRunningWork(sessions);
-    publishOwnSessions(sessions); // Fork: hide them from "Elsewhere".
+    // Fork: hide them from "Elsewhere". A moved tab's conversation runs elsewhere
+    // now, and that live session is the one to show.
+    publishOwnSessions(sessions.filter((session) => !isSessionMoved(session.id)));
     publishMonoSessions(monoSessionRefs(sessions)); // Fork: lets the Messages window open them.
   }, [sessions]);
 
@@ -7535,6 +7539,7 @@ function Workspace({
       if (
         !storedCurrent ||
         storedCurrent.worktreeRemoved ||
+        isMoveLocked(storedCurrent.id) || // Fork: stopped for a move, or moved.
         [...removingWorktreePaths.current].some((path) =>
           isEqualOrInside(sessionWorkCwd(storedCurrent), path),
         )
@@ -8973,7 +8978,8 @@ function Workspace({
   useEffect(() => {
     const onBroadcast = (event: Event) => {
       (event as CustomEvent<(app: BroadcastApp<Session>) => void>).detail({
-        sessions: () => sessionsRef.current,
+        // Fork: a moved tab has ended, so it isn't offered at all.
+        sessions: () => sessionsRef.current.filter((session) => !isMoveLocked(session.id)),
         project: () => projectCwdRef.current,
         submit: (id, text) =>
           !workspaceNavigation.isSwitching(id) &&
@@ -10934,6 +10940,36 @@ function Workspace({
     });
     return () => registerContinueHost(null);
   }, [onHandoff]);
+
+  // Fork: what a move needs from the app (src/fork/sessionMove).
+  useEffect(() => {
+    registerMoveHost({
+      session: (id) => sessionsRef.current.find((session) => session.id === id),
+      needsInput: sessionNeedsInput,
+      isMono: isMonoSession,
+      openMovedTab: ({ repo, cwd, branch, providerSessionId, providerAccountId, title, blocks }) => {
+        const session: Session = {
+          ...newSession("claude", repo),
+          worktreeCwd: cwd,
+          branch,
+          providerSessionId,
+          providerAccountId,
+          title,
+          blocks,
+        };
+        getHarness("claude")?.bindSession?.(session.id, providerSessionId, cwd, providerAccountId);
+        const nextSessions = [...sessionsRef.current, session];
+        sessionsRef.current = nextSessions;
+        setSessions(nextSessions);
+        appendTab(newTab(session.id), repo);
+        return session.id;
+      },
+      openSession: (id) => onSelectHistorySessionRef.current(id),
+      onMoved: () =>
+        publishOwnSessions(sessionsRef.current.filter((session) => !isSessionMoved(session.id))),
+    });
+    return () => registerMoveHost(null);
+  }, [appendTab]);
 
   const autoContinueKey = sessions
     .filter(

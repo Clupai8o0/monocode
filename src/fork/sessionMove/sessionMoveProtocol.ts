@@ -77,7 +77,7 @@ export type SourceState = {
   account?: MoveAccount;
 };
 
-export type UnpackCodeResult = { cwd: string; branch: string };
+export type UnpackCodeResult = { repo: string; cwd: string; branch: string };
 export type StartResult = { name: string };
 export type ConfirmResult = {
   state: "up" | "queued" | "starting" | "failed";

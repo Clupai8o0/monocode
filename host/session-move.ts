@@ -682,7 +682,7 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
     if (file.executable) await chmod(target, 0o755);
   }
   await placeLinks(worktree, manifest);
-  return { cwd: worktree, branch };
+  return { repo: found.repo, cwd: worktree, branch };
 }
 
 /** An account with room, by what `claude-acct status` prints. */

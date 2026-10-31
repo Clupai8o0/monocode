@@ -3,6 +3,10 @@ import {
   continueHost,
   continueLabel,
 } from "../../fork/continueElsewhere/continueElsewhere";
+import { useRemoteMachines } from "../../features/connections/model/connections"; // Fork
+import { FORK_SESSION_MOVE } from "../../fork/sessionMove/sessionMoveModel"; // Fork
+import { moveMenuItems, pickMoveItem } from "../../fork/sessionMove/moveMenu"; // Fork
+import { refreshMoveTarget, useMoveVersion } from "../../fork/sessionMove/sessionMoveStore"; // Fork
 import { BranchChip } from "../../fork/autoWorktree/BranchChip"; // Fork
 import { NO_BRANCH_LABEL } from "../../features/source-control/model/worktrees";
 import {
@@ -763,6 +767,8 @@ function SidebarComponent({
   const [now, setNow] = useState(() => Date.now());
   const sessionsLock = useLockOverscroll<HTMLDivElement>();
   const sessionsScrollRef = useRef<HTMLDivElement>(null);
+  const { machines: moveMachines } = useRemoteMachines(FORK_SESSION_MOVE); // Fork
+  useMoveVersion(); // Fork: the menu's move item follows the host's answer.
   const [sessionMenu, setSessionMenu] = useState<{
     x: number;
     y: number;
@@ -1592,6 +1598,10 @@ function SidebarComponent({
           },
         ]
       : []),
+    // Fork: move the session and its work to another machine.
+    ...(!multipleMenuSessions && menuSessions[0]
+      ? moveMenuItems(menuSessions[0], moveMachines)
+      : []),
     ...(!multipleMenuSessions
       ? [
           {
@@ -1710,6 +1720,7 @@ function SidebarComponent({
     setFilterMenu(null);
     setFolderMenu(null);
     setSessionMenu({ x: e.clientX, y: e.clientY, sessionId });
+    for (const machine of moveMachines) refreshMoveTarget(machine.id); // Fork
   };
 
   const closeSessionMenu = () => {
@@ -1756,6 +1767,7 @@ function SidebarComponent({
       continueHost()?.continueSession(sessionIds[0]);
       return;
     }
+    if (pickMoveItem(id, sessionIds[0], moveMachines)) return; // Fork
     if (id === "pin") {
       if (sessionIds.length > 1 && onPinSessions) {
         onPinSessions(sessionIds, !pinned);
