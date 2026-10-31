@@ -176,13 +176,19 @@ describe("runMove", () => {
     });
   }
 
-  it("says so when the rollback itself goes wrong", async () => {
-    const { deps } = harness({}, { "target:unpackCode": "boom", "target:undo": "no link", resume: "no tab" });
+  it("keeps the source stopped when the target can't be cleaned up", async () => {
+    const { deps, log } = harness({}, { "target:unpackCode": "boom", "target:undo": "no link" });
     const outcome = await runMove(PLAN, deps, () => {}, nothing);
-    expect(outcome).toMatchObject({
+    expect(outcome).toMatchObject({ kind: "failed", reason: "boom", targetMayRun: true });
+    expect(log).not.toContain("resume");
+  });
+
+  it("says so when the source can't be resumed", async () => {
+    const { deps } = harness({}, { "target:unpackCode": "boom", resume: "no window" });
+    expect(await runMove(PLAN, deps, () => {}, nothing)).toEqual({
       kind: "failed",
       reason: "boom",
-      rollbackProblem: "Could not clean up the other machine: no link; Could not resume it here: no tab",
+      rollbackProblem: "Could not resume it here: no window",
     });
   });
 

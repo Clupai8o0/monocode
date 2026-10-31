@@ -72,6 +72,8 @@ let host: MoveHost | null = null;
 let moved: MovedMap = readMoved();
 const active = new Map<string, MoveView & { locked: boolean }>();
 const failures = new Map<string, string>();
+/** Failed moves whose copy on the target may still run: no new turn here. */
+const stuck = new Set<string>(readJournal().map((entry) => entry.plan.sessionId));
 const targets = new Map<string, TargetInfo>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -137,7 +139,7 @@ export function isSessionMoved(id: string): boolean {
 
 /** No new turn may start: stopped for a move, or already moved. */
 export function isMoveLocked(id: string): boolean {
-  return Boolean(moved[id]) || active.get(id)?.locked === true;
+  return Boolean(moved[id]) || stuck.has(id) || active.get(id)?.locked === true;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -268,6 +270,9 @@ async function run(
     cancel,
   );
   active.delete(key);
+  if (outcome.kind === "failed" && outcome.targetMayRun) {
+    stuck.add(key);
+  }
   if (outcome.kind === "failed") {
     failures.set(
       key,
@@ -385,6 +390,10 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
   if (active.has(key)) {
     return;
   }
+  // Taken now: the account lookup below waits, and a second click must not start another.
+  const firstStep: MoveProgress = { step: "check", cancellable: false };
+  active.set(key, { step: firstStep, text: stepText("check", "this Mac"), locked: false });
+  bump();
   const remote = hostCall(machineId);
   const moveId = crypto.randomUUID();
   const name = moveSlug(session.name, session.id);
@@ -469,8 +478,14 @@ async function recoverJournal() {
     });
     if (done) {
       writeJournal(readJournal().filter((other) => other.plan.moveId !== entry.plan.moveId));
+      stuck.delete(entry.plan.sessionId);
+      failures.set(entry.plan.sessionId, "The app closed during the move, so it was undone");
+    } else {
+      failures.set(
+        entry.plan.sessionId,
+        "An earlier move couldn't be undone, so it stays stopped here. It tries again when the app next opens",
+      );
     }
-    failures.set(entry.plan.sessionId, "The app closed during the move, so it was undone");
   }
   bump();
 }

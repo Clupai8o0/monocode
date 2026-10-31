@@ -404,6 +404,8 @@ describe("session move, a real run with two home folders", () => {
     expect(calls).toContain("CLAUDE_ACCT=cx");
 
     await expect(handleSessionMove(targetEnv, { op: "confirm", sessionId: ID, name: "queued-one" })).resolves.toEqual({ state: "queued" });
+    fake("agent-gate", `printf "agent-gate: 1 of 10\\n\\n  pos  name\\n  1    ${"a".repeat(40)} 1 1s 1 x\\n"`);
+    await expect(handleSessionMove(targetEnv, { op: "confirm", sessionId: ID, name: "a".repeat(48) })).resolves.toEqual({ state: "queued" });
     const dir = join(targetHome, ".claude-exec/sessions");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd: "x", status: "idle" }));

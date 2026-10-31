@@ -93,6 +93,7 @@ const SEARCH_DEPTH = 3;
 const SEARCH_MAX = 400;
 const ROOM_CAP = 90;
 const WINDOWS_TRIED = 5;
+const GATE_NAME_MAX = 40;
 const LAB_TMUX = "lab";
 const ACCOUNT_DIRS: Record<"main" | "cx", string> = { main: ".claude", cx: ".claude-exec" };
 const REGISTRY_DIRS = [".claude", ".claude-exec", ".claude-cx"];
@@ -810,10 +811,12 @@ async function inGateQueue(env: SessionMoveEnv, name: string) {
   const gate = await env.run(join(env.home, ".local/bin/agent-gate"), ["status"], { timeoutMs: 10_000 });
   const at = gate.stdout.indexOf(" pos ");
   if (at < 0) return false;
+  // The gate keeps the first 40 characters of a name.
+  const shown = name.slice(0, GATE_NAME_MAX);
   return gate.stdout
     .slice(at)
     .split("\n")
-    .some((line) => line.trim().split(/\s+/)[1] === name.slice(0, 20) || line.trim().split(/\s+/)[1] === name);
+    .some((line) => line.trim().split(/\s+/)[1] === shown);
 }
 
 /** Whether it came up on that session id, not just that a window opened. */

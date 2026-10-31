@@ -74,7 +74,7 @@ export type MoveOutcome =
   | { kind: "moved"; result: MoveResult }
   | { kind: "cancelled" }
   /** Refused or failed, in one plain line; the source runs as before. */
-  | { kind: "failed"; reason: string; rollbackProblem?: string };
+  | { kind: "failed"; reason: string; rollbackProblem?: string; targetMayRun?: boolean };
 
 const WAIT_POLL_MS = 1_500;
 const CONFIRM_POLL_MS = 2_000;
@@ -258,21 +258,26 @@ async function waitUp(
 }
 
 async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise<MoveOutcome> {
-  const problems: string[] = [];
-  await deps.target("undo", { moveId: plan.moveId }).catch((error: unknown) => {
-    problems.push(`Could not clean up the other machine: ${text(error)}`);
-  });
+  try {
+    await deps.target("undo", { moveId: plan.moveId });
+  } catch (error) {
+    // The copy there may be running, so this one stays stopped: two copies must
+    // never write at once. The journal stays too, and the next launch retries.
+    return {
+      kind: "failed",
+      reason,
+      targetMayRun: true,
+      rollbackProblem: `Could not clean up the other machine (${text(error)}), so it stays stopped here until that works`,
+    };
+  }
   await deps.source("done", { moveId: plan.moveId }).catch(() => undefined);
-  await deps.resumeSource().catch((error: unknown) => {
-    problems.push(`Could not resume it here: ${text(error)}`);
-  });
-  // A rollback that went wrong is tried again at the next launch.
-  if (problems.length === 0) deps.journal?.end();
-  return {
-    kind: "failed",
-    reason,
-    ...(problems.length > 0 ? { rollbackProblem: problems.join("; ") } : {}),
-  };
+  try {
+    await deps.resumeSource();
+  } catch (error) {
+    return { kind: "failed", reason, rollbackProblem: `Could not resume it here: ${text(error)}` };
+  }
+  deps.journal?.end();
+  return { kind: "failed", reason };
 }
 
 /**

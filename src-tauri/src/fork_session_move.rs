@@ -175,10 +175,10 @@ fn is_client_path(path: &str) -> bool {
 /// `git@github.com:a/b.git`, `https://github.com/a/b` and `ssh://...` as one.
 fn normalize_remote_url(url: &str) -> String {
     let text = url.trim().trim_end_matches('/');
-    let text = if text.len() >= 4 && text[text.len() - 4..].eq_ignore_ascii_case(".git") {
-        &text[..text.len() - 4]
-    } else {
-        text
+    let end = text.len().saturating_sub(4);
+    let text = match text.get(end..) {
+        Some(tail) if tail.eq_ignore_ascii_case(".git") => &text[..end],
+        _ => text,
     };
     if let Some((scheme, rest)) = text.split_once("://") {
         let good = scheme.starts_with(|c: char| c.is_ascii_alphabetic());
@@ -1682,6 +1682,11 @@ mod tests {
         ] {
             assert_eq!(normalize_remote_url(url), "github.com/Me/app", "{url}");
         }
+        // A cut inside a character must not panic.
+        assert_eq!(
+            normalize_remote_url("https://example.com/项目"),
+            "example.com/项目"
+        );
         assert_ne!(
             normalize_remote_url("git@github.com:Me/other.git"),
             "github.com/Me/app"
