@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SIZES,
+  DOCK_APP_MIN,
   activityLabel,
+  clampDockWidth,
+  gamesPanel,
   activityNotice,
   loadFullscreen,
   loadSizes,
@@ -113,5 +116,34 @@ describe("panel size and full screen", () => {
     expect(loadFullscreen()).toBe(false);
     expect(() => saveSizes(DEFAULT_SIZES)).not.toThrow();
     expect(() => saveFullscreen(true)).not.toThrow();
+  });
+});
+
+describe("side by side", () => {
+  afterEach(() => gamesPanel.hide());
+
+  it("docking shows the panel, and hiding undocks it", () => {
+    gamesPanel.dock(true);
+    expect(gamesPanel.isOpen()).toBe(true);
+    expect(gamesPanel.isDocked()).toBe(true);
+    gamesPanel.hide();
+    expect(gamesPanel.isDocked()).toBe(false);
+    gamesPanel.toggle();
+    expect(gamesPanel.isDocked()).toBe(false);
+  });
+
+  it("undocking leaves the panel floating", () => {
+    gamesPanel.dock(true);
+    gamesPanel.dock(false);
+    expect(gamesPanel.isOpen()).toBe(true);
+    expect(gamesPanel.isDocked()).toBe(false);
+  });
+
+  it("keeps room for the app, and halves a narrow window", () => {
+    expect(clampDockWidth(2000, 1400, 420)).toBe(1400 - DOCK_APP_MIN);
+    expect(clampDockWidth(100, 1400, 420)).toBe(420);
+    expect(clampDockWidth(600, 1400, 420)).toBe(600);
+    expect(clampDockWidth(900, 700, 420)).toBe(350);
+    expect(clampDockWidth(100, 700, 420)).toBe(350);
   });
 });

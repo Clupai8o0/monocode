@@ -16,6 +16,9 @@ import { TerminalGridBackground } from "../../features/terminal/ui/TerminalGridB
 import { LAYER } from "../../shared/lib/layers";
 import { useAgentActivity } from "../backgroundAgents/runningAgents";
 import {
+  clampDockWidth,
+  loadDockWidth,
+  saveDockWidth,
   DEFAULT_GAME,
   DEFAULT_SIZES,
   activityLabel,
@@ -94,6 +97,8 @@ type ResizeAxis = "both" | "x" | "y";
 
 type ResizeSession = {
   axis: ResizeAxis;
+  /** Side by side, only the width changes, and it is the dock's. */
+  docked: boolean;
   kind: PanelKind;
   pointerId: number;
   startX: number;
@@ -104,6 +109,7 @@ type ResizeSession = {
 
 export function GamesPanel() {
   const open = useSyncExternalStore(gamesPanel.subscribe, gamesPanel.isOpen);
+  const docked = useSyncExternalStore(gamesPanel.subscribe, gamesPanel.isDocked);
   const activity = useAgentActivity();
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -125,6 +131,11 @@ export function GamesPanel() {
   const [bounds, setBounds] = useState(room);
   const [fullscreen, setFullscreen] = useState(loadFullscreen);
   const resizing = useRef<ResizeSession | null>(null);
+  // Fork: side by side with the app (Ask Dojo docks it there).
+  const [dockWanted, setDockWanted] = useState(
+    () => loadDockWidth() ?? Math.round(window.innerWidth * 0.45),
+  );
+  const dockWidth = clampDockWidth(dockWanted, bounds.width + MARGIN * 2, MIN_WIDTH);
 
   // Fork: a table game leaves the grid board parked on its last game.
   const atTable = isTableGame(gameId);
@@ -147,6 +158,19 @@ export function GamesPanel() {
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+
+  // Side by side, the app narrows to the space left of the panel, so
+  // neither covers the other. Hiding gives the app its width back.
+  useEffect(() => {
+    const appRoot = document.getElementById("root");
+    if (!appRoot || !open || !docked) {
+      return;
+    }
+    appRoot.style.width = `calc(100% - ${dockWidth + MARGIN * 2}px)`;
+    return () => {
+      appRoot.style.width = "";
+    };
+  }, [open, docked, dockWidth]);
 
   // Where focus goes back to on hiding. Read before the board's effect takes it.
   useLayoutEffect(() => {
@@ -227,6 +251,10 @@ export function GamesPanel() {
 
   // Fork: fills the window, but never the footer. Not the OS's own full screen.
   const toggleFullscreen = () => {
+    // Side by side has no full screen; F waits until the panel floats again.
+    if (gamesPanel.isDocked()) {
+      return;
+    }
     setFullscreen((current) => {
       const next = !current;
       saveFullscreen(next);
@@ -236,16 +264,19 @@ export function GamesPanel() {
 
   const startResize =
     (axis: ResizeAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0 || fullscreen) {
+      if (event.button !== 0 || (fullscreen && !docked)) {
         return;
       }
       // This press is the grip's, not the header's or the board's.
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
-      const start = clampSize(sizesRef.current[kind], room());
+      const start = docked
+        ? { width: dockWidth, height: 0 }
+        : clampSize(sizesRef.current[kind], room());
       resizing.current = {
-        axis,
+        axis: docked ? "x" : axis,
+        docked,
         kind,
         pointerId: event.pointerId,
         startX: event.clientX,
@@ -261,6 +292,16 @@ export function GamesPanel() {
       return;
     }
     event.preventDefault();
+    if (session.docked) {
+      const width = clampDockWidth(
+        session.startSize.width + session.startX - event.clientX,
+        window.innerWidth,
+        MIN_WIDTH,
+      );
+      session.size = { width, height: 0 };
+      setDockWanted(width);
+      return;
+    }
     const next = clampSize(
       {
         width:
@@ -292,6 +333,10 @@ export function GamesPanel() {
       // Already released.
     }
     // Written once the drag ends, never on every step.
+    if (session.docked) {
+      saveDockWidth(session.size.width);
+      return;
+    }
     saveSizes(withSize(sizesRef.current, session.kind, session.size));
   };
 
@@ -350,10 +395,13 @@ export function GamesPanel() {
       style={{
         zIndex: LAYER.popover,
         right: MARGIN,
-        bottom: FOOTER,
-        ...(fullscreen
-          ? { left: MARGIN, top: MARGIN }
-          : { width: size.width, height: size.height }),
+        // Side by side, the footer sits in the narrowed app, not under this.
+        bottom: docked ? MARGIN : FOOTER,
+        ...(docked
+          ? { top: MARGIN, width: dockWidth }
+          : fullscreen
+            ? { left: MARGIN, top: MARGIN }
+            : { width: size.width, height: size.height }),
         display: open ? undefined : "none",
       }}
       className="fixed isolate flex flex-col overflow-hidden rounded-xl border border-content/10 text-content shadow-xl"
@@ -423,13 +471,26 @@ export function GamesPanel() {
           <button
             type="button"
             tabIndex={-1}
-            aria-pressed={fullscreen}
-            data-fork-games-fullscreen=""
-            className={`${CHIP} ${fullscreen ? CHIP_ON : CHIP_OFF}`}
-            onClick={toggleFullscreen}
+            aria-pressed={docked}
+            data-fork-games-dock=""
+            title="The app on the left, the games on the right"
+            className={`${CHIP} ${docked ? CHIP_ON : CHIP_OFF}`}
+            onClick={() => gamesPanel.dock(!docked)}
           >
-            {fullscreen ? "Exit full screen" : "Full screen"}
+            Side by side
           </button>
+          {docked ? null : (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-pressed={fullscreen}
+              data-fork-games-fullscreen=""
+              className={`${CHIP} ${fullscreen ? CHIP_ON : CHIP_OFF}`}
+              onClick={toggleFullscreen}
+            >
+              {fullscreen ? "Exit full screen" : "Full screen"}
+            </button>
+          )}
           <button
             type="button"
             tabIndex={-1}
@@ -534,7 +595,17 @@ export function GamesPanel() {
           </div>
         ) : null}
       </div>
-      {fullscreen ? null : (
+      {docked ? (
+        <div
+          aria-hidden="true"
+          data-fork-games-resize-edge="left"
+          className="absolute top-0 bottom-0 left-0 z-10 w-1.5 cursor-ew-resize touch-none"
+          onPointerDown={startResize("x")}
+          onPointerMove={resizeTo}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+        />
+      ) : fullscreen ? null : (
         <>
           <div
             aria-hidden="true"

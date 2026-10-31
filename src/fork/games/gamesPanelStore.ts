@@ -6,16 +6,23 @@ const BEST_KEY = "monocode.fork.games.best";
 const LAST_KEY = "monocode.fork.games.last";
 const SIZE_KEY = "monocode.fork.games.size";
 const FULLSCREEN_KEY = "monocode.fork.games.fullscreen";
+const DOCK_KEY = "monocode.fork.games.dock";
 export const DEFAULT_GAME = "blocks";
 
 let open = false;
+// Fork: side by side, the panel takes the window's right side and the app
+// keeps the rest, so a chat (Dojo) and a game are both in full view.
+let docked = false;
 const listeners = new Set<() => void>();
 
-function setOpen(next: boolean) {
-  if (next === open) {
+function set(nextOpen: boolean, nextDocked: boolean) {
+  // Hidden is never docked: the app gets its whole width back.
+  const dockedNow = nextOpen && nextDocked;
+  if (nextOpen === open && dockedNow === docked) {
     return;
   }
-  open = next;
+  open = nextOpen;
+  docked = dockedNow;
   for (const listener of listeners) {
     listener();
   }
@@ -23,8 +30,11 @@ function setOpen(next: boolean) {
 
 export const gamesPanel = {
   isOpen: () => open,
-  toggle: () => setOpen(!open),
-  hide: () => setOpen(false),
+  isDocked: () => docked,
+  toggle: () => set(!open, docked),
+  hide: () => set(false, false),
+  /** Docking also shows the panel; undocking leaves it floating. */
+  dock: (on: boolean) => set(on || open, on),
   subscribe(listener: () => void) {
     listeners.add(listener);
     return () => {
@@ -159,4 +169,35 @@ export function activityNotice(
     return "Agents finished";
   }
   return null;
+}
+
+/** Fork: how wide the panel is side by side, or null for the default. */
+export function loadDockWidth(): number | null {
+  try {
+    const value = Number(localStorage.getItem(DOCK_KEY));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDockWidth(width: number) {
+  try {
+    localStorage.setItem(DOCK_KEY, String(Math.round(width)));
+  } catch {
+    // As above.
+  }
+}
+
+/** The app keeps at least this much beside a docked panel. */
+export const DOCK_APP_MIN = 480;
+
+/**
+ * A side-by-side width that leaves the app DOCK_APP_MIN where it can, and
+ * never takes more than half a window too narrow for both.
+ */
+export function clampDockWidth(width: number, windowWidth: number, minWidth: number): number {
+  const low = Math.min(minWidth, Math.floor(windowWidth / 2));
+  const high = Math.max(windowWidth - DOCK_APP_MIN, Math.floor(windowWidth / 2));
+  return Math.round(Math.min(Math.max(width, low), high));
 }

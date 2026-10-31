@@ -407,3 +407,41 @@ test("grid and table sizes are kept apart", async ({ page }) => {
     .toBe(680);
   expect((await panel(page).boundingBox())!.height).toBe(588);
 });
+
+test("Side by side puts the app on the left and the games on the right", async ({
+  page,
+}) => {
+  await open(page);
+  const dock = page.locator("[data-fork-games-dock]");
+  const appRoot = page.locator("#root");
+  const before = (await appRoot.boundingBox())!;
+
+  await dock.click();
+  await expect(dock).toHaveAttribute("aria-pressed", "true");
+  await expect(fullscreenChip(page)).toHaveCount(0);
+  const side = (await panel(page).boundingBox())!;
+  const app = (await appRoot.boundingBox())!;
+  // Full height on the right, and the app ends just left of it.
+  expect(side.y).toBe(10);
+  expect(side.x + side.width).toBe(before.width - 10);
+  expect(app.width).toBe(side.x - 10);
+  const footer = (await page.locator("footer").boundingBox())!;
+  expect(footer.x + footer.width).toBeLessThanOrEqual(side.x);
+
+  // F does nothing side by side; the left edge still resizes.
+  await page.keyboard.press("f");
+  await expect(dock).toHaveAttribute("aria-pressed", "true");
+  const edge = (await page.locator('[data-fork-games-resize-edge="left"]').boundingBox())!;
+  await page.mouse.move(edge.x + 2, edge.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(edge.x - 98, edge.y + 100, { steps: 4 });
+  await page.mouse.up();
+  const wider = (await panel(page).boundingBox())!;
+  expect(wider.width).toBe(side.width + 100);
+  expect((await appRoot.boundingBox())!.width).toBe(app.width - 100);
+
+  // Hiding gives the app its whole width back.
+  await page.getByRole("button", { name: "Hide" }).click();
+  await expect(panel(page)).toBeHidden();
+  expect((await appRoot.boundingBox())!.width).toBe(before.width);
+});

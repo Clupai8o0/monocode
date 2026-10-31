@@ -593,7 +593,8 @@ export function CodeTable({
               return;
             }
             window.dispatchEvent(new Event(OPEN_DOJO_EVENT));
-            gamesPanel.hide();
+            // Dojo's chat on the left, this drill on the right.
+            gamesPanel.dock(true);
           }}
         >
           Ask Dojo
