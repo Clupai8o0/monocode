@@ -603,6 +603,33 @@ describe("session move, a real run with two home folders", () => {
     expect(existsSync(cwd)).toBe(false);
   });
 
+  it("a repeated restart finds the window it already started, queued or running", async () => {
+    const bin = join(targetHome, ".local/bin");
+    mkdirSync(bin, { recursive: true });
+    const calls = join(base, "restarts");
+    writeFileSync(join(bin, "lab-session"), `#!/bin/bash\necho "$3" >> '${calls}'\n`);
+    chmodSync(join(bin, "lab-session"), 0o755);
+    const gate = (body: string) => {
+      writeFileSync(join(bin, "agent-gate"), `#!/bin/bash\nprintf "${body}"\n`);
+      chmodSync(join(bin, "agent-gate"), 0o755);
+    };
+    const params = { op: "restart", moveId: MOVE, sessionId: ID, name: "s", cwd: source };
+    const noWindows = withTmux({ code: 1, stderr: "can't find session: lab", timedOut: false });
+    gate("agent-gate: 0 of 10 running\\n");
+    await expect(handleSessionMove(noWindows, params)).resolves.toEqual({ name: "s" });
+    // Its reply was lost and the runner cleared the move before trying again.
+    await handleSessionMove(noWindows, { op: "done", moveId: MOVE });
+    gate("agent-gate: 1 of 10\\n\\n  pos  name\\n  1    s 1 1s 1 x\\n");
+    await expect(handleSessionMove(noWindows, params)).resolves.toEqual({ name: "s" });
+    gate("agent-gate: 0 of 10 running\\n");
+    const running = withTmux({ code: 0, stderr: "", timedOut: false, stdout: `s\t${source}\n` });
+    await expect(handleSessionMove(running, params)).resolves.toEqual({ name: "s" });
+    expect(readFileSync(calls, "utf8")).toBe("s\n");
+    // Gone from both: it is started again.
+    await expect(handleSessionMove(noWindows, params)).resolves.toEqual({ name: "s" });
+    expect(readFileSync(calls, "utf8")).toBe("s\ns\n");
+  });
+
   it("a repeated start gets the launch already made", async () => {
     const { cwd } = await started();
     const calls = join(base, "starts");
@@ -718,6 +745,30 @@ describe("session move, a real run with two home folders", () => {
     expect(existsSync(join(cwd, "work.txt"))).toBe(true);
     expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
     expect(existsSync(join(targetHome, "staging", MOVE))).toBe(false);
+  });
+
+  it("undo removes nothing when it can't check for new commits", async () => {
+    const { manifest, urls } = await carry();
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    const answer = (result: { code: number | null; stderr: string; timedOut: boolean }): SessionMoveEnv => ({
+      ...targetEnv,
+      run: async (command, args, options) =>
+        command === "git" && args.includes("rev-parse") ? { stdout: "", ...result } : runCommand(command, args, options),
+    });
+    for (const failed of [
+      { code: null, stderr: "", timedOut: true },
+      { code: 128, stderr: "fatal: unable to read refs", timedOut: false },
+    ]) {
+      await expect(handleSessionMove(answer(failed), { op: "undo", moveId: MOVE })).rejects.toThrow(/nothing was removed/);
+      expect(existsSync(cwd)).toBe(true);
+      expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
+      expect(existsSync(join(targetHome, "staging", MOVE, "made.json"))).toBe(true);
+    }
+    // Answered, it goes ahead.
+    await handleSessionMove(targetEnv, { op: "undo", moveId: MOVE });
+    expect(existsSync(cwd)).toBe(false);
   });
 
   it("won't stop a conversation two processes have open", async () => {

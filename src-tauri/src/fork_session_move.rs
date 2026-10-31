@@ -26,6 +26,8 @@ const PROJECT_KEY_MAX: usize = 200;
 const STALE: Duration = Duration::from_secs(24 * 60 * 60);
 const GIT_TIME: Duration = Duration::from_secs(30);
 const GIT_LONG_TIME: Duration = Duration::from_secs(10 * 60);
+// The harness sends SIGKILL 2 s after SIGTERM, so a tree still here past this won't go.
+const STOP_WAIT: Duration = Duration::from_secs(10);
 const ACCOUNT_DIRS: [&str; 3] = [".claude", ".claude-exec", ".claude-cx"];
 const SEARCH_DEPTH: usize = 3;
 const SEARCH_MAX: usize = 400;
@@ -159,6 +161,7 @@ fn handle(env: &Env, op: &str, params: &Value) -> Result<Value, String> {
         "unpackConversation" => unpack_conversation(env, params),
         "undo" => undo(env, params),
         "done" => done(env, params),
+        "waitGone" => wait_gone(params, STOP_WAIT),
         _ => Err("Unsupported session move step".into()),
     }
 }
@@ -378,6 +381,7 @@ fn lexists(path: &Path) -> bool {
 
 struct GitOut {
     ok: bool,
+    code: Option<i32>,
     timed_out: bool,
     stdout: String,
     stderr: String,
@@ -450,6 +454,7 @@ fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Stri
         // Not waited on: anything that slipped the group could hold the pipes open.
         return Ok(GitOut {
             ok: false,
+            code: None,
             timed_out,
             stdout: String::new(),
             stderr: format!("git {} timed out", args.first().copied().unwrap_or("")),
@@ -466,6 +471,7 @@ fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Stri
         }
         return Ok(GitOut {
             ok: false,
+            code: None,
             timed_out: true,
             stdout: String::new(),
             stderr: format!(
@@ -476,6 +482,7 @@ fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Stri
     };
     Ok(GitOut {
         ok: status.is_some_and(|status| status.success()),
+        code: status.and_then(|status| status.code()),
         timed_out,
         stdout,
         stderr,
@@ -1457,19 +1464,23 @@ fn added_by_this_move(repo: Option<&str>, pending: &Pending) -> bool {
 }
 
 /// The branch or the worktree's HEAD is no longer at the commit the move made it at.
-fn moved_on(repo: &Path, worktree: &Path, branch: &str, head: &str) -> bool {
+/// An error when either can't be read: nothing is removed on a guess.
+fn moved_on(repo: &Path, worktree: &Path, branch: &str, head: &str) -> Result<bool, String> {
     let reference = format!("refs/heads/{branch}");
-    if let Ok(tip) = git_out(repo, &["rev-parse", "--verify", "--quiet", &reference]) {
-        if tip.trim() != head {
-            return true;
+    let tip = git(repo, &["rev-parse", "--verify", "--quiet", &reference])?;
+    if tip.ok {
+        if tip.stdout.trim() != head {
+            return Ok(true);
         }
+    } else if tip.code != Some(1) || !tip.stderr.trim().is_empty() {
+        // A missing branch fails quietly; anything else is a check that didn't run.
+        return Err(git_error(&tip, &["rev-parse"]));
     }
     // Without its own .git, git would answer for the repository above it.
     if !worktree.join(".git").exists() {
-        return false;
+        return Ok(false);
     }
-    git_out(worktree, &["rev-parse", "--verify", "--quiet", "HEAD"])
-        .is_ok_and(|at| at.trim() != head)
+    git_out(worktree, &["rev-parse", "--verify", "--quiet", "HEAD"]).map(|at| at.trim() != head)
 }
 
 fn remove_empty(folder: &Path) {
@@ -1497,6 +1508,15 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
             let _ = fs::remove_dir(&pending.worktree);
         }
     }
+    // Asked first: an unanswered check keeps everything, record included, for a retry.
+    let moved = match (&made.repo, &made.worktree, &made.branch, &made.head) {
+        (Some(repo), Some(worktree), Some(branch), Some(head)) => {
+            moved_on(Path::new(repo), Path::new(worktree), branch, head).map_err(|error| {
+                format!("Could not check {worktree} for new commits ({error}), so nothing was removed")
+            })?
+        }
+        _ => false,
+    };
     for file in &made.files {
         let _ = fs::remove_file(file);
     }
@@ -1504,15 +1524,11 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
         fs::copy(&old.backup, &old.path).map_err(io_text)?;
     }
     // Someone committed there after the move: that work stays, worktree and branch both.
-    if let (Some(repo), Some(worktree), Some(branch), Some(head)) =
-        (&made.repo, &made.worktree, &made.branch, &made.head)
-    {
-        if moved_on(Path::new(repo), Path::new(worktree), branch, head) {
-            let _ = fs::remove_dir_all(&folder);
-            return Ok(json!({
-                "kept": format!("New commits were made in {worktree} on this Mac, so it was kept")
-            }));
-        }
+    if let (true, Some(worktree)) = (moved, &made.worktree) {
+        let _ = fs::remove_dir_all(&folder);
+        return Ok(json!({
+            "kept": format!("New commits were made in {worktree} on this Mac, so it was kept")
+        }));
     }
     if let (Some(home), Some(worktree)) = (&made.account_home, &made.worktree) {
         let home = Path::new(home);
@@ -1536,6 +1552,35 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     }
     let _ = fs::remove_dir_all(&folder);
     Ok(json!({}))
+}
+
+/// Waits for a stopped session's process and its group to be gone. The stop only
+/// sends SIGTERM, and a tool still running could change files while they're packed.
+fn wait_gone(params: &Value, limit: Duration) -> Result<Value, String> {
+    let pid = params
+        .get("pid")
+        .and_then(Value::as_u64)
+        .filter(|pid| *pid > 1 && *pid <= i32::MAX as u64)
+        .ok_or("Invalid pid")? as i32;
+    let started = std::time::Instant::now();
+    while tree_alive(pid) {
+        if started.elapsed() >= limit {
+            return Ok(json!({"gone": false}));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Ok(json!({"gone": true}))
+}
+
+/// The harness starts each child in its own group, so the group outlives the leader.
+#[cfg(unix)]
+fn tree_alive(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 || libc::kill(-pid, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn tree_alive(_pid: i32) -> bool {
+    false
 }
 
 fn done(env: &Env, params: &Value) -> Result<Value, String> {
@@ -2068,6 +2113,26 @@ mod tests {
     }
 
     #[test]
+    fn undo_removes_nothing_when_it_cant_check_for_new_commits() {
+        let fix = fixture();
+        let (manifest, urls) = carry(&fix);
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
+        // The worktree's HEAD can't be read: git fails on it, it isn't a missing branch.
+        let dot_git = cwd.join(".git");
+        let pointer = fs::read_to_string(&dot_git).unwrap();
+        fs::write(&dot_git, "gitdir: /nowhere\n").unwrap();
+        let error = undo(&fix.to, &json!({"moveId": MOVE})).unwrap_err();
+        assert!(error.contains("nothing was removed"), "{error}");
+        assert!(cwd.exists());
+        assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+        assert!(fix.to.staging_root.join(MOVE).join("made.json").exists());
+        fs::write(&dot_git, pointer).unwrap();
+        undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
+        assert!(!cwd.exists());
+    }
+
+    #[test]
     fn git_gives_up_on_a_helper_that_holds_its_output() {
         let fix = fixture();
         let started = std::time::Instant::now();
@@ -2109,6 +2174,36 @@ mod tests {
         undo(&fix.to, &json!({"moveId": "move-0002-abcdef"})).unwrap();
         assert!(!reserved.exists());
         assert!(PathBuf::from(code["cwd"].as_str().unwrap()).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn waits_for_the_whole_group_to_be_gone() {
+        use std::os::unix::process::CommandExt;
+        // The leader ends at once; what it started lives on in its group.
+        let mut leader = Command::new("sh")
+            .args(["-c", "sleep 1 & exit 0"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = leader.id();
+        leader.wait().unwrap();
+        let started = std::time::Instant::now();
+        let out = wait_gone(&json!({"pid": pid}), Duration::from_secs(10)).unwrap();
+        assert_eq!(out["gone"], true);
+        assert!(started.elapsed() >= Duration::from_millis(500));
+
+        let mut stubborn = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = stubborn.id();
+        let out = wait_gone(&json!({"pid": pid}), Duration::from_millis(300)).unwrap();
+        assert_eq!(out["gone"], false);
+        stubborn.kill().unwrap();
+        stubborn.wait().unwrap();
+        assert!(wait_gone(&json!({"pid": 1}), Duration::ZERO).is_err());
     }
 
     #[test]
