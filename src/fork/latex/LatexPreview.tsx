@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertCircle, Check, Loader, RotateCcw } from "../../shared/ui/icons";
 import { watchFile } from "../../features/files/model/fileWatch";
+import { displayPath } from "../../shared/lib/paths";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
 import type { OpenFileFn } from "../../features/search/model/search";
 import { PdfView } from "../pdf/PdfView";
@@ -261,6 +262,7 @@ export function LatexPreview({
             cwd={cwd}
             watch={false}
             version={version}
+            referenceName={`${displayPath(path, cwd)} PDF`}
           />
         ) : (
           <div className="grid h-full place-items-center text-[12px] text-content/45">

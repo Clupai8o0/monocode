@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { AlertCircle, Loader, RotateCcw } from "../../shared/ui/icons";
 import { watchFile } from "../../features/files/model/fileWatch";
 import { openPathWithDefaultApp } from "../../platform/tauri/fs";
+import { displayPath } from "../../shared/lib/paths";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
 import { PdfView } from "../pdf/PdfView";
 import { formatMillis } from "../latex/latexModel";
@@ -169,6 +170,7 @@ export function OfficeView({ path, cwd }: { path: string; cwd: string }) {
             cwd={cwd}
             watch={false}
             version={version}
+            referenceName={displayPath(path, cwd)}
           />
         ) : (
           <div className="grid h-full place-items-center text-[12px] text-content/45">

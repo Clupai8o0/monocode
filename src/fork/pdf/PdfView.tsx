@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   RenderTask,
+  TextLayer,
 } from "pdfjs-dist";
 import { AlertCircle, Minus, Plus, RotateCcw } from "../../shared/ui/icons";
 import { formatFileSize } from "../../features/files/model/filePreview";
@@ -16,7 +17,10 @@ import {
 import { displayPath } from "../../shared/lib/paths";
 import { claimTrackpadMagnify } from "../../platform/tauri/trackpadZoom";
 import { resolveZoomKeybinding } from "../../features/settings/model/zoomKeybinding";
-import { openPdf } from "./pdfDocument";
+import { AskChatRegion } from "../askChat/AskChatRegion";
+import { describePdf, PDF_PAGE_ATTR } from "../askChat/askChatDescribe";
+import { loadPdfJs, openPdf } from "./pdfDocument";
+import "./pdfTextLayer.css";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 5;
@@ -38,6 +42,8 @@ type Props = {
   /** Watch the file and reload on change (default). LaTeX turns this off and bumps `version` itself. */
   watch?: boolean;
   version?: number;
+  /** What "Add to chat" calls this document; a converted PDF names its source. */
+  referenceName?: string;
 };
 
 /**
@@ -48,7 +54,13 @@ type Props = {
  * A reload keeps the current pages up until the new version is ready, so the
  * scroll position survives a rebuild of the same file.
  */
-export function PdfView({ path, cwd, watch = true, version = 0 }: Props) {
+export function PdfView({
+  path,
+  cwd,
+  watch = true,
+  version = 0,
+  referenceName,
+}: Props) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const shown = useRef<{ path: string; task: PDFDocumentLoadingTask } | null>(
@@ -171,6 +183,7 @@ export function PdfView({ path, cwd, watch = true, version = 0 }: Props) {
       doc={state.doc}
       pages={state.pages}
       size={state.size}
+      referenceName={referenceName ?? displayPath(path, cwd)}
     />
   );
 }
@@ -180,12 +193,15 @@ function PdfPages({
   doc,
   pages,
   size,
+  referenceName,
 }: {
   path: string;
   doc: PDFDocumentProxy;
   pages: PageSize[];
   size: number;
+  referenceName: string;
 }) {
+  const describe = useMemo(() => describePdf(referenceName), [referenceName]);
   // Zoom is relative to fitting the widest page to the pane width.
   const [zoom, setZoom] = useState(1);
   const [paneWidth, setPaneWidth] = useState(0);
@@ -290,23 +306,25 @@ function PdfPages({
         aria-label={`PDF preview: ${basename(path)}`}
       >
         {scale > 0 ? (
-          <div
-            className="mx-auto flex w-max min-w-full flex-col items-center"
-            style={{ padding: PADDING, gap: PAGE_GAP }}
-          >
-            {pages.map((page, index) => (
-              <PdfPage
-                key={index}
-                doc={doc}
-                number={index + 1}
-                width={page.width * scale}
-                height={page.height * scale}
-                scale={scale}
-                pixelRatio={pixelRatio}
-                root={scrollerRef}
-              />
-            ))}
-          </div>
+          <AskChatRegion describe={describe} overWhitePage>
+            <div
+              className="mx-auto flex w-max min-w-full flex-col items-center"
+              style={{ padding: PADDING, gap: PAGE_GAP }}
+            >
+              {pages.map((page, index) => (
+                <PdfPage
+                  key={index}
+                  doc={doc}
+                  number={index + 1}
+                  width={page.width * scale}
+                  height={page.height * scale}
+                  scale={scale}
+                  pixelRatio={pixelRatio}
+                  root={scrollerRef}
+                />
+              ))}
+            </div>
+          </AskChatRegion>
         ) : null}
       </div>
       <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-stroke px-3 text-[11px] text-content/50">
@@ -370,6 +388,7 @@ function PdfPage({
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -389,6 +408,7 @@ function PdfPage({
     if (!near || !canvas) return;
     let cancelled = false;
     let task: RenderTask | null = null;
+    let textLayer: TextLayer | null = null;
     // Debounce so a pinch or drag-resize renders once it settles.
     const timer = window.setTimeout(async () => {
       try {
@@ -406,6 +426,28 @@ function PdfPage({
         canvas.height = target.height;
         canvas.getContext("2d")?.drawImage(target, 0, 0);
         setFailed(false);
+        // Selectable text over the drawing; a page without any stays an image.
+        const container = textRef.current;
+        if (container) {
+          const pdfjs = await loadPdfJs();
+          if (cancelled) return;
+          const textViewport = page.getViewport({ scale });
+          container.replaceChildren();
+          container.style.setProperty(
+            "--total-scale-factor",
+            String(scale * (textViewport.userUnit || 1)),
+          );
+          textLayer = new pdfjs.TextLayer({
+            textContentSource: page.streamTextContent(),
+            container,
+            viewport: textViewport,
+          });
+          await textLayer.render();
+          if (cancelled) return;
+          const end = document.createElement("div");
+          end.className = "endOfContent";
+          container.append(end);
+        }
       } catch {
         // Teardown cancels the render or destroys the document; only a
         // failure while this page is still wanted is worth showing.
@@ -416,6 +458,7 @@ function PdfPage({
       cancelled = true;
       window.clearTimeout(timer);
       task?.cancel();
+      textLayer?.cancel();
     };
   }, [doc, number, scale, pixelRatio, near]);
 
@@ -424,11 +467,27 @@ function PdfPage({
       ref={boxRef}
       className="relative shrink-0 bg-white shadow-sm ring-1 ring-black/10"
       style={{ width, height }}
+      {...{ [PDF_PAGE_ATTR]: number }}
     >
       <canvas
         ref={canvasRef}
         aria-label={`Page ${number}`}
         className="block h-full w-full"
+      />
+      <div
+        ref={textRef}
+        className="textLayer"
+        // While dragging, this keeps a pointer between lines from selecting
+        // the whole document, as pdf.js's own viewer does.
+        onPointerDown={(event) => {
+          const layer = event.currentTarget;
+          layer.classList.add("selecting");
+          window.addEventListener(
+            "pointerup",
+            () => layer.classList.remove("selecting"),
+            { once: true },
+          );
+        }}
       />
       {failed ? (
         <div className="absolute inset-0 grid place-items-center text-[12px] text-black/50">

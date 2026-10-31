@@ -121,6 +121,8 @@ export function SpreadsheetView({ path, cwd }: { path: string; cwd: string }) {
           key={`${index}:${reloadKey}`}
           rows={sheet.rows}
           label={`Spreadsheet preview: ${basename(path)}, ${sheet.name}`}
+          file={displayPath(path, cwd)}
+          sheet={sheet.name}
           footer={
             <>
               {sheet.truncated ? (

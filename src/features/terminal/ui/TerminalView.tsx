@@ -30,6 +30,8 @@ import {
 import { IS_MAC } from "../../../platform/tauri/platform";
 import { takeTerminalStartInput } from "../../../fork/ultrareview/ultrareview"; // Fork
 import "@xterm/xterm/css/xterm.css";
+import { AskChatMenu } from "../../../fork/askChat/AskChatRegion"; // Fork
+import { useTerminalAskChat } from "../../../fork/askChat/useTerminalAskChat"; // Fork
 
 type Props = {
   id: string;
@@ -412,6 +414,9 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
     };
   }, [id]);
 
+  // Fork: "Add to chat" on selected terminal text. After the effect above.
+  const askChat = useTerminalAskChat(outerRef, termRef, id);
+
   // Identity-stable: the callers pass an inline arrow, so depending on the
   // prop itself would tear down and re-arm the poll — and re-fork `ps` — on
   // every parent render.
@@ -468,6 +473,12 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       <div
         ref={hostRef}
         className="monocode-terminal-host min-h-0 min-w-0 flex-1 overflow-hidden"
+      />
+      <AskChatMenu
+        selection={askChat.selection}
+        onDismiss={askChat.dismissSelection}
+        onAdded={askChat.clearSelection}
+        tabToMenu={false}
       />
     </div>
   );
