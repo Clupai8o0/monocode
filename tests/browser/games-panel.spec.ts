@@ -8,6 +8,13 @@ if (process.env.GAME_BROWSER) {
 
 const GAMES = ["blocks", "agent run", "mono bros", "pac-man", "snake"];
 
+async function pickGame(page: Page, name: string) {
+  await page.getByRole("button", { name: "Game", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
+const gameSelect = (page: Page) => page.getByRole("button", { name: "Game", exact: true });
+
 async function open(page: Page, theme = "dark") {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/tests/browser/games-panel.html?theme=${theme}`);
@@ -78,12 +85,9 @@ test("each game draws in the panel, and the last one is remembered", async ({
 }, testInfo) => {
   const dir = process.env.GAME_SHOTS ?? testInfo.outputDir;
   await open(page);
-  await expect(page.getByRole("tab", { name: "blocks" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(gameSelect(page)).toHaveText("blocks");
   for (const name of GAMES) {
-    await page.getByRole("tab", { name }).click();
+    await pickGame(page, name);
     await expect(board(page)).toBeFocused();
     await page.waitForTimeout(1500);
     expect(await litPixels(page), name).toBeGreaterThan(50);
@@ -94,15 +98,12 @@ test("each game draws in the panel, and the last one is remembered", async ({
   }
   await page.reload();
   await page.locator("[data-fork-games]").click();
-  await expect(page.getByRole("tab", { name: "snake" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(gameSelect(page)).toHaveText("snake");
 });
 
 test("Pause parks the board, and Resume, P or New game brings it back", async ({ page }) => {
   await open(page);
-  await page.getByRole("tab", { name: "agent run" }).click();
+  await pickGame(page, "agent run");
   await expect(board(page)).toBeFocused();
 
   await pauseChip(page).click();
@@ -169,7 +170,7 @@ test("blocks plays through the keyboard and retries on Space", async ({ page }) 
 
 test("agent run jumps, scores and ends", async ({ page }) => {
   await open(page);
-  await page.getByRole("tab", { name: "agent run" }).click();
+  await pickGame(page, "agent run");
   await page.keyboard.press(" ");
   await expect.poll(() => score(page), { timeout: 8000 }).toBeGreaterThan(2);
   await expect(page.getByRole("status")).toHaveText(/game over/, {
@@ -179,7 +180,7 @@ test("agent run jumps, scores and ends", async ({ page }) => {
 
 test("mono bros runs on a held key", async ({ page }) => {
   await open(page);
-  await page.getByRole("tab", { name: "mono bros" }).click();
+  await pickGame(page, "mono bros");
   await page.keyboard.down("ArrowRight");
   await expect.poll(() => score(page), { timeout: 8000 }).toBeGreaterThan(0);
   await page.keyboard.up("ArrowRight");
@@ -192,7 +193,7 @@ test("typing in the composer pauses, a click resumes, Esc hides and keeps the ga
 }, testInfo) => {
   const dir = process.env.GAME_SHOTS ?? testInfo.outputDir;
   await open(page);
-  await page.getByRole("tab", { name: "agent run" }).click();
+  await pickGame(page, "agent run");
   await page.waitForTimeout(1200);
 
   const composer = page.getByLabel("Composer", { exact: true });
@@ -254,7 +255,7 @@ test("Full screen fills the window above the footer, and back", async ({ page })
   await open(page);
   await fullscreenChip(page).click();
   await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "true");
-  await expect(fullscreenChip(page)).toHaveText("Exit full screen");
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-label", "Exit full screen");
 
   const full = (await panel(page).boundingBox())!;
   expect(full.x).toBe(10);
@@ -268,7 +269,7 @@ test("Full screen fills the window above the footer, and back", async ({ page })
 
   await fullscreenChip(page).click();
   await expect(fullscreenChip(page)).toHaveAttribute("aria-pressed", "false");
-  await expect(fullscreenChip(page)).toHaveText("Full screen");
+  await expect(fullscreenChip(page)).toHaveAttribute("aria-label", "Full screen");
   const back = (await panel(page).boundingBox())!;
   expect(back.width).toBe(600);
   expect(back.height).toBe(548);
@@ -359,8 +360,8 @@ test("the panel stops at its minimum size", async ({ page }) => {
   // Anchored bottom-right, so it grew towards the window's corner.
   expect(after.x - before.x).toBe(before.width - 420);
   expect(after.y - before.y).toBe(before.height - 360);
-  // Every game tab still fits: the list wraps rather than clipping Code.
-  const code = (await panel(page).getByRole("tab", { name: "Code" }).boundingBox())!;
+  // The whole toolbar still fits at the smallest size, down to Hide.
+  const code = (await panel(page).getByRole("button", { name: "Hide" }).boundingBox())!;
   expect(code.x + code.width).toBeLessThanOrEqual(after.x + after.width);
 });
 
@@ -395,13 +396,13 @@ test("grid and table sizes are kept apart", async ({ page }) => {
   await dragGrip(page, -80, -40);
   expect((await panel(page).boundingBox())!.width).toBe(680);
 
-  await page.getByRole("tab", { name: "poker" }).click();
+  await pickGame(page, "poker");
   await expect
     .poll(async () => (await panel(page).boundingBox())!.width)
     .toBe(720);
   expect((await panel(page).boundingBox())!.height).toBe(560);
 
-  await page.getByRole("tab", { name: "blocks" }).click();
+  await pickGame(page, "blocks");
   await expect
     .poll(async () => (await panel(page).boundingBox())!.width)
     .toBe(680);

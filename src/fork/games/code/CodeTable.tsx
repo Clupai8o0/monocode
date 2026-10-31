@@ -5,6 +5,7 @@ import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 import { readTextFile, writeTextFile } from "../../../platform/tauri/fs";
 import { DOJO_FOLDER, DOJO_MONO } from "../../starterMonos/dojoMono";
 import { starterMonoId } from "../../starterMonos/starterMono";
+import { ChipSelect } from "../ChipSelect";
 import { gamesPanel } from "../gamesPanelStore";
 import { CodeConsole } from "./CodeConsole";
 import { CodeEditor, type CodeEditorHandle } from "./CodeEditor";
@@ -75,7 +76,10 @@ const CHIP =
 const CHIP_ON = "bg-content/10 text-content";
 const CHIP_OFF = "text-content/50 hover:bg-content/10 hover:text-content";
 
-const LEVELS: DrillLevel[] = ["easy", "mid", "hard"];
+const LEVEL_OPTIONS = (["easy", "mid", "hard"] as DrillLevel[]).map((id) => ({
+  id,
+  label: id,
+}));
 const LANGUAGES: { id: DrillLanguage; label: string }[] = [
   { id: "javascript", label: "JavaScript" },
   { id: "python", label: "Python" },
@@ -669,39 +673,27 @@ export function CodeTable({
       onKeyDown={(event) => event.stopPropagation()}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="flex items-center gap-0.5" aria-label="Language">
-          {LANGUAGES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              tabIndex={-1}
-              aria-pressed={language === item.id}
-              className={`${CHIP} ${language === item.id ? CHIP_ON : CHIP_OFF}`}
-              onClick={() => {
-                setLanguage(item.id);
-                pickFor(level, item.id);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-0.5" aria-label="Level">
-          {LEVELS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              tabIndex={-1}
-              aria-pressed={level === id}
-              className={`${CHIP} ${level === id ? CHIP_ON : CHIP_OFF}`}
-              onClick={() => {
-                setLevel(id);
-                pickFor(id, language);
-              }}
-            >
-              {id}
-            </button>
-          ))}
+        <div className="flex items-center gap-1.5">
+          <ChipSelect
+            label="Language"
+            value={language}
+            options={LANGUAGES}
+            onChange={(id) => {
+              setLanguage(id);
+              pickFor(level, id);
+            }}
+            width={130}
+          />
+          <ChipSelect
+            label="Level"
+            value={level}
+            options={LEVEL_OPTIONS}
+            onChange={(id) => {
+              setLevel(id);
+              pickFor(id, language);
+            }}
+            width={110}
+          />
         </div>
         <span
           className="ml-auto font-mono text-[11px] tabular-nums text-content/55"

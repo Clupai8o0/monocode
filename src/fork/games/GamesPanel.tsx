@@ -14,6 +14,14 @@ import {
 import { GRID_GAMES } from "../../features/terminal/arcade/gridGames";
 import { TerminalGridBackground } from "../../features/terminal/ui/TerminalGridBackground";
 import { LAYER } from "../../shared/lib/layers";
+import {
+  Maximize2,
+  Minus,
+  PanelRight,
+  Pause,
+  Play,
+  RotateCcw,
+} from "../../shared/ui/icons";
 import { useAgentActivity } from "../backgroundAgents/runningAgents";
 import {
   clampDockWidth,
@@ -37,6 +45,7 @@ import {
   type PanelSize,
   type PanelSizes,
 } from "./gamesPanelStore";
+import { ChipSelect, IconButton } from "./ChipSelect";
 // Fork: poker, blackjack and chess share the panel with the grid games.
 import {
   TABLE_GAMES,
@@ -88,10 +97,11 @@ function withSize(
   return kind === "grid" ? { ...sizes, grid: size } : { ...sizes, table: size };
 }
 
-const CHIP =
-  "h-6 cursor-pointer whitespace-nowrap rounded px-1.5 text-[11px] leading-none";
-const CHIP_ON = "bg-content/10 text-content";
-const CHIP_OFF = "text-content/50 hover:bg-content/10 hover:text-content";
+const GAME_OPTIONS = [...GRID_GAMES, ...TABLE_GAMES].map(({ id, label }) => ({
+  id,
+  label,
+}));
+const MODE_OPTIONS = ARCADE_MODES.map((id) => ({ id, label: id }));
 
 type ResizeAxis = "both" | "x" | "y";
 
@@ -409,46 +419,29 @@ export function GamesPanel() {
     >
       <GlassBackdrop />
       <header
-        className="relative z-[1] flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 pt-2 pb-1.5"
+        className="relative z-[1] flex shrink-0 items-center gap-1.5 px-2 pt-2 pb-1.5"
         onMouseDown={(event) => event.preventDefault()}
       >
-        <div className="flex flex-wrap items-center gap-0.5" role="tablist" aria-label="Game">
-          {[...GRID_GAMES, ...TABLE_GAMES].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              tabIndex={-1}
-              aria-selected={item.id === gameId}
-              className={`${CHIP} ${item.id === gameId ? CHIP_ON : CHIP_OFF}`}
-              onClick={() => pickGame(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-0.5" aria-label="Difficulty">
-          {ARCADE_MODES.map((id) => (
-            <button
-              key={id}
-              type="button"
-              tabIndex={-1}
-              aria-pressed={mode === id}
-              className={`${CHIP} ${mode === id ? CHIP_ON : CHIP_OFF}`}
-              onClick={() => pickMode(id)}
-            >
-              {id}
-            </button>
-          ))}
-        </div>
-        <div className="ml-auto flex items-center gap-0.5">
+        <ChipSelect
+          label="Game"
+          value={gameId}
+          options={GAME_OPTIONS}
+          onChange={pickGame}
+        />
+        <ChipSelect
+          label="Difficulty"
+          value={mode}
+          options={MODE_OPTIONS}
+          onChange={pickMode}
+          width={110}
+        />
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {canPause ? (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-pressed={userPaused}
+            <IconButton
+              icon={userPaused ? Play : Pause}
+              label={userPaused ? "Resume" : "Pause"}
+              pressed={userPaused}
               data-fork-games-pause=""
-              className={`${CHIP} ${userPaused ? CHIP_ON : CHIP_OFF}`}
               onClick={() => {
                 if (userPaused) {
                   resume();
@@ -457,49 +450,26 @@ export function GamesPanel() {
                   setUserPaused(true);
                 }
               }}
-            >
-              {userPaused ? "Resume" : "Pause"}
-            </button>
+            />
           ) : null}
-          <button
-            type="button"
-            tabIndex={-1}
-            className={`${CHIP} ${CHIP_OFF}`}
-            onClick={newGame}
-          >
-            New game
-          </button>
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-pressed={docked}
+          <IconButton icon={RotateCcw} label="New game" onClick={newGame} />
+          <IconButton
+            icon={PanelRight}
+            label="Side by side"
+            pressed={docked}
             data-fork-games-dock=""
-            title="The app on the left, the games on the right"
-            className={`${CHIP} ${docked ? CHIP_ON : CHIP_OFF}`}
             onClick={() => gamesPanel.dock(!docked)}
-          >
-            Side by side
-          </button>
+          />
           {docked ? null : (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-pressed={fullscreen}
+            <IconButton
+              icon={Maximize2}
+              label={fullscreen ? "Exit full screen" : "Full screen"}
+              pressed={fullscreen}
               data-fork-games-fullscreen=""
-              className={`${CHIP} ${fullscreen ? CHIP_ON : CHIP_OFF}`}
               onClick={toggleFullscreen}
-            >
-              {fullscreen ? "Exit full screen" : "Full screen"}
-            </button>
+            />
           )}
-          <button
-            type="button"
-            tabIndex={-1}
-            className={`${CHIP} ${CHIP_OFF}`}
-            onClick={() => gamesPanel.hide()}
-          >
-            Hide
-          </button>
+          <IconButton icon={Minus} label="Hide" onClick={() => gamesPanel.hide()} />
         </div>
       </header>
       <div className="relative z-[1] flex shrink-0 items-center gap-3 px-3 pb-1.5 font-mono text-[11px] tabular-nums text-content/55">

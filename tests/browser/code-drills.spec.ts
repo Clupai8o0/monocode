@@ -178,7 +178,8 @@ test("the editor highlights keywords and indents the next line", async ({
   expect((await codeText(page)).split("\n")[1]).toBe("  return a + b;");
 
   // Python: the same after a colon, with a four-space block.
-  await page.getByRole("button", { name: "Python" }).click();
+  await page.getByRole("button", { name: "Language", exact: true }).click();
+  await page.getByRole("option", { name: "Python", exact: true }).click();
   await expect(page.locator(table)).toContainText("Add two numbers in Python");
   await setCode(page, "def add(a, b):");
   await page.keyboard.press("Enter");
@@ -197,7 +198,8 @@ test("Format runs Prettier for JavaScript and re-indents Python", async ({
     .poll(async () => (await codeText(page)).trimEnd())
     .toBe("function add(a, b) {\n  return a + b;\n}");
 
-  await page.getByRole("button", { name: "Python" }).click();
+  await page.getByRole("button", { name: "Language", exact: true }).click();
+  await page.getByRole("option", { name: "Python", exact: true }).click();
   await expect(page.locator(table)).toContainText("Add two numbers in Python");
   await setCode(page, "def add(a, b):\n  return a + b\n");
   await page.locator("[data-fork-code-format]").click();
