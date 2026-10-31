@@ -15,6 +15,7 @@ import {
   loadSavedLeetcode,
   parseLeetcodeInput,
   saveLeetcode,
+  withPythonImports,
   type LeetcodeFetch,
   type LeetcodeRequest,
 } from "./leetcode";
@@ -359,23 +360,35 @@ export function CodeTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, active]);
 
+  // Each sign-in or sign-out starts a new generation; a sync from an older
+  // one finishes without touching anything.
+  const lcGeneration = useRef(0);
   const syncAccount = async (username: string) => {
+    const generation = lcGeneration.current;
     setLcSyncing(true);
     try {
       const snapshot = await syncLeetcode(fetchLeetcode, username);
+      if (generation !== lcGeneration.current) {
+        return false;
+      }
       setLcSnapshot(snapshot);
       saveSnapshot(snapshot);
       await leetcodeAccount.writeForDojo(snapshotForDojo(snapshot)).catch(() => undefined);
       return true;
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      if (generation === lcGeneration.current) {
+        setNote(error instanceof Error ? error.message : String(error));
+      }
       return false;
     } finally {
-      setLcSyncing(false);
+      if (generation === lcGeneration.current) {
+        setLcSyncing(false);
+      }
     }
   };
 
   const onConnected = (username: string) => {
+    lcGeneration.current += 1;
     setLcUser(username);
     setLcPanel(null);
     setLcPaste({ session: "", csrf: "" });
@@ -465,6 +478,8 @@ export function CodeTable({
     void leetcodeAccount
       .disconnect()
       .then(() => {
+        lcGeneration.current += 1;
+        setLcSyncing(false);
         setLcUser(null);
         setLcSnapshot(null);
         saveSnapshot(null);
@@ -516,7 +531,9 @@ export function CodeTable({
     onInput?.();
     try {
       const { code: past } = await loadSubmissionCode(fetchLeetcode, submission.id);
-      setCodeById((current) => ({ ...current, [into.id]: past }));
+      // LeetCode's Python adds typing, collections and the like by itself.
+      const runnable = into.language === "python" ? withPythonImports(past) : past;
+      setCodeById((current) => ({ ...current, [into.id]: runnable }));
       goTo(into);
       setNote(`Loaded your ${submission.status.toLowerCase()} submission from ${ago(submission.time)}.`);
     } catch (error) {

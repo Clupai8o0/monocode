@@ -286,10 +286,41 @@ function pythonStarter(code: string): string {
     const indent = /^\s*/.exec(lastLine)?.[0] ?? "";
     starter += `\n${indent}    pass`;
   }
-  if (/\b(List|Optional|Dict|Tuple|Set)\[/.test(starter)) {
-    starter = `from typing import *\n\n${starter}`;
+  return `${withPythonImports(starter)}\n`;
+}
+
+// What LeetCode's Python imports for every answer, by the names that need it.
+const PY_STAR_IMPORTS: [RegExp, string][] = [
+  [/\b(List|Optional|Dict|Tuple|Set|Deque)\[/, "typing"],
+  [/(?<![.\w])(Counter|defaultdict|deque|OrderedDict)\b/, "collections"],
+  [/(?<![.\w])(heappush|heappop|heapify|heappushpop|nlargest|nsmallest)\b/, "heapq"],
+  [/(?<![.\w])(bisect_left|bisect_right|insort)\b/, "bisect"],
+  [/(?<![.\w])(lru_cache|cache|reduce|cmp_to_key)\b/, "functools"],
+  [/(?<![.\w])(accumulate|permutations|combinations|product|pairwise|zip_longest)\b/, "itertools"],
+];
+const PY_MODULES = ["math", "heapq", "bisect", "collections", "itertools", "functools", "re", "string"];
+
+/**
+ * Python code as LeetCode runs it: the imports it adds for every answer, put
+ * at the top so code written there (List[int], deque, math.inf) runs here.
+ */
+export function withPythonImports(code: string): string {
+  const lines: string[] = [];
+  for (const [pattern, module] of PY_STAR_IMPORTS) {
+    const line = `from ${module} import *`;
+    if (pattern.test(code) && !code.includes(line)) {
+      lines.push(line);
+    }
   }
-  return `${starter}\n`;
+  const modules = PY_MODULES.filter(
+    (module) =>
+      new RegExp(`(?<![.\\w])${module}\\.`).test(code) &&
+      !new RegExp(`^\\s*import [^\\n]*\\b${module}\\b`, "m").test(code),
+  );
+  if (modules.length) {
+    lines.push(`import ${modules.join(", ")}`);
+  }
+  return lines.length ? `${lines.join("\n")}\n\n${code}` : code;
 }
 
 /**

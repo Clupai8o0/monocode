@@ -327,3 +327,19 @@ describe("saved LeetCode drills", () => {
     expect(loadSavedLeetcode(storage)).toEqual([]);
   });
 });
+
+describe("withPythonImports", () => {
+  it("adds what LeetCode's Python imports, once", async () => {
+    const { withPythonImports } = await import("./leetcode");
+    const code = "class Solution:\n    def f(self, a: List[int]) -> int:\n        q = deque(a)\n        return math.floor(heappop(a))\n";
+    const out = withPythonImports(code);
+    expect(out).toContain("from typing import *");
+    expect(out).toContain("from collections import *");
+    expect(out).toContain("from heapq import *");
+    expect(out).toContain("import math");
+    expect(out).not.toContain("import math, heapq");
+    expect(withPythonImports(out)).toBe(out);
+    expect(withPythonImports("x = collections.Counter()\nimport collections\n")).toBe("x = collections.Counter()\nimport collections\n");
+    expect(withPythonImports("def f():\n    return 1\n")).toBe("def f():\n    return 1\n");
+  });
+});

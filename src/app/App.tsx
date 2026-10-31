@@ -5238,7 +5238,7 @@ function Workspace({
           setSessions(sessionsRef.current);
         },
       });
-      if (!session || request !== monoViewRequest.current) return;
+      if (!session || request !== monoViewRequest.current) return undefined;
       // What the last Mono had open over its overview is its own; another
       // Mono opens on its list.
       if (monoViewIdRef.current !== session.id) {
@@ -5263,6 +5263,8 @@ function Workspace({
       setProjectTerminalFocused(false);
       setComposerFocused(true);
       setComposerFocusToken((token) => token + 1);
+      // Fork: the session it opened, so a caller can send to that one only.
+      return session.id;
     },
     [ensureOpenSession, workspaceNavigation.cancel],
   );
@@ -9001,9 +9003,9 @@ function Workspace({
         return;
       }
       const prompt = (event as CustomEvent<{ prompt?: string } | null>).detail?.prompt;
-      void onOpenMono(dojoId).then(() => {
-        const sessionId = monoViewIdRef.current;
-        if (prompt && sessionId) {
+      void onOpenMono(dojoId).then((sessionId) => {
+        // Undefined when another Mono was opened meanwhile.
+        if (prompt && sessionId && monoViewIdRef.current === sessionId) {
           void submitSession(sessionId, prompt, [], { followUpBehavior: "queue" });
         }
       });
@@ -14048,7 +14050,9 @@ function Workspace({
     approval: onApproval,
     question: onQuestionReply,
     questionInteraction: onQuestionInteraction,
-    reveal: onOpenMono,
+    reveal: async (monoId) => {
+      await onOpenMono(monoId);
+    },
     openArtifact: async (monoId, id) => {
       await onOpenMono(monoId);
       const sessionId = findMono(monoId)?.sessionId;

@@ -50,6 +50,7 @@ const KEYCHAIN_USER: &str = "account";
 const LOGIN_LABEL: &str = "fork-leetcode-login";
 const LOGIN_URL: &str = "https://leetcode.com/accounts/login/";
 const ACCOUNT_EVENT: &str = "monocode:fork-leetcode-account";
+const REJECTED: &str = "LeetCode did not accept that session.";
 const LOGIN_WAIT: Duration = Duration::from_secs(15 * 60);
 
 /// The signed-in session. Only Rust ever sees `session` and `csrf`.
@@ -242,7 +243,7 @@ fn verify(session: &str, csrf: &str) -> Result<String, String> {
     let status = &data["userStatus"];
     match (status["isSignedIn"].as_bool(), status["username"].as_str()) {
         (Some(true), Some(name)) if !name.is_empty() => Ok(name.to_string()),
-        _ => Err("LeetCode did not accept that session. Sign in again.".into()),
+        _ => Err(format!("{REJECTED} Sign in again.")),
     }
 }
 
@@ -270,7 +271,7 @@ fn watch_login(app: AppHandle) {
         Err(_) => return,
     };
     let started = Instant::now();
-    let mut last_tried: Option<String> = None;
+    let mut rejected: Option<String> = None;
     while started.elapsed() < LOGIN_WAIT {
         std::thread::sleep(Duration::from_millis(1200));
         let Some(window) = app.get_webview_window(LOGIN_LABEL) else {
@@ -288,11 +289,11 @@ fn watch_login(app: AppHandle) {
         let (Some(session), Some(csrf)) = (find("LEETCODE_SESSION"), find("csrftoken")) else {
             continue;
         };
-        // A session LeetCode already turned down is not asked about again.
-        if last_tried.as_deref() == Some(session.as_str()) {
+        // A session LeetCode already turned down is not asked about again;
+        // one that failed on the network is tried again on the next tick.
+        if rejected.as_deref() == Some(session.as_str()) {
             continue;
         }
-        last_tried = Some(session.clone());
         match connect_with(&session, &csrf) {
             Ok(username) => {
                 let _ = app.emit(
@@ -307,7 +308,8 @@ fn watch_login(app: AppHandle) {
                 let _ = window.close();
                 return;
             }
-            Err(_) => {}
+            Err(error) if error.starts_with(REJECTED) => rejected = Some(session),
+            Err(_) => std::thread::sleep(Duration::from_secs(3)),
         }
     }
     if let Some(window) = app.get_webview_window(LOGIN_LABEL) {
