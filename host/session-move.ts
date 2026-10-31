@@ -948,6 +948,8 @@ async function labWindows(env: SessionMoveEnv): Promise<Array<{ name: string; pa
     { timeoutMs: 10_000 },
   );
   if (list.code !== 0) {
+    // No tmux on this machine, so no window can be alive.
+    if (/spawn tmux ENOENT/.test(list.stderr)) return [];
     if (!list.timedOut && list.code !== null && /can't find session|no server running|error connecting to .*\(No such file or directory\)/i.test(list.stderr)) return [];
     throw new Error(`Could not list that machine's windows: ${firstLine(list.stderr, list.timedOut ? "tmux timed out" : "tmux failed")}`);
   }
