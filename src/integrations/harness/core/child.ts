@@ -113,6 +113,8 @@ const sseBuffer = new Map<string, string[]>();
 const ownedChildren = new Set<string>();
 const ownedSse = new Set<string>();
 const livePid = new Map<string, number>();
+// Fork: never cleared; a pid per session, read by childPid.
+const lastPid = new Map<string, number>();
 const pendingExit = new Map<
   string,
   Array<{ code: number | null; pid: number }>
@@ -124,9 +126,10 @@ export function sessionIdForPid(pid: number): string | undefined {
   return undefined;
 }
 
-// Fork: the live child's pid, so a session move can wait for its group to end.
+// Fork: the last child's pid, so a session move can wait for its group to end.
+// Kept after it exits: tools it started can outlive it in that group.
 export function childPid(sessionId: string): number | undefined {
-  return livePid.get(sessionId);
+  return lastPid.get(sessionId);
 }
 
 /** True when this exit belongs to the child we currently have spawned. */
@@ -380,6 +383,7 @@ export async function spawnChild(
   });
   if (typeof pid !== "number" || pid <= 0) return;
   livePid.set(sessionId, pid);
+  lastPid.set(sessionId, pid);
   const exits = pendingExit.get(sessionId);
   pendingExit.delete(sessionId);
   const exited = exits?.find((event) => event.pid === pid);

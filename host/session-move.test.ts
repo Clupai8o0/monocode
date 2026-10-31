@@ -628,6 +628,14 @@ describe("session move, a real run with two home folders", () => {
     // Gone from both: it is started again.
     await expect(handleSessionMove(noWindows, params)).resolves.toEqual({ name: "s" });
     expect(readFileSync(calls, "utf8")).toBe("s\ns\n");
+    // A gate with no answer isn't an empty line: it may still be queued there.
+    writeFileSync(join(bin, "agent-gate"), "#!/bin/bash\nexit 3\n");
+    await expect(handleSessionMove(noWindows, params)).rejects.toThrow(/queue/);
+    expect(readFileSync(calls, "utf8")).toBe("s\ns\n");
+    // A machine with no gate has no line to be in.
+    rmSync(join(bin, "agent-gate"));
+    await expect(handleSessionMove(noWindows, params)).resolves.toEqual({ name: "s" });
+    expect(readFileSync(calls, "utf8")).toBe("s\ns\ns\n");
   });
 
   it("a repeated start gets the launch already made", async () => {

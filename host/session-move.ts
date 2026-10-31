@@ -1064,6 +1064,8 @@ async function windowAlive(env: SessionMoveEnv, name: string) {
 
 async function inGateQueue(env: SessionMoveEnv, name: string) {
   const gate = await env.run(join(env.home, ".local/bin/agent-gate"), ["status"], { timeoutMs: 10_000 });
+  // No answer isn't an empty line: a retry could start a second copy. No gate here is.
+  if (gate.timedOut || (gate.code !== 0 && !gate.stderr.includes("ENOENT"))) throw new Error("Could not read the queue on that machine");
   const at = gate.stdout.indexOf(" pos ");
   if (at < 0) return false;
   // The gate keeps the first 40 characters of a name.

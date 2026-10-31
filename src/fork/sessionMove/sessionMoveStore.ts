@@ -166,7 +166,6 @@ const localCall: MoveCall = (op, params) =>
  * only sends SIGTERM, and a tool still running could change files while they're packed.
  */
 export async function stopUntilGone(sessionId: string, stop: (sessionId: string) => Promise<void> | undefined) {
-  // Read first: the stop forgets it.
   const pid = childPid(sessionId);
   await stop(sessionId);
   if (pid === undefined) return;

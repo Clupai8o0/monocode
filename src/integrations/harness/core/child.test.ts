@@ -144,6 +144,8 @@ describe("child bridge", () => {
     spawned.resolve(42);
     await spawning;
     expect(onExit).toHaveBeenCalledWith(1);
+    // Fork: tools can outlive it in its group, so a session move still asks.
+    expect(child.childPid("probe")).toBe(42);
     release();
   });
 
