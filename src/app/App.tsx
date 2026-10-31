@@ -10965,25 +10965,18 @@ function Workspace({
         appendTab(newTab(session.id), repo);
         return session.id;
       },
-      // Undone before it was ever the app's: not kept in history either.
-      closeMovedTab: (id) => {
-        void getHarness("claude")?.forgetSession(id);
-        const nextSessions = sessionsRef.current.filter((session) => session.id !== id);
-        sessionsRef.current = nextSessions;
-        setSessions(nextSessions);
-        const nextTabs = tabsRef.current.filter((tab) => !leafIds(tab.layout).includes(id));
-        if (nextTabs.length === tabsRef.current.length) return;
-        if (!nextTabs.some((tab) => tab.id === activeTabIdRef.current) && nextTabs[0]) {
-          activateTab(nextTabs[0].id);
+      // Undone before it was ever the app's: deleted, so history can't reopen it.
+      closeMovedTab: async (id) => {
+        if (!(await removeSessionRef.current(id, "delete", true, "cli"))) {
+          throw new Error("Could not close the new tab");
         }
-        setTabs((prev) => prev.filter((tab) => !leafIds(tab.layout).includes(id)));
       },
       openSession: (id) => onSelectHistorySessionRef.current(id),
       onMoved: () =>
         publishOwnSessions(sessionsRef.current.filter((session) => !isSessionMoved(session.id))),
     });
     return () => registerMoveHost(null);
-  }, [activateTab, appendTab]);
+  }, [appendTab]);
 
   const autoContinueKey = sessions
     .filter(

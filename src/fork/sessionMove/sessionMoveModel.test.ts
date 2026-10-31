@@ -5,6 +5,7 @@ import {
   leftBehindText,
   moveAvailability,
   movedTitle,
+  openJournal,
   parseMoved,
   withMoved,
   type MoveFacts,
@@ -219,5 +220,23 @@ describe("moved records", () => {
     expect(journalFinished(map, "tab-1", "move-1")).toBe(true);
     expect(journalFinished(map, "tab-1", "move-2")).toBe(false);
     expect(journalFinished(map, "tab-9", "move-1")).toBe(false);
+  });
+
+  it("drops a finished move's journal before a later move replaces its card", () => {
+    const toMac: MovedRecord = {
+      ...record,
+      sessionId: labKey("conv-1"),
+      moveId: "m1",
+      live: { kind: "tab", sessionId: "tab-2" },
+    };
+    const map = withMoved({}, toMac);
+    const entry = (moveId: string, sessionId: string) => ({ plan: { moveId, sessionId } });
+    // m1 finished but its entry stayed; m2 is the next move, m3 an unfinished one.
+    const journal = [entry("m1", labKey("conv-1")), entry("m3", "tab-9")];
+    expect(openJournal(journal, map, "m2")).toEqual([entry("m3", "tab-9")]);
+    // Once the card is replaced, m1 could no longer be told apart: it is already gone.
+    const later = withMoved(map, { ...record, sessionId: "tab-2", moveId: "m2" });
+    expect(journalFinished(later, labKey("conv-1"), "m1")).toBe(false);
+    expect(openJournal([entry("m2", "tab-2")], later, "x")).toEqual([]);
   });
 });

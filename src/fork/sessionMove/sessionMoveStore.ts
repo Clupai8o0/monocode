@@ -11,6 +11,7 @@ import {
   journalFinished,
   labKey,
   moveAvailability,
+  openJournal,
   parseMoved,
   stepText,
   withMoved,
@@ -54,8 +55,8 @@ export type MoveHost = {
     title: string;
     blocks: Block[];
   }) => string;
-  /** Closes a tab `openMovedTab` opened and lets go of its conversation. */
-  closeMovedTab: (id: string) => void;
+  /** Deletes a tab `openMovedTab` opened, and its saved record. */
+  closeMovedTab: (id: string) => Promise<void>;
   openSession: (id: string) => void;
   /** A tab just became a card, so its conversation is no longer the app's. */
   onMoved: () => void;
@@ -134,8 +135,12 @@ function writeJournal(next: MoveJournal[]) {
   localStorage.setItem(JOURNAL_KEY, JSON.stringify(next));
 }
 
+function journalWithout(moveId: string): MoveJournal[] {
+  return openJournal(readJournal(), moved, moveId);
+}
+
 function dropJournal(moveId: string) {
-  writeJournal(readJournal().filter((entry) => entry.plan.moveId !== moveId));
+  writeJournal(journalWithout(moveId));
 }
 
 const localCall: MoveCall = (op, params) =>
@@ -311,7 +316,7 @@ async function run(
       sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       now: Date.now,
       journal: {
-        begin: () => writeJournal([...readJournal().filter((entry) => entry.plan.moveId !== plan.moveId), journal]),
+        begin: () => writeJournal([...journalWithout(plan.moveId), journal]),
         end: () => dropJournal(plan.moveId),
       },
     },
@@ -463,9 +468,9 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
       targetAccountId,
     };
     const journal: MoveJournal = { plan, machineId, direction: "to-mac" };
-    const closeTab = () => {
+    const closeTab = async () => {
       if (!tabId) return;
-      host?.closeMovedTab(tabId);
+      await host?.closeMovedTab(tabId);
       opened.delete(tabId);
       tabId = "";
     };
@@ -535,8 +540,8 @@ async function recoverEntry(entry: MoveJournal): Promise<boolean> {
     {
       source: toHost ? localCall : remote,
       target: toHost ? remote : localCall,
-      closeTarget: () => {
-        if (entry.tabId) host?.closeMovedTab(entry.tabId);
+      closeTarget: async () => {
+        if (entry.tabId) await host?.closeMovedTab(entry.tabId);
       },
       resumeSource: async () => {
         if (!toHost) {

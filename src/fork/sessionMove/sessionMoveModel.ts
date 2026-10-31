@@ -180,6 +180,21 @@ export function journalFinished(map: MovedMap, sessionId: string, moveId: string
   return map[sessionId]?.moveId === moveId;
 }
 
+/**
+ * The journal minus one move, and minus moves whose card was saved but whose
+ * entry couldn't be cleared: a later move of the conversation replaces that
+ * card, and recovery would then take a finished move for an unfinished one.
+ */
+export function openJournal<T extends { plan: { moveId: string; sessionId: string } }>(
+  entries: readonly T[],
+  map: MovedMap,
+  without: string,
+): T[] {
+  return entries.filter(
+    (entry) => entry.plan.moveId !== without && !journalFinished(map, entry.plan.sessionId, entry.plan.moveId),
+  );
+}
+
 /** The record's time as "10:42". */
 export function movedTime(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
