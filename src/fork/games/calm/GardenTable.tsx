@@ -96,14 +96,16 @@ function Bed({ plant, index, onTend }: { plant: Plant | null; index: number; onT
 export function GardenTable({ active, onExit, onInput }: TableProps) {
   const state = useGarden();
   const activity = useAgentActivity();
-  const [shown, setShown] = useState(0);
+  // Each award gets its own id, so two equal ones in a row both get the full fade.
+  const [award, setAward] = useState({ amount: 0, id: 0 });
+  const shown = award.amount;
 
   // Show fresh sunshine for a moment, then mark it seen.
   useEffect(() => {
     if (state.sunshine <= 0) {
       return;
     }
-    setShown(state.sunshine);
+    setAward((last) => ({ amount: state.sunshine, id: last.id + 1 }));
     updateGarden(seenSunshine);
   }, [state.sunshine]);
 
@@ -112,9 +114,9 @@ export function GardenTable({ active, onExit, onInput }: TableProps) {
     if (shown <= 0) {
       return;
     }
-    const timer = setTimeout(() => setShown(0), 2400);
+    const timer = setTimeout(() => setAward((last) => ({ ...last, amount: 0 })), 2400);
     return () => clearTimeout(timer);
-  }, [shown]);
+  }, [award.id, shown]);
 
   const onTend = (index: number) => updateGarden((current) => tend(current, index));
   const onSeed = (kind: SeedKind) =>
