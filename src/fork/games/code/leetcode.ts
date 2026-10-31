@@ -320,13 +320,12 @@ export function withPythonImports(code: string): string {
   if (modules.length) {
     lines.push(`import ${modules.join(", ")}`);
   }
-  if (!lines.length) {
+  // __future__ imports must come first, after any docstring, in any form;
+  // rather than parse that, such code is left as written.
+  if (!lines.length || /\b__future__\b/.test(code)) {
     return code;
   }
-  // __future__ imports must stay first, so ours go after them.
-  const future = /^(?:[ \t]*(?:#[^\n]*)?\n|from __future__ import[^\n]*\n)*/.exec(code)?.[0] ?? "";
-  const head = /from __future__/.test(future) ? future : "";
-  return `${head}${lines.join("\n")}\n\n${code.slice(head.length)}`;
+  return `${lines.join("\n")}\n\n${code}`;
 }
 
 /**

@@ -342,7 +342,7 @@ describe("withPythonImports", () => {
     expect(withPythonImports("x = collections.Counter()\nimport collections\n")).toBe("x = collections.Counter()\nimport collections\n");
     expect(withPythonImports("def f():\n    return 1\n")).toBe("def f():\n    return 1\n");
     expect(withPythonImports("from __future__ import annotations\nq = deque()\n")).toBe(
-      "from __future__ import annotations\nfrom collections import *\n\nq = deque()\n",
+      "from __future__ import annotations\nq = deque()\n",
     );
   });
 });
