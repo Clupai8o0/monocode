@@ -6,6 +6,7 @@ import {
 import { MONO_COLORS } from "../../features/monos/model/mono";
 import { withMonoConfigurationLock } from "../../features/monos/model/monoConfigurationLock";
 import { ensureStarterMono, type StarterMono } from "../starterMonos/starterMono";
+import { DOJO_MONO } from "../starterMonos/dojoMono"; // Fork
 import { SWEEP_MONO } from "../starterMonos/sweepMono";
 
 const USAGE_REPORT =
@@ -35,6 +36,7 @@ export type HabitPreset = {
 
 const MONDAY = 1;
 const FRIDAY = 5;
+const SUNDAY = 0; // Fork
 
 export const HABIT_PRESETS: readonly (HabitPreset & { dayOfWeek: number; time: string })[] = [
   {
@@ -57,6 +59,18 @@ export const HABIT_PRESETS: readonly (HabitPreset & { dayOfWeek: number; time: s
     dayOfWeek: MONDAY,
     time: "09:00",
     instructions: "Report this week's usage.",
+  },
+  {
+    // Fork: Dojo reviews the week's practice from the Code tab's progress.
+    id: "weekly-learning",
+    name: "Weekly learning review",
+    why: "Dojo reads what you practiced in the Code tab, says what stuck and what is due, and sets the next drills.",
+    when: "Sundays at 10 am",
+    mono: DOJO_MONO,
+    dayOfWeek: SUNDAY,
+    time: "10:00",
+    instructions:
+      "Review this week's learning: read progress.json and progress.md in your folder, say what moved and what is due for review, and set the next drills. If nothing was practiced, reply with NOTHING_TO_REPORT.",
   },
 ];
 

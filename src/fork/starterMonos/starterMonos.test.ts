@@ -9,6 +9,7 @@ import { PROJECT_MASCOTS } from "../../features/projects/model/projectMascots";
 import { ensureStarterMono, seedStarterMonos, starterMonoId } from "./starterMono";
 import { KICKOFF_MONO } from "./kickoffMono";
 import { MONO_MAKER } from "./makerMono";
+import { DOJO_MONO } from "./dojoMono"; // Fork
 import { SWEEP_MONO } from "./sweepMono";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -73,9 +74,9 @@ function chatOf(monoId: string, mode: Session["runtimeMode"] = "full-access"): S
 
 describe("starter Monos", () => {
   it("are made once each, with their look and instructions, and no projects", async () => {
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO]);
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO]);
-    expect(listMonos()).toHaveLength(3);
+    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]);
+    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]);
+    expect(listMonos()).toHaveLength(4);
     const kickoff = findMono(starterMonoId(KICKOFF_MONO)!)!;
     expect(kickoff).toMatchObject({ name: "Kickoff", mascot: "rocket", projects: [] });
     expect(kickoff.instructions).toMatch(/You are Kickoff/);
@@ -83,10 +84,16 @@ describe("starter Monos", () => {
     const sweep = findMono(starterMonoId(SWEEP_MONO)!)!;
     expect(sweep).toMatchObject({ name: "Sweep", mascot: "broom", projects: [] });
     expect(sweep.instructions).toMatch(/You are Sweep/);
-    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom"]));
+    const dojo = findMono(starterMonoId(DOJO_MONO)!)!;
+    expect(dojo).toMatchObject({ name: "Dojo", mascot: "belt", projects: [] });
+    expect(dojo.instructions).toMatch(/You are Dojo/);
+    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom", "belt"]));
   });
 
   it("stays deleted once the user deletes it", () => {
+    const dojoId = ensureStarterMono(DOJO_MONO)!; // Fork: Dojo stays deleted too.
+    removeMono(dojoId);
+    expect(ensureStarterMono(DOJO_MONO)).toBeUndefined();
     const id = ensureStarterMono(KICKOFF_MONO)!;
     removeMono(id);
     expect(ensureStarterMono(KICKOFF_MONO)).toBeUndefined();
