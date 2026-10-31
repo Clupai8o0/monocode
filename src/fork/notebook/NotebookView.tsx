@@ -1,6 +1,11 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AlertCircle } from "../../shared/ui/icons";
 import { AgentMarkdown } from "../../features/sessions/ui/AgentMarkdown";
+import { AskChatRegion } from "../askChat/AskChatRegion";
+import {
+  describeNotebook,
+  NOTEBOOK_CELL_ATTR,
+} from "../askChat/askChatDescribe";
 import {
   fenced,
   parseNotebook,
@@ -23,12 +28,16 @@ export function NotebookView({
   source,
   cwd,
   onOpenFile,
+  file = "notebook",
 }: {
   source: string;
   cwd: string;
   onOpenFile?: OpenFileFn;
+  /** Where "Add to chat" says a cell came from. */
+  file?: string;
 }) {
   const text = useDeferredValue(source);
+  const describe = useMemo(() => describeNotebook(file), [file]);
   const parsed = useMemo(() => {
     try {
       return { notebook: parseNotebook(text) };
@@ -68,15 +77,18 @@ export function NotebookView({
               Empty notebook
             </p>
           ) : null}
-          {notebook.cells.map((cell, index) => (
-            <Cell
-              key={index}
-              cell={cell}
-              language={notebook.language}
-              cwd={cwd}
-              onOpenFile={onOpenFile}
-            />
-          ))}
+          <AskChatRegion describe={describe}>
+            {notebook.cells.map((cell, index) => (
+              <div key={index} {...{ [NOTEBOOK_CELL_ATTR]: index + 1 }}>
+                <Cell
+                  cell={cell}
+                  language={notebook.language}
+                  cwd={cwd}
+                  onOpenFile={onOpenFile}
+                />
+              </div>
+            ))}
+          </AskChatRegion>
         </div>
       </div>
       <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-stroke px-3 text-[11px] text-content/50">

@@ -30,6 +30,15 @@ import {
   DiffCommentComposer,
   type DiffCommentComposerTarget,
 } from "./DiffCommentComposer";
+import { AskChatRegion } from "../../../fork/askChat/AskChatRegion"; // Fork
+import {
+  describeDiff,
+  DIFF_LINE_ATTR,
+  DIFF_PATH_ATTR,
+  DIFF_REMOVED_ATTR,
+} from "../../../fork/askChat/askChatDescribe"; // Fork
+
+const DESCRIBE_DIFF = describeDiff(); // Fork
 import { PaneHeader } from "../../../shared/ui/PaneHeader";
 import type { UnifiedLine } from "../model/unifiedDiff";
 import { windowRows } from "../model/unifiedDiffWindow";
@@ -395,6 +404,7 @@ export function UnifiedDiffView({
     );
 
   return (
+    <AskChatRegion describe={DESCRIBE_DIFF}>{/* Fork */}
     <div
       tabIndex={-1}
       className={
@@ -608,6 +618,7 @@ export function UnifiedDiffView({
         />
       ) : null}
     </div>
+    </AskChatRegion>
   );
 }
 
@@ -799,6 +810,13 @@ const CodeLine = memo(function CodeLine({
       data-diff-line={lane === "code" ? "" : undefined}
       data-diff-gutter-row={lane === "gutter" ? row.key : undefined}
       data-diff-row={row.key}
+      {...(lane === "code" && number != null // Fork: for "Add to chat".
+        ? {
+            [DIFF_LINE_ATTR]: number,
+            [DIFF_PATH_ATTR]: file.path,
+            ...(removed ? { [DIFF_REMOVED_ATTR]: "" } : {}),
+          }
+        : {})}
       className={`diff-review-line ${added ? "is-add" : removed ? "is-del" : "is-context"} ${row.stagePos != null ? "is-stageable" : ""} ${cards ? "diff-review-card-row" : ""}`}
       style={{ height: row.height }}
     >

@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw } from "../../shared/ui/icons";
+import { displayPath } from "../../shared/lib/paths";
+import { AskChatMenu } from "../askChat/AskChatRegion";
+import {
+  useFrameSelection,
+  withSelectionBridge,
+} from "../askChat/htmlSelectionBridge";
+import { ASK_CHAT_ENABLED } from "../askChat/useAskChatSelection";
 import { htmlPreviewUrl } from "./htmlModel";
 
 export const HTML_PREVIEW_DELAY = 200;
@@ -35,6 +42,12 @@ export function HtmlPreview({
   const currentId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const { selection, dismissSelection } = useFrameSelection(
+    frameRef,
+    displayPath(path, cwd),
+    active && page ? page.id : null,
+  );
   useEffect(() => {
     const update = () => setDocumentVisible(!document.hidden);
     document.addEventListener("visibilitychange", update);
@@ -60,7 +73,7 @@ export function HtmlPreview({
     const timer = setTimeout(() => {
       setError(null);
       void invoke<PreviewPage>("fork_html_preview_create", {
-        source,
+        source: ASK_CHAT_ENABLED ? withSelectionBridge(source) : source,
         path,
         cwd,
       }).then(
@@ -131,6 +144,7 @@ export function HtmlPreview({
       ) : active && page ? (
         <iframe
           key={page.id}
+          ref={frameRef}
           title={`HTML preview: ${title}`}
           src={htmlPreviewUrl(page.urlPath)}
           sandbox="allow-scripts"
@@ -159,6 +173,11 @@ export function HtmlPreview({
           {active ? "Rendering HTML…" : "Preview paused"}
         </div>
       )}
+      <AskChatMenu
+        selection={selection}
+        onDismiss={dismissSelection}
+        overWhitePage
+      />
     </div>
   );
 }
