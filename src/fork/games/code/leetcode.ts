@@ -320,7 +320,13 @@ export function withPythonImports(code: string): string {
   if (modules.length) {
     lines.push(`import ${modules.join(", ")}`);
   }
-  return lines.length ? `${lines.join("\n")}\n\n${code}` : code;
+  if (!lines.length) {
+    return code;
+  }
+  // __future__ imports must stay first, so ours go after them.
+  const future = /^(?:[ \t]*(?:#[^\n]*)?\n|from __future__ import[^\n]*\n)*/.exec(code)?.[0] ?? "";
+  const head = /from __future__/.test(future) ? future : "";
+  return `${head}${lines.join("\n")}\n\n${code.slice(head.length)}`;
 }
 
 /**
