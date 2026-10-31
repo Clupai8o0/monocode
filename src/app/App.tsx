@@ -634,10 +634,12 @@ import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
 import { NotificationPopups } from "../fork/notifications/NotificationPopups"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
-import { seedStarterMonos } from "../fork/starterMonos/starterMono";
+import { seedStarterMonos, starterMonoId } from "../fork/starterMonos/starterMono"; // Fork
 import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
 import { MONO_MAKER } from "../fork/starterMonos/makerMono";
+import { DOJO_MONO } from "../fork/starterMonos/dojoMono"; // Fork
 import { SWEEP_MONO } from "../fork/starterMonos/sweepMono";
+import { OPEN_DOJO_EVENT } from "../fork/games/code/codeModel"; // Fork
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
 import type { FileOpenOptions } from "../features/search/model/search"; // Fork
@@ -2466,10 +2468,10 @@ function Workspace({
       void seedStylistMono(recents.map((project) => project.path));
     }
   }, [monosEnabled, recents]);
-  // Fork: the Kickoff, Mono Maker and Sweep are made once (src/fork/starterMonos).
+  // Fork: the Kickoff, Mono Maker, Sweep and Dojo are made once (src/fork/starterMonos).
   useEffect(() => {
     if (import.meta.env.MODE !== "test" && monosEnabled) {
-      void seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO]);
+      void seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]); // Fork
     }
   }, [monosEnabled]);
   const unseenFinishedIds = useUnseenFinishedSessions(
@@ -8983,6 +8985,18 @@ function Workspace({
     window.addEventListener(BROADCAST_EVENT, onBroadcast);
     return () => window.removeEventListener(BROADCAST_EVENT, onBroadcast);
   }, [submitSession, workspaceNavigation]);
+
+  // Fork: the Games panel's Code tab opens the Dojo Mono from its Ask Dojo button.
+  useEffect(() => {
+    const onOpenDojo = () => {
+      const dojoId = starterMonoId(DOJO_MONO);
+      if (dojoId) {
+        void onOpenMono(dojoId);
+      }
+    };
+    window.addEventListener(OPEN_DOJO_EVENT, onOpenDojo);
+    return () => window.removeEventListener(OPEN_DOJO_EVENT, onOpenDojo);
+  }, [onOpenMono]);
 
   // onApproval is created once; it reaches the current helper through this.
   const decideMonoBlockRef = useRef<

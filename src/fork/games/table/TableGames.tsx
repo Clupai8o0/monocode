@@ -6,6 +6,13 @@ import { useBankroll, useRivals } from "./kit";
 import { AGENTS, AGENT_IDS } from "./agents";
 import { PokerTable } from "./PokerTable";
 import { formatTokens, rivalLine } from "./tokens";
+// Fork: coding drills share the panel's table slot (src/fork/games/code).
+import { CodeTable } from "../code/CodeTable";
+import {
+  CODE_PROGRESS_EVENT,
+  loadProgress,
+  streakDays,
+} from "../code/codeModel";
 
 /**
  * Fork: poker, blackjack and chess in the games panel. Each table stays mounted
@@ -19,6 +26,8 @@ export const TABLE_GAMES = FORK_TABLE_GAMES
       { id: "poker", label: "poker", hint: "F fold · C call · R raise · A all in" },
       { id: "blackjack", label: "blackjack", hint: "H hit · S stand · D double · P split" },
       { id: "chess", label: "chess", hint: "click or drag to move" },
+      // Fork: the Code tab's drills, run by fork_code_run.
+      { id: "code", label: "code", hint: "write code · Cmd+Enter to run" },
     ] as const)
   : [];
 
@@ -84,6 +93,12 @@ export function TableGames({
           <ChessTable {...tableProps("chess")} />
         </div>
       ) : null}
+      {/* Fork: the Code tab stays mounted like the tables, code and all. */}
+      {visited.has("code") ? (
+        <div className="absolute inset-0" {...shown("code")}>
+          <CodeTable {...tableProps("code")} />
+        </div>
+      ) : null}
     </>
   );
 }
@@ -92,6 +107,26 @@ export function TableGames({
 export function TableScore({ gameId }: { gameId: string }) {
   const bankroll = useBankroll();
   const rivals = useRivals();
+  // Fork: the Code tab's points change under this row, so listen for a run.
+  const [, setCodeRuns] = useState(0);
+  useEffect(() => {
+    const onRun = () => setCodeRuns((value) => value + 1);
+    window.addEventListener(CODE_PROGRESS_EVENT, onRun);
+    return () => window.removeEventListener(CODE_PROGRESS_EVENT, onRun);
+  }, []);
+  if (gameId === "code") {
+    const progress = loadProgress();
+    return (
+      <>
+        <span data-fork-games-score={progress.totalPoints}>
+          points {progress.totalPoints}
+        </span>
+        <span className="text-content/35">
+          streak {streakDays(progress, Date.now())}
+        </span>
+      </>
+    );
+  }
   if (gameId === "chess") {
     const played = AGENT_IDS.flatMap((id) => {
       const rival = rivals[id];
