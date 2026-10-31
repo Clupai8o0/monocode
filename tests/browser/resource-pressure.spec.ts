@@ -50,13 +50,11 @@ test("keeps many processes compact, with details and stop controls on demand", a
   });
 
   const footer = page.getByRole("contentinfo", { name: "Provider usage" });
-  const chip = footer.getByRole("button", {
-    name: "High resource usage",
-    exact: true,
-  });
-  await expect(chip).toBeVisible({ timeout: 15_000 });
-  await expect(chip).toHaveText("High usage");
+  // High usage shows on the Machines chip, and its Memory tab offers the review.
+  const chip = footer.locator("[data-fork-machines]");
+  await expect(chip).toHaveAttribute("title", /High/, { timeout: 15_000 });
   await chip.click();
+  await page.locator("[data-fork-review-work]").click();
   const dialog = page.getByRole("dialog", {
     name: "Running work",
     exact: true,

@@ -15319,12 +15319,11 @@ function Workspace({
             chipHost={pressureChipHost}
             insetChip={insetLayout}
           />
-          {/* Fork: Memory chip; parks idle sessions to free RAM. */}
+          {/* Fork: Machines' Memory tab; parks idle sessions to free RAM. */}
           <MemoryWatcher
             sessions={sessionsRef}
             isForeground={harnessEvents.isForeground}
             chipHost={pressureChipHost}
-            insetChip={insetLayout}
           />
           {/* Fork: files and links sent from other machines' agents. */}
           <ShowsWatcher />

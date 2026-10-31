@@ -1,8 +1,9 @@
 import { openDevicePanel, type Device } from "../device/deviceModel"; // Fork
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { Container, LoaderCircle, RefreshCw } from "../../shared/ui/icons";
-import { Popover } from "../../shared/ui/Popover";
+import { LoaderCircle, RefreshCw } from "../../shared/ui/icons";
+import { useMachineHost, useMachineSignal } from "../machines/machinesStore";
 import {
   isForgotten,
   parseSnapshot,
@@ -117,7 +118,7 @@ function useStacks(): Store {
 // --- UI ----------------------------------------------------------------------
 
 /**
- * Footer button: "Stacks · N up". Opens a list of the shared stacks and
+ * The Stacks tab of the footer's Machines chip: a list of the shared stacks and
  * devices, who holds each, and a Stop for the running ones.
  */
 export function StacksButton() {
@@ -126,68 +127,43 @@ export function StacksButton() {
 
 function Stacks() {
   const { snapshot, missing, loading, error } = useStacks();
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
-  if (missing || (!snapshot && !error)) {
-    return null;
-  }
+  const host = useMachineHost("stacks");
+  const open = host !== null;
   const count = snapshot ? upCount(snapshot) : 0;
   const forgotten = snapshot?.rows.some(isForgotten) ?? false;
   const label = count > 0 ? `Stacks · ${count} up` : "Stacks";
-  return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        data-fork-stacks=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open
-            ? "text-accent"
-            : count > 0
-              ? "text-content/70 hover:text-content"
-              : "text-content/40 hover:text-content"
-        }`}
-        aria-expanded={open}
-        title={
-          forgotten
-            ? `${label}: one was started by hand and nobody is using it`
-            : label
-        }
-        onClick={() => {
-          if (!open) {
-            void refreshStacks();
-          }
-          setOpen(!open);
-        }}
-      >
-        <Container className="size-3.5" strokeWidth={1.75} aria-hidden />
-        <span className="tabular-nums">{label}</span>
-        {forgotten ? (
-          <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
-        ) : null}
-      </button>
-      {open ? (
-        <Popover
-          anchor={anchor}
-          side="top"
-          align="end"
-          gap={6}
-          width={340}
-          ignore="[data-fork-stacks]"
-          onDismiss={() => setOpen(false)}
-        >
-          <StacksPanel snapshot={snapshot} loading={loading} error={error} />
-        </Popover>
-      ) : null}
-    </>
+  useMachineSignal("stacks", {
+    tone: forgotten ? "amber" : null,
+    why: forgotten ? `${label}: one was started by hand and nobody is using it.` : "",
+    detail: missing || !snapshot ? "" : label,
+  });
+  useEffect(() => {
+    if (open) {
+      void refreshStacks();
+    }
+  }, [open]);
+  if (!host) {
+    return null;
+  }
+  return createPortal(
+    missing || (!snapshot && !error) ? (
+      <p className="p-3 text-[12px] text-content/50">
+        {missing ? "Stacks aren't set up on this machine." : "Checking stacks…"}
+      </p>
+    ) : (
+      <StacksPanel label={label} snapshot={snapshot} loading={loading} error={error} />
+    ),
+    host,
   );
 }
 
 function StacksPanel({
+  label,
   snapshot,
   loading,
   error,
 }: {
+  label: string;
   snapshot: StacksSnapshot | null;
   loading: boolean;
   error: string | null;
@@ -195,7 +171,7 @@ function StacksPanel({
   return (
     <div className="flex flex-col gap-1 p-2 text-[12px]">
       <div className="flex items-center gap-2 px-1 pb-1">
-        <span className="font-semibold text-content">Stacks</span>
+        <span className="font-semibold tabular-nums text-content">{label}</span>
         <span className="text-content/45">
           {snapshot
             ? `${snapshot.runtime} ${snapshot.up ? "up" : "not running"}`
@@ -215,12 +191,12 @@ function StacksPanel({
           )}
         </button>
       </div>
-      {error ? <p className="px-1 text-red-300">{error}</p> : null}
+      {error ? <p className="px-1 text-red-600 dark:text-red-300">{error}</p> : null}
       {snapshot?.rows.map((row) => (
         <Row key={row.name} row={row} />
       ))}
       {snapshot && snapshot.loose.length > 0 ? (
-        <div className="mt-1 border-t border-content/10 px-1 pt-1.5">
+        <div className="mt-2 px-1">
           <p className="pb-0.5 text-[11px] font-medium text-content/45">
             Not in a stack
           </p>
@@ -327,7 +303,7 @@ function Row({ row }: { row: StackRow }) {
           <button
             type="button"
             disabled={stop.step === "stopping"}
-            className={`${row.kind === "stack" ? "ml-auto " : ""}shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent`}
+            className={`${row.kind === "stack" ? "ml-auto " : ""}shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-600 dark:hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent`}
             onClick={() => {
               const question = stopQuestion(row);
               if (question) {
@@ -342,17 +318,17 @@ function Row({ row }: { row: StackRow }) {
         ) : null}
       </div>
       <p
-        className={`truncate pl-3.5 text-[11px] ${forgotten ? "text-amber-300" : "text-content/50"}`}
+        className={`truncate pl-3.5 text-[11px] ${forgotten ? "text-amber-700 dark:text-amber-300" : "text-content/50"}`}
         title={rowDetail(row)}
       >
         {rowDetail(row)}
       </p>
       {stop.step === "asking" ? (
         <div className="flex items-center gap-2 pl-3.5 text-[11px]">
-          <span className="min-w-0 flex-1 text-amber-300">{stop.question}</span>
+          <span className="min-w-0 flex-1 text-amber-700 dark:text-amber-300">{stop.question}</span>
           <button
             type="button"
-            className="shrink-0 rounded bg-red-400/20 px-1.5 font-semibold text-red-200 hover:bg-red-400/30"
+            className="shrink-0 rounded bg-red-400/20 px-1.5 font-semibold text-red-700 dark:text-red-200 hover:bg-red-400/30"
             onClick={doStop}
           >
             Stop
@@ -367,7 +343,7 @@ function Row({ row }: { row: StackRow }) {
         </div>
       ) : null}
       {stop.step === "failed" ? (
-        <p className="pl-3.5 text-[11px] text-red-300">{stop.message}</p>
+        <p className="pl-3.5 text-[11px] text-red-600 dark:text-red-300">{stop.message}</p>
       ) : null}
     </div>
   );

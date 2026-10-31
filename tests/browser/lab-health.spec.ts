@@ -9,7 +9,7 @@ if (process.env.LAB_BROWSER) {
 async function open(page: Page, query: string) {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/tests/browser/lab-button.html?${query}`);
-  await page.locator("[data-fork-lab]").click();
+  await page.locator("[data-fork-machines]").click();
   await expect(page.locator('[aria-label="Home lab"]').last()).toBeVisible();
 }
 
@@ -109,8 +109,8 @@ test("the popover polls every 5 s and has no rules or dividers", async ({ page }
 
 test("the chip's dot shows lag and strain, names why, and keeps the chip's width", async ({ page }, testInfo) => {
   const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
-  const chip = page.locator("[data-fork-lab]");
-  const dot = page.locator("[data-fork-lab-dot]");
+  const chip = page.locator("[data-fork-machines]");
+  const dot = page.locator("[data-fork-machines-dot]");
   const load = async (kind: string) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/tests/browser/lab-button.html?health=${kind}&theme=dark`);
@@ -119,19 +119,19 @@ test("the chip's dot shows lag and strain, names why, and keeps the chip's width
 
   await load("ok");
   await page.waitForTimeout(300);
-  await expect(dot).toHaveAttribute("data-fork-lab-dot", "");
+  await expect(dot).toHaveAttribute("data-fork-machines-dot", "");
   await expect(dot).toHaveCSS("visibility", "hidden");
   const width = (await chip.boundingBox())!.width;
   await chip.screenshot({ path: `${dir}/lab-chip-health-ok.png` });
 
   await load("strained");
-  await expect(dot).toHaveAttribute("data-fork-lab-dot", "amber");
+  await expect(dot).toHaveAttribute("data-fork-machines-dot", "amber");
   await expect(chip).toHaveAttribute("title", /The machine is strained: .*running hot at 94°C/);
   expect((await chip.boundingBox())!.width).toBe(width);
   await chip.screenshot({ path: `${dir}/lab-chip-health-amber.png` });
 
   await load("lag");
-  await expect(dot).toHaveAttribute("data-fork-lab-dot", "red");
+  await expect(dot).toHaveAttribute("data-fork-machines-dot", "red");
   await expect(chip).toHaveAttribute("title", /monocode-crossmachine: no response for 4 min\./);
   await expect(chip).toHaveAttribute("title", /monocode-footer-tidy: slow, 3 tok\/s\./);
   expect((await chip.boundingBox())!.width).toBe(width);
@@ -140,14 +140,14 @@ test("the chip's dot shows lag and strain, names why, and keeps the chip's width
   // An unreachable host's old numbers say nothing here.
   await load("down");
   await page.waitForTimeout(300);
-  await expect(dot).toHaveAttribute("data-fork-lab-dot", "");
+  await expect(dot).toHaveAttribute("data-fork-machines-dot", "");
 });
 
 test("the closed chip keeps polling, every 30 s", async ({ page }) => {
   await page.clock.install();
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/tests/browser/lab-button.html?health=ok&theme=dark");
-  await expect(page.locator("[data-fork-lab]")).toBeVisible();
+  await expect(page.locator("[data-fork-machines]")).toBeVisible();
   const asked = () =>
     page.evaluate(() => (window as unknown as { __healthAsks?: number }).__healthAsks ?? 0);
   await page.clock.runFor(1000);
