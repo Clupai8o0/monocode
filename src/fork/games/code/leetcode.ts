@@ -107,8 +107,8 @@ export function htmlToText(html: string): string {
 
 const BASE_TYPES = new Set(["integer", "long", "double", "boolean", "string", "character"]);
 
-/** True for the types a JSON-like literal can carry: numbers, text, lists. */
-export function supportedType(type: string): boolean {
+/** The item type under any lists: "list<double[]>" is "double". */
+export function baseType(type: string): string {
   let rest = type.trim();
   for (;;) {
     const list = /^list<(.+)>$/.exec(rest);
@@ -120,7 +120,32 @@ export function supportedType(type: string): boolean {
       rest = rest.slice(0, -2);
       continue;
     }
-    return BASE_TYPES.has(rest);
+    return rest;
+  }
+}
+
+/** True for the types a JSON-like literal can carry: numbers, text, lists. */
+export function supportedType(type: string): boolean {
+  return BASE_TYPES.has(baseType(type));
+}
+
+/** How many lists deep: "integer" 0, "integer[]" 1, "list<string[]>" 2. */
+function listDepth(type: string): number {
+  let depth = 0;
+  let rest = type.trim();
+  for (;;) {
+    const list = /^list<(.+)>$/.exec(rest);
+    if (list) {
+      rest = list[1].trim();
+      depth++;
+      continue;
+    }
+    if (rest.endsWith("[]")) {
+      rest = rest.slice(0, -2);
+      depth++;
+      continue;
+    }
+    return depth;
   }
 }
 
@@ -288,10 +313,12 @@ export function innerOrderFree(output: string): boolean {
   return new Set(keys).size === keys.length;
 }
 
-// Doubles pass within 1e-5, absolute or relative, as LeetCode's judge does.
-const JS_CLOSE = "((a, b) => typeof a === \"number\" && Math.abs(a - b) <= 1e-5 * Math.max(1, Math.abs(b)) ? b : a)";
+// Doubles, alone or in lists, pass within 1e-5, absolute or relative, as
+// LeetCode's judge does. Close enough gives back the expected value itself.
+const JS_CLOSE =
+  "((a, b) => { const close = (x, y) => typeof x === \"number\" && typeof y === \"number\" ? Math.abs(x - y) <= 1e-5 * Math.max(1, Math.abs(y)) : Array.isArray(x) && Array.isArray(y) && x.length === y.length && x.every((v, i) => close(v, y[i])); return close(a, b) ? b : a; })";
 const PY_CLOSE =
-  "(lambda a, b: b if isinstance(a, (int, float)) and not isinstance(a, bool) and abs(a - b) <= 1e-5 * max(1, abs(b)) else a)";
+  "(lambda close: (lambda a, b: b if close(close, a, b) else a))(lambda close, x, y: (isinstance(x, (int, float)) and not isinstance(x, bool) and isinstance(y, (int, float)) and abs(x - y) <= 1e-5 * max(1, abs(y))) or (isinstance(x, list) and isinstance(y, list) and len(x) == len(y) and all(close(close, u, v) for u, v in zip(x, y))))";
 
 function tests(
   meta: Meta,
@@ -299,8 +326,12 @@ function tests(
   anyOrder: boolean,
   python: boolean,
 ): DrillTest[] {
-  const isDouble = meta.returnType === "double";
+  const isDouble = baseType(meta.returnType) === "double";
   const sorted = anyOrder && isListType(meta.returnType);
+  // Inside each inner list, order only stops mattering for groups of words
+  // (anagrams); numbers there are pairs, points or permutations.
+  const wordGroups =
+    listDepth(meta.returnType) === 2 && ["string", "character"].includes(baseType(meta.returnType));
   return examples.map(({ args, output }) => {
     const shown = python ? args.map(toPython) : args;
     const label = `${meta.name}(${shown.join(", ")})`;
@@ -309,7 +340,7 @@ function tests(
     if (isDouble) {
       call = python ? `${PY_CLOSE}(${call}, ${expect})` : `${JS_CLOSE}(${call}, ${expect})`;
     } else if (sorted) {
-      const inner = innerOrderFree(output);
+      const inner = wordGroups && innerOrderFree(output);
       [call, expect] = [call, expect].map((value) =>
         python
           ? `(lambda x: sorted(json.dumps(${inner ? "sorted(v) if isinstance(v, list) else v" : "v"}) for v in x) if isinstance(x, list) else x)(${value})`

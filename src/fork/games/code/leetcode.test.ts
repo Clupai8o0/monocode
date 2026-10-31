@@ -151,9 +151,51 @@ describe("leetcodeDrills", () => {
     const [js, py] = result.drills;
     expect(js.tests[0].expect).toBe("9.26100");
     expect(py.tests[0].label).toBe("myPow(2.10000, 3)");
-    const check = (x: number) => new Function("myPow", `return ${js.tests[0].call};`)(() => x);
+    const check = (x: unknown) => new Function("myPow", `return ${js.tests[0].call};`)(() => x);
     expect(check(9.261000004)).toBe(9.261);
     expect(check(9.27)).toBe(9.27);
+    expect(check("9.261")).toBe("9.261");
+  });
+
+  it("lets lists of doubles be close too", () => {
+    const result = leetcodeDrills(
+      withMeta(
+        { name: "avg", params: [{ name: "n", type: "integer" }], return: { type: "double[]" } },
+        { content: "<p><strong>Input:</strong> n = 3\n<strong>Output:</strong> [0.33333,1.00000]\n</p>" },
+      ),
+    );
+    if (!("drills" in result)) {
+      throw new Error(result.problem);
+    }
+    const call = result.drills[0].tests[0].call;
+    const check = (x: unknown) => new Function("avg", `return ${call};`)(() => x);
+    expect(check([1 / 3, 1])).toEqual([0.33333, 1]);
+    expect(check([1 / 3])).toEqual([1 / 3]);
+    expect(check([0.4, 1])).toEqual([0.4, 1]);
+  });
+
+  it("keeps the order inside number pairs under any order", () => {
+    const points = leetcodeDrills(
+      withMeta(
+        { name: "closest", params: [{ name: "k", type: "integer" }], return: { type: "integer[][]" } },
+        { content: "<p>Return them in any order.</p><p><strong>Input:</strong> k = 1\n<strong>Output:</strong> [[-2,2]]\n</p>" },
+      ),
+    );
+    const words = leetcodeDrills(
+      withMeta(
+        { name: "group", params: [{ name: "k", type: "integer" }], return: { type: "list<list<string>>" } },
+        { content: "<p>Return the answer in any order.</p><p><strong>Input:</strong> k = 1\n<strong>Output:</strong> [[\"eat\",\"tea\"]]\n</p>" },
+      ),
+    );
+    if (!("drills" in points) || !("drills" in words)) {
+      throw new Error("no drills");
+    }
+    const run = (call: string, name: string, x: unknown) => new Function(name, `return ${call};`)(() => x);
+    const test = points.drills[0].tests[0];
+    expect(run(test.call, "closest", [[2, -2]])).not.toEqual(run(test.expect, "closest", null));
+    expect(run(test.call, "closest", [[-2, 2]])).toEqual(run(test.expect, "closest", null));
+    const group = words.drills[0].tests[0];
+    expect(run(group.call, "group", [["tea", "eat"]])).toEqual(run(group.expect, "group", null));
   });
 
   it("sorts inside inner lists only when that keeps the meaning", () => {
