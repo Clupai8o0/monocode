@@ -538,6 +538,7 @@ fn supported_remote_method(method: &str) -> bool {
             | "lab.remoteDesktop.set"
             | "lab.report"
             | "lab.health"
+            | "sessionMove" // Fork
     )
 }
 
@@ -864,6 +865,7 @@ mod tests {
             "git.worktreeCreate",
             "attachments.upload",
             "attachments.read",
+            "sessionMove",
         ] {
             assert!(supported_remote_method(method), "{method}");
         }

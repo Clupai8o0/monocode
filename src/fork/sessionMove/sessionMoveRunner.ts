@@ -15,7 +15,7 @@ import {
   type MoveManifest,
 } from "./sessionMoveProtocol";
 
-export type MoveCall = <T>(op: string, params: Record<string, unknown>, longMs?: number) => Promise<T>;
+export type MoveCall = <T>(op: string, params: Record<string, unknown>) => Promise<T>;
 
 export type MoveDeps = {
   /** Ops on the machine the session is on, and on the one it goes to. */
@@ -81,7 +81,6 @@ const CONFIRM_POLL_MS = 2_000;
 /** Time to come up once it is out of the gate's line. */
 const START_TIMEOUT_MS = 90_000;
 const QUEUE_TIMEOUT_MS = 15 * 60_000;
-const LONG_MS = 10 * 60_000;
 
 function text(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -162,7 +161,6 @@ export async function runMove(
     const manifest = await deps.source<MoveManifest>(
       "pack",
       { ...base, cwd: plan.cwd, remoteName: sourceRemote, accountId: plan.sourceAccountId },
-      LONG_MS,
     );
     const total = manifest.files.reduce((sum, file) => sum + file.size, 0);
     let sent = 0;
@@ -189,7 +187,6 @@ export async function runMove(
     const code = await deps.target<{ repo: string; cwd: string; branch: string }>(
       "unpackCode",
       { moveId: plan.moveId, name: plan.name, manifest, urls },
-      LONG_MS,
     );
 
     // 5. The conversation, into the target account's folder for the new path.
@@ -197,7 +194,6 @@ export async function runMove(
     const landed = await deps.target<{ account: MoveAccount }>(
       "unpackConversation",
       { moveId: plan.moveId, manifest, account: facts.account, accountId: plan.targetAccountId },
-      LONG_MS,
     );
 
     // 6. Start, and confirm it came up on that session id.

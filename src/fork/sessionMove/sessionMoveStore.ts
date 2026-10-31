@@ -16,7 +16,7 @@ import {
   type MovedRecord,
   type MoveFacts,
 } from "./sessionMoveModel";
-import { moveSlug, SESSION_MOVE_CAPABILITY, type MoveAccount, type SourceState } from "./sessionMoveProtocol";
+import { LONG_OPS, moveSlug, SESSION_MOVE_CAPABILITY, type MoveAccount, type SourceState } from "./sessionMoveProtocol";
 import {
   createCancel,
   recoverMove,
@@ -58,7 +58,8 @@ export type MoveHost = {
 const MOVED_KEY = "monocode.fork.movedSessions";
 const JOURNAL_KEY = "monocode.fork.moveJournal";
 const DESCRIBE_EVERY_MS = 60_000;
-const LONG_MS = 10 * 60_000;
+const POLL_MS = 1_000;
+const POLL_MISSES = 20;
 
 export type MoveView = {
   step: MoveProgress;
@@ -127,8 +128,35 @@ const localCall: MoveCall = (op, params) =>
     params: op === "check" || op === "unpackCode" ? { ...params, projects: knownLocalProjectPaths() } : params,
   });
 
+/** A long step starts and is asked after, so it can outlast one request. */
+async function hostLongCall<T>(machineId: string, op: string, params: Record<string, unknown>): Promise<T> {
+  const moveId = params.moveId;
+  await remoteRequest(machineId, "sessionMove", { op: "begin", inner: { op, ...params } });
+  let misses = 0;
+  for (;;) {
+    await new Promise((done) => setTimeout(done, POLL_MS));
+    let answer: { done: boolean; result?: T; error?: string };
+    try {
+      answer = await remoteRequest(machineId, "sessionMove", { op: "poll", moveId, inner: op });
+      misses = 0;
+    } catch (error) {
+      // A dropped connection is worth a wait. Only a run of them is an answer.
+      misses += 1;
+      if (misses >= POLL_MISSES) throw error;
+      continue;
+    }
+    if (answer.done) {
+      if (answer.error) throw new Error(answer.error);
+      return answer.result as T;
+    }
+  }
+}
+
 function hostCall(machineId: string): MoveCall {
-  return (op, params, longMs) => remoteRequest(machineId, "sessionMove", { op, ...params }, longMs);
+  return <T,>(op: string, params: Record<string, unknown>) =>
+    LONG_OPS.has(op)
+      ? hostLongCall<T>(machineId, op, params)
+      : remoteRequest<T>(machineId, "sessionMove", { op, ...params });
 }
 
 // ---- reading state ----
@@ -425,7 +453,7 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
             session.id,
           ).catch(() => null);
           turns = page?.turns ?? [];
-          return (await remote<{ stopped: boolean }>("stop", { sessionId: session.id }, LONG_MS)).stopped;
+          return (await remote<{ stopped: boolean }>("stop", { sessionId: session.id })).stopped;
         },
         resumeSource: async () => {
           await remote("restart", { sessionId: session.id, name, cwd: session.cwd });

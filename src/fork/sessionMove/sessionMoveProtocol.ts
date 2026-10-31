@@ -26,6 +26,14 @@ export const MOVE_ID = /^[A-Za-z0-9-]{8,64}$/;
 export const SESSION_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 export const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
+/** Steps that can outlast a request: on a host, `begin` then `poll`. */
+export const LONG_OPS: ReadonlySet<string> = new Set([
+  "pack",
+  "unpackCode",
+  "unpackConversation",
+  "undo",
+]);
+
 export const BUNDLE_FILE = "commits.bundle";
 export const PATCH_FILE = "changes.patch";
 export const UNTRACKED_DIR = "untracked";

@@ -24,6 +24,7 @@ import { dirname, join } from "node:path";
 import {
   BUNDLE_FILE,
   CHUNK_BYTES,
+  LONG_OPS,
   COMMIT_ID,
   CONVO_DIR,
   IGNORED_MAX,
@@ -297,11 +298,15 @@ async function sourceState(env: SessionMoveEnv, params: Record<string, unknown>)
   return toState(env, await liveRecord(env, sessionIdParam(params)));
 }
 
-/** SIGTERM, then SIGKILL after 15 s, as `claude-acct` stops a session. */
 async function stopSource(env: SessionMoveEnv, params: Record<string, unknown>) {
   const record = await liveRecord(env, sessionIdParam(params));
   if (!record) return { stopped: true };
   if (toState(env, record).state !== "idle") return { stopped: false };
+  return { stopped: await endProcess(env, record) };
+}
+
+/** SIGTERM, then SIGKILL after 15 s, as `claude-acct` stops a session. */
+async function endProcess(env: SessionMoveEnv, record: Live): Promise<boolean> {
   const signal = (name: NodeJS.Signals) => {
     try {
       env.kill(record.pid, name);
@@ -311,16 +316,20 @@ async function stopSource(env: SessionMoveEnv, params: Record<string, unknown>) 
   };
   signal("SIGTERM");
   for (let poll = 0; poll < STOP_POLLS; poll++) {
-    if (!(await env.isAlive(record.pid, record.procStart))) return { stopped: true };
+    if (!(await env.isAlive(record.pid, record.procStart))) return true;
     await env.sleep(STOP_POLL_MS);
   }
   signal("SIGKILL");
   await env.sleep(500);
-  return { stopped: !(await env.isAlive(record.pid, record.procStart)) };
+  return !(await env.isAlive(record.pid, record.procStart));
 }
 
 // ---- finding things ----
 
+/**
+ * The newest copy: after `claude-acct` moved a conversation between accounts,
+ * both can hold it, and the older one is missing the latest turns.
+ */
 async function findTranscript(env: SessionMoveEnv, cwd: string, sessionId: string) {
   const wanted = `${sessionId}.jsonl`;
   const dirs: Array<[string, MoveAccount]> = [
@@ -328,18 +337,21 @@ async function findTranscript(env: SessionMoveEnv, cwd: string, sessionId: strin
     [".claude-exec", "cx"],
     [".claude-cx", "cx"],
   ];
-  for (const [dir, account] of dirs) {
-    const project = join(env.home, dir, "projects", projectKey(cwd));
-    if (await lexists(join(project, wanted))) return { home: join(env.home, dir), project, account };
-  }
+  let best: { home: string; project: string; account: MoveAccount; at: number } | null = null;
+  const consider = async (dir: string, account: MoveAccount, project: string) => {
+    const info = await stat(join(project, wanted)).catch(() => null);
+    if (info && (!best || info.mtimeMs > best.at))
+      best = { home: join(env.home, dir), project, account, at: info.mtimeMs };
+  };
+  for (const [dir, account] of dirs)
+    await consider(dir, account, join(env.home, dir, "projects", projectKey(cwd)));
+  if (best) return best as { home: string; project: string; account: MoveAccount; at: number };
   for (const [dir, account] of dirs) {
     const root = join(env.home, dir, "projects");
-    for (const folder of await readdir(root).catch(() => [] as string[])) {
-      const project = join(root, folder);
-      if (await lexists(join(project, wanted))) return { home: join(env.home, dir), project, account };
-    }
+    for (const folder of await readdir(root).catch(() => [] as string[]))
+      await consider(dir, account, join(root, folder));
   }
-  return null;
+  return best as { home: string; project: string; account: MoveAccount; at: number } | null;
 }
 
 async function remotesOf(env: SessionMoveEnv, repo: string): Promise<MoveRemote[]> {
@@ -846,15 +858,12 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
   const folder = moveFolder(env, params);
   const made = await loadMade(folder);
   if (made.window) {
+    // Gone first, and known to be: nothing is removed from under a live copy.
     const record = made.sessionId ? await liveRecord(env, made.sessionId) : null;
-    if (record && made.worktree && record.cwd === made.worktree) {
-      try {
-        env.kill(record.pid, "SIGTERM");
-      } catch {
-        // Already gone.
-      }
-    }
+    if (record && made.worktree && record.cwd === made.worktree && !(await endProcess(env, record)))
+      throw new Error("The copy there would not stop");
     await env.run("tmux", ["kill-window", "-t", `=${LAB_TMUX}:=${made.window}`], { timeoutMs: 10_000 });
+    if (await windowAlive(env, made.window)) throw new Error("The copy's window there would not close");
   }
   for (const file of made.files) await rm(file, { force: true }).catch(() => undefined);
   for (const old of made.replaced ?? []) await copyFile(old.backup, old.path);
@@ -885,7 +894,49 @@ async function done(env: SessionMoveEnv, params: Record<string, unknown>) {
   return {};
 }
 
+// The desktop gives up on a request after a minute, and these can take longer,
+// so they start with `begin` and are asked after with `poll`. One at a time per
+// move, and undo waits its turn, so it never races a step still running.
+type JobEnd = { done: true; result?: unknown; error?: string };
+const jobs = new Map<string, { op: string; end: Promise<JobEnd>; settled?: JobEnd }>();
+
+function beginJob(env: SessionMoveEnv, params: Record<string, unknown>) {
+  const inner = params.inner as Record<string, unknown> | undefined;
+  const op = inner?.op;
+  if (typeof op !== "string" || !LONG_OPS.has(op)) throw new Error("Unsupported session move step");
+  const moveId = stringParam(inner as Record<string, unknown>, "moveId");
+  if (!MOVE_ID.test(moveId)) throw new Error("Invalid move id");
+  const before = jobs.get(moveId)?.end ?? Promise.resolve();
+  const end: Promise<JobEnd> = before
+    .then(() => handleNow(env, inner as Record<string, unknown>))
+    .then(
+      (result): JobEnd => ({ done: true, result }),
+      (error: unknown): JobEnd => ({ done: true, error: error instanceof Error ? error.message : String(error) }),
+    );
+  const job: { op: string; end: Promise<JobEnd>; settled?: JobEnd } = { op, end };
+  void end.then((settled) => {
+    job.settled = settled;
+  });
+  jobs.set(moveId, job);
+  return {};
+}
+
+function pollJob(params: Record<string, unknown>) {
+  const moveId = stringParam(params, "moveId");
+  const job = jobs.get(moveId);
+  if (!job || job.op !== params.inner) throw new Error("That machine restarted during the move");
+  if (!job.settled) return { done: false };
+  jobs.delete(moveId);
+  return job.settled;
+}
+
 export async function handleSessionMove(env: SessionMoveEnv, params: Record<string, unknown>): Promise<unknown> {
+  if (params.op === "begin") return beginJob(env, params);
+  if (params.op === "poll") return pollJob(params);
+  return handleNow(env, params);
+}
+
+async function handleNow(env: SessionMoveEnv, params: Record<string, unknown>): Promise<unknown> {
   switch (params.op) {
     case "state": return sourceState(env, params);
     case "inspect": return inspect(env, params);

@@ -12,6 +12,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -375,6 +376,75 @@ describe("session move, a real run with two home folders", () => {
     };
     await expect(handleSessionMove(stopping, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
     expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  it("takes the newest copy when both accounts hold the conversation", async () => {
+    const convo = conversation(sourceEnv.home, source);
+    const other = conversation(sourceEnv.home, source, ".claude-exec");
+    mkdirSync(dirname(other.transcript), { recursive: true });
+    writeFileSync(other.transcript, '{"turn":2}\n');
+    utimesSync(convo.transcript, 1000, 1000);
+    const facts = (await handleSessionMove(sourceEnv, { op: "inspect", cwd: source, sessionId: ID })) as InspectResult;
+    expect(facts.account).toBe("cx");
+    const manifest = (await handleSessionMove(sourceEnv, {
+      op: "pack", moveId: MOVE, cwd: source, sessionId: ID, remoteName: "origin",
+    })) as MoveManifest;
+    const packed = join(sourceEnv.home, "staging", MOVE, `convo/session/${ID}.jsonl`);
+    expect(readFileSync(packed, "utf8")).toBe('{"turn":2}\n');
+    expect(manifest.files.some((file) => file.path.endsWith(`${ID}.jsonl`))).toBe(true);
+  });
+
+  it("runs long steps as begin and poll, undo after what is running", async () => {
+    const { manifest, urls } = await carry();
+    const order: string[] = [];
+    const slow: SessionMoveEnv = {
+      ...targetEnv,
+      run: async (command, args, options) => {
+        if (args.includes("worktree") && args.includes("add")) order.push("add");
+        if (args.includes("worktree") && args.includes("remove")) order.push("remove");
+        return runCommand(command, args, options);
+      },
+    };
+    const poll = async (inner: string) => {
+      for (;;) {
+        const answer = (await handleSessionMove(slow, { op: "poll", moveId: MOVE, inner })) as {
+          done: boolean; result?: unknown; error?: string;
+        };
+        if (answer.done) return answer;
+        await new Promise((done) => setTimeout(done, 10));
+      }
+    };
+    await expect(handleSessionMove(slow, { op: "poll", moveId: MOVE, inner: "unpackCode" })).rejects.toThrow(/restarted/);
+    await handleSessionMove(slow, {
+      op: "begin",
+      inner: { op: "unpackCode", moveId: MOVE, name: "s", manifest, urls },
+    });
+    await handleSessionMove(slow, { op: "begin", inner: { op: "undo", moveId: MOVE } });
+    const answer = await poll("undo");
+    expect(answer.error).toBeUndefined();
+    expect(order).toEqual(["add", "remove"]);
+    expect(existsSync(join(targetRepo, ".claude/worktrees/moved-s"))).toBe(false);
+    await expect(handleSessionMove(slow, { op: "begin", inner: { op: "read", moveId: MOVE } })).rejects.toThrow(/Unsupported/);
+  });
+
+  it("undo won't remove anything while the copy there refuses to stop", async () => {
+    const { manifest, urls, account } = await carry();
+    const bin = join(targetHome, ".local/bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "lab-session"), "#!/bin/bash\necho started\n");
+    chmodSync(join(bin, "lab-session"), 0o755);
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    await handleSessionMove(targetEnv, { op: "unpackConversation", moveId: MOVE, manifest, account });
+    await handleSessionMove(targetEnv, { op: "start", moveId: MOVE, sessionId: ID, name: "s" });
+    const dir = join(targetHome, ".claude/sessions");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd, status: "idle" }));
+    const stubborn: SessionMoveEnv = { ...targetEnv, isAlive: () => true };
+    await expect(handleSessionMove(stubborn, { op: "undo", moveId: MOVE })).rejects.toThrow(/would not stop/);
+    expect(existsSync(cwd)).toBe(true);
+    expect(existsSync(conversation(targetHome, cwd).transcript)).toBe(true);
   });
 
   it("starts through lab-session, and tells a queue from a failure", async () => {
