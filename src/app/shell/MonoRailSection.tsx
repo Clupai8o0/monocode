@@ -19,6 +19,7 @@ import {
   ColorPicker,
   MascotPicker,
 } from "../../features/monos/ui/monoPanelParts";
+import { monoShowsIn } from "../../fork/starterMonos/monoShowsIn"; // Fork
 import {
   defaultMonoName,
   findMono,
@@ -28,7 +29,6 @@ import {
   monoLook,
   monoProjectsPhrase,
   monosSnapshot,
-  monoWorksOn,
   reorderMonos,
   saveMonoMascot,
   saveMonoName,
@@ -83,7 +83,8 @@ export function MonoRailSection({
 }) {
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const monos = useMemo(
-    () => listMonos().filter((mono) => !project || monoWorksOn(mono, project)),
+    // Fork: Monos with no project yet show in every project.
+    () => listMonos().filter((mono) => !project || monoShowsIn(mono, project)),
     [snapshot, project],
   );
   const ids = monos.map((mono) => mono.id);

@@ -637,6 +637,7 @@ import { NotificationPopups } from "../fork/notifications/NotificationPopups"; /
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
 import { seedStarterMonos, starterMonoId } from "../fork/starterMonos/starterMono"; // Fork
+import { monoShowsIn } from "../fork/starterMonos/monoShowsIn"; // Fork
 import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
 import { MONO_MAKER } from "../fork/starterMonos/makerMono";
 import { DOJO_MONO } from "../fork/starterMonos/dojoMono"; // Fork
@@ -687,7 +688,6 @@ import {
 import {
   createMono,
   findMono,
-  monoWorksOn,
   isMonoSession,
   listMonos,
   loadOpenMono,
@@ -12447,7 +12447,7 @@ function Workspace({
         const mono = findMono(monoId);
         // Like the sidebar's Monos, a Mono's tab shows in the projects it
         // works on; it keeps its place for when the project comes back.
-        if (!mono || !monoWorksOn(mono, sidebarCwd)) return [];
+        if (!mono || !monoShowsIn(mono, sidebarCwd)) return []; // Fork: no project yet shows everywhere
         const look = monoLook(mono);
         const session = mono.sessionId
           ? sessions.find((entry) => entry.id === mono.sessionId)
