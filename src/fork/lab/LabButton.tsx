@@ -1,8 +1,8 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { openRemoteProjectOn } from "../../features/connections/model/connections";
-import { HomeLab, LoaderCircle } from "../../shared/ui/icons";
-import { Popover } from "../../shared/ui/Popover";
-import { useZonePickerOpen } from "./agentTimeZone";
+import { LoaderCircle } from "../../shared/ui/icons";
+import { closeMachines, useMachineHost, useMachineSignal } from "../machines/machinesStore";
 import { AgentTimeZoneSection, zoneHosts } from "./AgentTimeZoneSection";
 import { LabHealthSection } from "./LabHealthSection";
 import { useLabHealthDot } from "./labHealthStore";
@@ -34,12 +34,11 @@ import {
 import { CopyButton, Segmented, Toggle, useNow } from "./labUi";
 
 /**
- * Fork: footer chip for the home lab. Shows how many sessions run on the lab
- * in a few words (scope and relay in its hover text), with an amber dot when something needs the owner
- * (a host offline, uresourced looping, remote desktop on). Opens a popover
- * that starts a session on a host and switches each Home lab setting in one
- * click. Hidden until a lab host
- * is paired, and under the test runner.
+ * Fork: the Lab tab of the footer's Machines chip. Lights the chip's dot when
+ * something needs the owner (a host offline, uresourced looping, remote desktop
+ * on, lab health). The tab says how many sessions run on the lab, starts a
+ * session on a host and switches each Home lab setting in one click. Off under
+ * the test runner.
  */
 export const FORK_LAB_BUTTON = import.meta.env.MODE !== "test";
 
@@ -63,70 +62,51 @@ export function chipFor(state: LabState, running: RunningByHost = new Map()): La
 
 function Lab() {
   const state = useLab();
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
-  // Escape in the zone search closes the search, not the popover.
-  const pickerOpen = useZonePickerOpen();
-  const sessions = useRemoteSessions(state.hosts.map((host) => host.machine.id));
-  // Polls every 30 s while the chip is on screen, every 5 s while it's open.
+  const host = useMachineHost("lab");
+  const open = host !== null;
+  const sessions = useRemoteSessions(state.hosts.map((labHost) => labHost.machine.id));
+  // Polls every 30 s while the footer shows, every 5 s while this tab does.
   const health = useLabHealthDot(open);
-  if (!state.hosts.length) {
-    return null;
-  }
   const running = new Map(
     [...sessions].map(([machineId, rows]) => [machineId, liveSessions(rows).filter((row) => row.state === "running").length]),
   );
   const chip = chipFor(state, running);
-  const attention = chip.attention.length > 0;
-  const hover = health.reason ? `${chip.sentence} ${health.reason}` : chip.sentence;
-  const dot = health.tone === "red" ? "bg-red-500" : attention || health.tone ? "bg-amber-400" : "invisible";
-  return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        data-fork-lab=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open ? "text-accent" : "text-content/70 hover:text-content"
-        }`}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label={hover}
-        title={hover}
-        onClick={() => {
-          if (!open) {
-            void refreshLab();
-          }
-          setOpen(!open);
-        }}
-      >
-        <HomeLab className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-        <span className="hidden tabular-nums min-[1100px]:inline">{chip.words}</span>
-        {/* Always there, so the chip keeps its width when the dot comes on. */}
-        <span data-fork-lab-dot={health.tone ?? ""} className={`size-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
-      </button>
-      {open ? (
-        <Popover
-          anchor={anchor}
-          side="top"
-          align="end"
-          gap={6}
-          width={332}
-          ignore="[data-fork-lab]"
-          autoFocus
-          dismissOnEscape={!pickerOpen}
-          aria-label="Home lab"
-          onDismiss={(reason) => {
-            setOpen(false);
-            if (reason === "escape") {
-              anchor.current?.focus();
-            }
-          }}
-        >
-          <LabPanel state={state} running={running} onSettings={() => setOpen(false)} />
-        </Popover>
-      ) : null}
-    </>
+  const paired = state.hosts.length > 0;
+  const tone = health.tone === "red" ? "red" : chip.attention.length > 0 || health.tone ? "amber" : null;
+  useMachineSignal("lab", {
+    tone,
+    why: [...chip.attention, health.reason].filter(Boolean).join(" "),
+    detail: paired ? chip.words : "",
+  });
+  useEffect(() => {
+    if (open) {
+      void refreshLab();
+    }
+  }, [open]);
+  if (!host) {
+    return null;
+  }
+  return createPortal(
+    <div aria-label="Home lab" title={paired ? chip.sentence : undefined}>
+      {paired ? (
+        <LabPanel state={state} running={running} words={chip.words} onSettings={closeMachines} />
+      ) : (
+        <div className="flex flex-col items-start gap-2 p-3 text-[12px] text-content/50">
+          <p>No lab machine is paired yet.</p>
+          <button
+            type="button"
+            className="rounded px-1 text-[11px] text-content/70 hover:bg-content/10 hover:text-content"
+            onClick={() => {
+              closeMachines();
+              openLabSettings();
+            }}
+          >
+            Settings
+          </button>
+        </div>
+      )}
+    </div>,
+    host,
   );
 }
 
@@ -141,10 +121,12 @@ const small =
 export function LabPanel({
   state,
   running,
+  words,
   onSettings,
 }: {
   state: LabState;
   running: RunningByHost;
+  words?: string;
   onSettings?: () => void;
 }) {
   const now = useNow();
@@ -161,9 +143,14 @@ export function LabPanel({
     .filter(Boolean)
     .join(" ");
   return (
-    <div className="flex max-h-[520px] flex-col gap-4 overflow-y-auto p-3 text-[12px]">
+    <div className="flex flex-col gap-4 p-3 text-[12px]">
       <div className="flex items-center gap-2">
         <span className="text-[13px] font-semibold text-content">Home lab</span>
+        {words ? (
+          <span data-fork-lab-words="" className="min-w-0 truncate tabular-nums text-content/45">
+            {words}
+          </span>
+        ) : null}
         {state.hosts.some((host) => host.loading) ? (
           <LoaderCircle className="size-3 animate-spin text-content/40" aria-label="Checking" />
         ) : null}

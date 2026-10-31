@@ -10,9 +10,8 @@ import {
   sessionNeedsInput,
   type Session,
 } from "../../features/sessions/model/session";
-import { Gauge } from "../../shared/ui/icons";
 import { LAYER } from "../../shared/lib/layers";
-import { Popover } from "../../shared/ui/Popover";
+import { closeMachines, useMachineHost, useMachineSignal } from "../machines/machinesStore";
 import {
   autoParkStep,
   buildRows,
@@ -31,7 +30,7 @@ import {
   pruneParked,
   useParkedSessions,
 } from "./memoryStore";
-import { MemoryPanel, PRESSURE_DOT } from "./MemoryPanel";
+import { MemoryPanel, PRESSURE_TEXT, ReviewWorkRow } from "./MemoryPanel";
 import {
   reviewRunningWork,
   setMemoryChipShown,
@@ -49,9 +48,8 @@ type Props = {
   sessions: RefObject<Session[]>;
   /** The conversation on screen is never parked. */
   isForeground: (sessionId: string) => boolean;
-  /** The footer's slot, shared with the high-usage chip. */
+  /** The footer's slot: set while the footer, and so Machines, is on screen. */
   chipHost?: HTMLElement | null;
-  insetChip?: boolean;
 };
 
 function sessionFacts(
@@ -74,25 +72,24 @@ function sessionFacts(
 }
 
 /**
- * Fork: the footer's "Memory" chip. Shows how tight memory is and how much
- * RAM the sessions' agents hold; its popover parks idle ones. With the
+ * Fork: the Memory tab of the footer's Machines chip. Shows how tight memory is
+ * and how much RAM the sessions' agents hold, and parks idle ones. With the
  * setting on, sustained pressure parks the suggested ones by itself.
  */
 export function MemoryWatcher({
   sessions,
   isForeground,
   chipHost,
-  insetChip = false,
 }: Props) {
   const [report, setReport] = useState<MemoryReport | null>(null);
   const [rows, setRows] = useState<MemoryRow[]>([]);
-  const [open, setOpen] = useState(false);
   const [parking, setParking] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ titles: string[]; freed: number }>();
   const parked = useParkedSessions();
   const pressure = useResourcePressure();
-  const anchor = useRef<HTMLButtonElement>(null);
+  const host = useMachineHost("memory");
+  const open = host !== null;
   const auto = useRef<AutoParkState>({});
   const foreground = useRef(isForeground);
   foreground.current = isForeground;
@@ -207,94 +204,60 @@ export function MemoryWatcher({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  useEffect(() => {
-    if (!chipHost) {
-      setOpen(false);
-    }
-  }, [chipHost]);
-
-  const chipOn = FORK_PRESSURE_ON_MEMORY && !!report && !!chipHost;
+  // Machines stands in for the high-usage chip whenever the footer is up.
+  const chipOn = FORK_PRESSURE_ON_MEMORY && !!chipHost;
   useEffect(() => {
     setMemoryChipShown(chipOn);
     return () => setMemoryChipShown(false);
   }, [chipOn]);
 
-  if (!report) {
-    return null;
-  }
   const highUsage = FORK_PRESSURE_ON_MEMORY && pressure.active;
   const total = totalSessionBytes(rows);
-  const suggestion = suggestParks(rows, report);
+  const reasons = highUsage ? pressure.reasons.join(" · ") : "";
+  const tight = report && report.pressure !== "normal" ? PRESSURE_TEXT[report.pressure] : "";
+  useMachineSignal("memory", {
+    // Red stays red: memory running out is the louder message.
+    tone: report?.pressure === "critical" ? "red" : tight || highUsage ? "amber" : null,
+    why: [reasons, tight].filter(Boolean).join(" · "),
+    detail: report ? `Memory${total > 0 ? ` · ${formatBytes(total)}` : ""}` : "",
+  });
+
+  const reviewWork = () => {
+    closeMachines();
+    reviewRunningWork();
+  };
+  const suggestion = report ? suggestParks(rows, report) : null;
   const openParked = [...parked.values()].filter((entry) =>
     (sessions.current ?? []).some((session) => session.id === entry.sessionId),
   );
-  const label = `Memory${total > 0 ? ` · ${formatBytes(total)}` : ""}`;
-  const pressureWord =
-    report.pressure === "critical"
-      ? "Memory is very tight"
-      : report.pressure === "warn"
-        ? "Memory is getting tight"
-        : "Memory is fine";
 
   return (
     <>
-      {chipHost
+      {host
         ? createPortal(
-            <button
-              ref={anchor}
-              type="button"
-              data-fork-memory=""
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              title={`${highUsage ? `${pressure.reasons.join(" · ")} · ` : ""}${pressureWord} · sessions use ${formatBytes(total)}`}
-              onClick={() => setOpen(!open)}
-              className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap ${insetChip ? "rounded-full px-2" : "rounded-md px-1.5"} transition-colors hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent ${
-                open ? "bg-content/8 text-content" : "text-content/55"
-              }`}
-            >
-              <Gauge className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-              <span className="tabular-nums">{label}</span>
-              {highUsage ? <span className="sr-only">High usage</span> : null}
-              <span
-                className={`size-1.5 shrink-0 rounded-full ${
-                  // Red stays red: memory running out is the louder message.
-                  PRESSURE_DOT[
-                    highUsage && report.pressure === "normal" ? "warn" : report.pressure
-                  ]
-                }`}
-                aria-hidden
+            report && suggestion ? (
+              <MemoryPanel
+                report={report}
+                rows={rows}
+                total={total}
+                suggestion={suggestion}
+                parked={openParked}
+                parking={parking}
+                error={error}
+                onPark={(row) => void park([row])}
+                onParkSuggested={() => void park(suggestion.rows)}
+                pressureReasons={highUsage ? pressure.reasons : undefined}
+                onReviewWork={reviewWork}
               />
-            </button>,
-            chipHost,
+            ) : (
+              <div className="flex flex-col gap-3 p-3 text-[12px] text-content/50" aria-label="Memory">
+                {highUsage ? <ReviewWorkRow reasons={pressure.reasons} onReviewWork={reviewWork} /> : null}
+                <p>Checking memory…</p>
+              </div>
+            ),
+            host,
           )
         : null}
-      {open && chipHost ? (
-        <Popover
-          anchor={anchor}
-          side="top"
-          align="end"
-          gap={6}
-          width={360}
-          ignore="[data-fork-memory]"
-          onDismiss={() => setOpen(false)}
-        >
-          <MemoryPanel
-            report={report}
-            rows={rows}
-            suggestion={suggestion}
-            parked={openParked}
-            parking={parking}
-            error={error}
-            onPark={(row) => void park([row])}
-            onParkSuggested={() => void park(suggestion.rows)}
-            pressureReasons={highUsage ? pressure.reasons : undefined}
-            onReviewWork={() => {
-              setOpen(false);
-              reviewRunningWork();
-            }}
-          />
-        </Popover>
-      ) : null}
       {notice
         ? createPortal(
             <div
