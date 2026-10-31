@@ -68,6 +68,8 @@ export function GamesPanel() {
   const [runId, setRunId] = useState(0);
   const [focused, setFocused] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Fork: a pause you asked for, which hiding the panel keeps.
+  const [userPaused, setUserPaused] = useState(false);
   const [stats, setStats] = useState({ score: 0, lives: 0, over: false });
   const [best, setBest] = useState<BestScores>(loadBest);
 
@@ -82,7 +84,7 @@ export function GamesPanel() {
   const gridId = lastGrid.current;
   const [tableRun, setTableRun] = useState(0);
   const game = GRID_GAMES.find((item) => item.id === gridId) ?? GRID_GAMES[0]!;
-  const paused = !open || !focused || notice !== null || atTable;
+  const paused = !open || !focused || notice !== null || atTable || userPaused;
 
   // Where focus goes back to on hiding. Read before the board's effect takes it.
   useLayoutEffect(() => {
@@ -117,7 +119,10 @@ export function GamesPanel() {
     }
   }, [activity]);
 
-  const resume = () => setNotice(null);
+  const resume = () => {
+    setNotice(null);
+    setUserPaused(false);
+  };
 
   const focusBoard = () => {
     root.current
@@ -147,6 +152,17 @@ export function GamesPanel() {
     focusBoard();
   };
 
+  // Fork: P parks a grid game where it is, and brings it back.
+  const togglePause = () => {
+    if (userPaused || notice) {
+      resume();
+      return;
+    }
+    if (!stats.over) {
+      setUserPaused(true);
+    }
+  };
+
   const onStats = (score: number, lives: number, over: boolean) => {
     setStats({ score, lives, over });
     setBest((current) => {
@@ -159,17 +175,24 @@ export function GamesPanel() {
     });
   };
 
+  // Fork: a drill has no clock, and a finished grid game has nothing to pause.
+  const canPause = atTable ? gameId !== "code" : !stats.over;
+
   const status = notice
     ? notice
-    : atTable
-      ? null
-      : stats.over
-      ? game.hasAction
-        ? "game over · space to retry"
-        : "game over"
-      : !focused && open
-        ? "paused · click to play"
-        : null;
+    : userPaused
+      ? atTable
+        ? "paused · click to resume"
+        : "paused · P or click to resume"
+      : atTable
+        ? null
+        : stats.over
+          ? game.hasAction
+            ? "game over · space to retry"
+            : "game over"
+          : !focused && open
+            ? "paused · click to play"
+            : null;
 
   return (
     <div
@@ -177,6 +200,14 @@ export function GamesPanel() {
       role="dialog"
       aria-label="Games"
       data-fork-games-panel=""
+      onKeyDown={(event) => {
+        // Fork: a parked table ignores keys, so Esc is heard here instead.
+        if (userPaused && atTable && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          gamesPanel.hide();
+        }
+      }}
       style={{
         zIndex: LAYER.popover,
         right: MARGIN,
@@ -222,6 +253,25 @@ export function GamesPanel() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-0.5">
+          {canPause ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-pressed={userPaused}
+              data-fork-games-pause=""
+              className={`${CHIP} ${userPaused ? CHIP_ON : CHIP_OFF}`}
+              onClick={() => {
+                if (userPaused) {
+                  resume();
+                  focusBoard();
+                } else {
+                  setUserPaused(true);
+                }
+              }}
+            >
+              {userPaused ? "Resume" : "Pause"}
+            </button>
+          ) : null}
           <button
             type="button"
             tabIndex={-1}
@@ -283,6 +333,7 @@ export function GamesPanel() {
               onExit: () => gamesPanel.hide(),
               onFocusChange: setFocused,
               onInput: resume,
+              onPauseKey: togglePause,
             }}
           />
         </div>
@@ -292,13 +343,37 @@ export function GamesPanel() {
             mode={mode}
             runId={tableRun}
             open={open}
+            paused={!open || userPaused}
             waiting={activity.waiting}
             onExit={() => gamesPanel.hide()}
             onInput={resume}
           />
         ) : null}
         {status ? (
-          <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center">
+          <div
+            className={`absolute inset-0 z-30 grid place-items-center ${
+              userPaused
+                ? "pointer-events-auto cursor-pointer"
+                : "pointer-events-none"
+            }`}
+            onMouseDown={
+              userPaused
+                ? (event) => {
+                    // A click here resumes; it must not also reach the hand.
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                : undefined
+            }
+            onClick={
+              userPaused
+                ? () => {
+                    resume();
+                    focusBoard();
+                  }
+                : undefined
+            }
+          >
             <span
               role="status"
               className="bg-background-base/85 px-3 py-1.5 font-mono text-[11px] tracking-[0.14em] text-content/85"

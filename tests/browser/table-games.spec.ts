@@ -244,6 +244,43 @@ test("agents stop while the panel's hidden, and the hand is there on return", as
   await expect(page.locator('[data-table-board="Poker table"]')).toBeFocused();
 });
 
+test("pausing a table stops the agents, and a click resumes the same hand", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "poker");
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Poker table")).toHaveAttribute(
+    "data-table-phase",
+    "preflop",
+  );
+
+  // Park the hand while the other seats are still taking their turns.
+  const chip = page.locator("[data-fork-games-pause]");
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  const overlay = page
+    .getByRole("status")
+    .filter({ hasText: "paused · click to resume" });
+  await expect(overlay).toBeVisible();
+
+  // Nothing moves while it's parked: no agent, dealer or pot.
+  const street = await phase(page, "Poker table").getAttribute("data-table-phase");
+  const pot = await page.locator("[data-pot]").textContent();
+  await page.waitForTimeout(2000);
+  expect(await phase(page, "Poker table").getAttribute("data-table-phase")).toBe(street);
+  expect(await page.locator("[data-pot]").textContent()).toBe(pot);
+  await expect(page.locator("[data-you-cards] [data-card]")).toHaveCount(2);
+
+  // The overlay takes the click, so it can only resume, never fold a hand.
+  await overlay.click();
+  await expect(overlay).toHaveCount(0);
+  await expect(page.locator('[data-table-board="Poker table"]')).toBeFocused();
+  await expect(phase(page, "Poker table")).not.toHaveAttribute(
+    "data-table-phase",
+    "idle",
+  );
+  await expect(page.locator("[data-you-cards] [data-card]")).toHaveCount(2);
+});
+
 test("broke: a quota bump refills, and the grid games still work", async ({ page }, testInfo) => {
   const dir = process.env.GAME_SHOTS ?? testInfo.outputDir;
   await page.emulateMedia({ reducedMotion: "reduce" });

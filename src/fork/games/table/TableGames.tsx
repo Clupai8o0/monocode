@@ -44,6 +44,7 @@ export function TableGames({
   mode,
   runId,
   open,
+  paused,
   waiting,
   onExit,
   onInput,
@@ -52,6 +53,7 @@ export function TableGames({
   mode: ArcadeMode;
   runId: number;
   open: boolean;
+  paused: boolean;
   waiting: number;
   onExit: () => void;
   onInput: () => void;
@@ -66,7 +68,7 @@ export function TableGames({
   const tableProps = (id: string) => ({
     mode,
     runId,
-    active: open && gameId === id,
+    active: open && gameId === id && !(paused && id !== "code"),
     waiting,
     onExit,
     onInput,

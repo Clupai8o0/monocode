@@ -63,6 +63,8 @@ export type GridGameHost = {
   onFocusChange(focused: boolean): void;
   /** Any key that reached the board, before the game sees it. */
   onInput(): void;
+  /** Fork: P, before any game key. */
+  onPauseKey?(): void;
 };
 
 type Board = {
@@ -614,6 +616,18 @@ export function TerminalGridBackground({
       const arcade = boardsRef.current?.[indexRef.current]?.arcade;
       const heading = HEADING[event.key] ?? HEADING[event.key.toLowerCase()];
       const isSpace = event.key === " ";
+      // Fork: P pauses or resumes without playing a move.
+      const pauseKey = hostRef.current?.onPauseKey;
+      if (
+        (event.key === "p" || event.key === "P") &&
+        !event.repeat &&
+        pauseKey
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        pauseKey();
+        return;
+      }
       // Fork: while it's the board's turn, letters don't reach the app, where
       // one could pull focus to the composer and pause the game.
       if (hostRef.current && event.key.length === 1) {

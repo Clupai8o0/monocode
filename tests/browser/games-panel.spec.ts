@@ -23,6 +23,7 @@ const score = async (page: Page) =>
   );
 
 const board = (page: Page) => page.locator("[data-grid-board]");
+const pauseChip = (page: Page) => page.locator("[data-fork-games-pause]");
 
 /** Cells lit on the live canvas: the board's own proof it is drawing. */
 const litPixels = (page: Page) =>
@@ -69,6 +70,53 @@ test("each game draws in the panel, and the last one is remembered", async ({
     "aria-selected",
     "true",
   );
+});
+
+test("Pause parks the board, and Resume, P or New game brings it back", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "agent run" }).click();
+  await expect(board(page)).toBeFocused();
+
+  await pauseChip(page).click();
+  await expect(pauseChip(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("status")).toHaveText(
+    "paused · P or click to resume",
+  );
+  const held = await score(page);
+  await page.waitForTimeout(600);
+  expect(await score(page)).toBe(held);
+
+  // The chip resumes, and gives the keyboard back to the board.
+  await pauseChip(page).click();
+  await expect(pauseChip(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(board(page)).toBeFocused();
+
+  // P toggles from the board, and keeps its own key to itself.
+  await page.keyboard.press("p");
+  await expect(page.getByRole("status")).toHaveText(
+    "paused · P or click to resume",
+  );
+  await page.keyboard.press("p");
+  await expect(page.getByRole("status")).toHaveCount(0);
+
+  // A new game clears a pause, as picking a game does.
+  await page.keyboard.press("p");
+  await expect(page.getByRole("status")).toHaveText(/paused/);
+  await page.getByRole("button", { name: "New game" }).click();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(pauseChip(page)).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the Pause chip is gone once a grid game is over", async ({ page }) => {
+  await open(page);
+  const status = page.getByRole("status");
+  for (let i = 0; i < 40 && !(await status.count()); i++) {
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(50);
+  }
+  await expect(status).toHaveText(/game over/);
+  await expect(pauseChip(page)).toHaveCount(0);
 });
 
 test("blocks plays through the keyboard and retries on Space", async ({ page }) => {
