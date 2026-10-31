@@ -8,6 +8,10 @@ import { PokerTable } from "./PokerTable";
 import { formatTokens, rivalLine } from "./tokens";
 // Fork: coding drills share the panel's table slot (src/fork/games/code).
 import { CodeTable } from "../code/CodeTable";
+// Fork: calm games (src/fork/games/calm).
+import { GardenScore, GardenTable } from "../calm/GardenTable";
+import { SolitaireTable } from "../calm/SolitaireTable";
+import { SortTable } from "../calm/SortTable";
 import {
   CODE_PROGRESS_EVENT,
   loadProgress,
@@ -28,6 +32,9 @@ export const TABLE_GAMES = FORK_TABLE_GAMES
       { id: "chess", label: "chess", hint: "click or drag to move" },
       // Fork: the Code tab's drills, run by fork_code_run.
       { id: "code", label: "code", hint: "write code · Cmd+Enter to run" },
+      { id: "garden", label: "garden", hint: "click a bed to plant, water or pick · agents bring the sun" },
+      { id: "solitaire", label: "solitaire", hint: "click to move · drag · space draws · U undo · N new" },
+      { id: "sort", label: "colour sort", hint: "click a tube, then another to pour · U undo · R restart · N next" },
     ] as const)
   : [];
 
@@ -101,6 +108,21 @@ export function TableGames({
           <CodeTable {...tableProps("code")} />
         </div>
       ) : null}
+      {visited.has("garden") ? (
+        <div className="absolute inset-0" {...shown("garden")}>
+          <GardenTable {...tableProps("garden")} />
+        </div>
+      ) : null}
+      {visited.has("solitaire") ? (
+        <div className="absolute inset-0" {...shown("solitaire")}>
+          <SolitaireTable {...tableProps("solitaire")} />
+        </div>
+      ) : null}
+      {visited.has("sort") ? (
+        <div className="absolute inset-0" {...shown("sort")}>
+          <SortTable {...tableProps("sort")} />
+        </div>
+      ) : null}
     </>
   );
 }
@@ -128,6 +150,12 @@ export function TableScore({ gameId }: { gameId: string }) {
         </span>
       </>
     );
+  }
+  if (gameId === "garden") {
+    return <GardenScore />;
+  }
+  if (gameId === "solitaire" || gameId === "sort") {
+    return null;
   }
   if (gameId === "chess") {
     const played = AGENT_IDS.flatMap((id) => {
