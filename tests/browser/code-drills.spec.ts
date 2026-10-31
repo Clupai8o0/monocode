@@ -456,3 +456,59 @@ test("a LeetCode problem becomes a drill, and an unsupported one says why", asyn
   await expect(page.locator("[data-fork-code-score]")).toContainText("Solved.");
   await page.screenshot({ path: `${dir}/code-leetcode.png` });
 });
+
+test("a misspelled variable is flagged and the quick fix clears it", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/code-drills.html");
+  await expect(page.locator(table)).toBeVisible();
+  await setCode(
+    page,
+    "function add(a, b) {\n  const total = a + b;\n  return totl;\n}\n",
+  );
+
+  const count = page.locator("[data-fork-code-name-warnings]");
+  await expect(count).toHaveText("1 name to check");
+  const warning = page.locator(".cm-lintRange-warning").first();
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveCSS("text-decoration-color", "rgb(245, 158, 11)");
+
+  await warning.hover();
+  await page.getByRole("button", { name: "Change to total" }).click();
+  await expect(count).toHaveCount(0);
+  expect(await codeText(page)).toContain("return total;");
+});
+
+test("renaming a drill's function warns that the tests call it", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/code-drills.html");
+  await expect(page.locator(table)).toBeVisible();
+  await setCode(page, "function Add(a, b) {\n  return a + b;\n}\n");
+
+  await expect(page.locator("[data-fork-code-name-warnings]")).toHaveText(
+    "1 name to check",
+  );
+  await page.locator(".cm-lintRange-warning").first().hover();
+  const tooltip = page.locator(".cm-tooltip-lint");
+  await expect(tooltip).toContainText(
+    "The tests call `add`, but your code doesn't define it",
+  );
+  await expect(tooltip).toContainText("Did you mean `Add`?");
+});
+
+test("a correct solution has no name warnings and still passes", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/code-drills.html");
+  await expect(page.locator(table)).toBeVisible();
+  await setCode(page, "function add(a, b) {\n  return a + b;\n}\n");
+  await page.waitForTimeout(1000);
+
+  await expect(page.locator("[data-fork-code-name-warnings]")).toHaveCount(0);
+  await expect(page.locator(".cm-lintRange-warning")).toHaveCount(0);
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect(page.locator("[data-fork-code-score]")).toHaveText(
+    "Solved. 100 points.",
+  );
+});

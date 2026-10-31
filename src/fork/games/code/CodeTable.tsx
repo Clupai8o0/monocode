@@ -7,6 +7,7 @@ import { starterMonoId } from "../../starterMonos/starterMono";
 import { gamesPanel } from "../gamesPanelStore";
 import { CodeConsole } from "./CodeConsole";
 import { CodeEditor, type CodeEditorHandle } from "./CodeEditor";
+import { testCallNames } from "./codeNames";
 import { BUILTIN_DRILLS } from "./codeDrills";
 import {
   loadLeetcode,
@@ -175,6 +176,7 @@ export function CodeTable({
   const [syntaxErrors, setSyntaxErrors] = useState(0);
   const [leetcodeText, setLeetcodeText] = useState("");
   const [leetcodeBusy, setLeetcodeBusy] = useState(false);
+  const [nameWarnings, setNameWarnings] = useState(0);
   const editorRef = useRef<CodeEditorHandle>(null);
 
   const drill = drills.find((item) => item.id === currentId) ?? drills[0] ?? null;
@@ -518,6 +520,8 @@ export function CodeTable({
           }
           onRun={() => void run()}
           onSyntaxErrors={setSyntaxErrors}
+          onNameWarnings={setNameWarnings}
+          testNames={testCallNames(drill.tests)}
         />
       </div>
 
@@ -537,6 +541,13 @@ export function CodeTable({
             className="px-1 text-[11px] text-content/45"
           >
             {syntaxErrors} syntax {syntaxErrors === 1 ? "error" : "errors"}
+          </span>
+        ) : nameWarnings > 0 ? (
+          <span
+            data-fork-code-name-warnings=""
+            className="px-1 text-[11px] text-amber-400/80"
+          >
+            {nameWarnings} {nameWarnings === 1 ? "name" : "names"} to check
           </span>
         ) : null}
         <button
