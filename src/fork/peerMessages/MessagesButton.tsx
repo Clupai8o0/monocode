@@ -90,7 +90,7 @@ function Messages({ inset }: { inset: boolean }) {
   const barOpen = useBroadcastOpen();
   const count = unread.length > 99 ? "99+" : `${unread.length}`;
   return (
-    <span data-fork-messages-slot="" className="flex w-[96px] shrink-0 justify-end min-[1100px]:w-[166px]">
+    <span data-fork-messages-slot="" className="flex w-[100px] shrink-0 justify-end min-[1100px]:w-[166px]">
       <button
         ref={anchor}
         type="button"

@@ -182,6 +182,18 @@ function BroadcastBar({
   const [choice, setChoice] = useState<ScopeChoice>("project");
   const [picked, setPicked] = useState<string>();
   const [app, setApp] = useState<BroadcastApp<Session> | null>(() => connectBroadcast<Session>());
+  // On the window, first: WebKit leaves focus outside the bar after a click,
+  // and a stray Escape must not reach the app behind it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
   // Sessions come and go, and turn busy, while the bar is open.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -260,12 +272,6 @@ function BroadcastBar({
       data-fork-broadcast-bar=""
       style={{ zIndex: LAYER.popover }}
       className="fixed right-3 bottom-9 flex max-h-[min(460px,70dvh)] w-[min(560px,calc(100vw-24px))] flex-col gap-2.5 rounded-xl bg-background-base/95 p-3 text-[12px] text-content shadow-lg ring-1 ring-content/10 backdrop-blur"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          onClose();
-        }
-      }}
     >
       <textarea
         autoFocus
