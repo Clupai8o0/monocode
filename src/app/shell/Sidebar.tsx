@@ -6,6 +6,7 @@ import {
 import { useRemoteMachines } from "../../features/connections/model/connections"; // Fork
 import { FORK_SESSION_MOVE } from "../../fork/sessionMove/sessionMoveModel"; // Fork
 import { moveMenuItems, pickMoveItem } from "../../fork/sessionMove/moveMenu"; // Fork
+import { MovedTag } from "../../fork/sessionMove/SessionMoveUi"; // Fork
 import { refreshMoveTarget, useMoveVersion } from "../../fork/sessionMove/sessionMoveStore"; // Fork
 import { BranchChip } from "../../fork/autoWorktree/BranchChip"; // Fork
 import { NO_BRANCH_LABEL } from "../../features/source-control/model/worktrees";
@@ -5431,6 +5432,7 @@ export const SessionCard = memo(function SessionCard({
                       : "text-sm font-medium text-content"
                   }`}
                 />
+                <MovedTag sessionId={session.id} />{/* Fork */}
                 <span className="flex shrink-0 items-center gap-1">
                   {closeBadge}
                   {linkedUpdateDot}
@@ -5550,6 +5552,7 @@ export const SessionCard = memo(function SessionCard({
                   text={title}
                   className="line-clamp-1 text-[13px] font-semibold leading-snug text-content"
                 />
+                <MovedTag sessionId={session.id} />{/* Fork */}
                 {headerRow ? null : (
                   <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
                     {linkedUpdateDot}

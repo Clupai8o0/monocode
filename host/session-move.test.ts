@@ -400,3 +400,84 @@ describe("accountHasRoom", () => {
     expect(accountHasRoom("", "main")).toBe(false);
   });
 });
+
+// A pack made on one side unpacks on the other. Run by hand with the Rust
+// module's ignored tests: MOVE_INTEROP_OUT there, then MOVE_INTEROP_RUST_PACK here;
+// MOVE_INTEROP_IN here, then `interop_unpack` there.
+describe("packs between the Mac and a host", () => {
+  const rustPack = process.env.MOVE_INTEROP_RUST_PACK;
+  it.skipIf(!rustPack)("unpacks what the Mac packed", async () => {
+    const base = rustPack as string;
+    const lab = join(base, "lab");
+    const to: SessionMoveEnv = {
+      home: lab,
+      stagingRoot: join(lab, "staging"),
+      run: runCommand,
+      projects: () => [],
+      isAlive: () => false,
+      kill: () => {},
+      sleep: async () => {},
+      now: Date.now,
+    };
+    const source = join(base, "mac/Documents/projects/app");
+    const manifest = JSON.parse(readFileSync(join(base, "manifest.json"), "utf8")) as MoveManifest;
+    const staged = join(base, "mac/staging", MOVE);
+    for (const file of manifest.files) {
+      const data = readFileSync(join(staged, file.path)).toString("base64");
+      await handleSessionMove(to, { op: "write", moveId: MOVE, sessionId: ID, path: file.path, offset: 0, data });
+    }
+    const urls = [sh(source, "remote", "get-url", "origin")];
+    const { cwd } = (await handleSessionMove(to, { op: "unpackCode", moveId: MOVE, name: "from-mac", manifest, urls })) as { cwd: string };
+    await handleSessionMove(to, { op: "unpackConversation", moveId: MOVE, manifest, account: "main" });
+    const ignored = (rel: string) => rel === ".env" || rel.startsWith("node_modules");
+    expect(tree(cwd)).toEqual(tree(source, ignored));
+  });
+
+  const hostPack = process.env.MOVE_INTEROP_IN;
+  it.skipIf(!hostPack)("packs for the Mac to unpack", async () => {
+    const base = hostPack as string;
+    const origin = join(base, "origin.git");
+    const macHome = join(base, "host");
+    const labHome = join(base, "lab");
+    const source = join(macHome, "Documents/projects/app");
+    const targetRepo = join(labHome, "Documents/projects/app");
+    mkdirSync(dirname(source), { recursive: true });
+    mkdirSync(dirname(targetRepo), { recursive: true });
+    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    execFileSync("git", ["clone", "--quiet", origin, source], { stdio: "ignore" });
+    sh(source, "checkout", "-q", "-b", "main");
+    writeFileSync(join(source, "edit.txt"), "one\n");
+    writeFileSync(join(source, "gone.txt"), "bye\n");
+    sh(source, "add", ".");
+    sh(source, "commit", "-q", "-m", "first");
+    sh(source, "push", "-q", "origin", "main");
+    execFileSync("git", ["clone", "--quiet", origin, targetRepo], { stdio: "ignore" });
+    writeFileSync(join(source, "local.txt"), "local\n");
+    sh(source, "add", ".");
+    sh(source, "commit", "-q", "-m", "local");
+    writeFileSync(join(source, "edit.txt"), "changed\n");
+    unlinkSync(join(source, "gone.txt"));
+    writeFileSync(join(source, "new.bin"), Buffer.from([0, 255, 0]));
+    const project = join(macHome, ".claude/projects", source.replace(/[^A-Za-z0-9]/g, "-"));
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, `${ID}.jsonl`), "{}\n");
+    const from: SessionMoveEnv = {
+      home: macHome,
+      stagingRoot: join(macHome, "staging"),
+      run: runCommand,
+      projects: () => [],
+      isAlive: () => false,
+      kill: () => {},
+      sleep: async () => {},
+      now: Date.now,
+    };
+    const manifest = (await handleSessionMove(from, { op: "pack", moveId: MOVE, cwd: source, sessionId: ID, remoteName: "origin" })) as MoveManifest;
+    for (const file of manifest.files) {
+      const to = join(labHome, "staging", MOVE, file.path);
+      mkdirSync(dirname(to), { recursive: true });
+      writeFileSync(to, readFileSync(join(macHome, "staging", MOVE, file.path)));
+    }
+    writeFileSync(join(base, "manifest.json"), JSON.stringify(manifest));
+    writeFileSync(join(base, "urls.json"), JSON.stringify([origin]));
+  });
+});

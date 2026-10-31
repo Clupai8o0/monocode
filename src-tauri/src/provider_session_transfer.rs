@@ -35,7 +35,7 @@ pub fn provider_session_transfer(
     }
 }
 
-fn provider_home(
+pub(crate) fn provider_home(
     app: &AppHandle,
     provider: &str,
     account_id: Option<&str>,

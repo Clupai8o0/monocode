@@ -8,6 +8,17 @@ import { labKey, labMoveAvailability, moveHost, moveLabToMac, useMovedRecord, us
 const PRESS =
   "transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
 
+/** On a sidebar row: this tab has ended, the session runs elsewhere. */
+export function MovedTag({ sessionId }: { sessionId: string }) {
+  const record = useMovedRecord(sessionId);
+  if (!record) return null;
+  return (
+    <span data-fork-moved-tag="" className="shrink-0 text-[11px] font-normal text-content/45">
+      Moved
+    </span>
+  );
+}
+
 /** The line in the session while it moves, or why it did not. */
 export function MoveLineView({
   text,
