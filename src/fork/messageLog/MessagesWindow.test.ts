@@ -169,6 +169,15 @@ describe("MessagesWindow", () => {
     expect(labels[0]).toBe("Copy text");
     expect(labels).not.toContain("Send again…");
     expect(labels).not.toContain("Dismiss");
+    expect(document.querySelector("[data-preview-cut]")).toBeNull();
+  });
+
+  it("says when the kept text is only the start of the message", () => {
+    const view = fakeView();
+    view.rows = view.rows.map((r) => (r.id === "r3" ? { ...r, preview: "x".repeat(600) } : r));
+    render({}, view);
+    click(document.querySelector('[data-feed-row="r3"] button')!);
+    expect(document.querySelector("[data-preview-cut]")?.textContent).toContain("first 600 characters");
   });
 
   it("says plainly when it is loading, empty, or filtered to nothing", () => {

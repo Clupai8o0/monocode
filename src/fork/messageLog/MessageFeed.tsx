@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CircleDot, CircleHelp, Internet, Share } from "../../shared/ui/icons";
+import { PREVIEW_MAX } from "./messageLogProtocol";
 import type { FeedRow, Party, RowRoute, RowStatus } from "./messageLogView";
 import { partyText, ROUTE_LABEL, ROUTE_TITLE, STATUS_LABEL, toneOf, type Tone } from "./messagesFilter";
 
@@ -172,60 +173,69 @@ function RowActions({
     return () => clearTimeout(timer);
   }, [copied]);
   const lost = LOST.has(row.status);
+  // Only the start of a long message is kept, so say what these act on.
+  const cut = [...row.preview].length >= PREVIEW_MAX;
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-row-actions="">
-      {lost ? (
-        <button
-          type="button"
-          title="Pick a running session to send this text to"
-          onClick={() => actions.onSendAgain(row.preview)}
-          className={ACTION}
-        >
-          Send again…
-        </button>
+    <>
+      {cut ? (
+        <p className="text-[11px] text-content/50" data-preview-cut="">
+          Only the first {PREVIEW_MAX} characters were kept, so Copy and Send again use those.
+        </p>
       ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          actions.onCopy(row.preview).then(
-            () => setCopied("yes"),
-            () => setCopied("failed"),
-          );
-        }}
-        className={ACTION}
-      >
-        {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy text"}
-      </button>
-      {openable.map((party) => (
-        <button
-          key={party.openId}
-          type="button"
-          onClick={() => actions.onOpenSession(party.openId)}
-          className={ACTION}
-        >
-          Open {party.label}
-        </button>
-      ))}
-      {row.problem ? (
+      <div className="flex flex-wrap items-center gap-1.5" data-row-actions="">
+        {lost ? (
+          <button
+            type="button"
+            title="Pick a running session to send this text to"
+            onClick={() => actions.onSendAgain(row.preview)}
+            className={ACTION}
+          >
+            Send again…
+          </button>
+        ) : null}
         <button
           type="button"
-          title="Stop counting this as a problem; it stays in the list"
-          onClick={() => actions.onDismiss(row.id)}
+          onClick={() => {
+            actions.onCopy(row.preview).then(
+              () => setCopied("yes"),
+              () => setCopied("failed"),
+            );
+          }}
           className={ACTION}
         >
-          Dismiss
+          {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy text"}
         </button>
-      ) : row.dismissed ? (
-        <button
-          type="button"
-          title="Count this as a problem again"
-          onClick={() => actions.onRestore(row.id)}
-          className={ACTION}
-        >
-          Restore
-        </button>
-      ) : null}
-    </div>
+        {openable.map((party) => (
+          <button
+            key={party.openId}
+            type="button"
+            onClick={() => actions.onOpenSession(party.openId)}
+            className={ACTION}
+          >
+            Open {party.label}
+          </button>
+        ))}
+        {row.problem ? (
+          <button
+            type="button"
+            title="Stop counting this as a problem; it stays in the list"
+            onClick={() => actions.onDismiss(row.id)}
+            className={ACTION}
+          >
+            Dismiss
+          </button>
+        ) : row.dismissed ? (
+          <button
+            type="button"
+            title="Count this as a problem again"
+            onClick={() => actions.onRestore(row.id)}
+            className={ACTION}
+          >
+            Restore
+          </button>
+        ) : null}
+      </div>
+    </>
   );
 }
 
