@@ -31,6 +31,10 @@ function render(over: Partial<MessagesWindowProps> = {}, view: MessageLogView = 
     onClose: vi.fn(),
     onWindowChange: vi.fn(),
     onOpenSession: vi.fn(),
+    onCopy: vi.fn(() => Promise.resolve()),
+    onSendAgain: vi.fn(),
+    onDismiss: vi.fn(),
+    onRestore: vi.fn(),
     onOpenHomeLab: vi.fn(),
     formatTime: (at) => new Date(at).toISOString().slice(11, 16),
     ...over,
@@ -125,6 +129,46 @@ describe("MessagesWindow", () => {
     expect(document.querySelector('[role="status"]')?.textContent).toContain("The relay is off on Vivobook");
     click(button("Open Home lab"));
     expect(props.onOpenHomeLab).toHaveBeenCalled();
+  });
+
+  it("gives a lost message ways to send it again, copy it, and dismiss it", async () => {
+    const props = render();
+    click(document.querySelector('[data-feed-row="r3"] button')!);
+    const actions = () => document.querySelector('[data-feed-row="r3"] [data-row-actions]')!;
+    expect([...actions().querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+      "Send again…",
+      "Copy text",
+      "Open monocode-ui",
+      "Dismiss",
+    ]);
+    click(button("Send again…"));
+    const r3 = props.view.rows.find((r) => r.id === "r3")!;
+    expect(props.onSendAgain).toHaveBeenCalledWith(r3.preview);
+    await act(async () => {
+      button("Copy text").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(props.onCopy).toHaveBeenCalledWith(r3.preview);
+    expect(button("Copied")).toBeTruthy();
+    click(button("Dismiss"));
+    expect(props.onDismiss).toHaveBeenCalledWith("r3");
+  });
+
+  it("offers Restore on a dismissed row, and only Copy on a delivered one", () => {
+    const view = fakeView();
+    view.rows = view.rows.map((r) =>
+      r.id === "r3" ? { ...r, problem: false, settled: true, dismissed: true } : r,
+    );
+    const props = render({}, view);
+    click(document.querySelector('[data-feed-row="r3"] button')!);
+    click(button("Restore"));
+    expect(props.onRestore).toHaveBeenCalledWith("r3");
+    click(document.querySelector('[data-feed-row="r8"] button')!);
+    const labels = [...document.querySelectorAll('[data-feed-row="r8"] [data-row-actions] button')].map(
+      (b) => b.textContent,
+    );
+    expect(labels[0]).toBe("Copy text");
+    expect(labels).not.toContain("Send again…");
+    expect(labels).not.toContain("Dismiss");
   });
 
   it("says plainly when it is loading, empty, or filtered to nothing", () => {

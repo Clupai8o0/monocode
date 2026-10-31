@@ -3,12 +3,20 @@ import { emit } from "@tauri-apps/api/event";
 import { NOTIFICATION_CLICK_EVENT } from "../../features/notifications/model/notifications";
 import { Mail } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
-import { BroadcastButton, BroadcastRow, useBroadcastOpen } from "../broadcast/BroadcastButton";
+import { copyText } from "../../platform/tauri/clipboard";
+import {
+  BroadcastButton,
+  BroadcastRow,
+  openBroadcastWith,
+  useBroadcastOpen,
+} from "../broadcast/BroadcastButton";
 import { openLabSettings } from "../lab/labStore";
 import { MessagesWindow } from "../messageLog/MessagesWindow";
 import {
   closeMessagesWindow,
+  dismissMessage,
   openMessagesWindow,
+  restoreMessage,
   setMessageLogWindow,
   useMessageLog,
   useMessagesWindowRequest,
@@ -71,6 +79,13 @@ function OpenMessagesWindow({ request }: { request: MessagesWindowRequest }) {
         void emit(NOTIFICATION_CLICK_EVENT, openId);
         closeMessagesWindow();
       }}
+      onCopy={copyText}
+      onSendAgain={(text) => {
+        closeMessagesWindow();
+        openBroadcastWith(text);
+      }}
+      onDismiss={dismissMessage}
+      onRestore={restoreMessage}
       onOpenHomeLab={() => {
         closeMessagesWindow();
         openLabSettings();

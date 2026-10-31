@@ -74,6 +74,8 @@ export type FeedRow = {
   problem: boolean;
   /** Lost, but nothing is left to do: the target ended, or it was sent again. */
   settled?: boolean;
+  /** The user dismissed this problem; it can be restored. */
+  dismissed?: boolean;
   /** Both ends known and on different machines. */
   crossMachine: boolean;
 };

@@ -243,6 +243,20 @@ describe("buildMessageLogView", () => {
     expect(view.recentProblems).toBe(1);
   });
 
+  it("keeps a dismissed problem listed but stops counting it", () => {
+    const events = [
+      send("f1", NOW - 5 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-1" }),
+      send("f2", NOW - 5 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-2" }),
+    ];
+    const view = build([mac(events)], { dismissed: new Set(["f1", "not-a-row"]) });
+    const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
+    expect(by.f1).toMatchObject({ status: "failed", problem: false, settled: true, dismissed: true, statusText: "No agent named old. Dismissed" });
+    expect(by.f2).toMatchObject({ problem: true });
+    expect(by.f2.dismissed).toBeUndefined();
+    expect(view.counts.problems).toBe(1);
+    expect(view.recentProblems).toBe(1);
+  });
+
   it("settles a failed send only when the same session sends the same text again soon", () => {
     const view = build([mac([
       send("retried", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-1" }),

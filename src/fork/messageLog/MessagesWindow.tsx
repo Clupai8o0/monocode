@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { CircleAlert, LoaderCircle, X } from "../../shared/ui/icons";
 import { Modal } from "../../shared/ui/Modal";
 import { formatPeerTime } from "../peerMessages/peerMessage";
-import { MessageFeed } from "./MessageFeed";
+import { MessageFeed, type FeedActions } from "./MessageFeed";
 import { MessageMap } from "./MessageMap";
 import type { MessagesWindowRequest } from "./messageLogStore";
 import type { MessageLogView, WindowChoice } from "./messageLogView";
@@ -27,6 +27,10 @@ export type MessagesWindowProps = {
   onClose: () => void;
   onWindowChange: (choice: WindowChoice) => void;
   onOpenSession: (openId: string) => void;
+  onCopy: FeedActions["onCopy"];
+  onSendAgain: FeedActions["onSendAgain"];
+  onDismiss: FeedActions["onDismiss"];
+  onRestore: FeedActions["onRestore"];
   onOpenHomeLab: () => void;
   initial?: MessagesWindowRequest;
   /** Clock time for rows; tests pass a fixed one. */
@@ -46,6 +50,10 @@ export function MessagesWindow({
   onClose,
   onWindowChange,
   onOpenSession,
+  onCopy,
+  onSendAgain,
+  onDismiss,
+  onRestore,
   onOpenHomeLab,
   initial,
   formatTime = formatPeerTime,
@@ -197,7 +205,11 @@ export function MessagesWindow({
               <Quiet>No messages between sessions in {WINDOW_WORDS[view.window]}.</Quiet>
             )
           ) : (
-            <MessageFeed rows={rows} formatTime={formatTime} onOpenSession={onOpenSession} />
+            <MessageFeed
+              rows={rows}
+              formatTime={formatTime}
+              actions={{ onOpenSession, onCopy, onSendAgain, onDismiss, onRestore }}
+            />
           )}
         </div>
       </div>

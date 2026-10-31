@@ -83,6 +83,27 @@ export function useBroadcastOpen() {
   return useSyncExternalStore(subscribeBar, () => barOpen);
 }
 
+/** Text handed in from elsewhere (the Messages window's "Send again"). */
+type Prefill = { id: number; text: string };
+let prefill: Prefill | null = null;
+let prefillId = 0;
+let usedPrefill = 0;
+
+/**
+ * Opens the bar with this text, every project shown and no session ticked, so
+ * the user picks who gets it. Text already typed there is replaced.
+ */
+export function openBroadcastWith(text: string): void {
+  prefill = { id: ++prefillId, text };
+  returnFocus = null;
+  barOpen = true;
+  listeners.forEach((listener) => listener());
+}
+
+function usePrefill() {
+  return useSyncExternalStore(subscribeBar, () => prefill);
+}
+
 /**
  * Fork: "Send to all", a row in the Messages popover. Opens a bar above the
  * footer with one text box, a scope switch and the sessions it will reach;
@@ -134,9 +155,30 @@ function Broadcast() {
   const [sending, setSending] = useState(false);
   const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
   const [results, setResults] = useState<ReadonlyMap<string, BroadcastResult>>(new Map());
+  // True: every session is ticked but those in `unticked`. False (after a
+  // prefill): none is but those in `unticked`, which then lists the ticked ones.
+  const [tickAll, setTickAll] = useState(true);
+  const handed = usePrefill();
+  const [seen, setSeen] = useState(0);
+  useEffect(() => {
+    // Once each, and never over a send in progress.
+    if (!handed || handed.id <= usedPrefill || sending) {
+      return;
+    }
+    usedPrefill = handed.id;
+    setSeen(handed.id);
+    setText(handed.text);
+    setResults(new Map());
+    setUnticked(new Set());
+    setTickAll(false);
+  }, [handed, sending]);
   return open
     ? createPortal(
         <BroadcastBar
+          key={seen}
+          initialChoice={seen ? "all" : "project"}
+          tickAll={tickAll}
+          onTickAll={setTickAll}
           text={text}
           onText={setText}
           sending={sending}
@@ -159,6 +201,9 @@ function Broadcast() {
 }
 
 function BroadcastBar({
+  initialChoice,
+  tickAll,
+  onTickAll,
   text,
   onText,
   sending,
@@ -169,6 +214,9 @@ function BroadcastBar({
   onResults,
   onClose,
 }: {
+  initialChoice: ScopeChoice;
+  tickAll: boolean;
+  onTickAll: (tickAll: boolean) => void;
   text: string;
   onText: (text: string) => void;
   sending: boolean;
@@ -179,7 +227,7 @@ function BroadcastBar({
   onResults: (results: ReadonlyMap<string, BroadcastResult>) => void;
   onClose: () => void;
 }) {
-  const [choice, setChoice] = useState<ScopeChoice>("project");
+  const [choice, setChoice] = useState<ScopeChoice>(initialChoice);
   const [picked, setPicked] = useState<string>();
   const [app, setApp] = useState<BroadcastApp<Session> | null>(() => connectBroadcast<Session>());
   // On the window, first: WebKit leaves focus outside the bar after a click,
@@ -219,9 +267,8 @@ function BroadcastBar({
     choice === "one" ? (pickedPath ? { path: pickedPath } : "project") : choice;
   const plan: BroadcastPlan = planBroadcast(sessions, factsFor(scope, app?.project()));
   const byId = new Map(sessions.map((session) => [session.id, session]));
-  const chosen = plan.targets.filter(
-    (target) => !target.blocked && !unticked.has(target.id),
-  );
+  const ticked = (id: string) => tickAll !== unticked.has(id);
+  const chosen = plan.targets.filter((target) => !target.blocked && ticked(target.id));
   const canSend = !!app && !!text.trim() && chosen.length > 0 && !sending;
   const failed = [...results.values()].filter((result) => result.outcome === "failed");
 
@@ -239,6 +286,7 @@ function BroadcastBar({
       live.submit,
     );
     onSending(false);
+    onTickAll(true);
     onResults(new Map(outcome.map((result) => [result.id, result])));
     // A second click only tries the ones that failed.
     const failedIds = new Set(
@@ -256,7 +304,7 @@ function BroadcastBar({
 
   const toggle = (id: string, on: boolean) => {
     const next = new Set(unticked);
-    if (on) {
+    if (on === tickAll) {
       next.delete(id);
     } else {
       next.add(id);
@@ -323,7 +371,7 @@ function BroadcastBar({
                   type="checkbox"
                   className="shrink-0 accent-[var(--color-accent)]"
                   disabled={!!target.blocked}
-                  checked={!target.blocked && !unticked.has(target.id)}
+                  checked={!target.blocked && ticked(target.id)}
                   onChange={(event) => toggle(target.id, event.target.checked)}
                 />
                 <span className="min-w-0 truncate">{title}</span>

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleDot, CircleHelp, Internet, Share } from "../../shared/ui/icons";
-import type { FeedRow, Party, RowRoute } from "./messageLogView";
+import type { FeedRow, Party, RowRoute, RowStatus } from "./messageLogView";
 import { partyText, ROUTE_LABEL, ROUTE_TITLE, STATUS_LABEL, toneOf, type Tone } from "./messagesFilter";
 
 /**
@@ -15,6 +15,22 @@ const TONE: Record<Tone, string> = {
   delivered: "text-emerald-700 dark:text-emerald-300/85",
 };
 
+/** What a row can have done to it, beside opening its sessions. */
+export type FeedActions = {
+  onOpenSession: (openId: string) => void;
+  /** Copies the message's text; rejects when the clipboard refused. */
+  onCopy: (text: string) => Promise<void>;
+  /** Opens "Send to all" with the text, so it can go to a session that is running. */
+  onSendAgain: (text: string) => void;
+  onDismiss: (rowId: string) => void;
+  onRestore: (rowId: string) => void;
+};
+
+const LOST: ReadonlySet<RowStatus> = new Set(["failed", "dropped", "expired"]);
+
+const ACTION =
+  "rounded-md bg-content/[0.07] px-2 py-1 text-[11.5px] font-medium text-content/80 hover:bg-content/12 hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+
 const ROUTE_ICON: Record<RowRoute, typeof Internet> = {
   local: CircleDot,
   relay: Internet,
@@ -25,11 +41,11 @@ const ROUTE_ICON: Record<RowRoute, typeof Internet> = {
 export function MessageFeed({
   rows,
   formatTime,
-  onOpenSession,
+  actions,
 }: {
   rows: FeedRow[];
   formatTime: (at: number) => string;
-  onOpenSession: (openId: string) => void;
+  actions: FeedActions;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -41,7 +57,7 @@ export function MessageFeed({
           open={open === row.id}
           formatTime={formatTime}
           onToggle={() => setOpen(open === row.id ? null : row.id)}
-          onOpenSession={onOpenSession}
+          actions={actions}
         />
       ))}
     </ol>
@@ -53,13 +69,13 @@ function FeedItem({
   open,
   formatTime,
   onToggle,
-  onOpenSession,
+  actions,
 }: {
   row: FeedRow;
   open: boolean;
   formatTime: (at: number) => string;
   onToggle: () => void;
-  onOpenSession: (openId: string) => void;
+  actions: FeedActions;
 }) {
   const tone = toneOf(row);
   const RouteIcon = ROUTE_ICON[row.route];
@@ -131,23 +147,85 @@ function FeedItem({
               ))}
             </ol>
           ) : null}
-          {openable.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {openable.map((party) => (
-                <button
-                  key={party.openId}
-                  type="button"
-                  onClick={() => onOpenSession(party.openId)}
-                  className="rounded-md bg-content/[0.07] px-2 py-1 text-[11.5px] font-medium text-content/80 hover:bg-content/12 hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  Open {party.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <RowActions row={row} openable={openable} actions={actions} />
         </div>
       ) : null}
     </li>
+  );
+}
+
+function RowActions({
+  row,
+  openable,
+  actions,
+}: {
+  row: FeedRow;
+  openable: (Party & { openId: string })[];
+  actions: FeedActions;
+}) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopied(null), 1_500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const lost = LOST.has(row.status);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-row-actions="">
+      {lost ? (
+        <button
+          type="button"
+          title="Pick a running session to send this text to"
+          onClick={() => actions.onSendAgain(row.preview)}
+          className={ACTION}
+        >
+          Send again…
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => {
+          actions.onCopy(row.preview).then(
+            () => setCopied("yes"),
+            () => setCopied("failed"),
+          );
+        }}
+        className={ACTION}
+      >
+        {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy text"}
+      </button>
+      {openable.map((party) => (
+        <button
+          key={party.openId}
+          type="button"
+          onClick={() => actions.onOpenSession(party.openId)}
+          className={ACTION}
+        >
+          Open {party.label}
+        </button>
+      ))}
+      {row.problem ? (
+        <button
+          type="button"
+          title="Stop counting this as a problem; it stays in the list"
+          onClick={() => actions.onDismiss(row.id)}
+          className={ACTION}
+        >
+          Dismiss
+        </button>
+      ) : row.dismissed ? (
+        <button
+          type="button"
+          title="Count this as a problem again"
+          onClick={() => actions.onRestore(row.id)}
+          className={ACTION}
+        >
+          Restore
+        </button>
+      ) : null}
+    </div>
   );
 }
 

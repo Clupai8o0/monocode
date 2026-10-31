@@ -106,6 +106,63 @@ function bump(): void {
   }
 }
 
+// ---- dismissed problems ----
+
+const DISMISSED_KEY = "monocode.fork.messageLog.dismissed";
+/** Longer than the widest window, so a dismissed row never comes back. */
+const DISMISSED_KEEP_MS = 8 * 24 * 3_600_000;
+
+/** Row id → when it was dismissed. */
+let dismissedAt: Map<string, number> = loadDismissed();
+let dismissedIds: ReadonlySet<string> = new Set(dismissedAt.keys());
+
+function loadDismissed(): Map<string, number> {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(DISMISSED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") {
+      return new Map();
+    }
+    const cutoff = Date.now() - DISMISSED_KEEP_MS;
+    return new Map(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= cutoff,
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function saveDismissed(): void {
+  const cutoff = Date.now() - DISMISSED_KEEP_MS;
+  for (const [id, at] of dismissedAt) {
+    if (at < cutoff) {
+      dismissedAt.delete(id);
+    }
+  }
+  dismissedIds = new Set(dismissedAt.keys());
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(Object.fromEntries(dismissedAt)));
+  } catch {
+    // Kept for this run only.
+  }
+  bump();
+}
+
+/** Marks a problem row as dealt with: it stays listed but no longer counts. */
+export function dismissMessage(id: string): void {
+  dismissedAt.set(id, Date.now());
+  saveDismissed();
+}
+
+/** Undoes dismissMessage. */
+export function restoreMessage(id: string): void {
+  if (dismissedAt.delete(id)) {
+    saveDismissed();
+  }
+}
+
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -364,6 +421,7 @@ function getView(): MessageLogView {
         mono,
         formatTime: formatPeerTime,
         loading: !macAnswered,
+        dismissed: dismissedIds,
       }),
     };
   }
@@ -487,6 +545,8 @@ export function __resetMessageLogForTests(pollingOn = false): void {
   listing += 1;
   subscribers = 0;
   fastSubscribers = 0;
+  dismissedAt = new Map();
+  dismissedIds = new Set();
   bump();
 }
 

@@ -134,6 +134,8 @@ export type BuildInput = {
   formatTime: (at: number) => string;
   /** True until this Mac's first answer. */
   loading: boolean;
+  /** Row ids the user dismissed: still listed, no longer problems. */
+  dismissed?: ReadonlySet<string>;
 };
 
 const HOUR_MS = 3_600_000;
@@ -526,6 +528,21 @@ function settleResent(
   });
 }
 
+/** A dismissed problem stays in the feed but stops counting as one. */
+function applyDismissed(rows: FeedRow[], dismissed: ReadonlySet<string> | undefined): void {
+  if (!dismissed?.size) {
+    return;
+  }
+  for (const row of rows) {
+    if (row.problem && dismissed.has(row.id)) {
+      row.problem = false;
+      row.settled = true;
+      row.dismissed = true;
+      row.statusText = `${row.statusText}. Dismissed`;
+    }
+  }
+}
+
 function receiveRow(ctx: Ctx, receive: Located<ReceiveEvent>, hops: Hop[]): FeedRow {
   const event = receive.event;
   const from = event.sender
@@ -660,6 +677,7 @@ export function buildMessageLogView(input: BuildInput): MessageLogView {
       .filter((receive) => !claimed.has(receive))
       .map((receive) => receiveRow(ctx, receive, hops)),
   ];
+  applyDismissed(all, input.dismissed);
   const rows = all
     .filter((row) => row.at >= cutoff)
     .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
