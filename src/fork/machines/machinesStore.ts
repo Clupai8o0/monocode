@@ -140,8 +140,12 @@ export function useMachinesOpen(): boolean {
   return useSyncExternalStore(subscribe, () => open);
 }
 
+export function currentMachineTab(): MachineTab | null {
+  return open ? tab : null;
+}
+
 export function useMachineTab(): MachineTab | null {
-  return useSyncExternalStore(subscribe, () => (open ? tab : null));
+  return useSyncExternalStore(subscribe, currentMachineTab);
 }
 
 /** Where a component draws its panel: set only while its tab is showing. */

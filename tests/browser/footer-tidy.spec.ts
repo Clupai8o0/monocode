@@ -32,9 +32,9 @@ test("Ultrareview sits in the composer and its popover isn't clipped", async ({ 
   await expect(input).toHaveCount(0);
 });
 
-test("high usage moves onto the Memory chip, which keeps its width", async ({ page }, testInfo) => {
+test("high usage moves onto the Machines chip, which keeps its width", async ({ page }, testInfo) => {
   await open(page);
-  const chip = page.locator("[data-fork-memory]");
+  const chip = page.locator("[data-fork-machines]");
   await page.evaluate(() => {
     const fixture = window as unknown as Fixture & { high: boolean };
     fixture.high = false;
@@ -62,6 +62,7 @@ test("high usage moves onto the Memory chip, which keeps its width", async ({ pa
   await expect(chip.locator(".bg-amber-400")).toHaveCount(1);
   expect((await chip.boundingBox())!.width).toBe(before);
   await chip.click();
+  await expect(page.getByRole("tab", { name: "Memory" })).toHaveAttribute("aria-selected", "true");
   const row = page.locator("[data-fork-review-work]");
   await expect(row).toHaveText("High CPU usage · Review running work");
   await page.screenshot({ path: testInfo.outputPath("memory-row.png") });

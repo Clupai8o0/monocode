@@ -18,7 +18,8 @@ vi.mock("../../integrations/harness/core/registry", () => ({
 import { newSession } from "../../features/sessions/model/session";
 import { MemoryPanel } from "./MemoryPanel";
 import { MemoryWatcher } from "./MemoryWatcher";
-import { buildRows, suggestParks, type MemoryReport } from "./memoryModel";
+import { openMachines, pickMachineTab, resetMachines, setMachinesHost } from "../machines/machinesStore";
+import { buildRows, suggestParks, totalSessionBytes, type MemoryReport } from "./memoryModel";
 import {
   memorySettings,
   parkedSessions,
@@ -48,6 +49,7 @@ let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   resetMemoryStores();
+  resetMachines();
   try {
     localStorage.clear();
   } catch {
@@ -84,6 +86,7 @@ describe("memory popover", () => {
         createElement(MemoryPanel, {
           report,
           rows,
+          total: totalSessionBytes(rows),
           suggestion: suggestParks(rows, report),
           parked: [{ sessionId: "old", title: "Old chat", freedBytes: GB, parkedAt: now }],
           parking: new Set(),
@@ -140,9 +143,15 @@ describe("memory popover", () => {
       await act(async () => vi.advanceTimersByTimeAsync(5 * 60_000));
       expect(park).not.toHaveBeenCalled();
 
-      const chip = footer.querySelector("[data-fork-memory]") as HTMLButtonElement;
-      expect(chip.textContent).toBe("Memory · 3.2 GB");
-      await act(async () => chip.click());
+      // The Machines chip's popover gives the Memory tab somewhere to draw.
+      const tab = document.createElement("div");
+      document.body.append(tab);
+      await act(async () => {
+        setMachinesHost(tab);
+        pickMachineTab("memory");
+        openMachines();
+      });
+      expect(tab.querySelector("[data-fork-memory-total]")?.textContent).toBe("Memory · 3.2 GB");
       const button = document.querySelector('[aria-label="Park Refactor"]') as HTMLButtonElement;
       expect(button).not.toBeNull();
       expect(document.querySelector('[aria-label="Park Build"]')).toBeNull();

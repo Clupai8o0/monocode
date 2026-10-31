@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import "../../src/styles/index.css";
-import { BroadcastButton } from "../../src/fork/broadcast/BroadcastButton";
+import { BroadcastButton, BroadcastRow } from "../../src/fork/broadcast/BroadcastButton";
 import { BROADCAST_EVENT, type BroadcastApp } from "../../src/fork/broadcast/broadcastModel";
 import type { Session } from "../../src/features/sessions/model/session";
 
@@ -50,6 +50,7 @@ window.addEventListener(BROADCAST_EVENT, (event) => {
 
 createRoot(document.getElementById("root")!).render(
   <div className="fixed inset-x-0 bottom-0 flex h-7 items-center justify-end px-3 text-[11px] text-content/55">
+    <BroadcastRow />
     <BroadcastButton />
   </div>,
 );
