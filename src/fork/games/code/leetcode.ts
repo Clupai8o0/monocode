@@ -316,7 +316,7 @@ export function innerOrderFree(output: string): boolean {
 // Doubles, alone or in lists, pass within 1e-5, absolute or relative, as
 // LeetCode's judge does. Close enough gives back the expected value itself.
 const JS_CLOSE =
-  "((a, b) => { const close = (x, y) => typeof x === \"number\" && typeof y === \"number\" ? Math.abs(x - y) <= 1e-5 * Math.max(1, Math.abs(y)) : Array.isArray(x) && Array.isArray(y) && x.length === y.length && x.every((v, i) => close(v, y[i])); return close(a, b) ? b : a; })";
+  "((a, b) => { const close = (x, y) => typeof x === \"number\" && typeof y === \"number\" ? Math.abs(x - y) <= 1e-5 * Math.max(1, Math.abs(y)) : Array.isArray(x) && Array.isArray(y) && x.length === y.length && y.every((v, i) => close(x[i], v)); return close(a, b) ? b : a; })";
 const PY_CLOSE =
   "(lambda close: (lambda a, b: b if close(close, a, b) else a))(lambda close, x, y: (isinstance(x, (int, float)) and not isinstance(x, bool) and isinstance(y, (int, float)) and abs(x - y) <= 1e-5 * max(1, abs(y))) or (isinstance(x, list) and isinstance(y, list) and len(x) == len(y) and all(close(close, u, v) for u, v in zip(x, y))))";
 
@@ -338,6 +338,14 @@ function tests(
     let call = python ? `Solution().${label}` : label;
     let expect = python ? toPython(output) : output;
     if (isDouble) {
+      if (sorted && listDepth(meta.returnType) === 1) {
+        // Any order: line both lists up smallest first, then compare closely.
+        [call, expect] = [call, expect].map((value) =>
+          python
+            ? `(lambda x: sorted(x) if isinstance(x, list) else x)(${value})`
+            : `((x) => Array.isArray(x) ? [...x].sort((p, q) => p - q) : x)(${value})`,
+        );
+      }
       call = python ? `${PY_CLOSE}(${call}, ${expect})` : `${JS_CLOSE}(${call}, ${expect})`;
     } else if (sorted) {
       const inner = wordGroups && innerOrderFree(output);

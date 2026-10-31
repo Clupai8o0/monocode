@@ -172,6 +172,25 @@ describe("leetcodeDrills", () => {
     expect(check([1 / 3, 1])).toEqual([0.33333, 1]);
     expect(check([1 / 3])).toEqual([1 / 3]);
     expect(check([0.4, 1])).toEqual([0.4, 1]);
+    // A list with holes is not close to a full one.
+    const holes = new Array(2);
+    expect(check(holes)).toBe(holes);
+  });
+
+  it("sorts doubles first when any order is fine", () => {
+    const result = leetcodeDrills(
+      withMeta(
+        { name: "avg", params: [{ name: "n", type: "integer" }], return: { type: "double[]" } },
+        { content: "<p>Return them in any order.</p><p><strong>Input:</strong> n = 2\n<strong>Output:</strong> [1.00000,2.00000]\n</p>" },
+      ),
+    );
+    if (!("drills" in result)) {
+      throw new Error(result.problem);
+    }
+    const { call, expect: wanted } = result.drills[0].tests[0];
+    const run = (code: string, x: unknown) => new Function("avg", `return ${code};`)(() => x);
+    expect(run(call, [2.000001, 1])).toEqual(run(wanted, null));
+    expect(run(call, [2.5, 1])).not.toEqual(run(wanted, null));
   });
 
   it("keeps the order inside number pairs under any order", () => {
