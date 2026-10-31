@@ -621,7 +621,7 @@ import {
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
-import { useEffortAsks } from "../fork/effortAsk/effortAsk";
+import { noteEffortStop, useEffortAsks } from "../fork/effortAsk/effortAsk";
 import {
   focusSessionElsewhere,
   OPEN_SESSION_EVENT,
@@ -2450,7 +2450,7 @@ function Workspace({
   );
   useInputNotifications(promptableSessions, activeSessionId);
   useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
-  useEffortAsks(promptableSessions, setSessions); // Fork: the model sets its effort
+  useEffortAsks(promptableSessions, setSessions, submitAfterProjectSyncRef); // Fork: the model sets its effort
   // Fork: report this window's sessions so no other window opens them twice.
   const forkSessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
   useWindowSessions(forkSessionIds);
@@ -11131,6 +11131,7 @@ function Workspace({
 
   const onStop = useCallback(
     (sessionId: string, managed = false) => {
+      noteEffortStop(sessionId); // Fork: a stopped turn is not sent on.
       const remote = sessionsRef.current.find((s) => s.id === sessionId);
       if (remote && remoteProjectFor(remote.cwd)) {
         remoteSessionActions(sessionId)?.stop();

@@ -23,6 +23,8 @@ import {
   RotateCcw,
 } from "../../shared/ui/icons";
 import { useAgentActivity } from "../backgroundAgents/runningAgents";
+// Fork: finished agent work grows the garden, open or not.
+import { noteAgentActivity } from "./calm/garden";
 import {
   clampDockWidth,
   loadDockWidth,
@@ -207,6 +209,9 @@ export function GamesPanel() {
 
   // Only a change while the panel's up is worth stopping a game for.
   const seen = useRef(activity);
+  useEffect(() => {
+    noteAgentActivity(activity, Date.now());
+  }, [activity]);
   useEffect(() => {
     const message = activityNotice(seen.current, activity);
     seen.current = activity;
