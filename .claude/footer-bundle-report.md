@@ -2,7 +2,9 @@
 
 **The footer's right side is now Messages, Machines, More, Terminal. Everything in the brief is built, but only Codex reviewed it and browser checks ran in Chromium only.**
 
-Commits: `5a6028ed` (`origin/mine`) up to this report, on `lab/footer-bundle`. Not pushed to `mine`; `fork/update.sh` not run.
+Commits: `4f9d5912` (the base) up to this report, on `lab/footer-bundle`. Not pushed to `mine`; `fork/update.sh` not run.
+
+`origin/mine` has since gained `4bdde7e4` and `5a6028ed`. They touch none of the same files and a trial merge is clean, but this branch hasn't been tested with them.
 
 ## Checks
 
