@@ -426,3 +426,33 @@ test("clicking your code:N moves the editor's cursor to line N", async ({
   await page.keyboard.type("x");
   await expect(page.locator(".cm-drill-error-line")).toHaveCount(0);
 });
+
+test("a LeetCode problem becomes a drill, and an unsupported one says why", async ({
+  page,
+}, testInfo) => {
+  const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
+  await page.goto("/tests/browser/code-drills.html");
+  const box = page.getByRole("textbox", { name: "LeetCode problem" });
+
+  await box.fill("tree");
+  await box.press("Enter");
+  await expect(page.locator("[data-fork-code-note]")).toContainText("TreeNode");
+  await expect(page.locator(table)).toContainText("Add two numbers");
+
+  await box.fill("https://leetcode.com/problems/two-sum/");
+  await page.getByRole("button", { name: "Load" }).click();
+  await expect(page.locator(table)).toContainText("1. Two Sum");
+  await expect(page.locator(table)).toContainText("LeetCode · Array · easy");
+  await expect(box).toHaveValue("");
+
+  await setCode(
+    page,
+    "var twoSum = function(nums, target) {\n  for (let i = 0; i < nums.length; i++) {\n    for (let j = i + 1; j < nums.length; j++) {\n      if (nums[i] + nums[j] === target) {\n        return [i, j];\n      }\n    }\n  }\n};\n",
+  );
+  await page.getByRole("button", { name: "Run" }).click();
+  await expect(page.locator('[data-fork-code-result="0"]')).toContainText(
+    "Pass — twoSum([2,7,11,15], 9)",
+  );
+  await expect(page.locator("[data-fork-code-score]")).toContainText("Solved.");
+  await page.screenshot({ path: `${dir}/code-leetcode.png` });
+});

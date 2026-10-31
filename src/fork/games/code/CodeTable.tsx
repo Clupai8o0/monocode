@@ -9,6 +9,14 @@ import { CodeConsole } from "./CodeConsole";
 import { CodeEditor, type CodeEditorHandle } from "./CodeEditor";
 import { BUILTIN_DRILLS } from "./codeDrills";
 import {
+  loadLeetcode,
+  loadSavedLeetcode,
+  parseLeetcodeInput,
+  saveLeetcode,
+  type LeetcodeFetch,
+  type LeetcodeRequest,
+} from "./leetcode";
+import {
   CODE_PROGRESS_EVENT,
   OPEN_DOJO_EVENT,
   buildSource,
@@ -55,6 +63,9 @@ export type RunCode = (language: DrillLanguage, source: string) => Promise<CodeR
 
 const nativeRunCode: RunCode = (language, source) =>
   invoke<CodeRunResult>("fork_code_run", { language, source });
+
+const nativeFetchLeetcode: LeetcodeFetch = (kind, value) =>
+  invoke<unknown>("fork_leetcode_fetch", { kind, value });
 
 /** Ask Dojo only closes the panel while its Mono is still there. */
 const hasDojoMono = () => starterMonoId(DOJO_MONO) !== undefined;
@@ -118,6 +129,7 @@ export function CodeTable({
   loadExtraDrills = loadDojoDrills,
   saveProgressFile = saveDojoProgress,
   hasDojo = hasDojoMono,
+  fetchLeetcode = nativeFetchLeetcode,
 }: {
   mode: ArcadeMode;
   runId: number;
@@ -130,11 +142,15 @@ export function CodeTable({
   loadExtraDrills?: typeof loadDojoDrills;
   saveProgressFile?: typeof saveDojoProgress;
   hasDojo?: () => boolean;
+  fetchLeetcode?: LeetcodeFetch;
 }) {
   const [progress, setProgress] = useState<CodeProgress>(loadProgress);
   const progressRef = useRef(progress);
   progressRef.current = progress;
-  const [drills, setDrills] = useState<Drill[]>(() => drillsProp ?? BUILTIN_DRILLS);
+  // LeetCode drills fetched before stay, so their reviews come back too.
+  const [drills, setDrills] = useState<Drill[]>(
+    () => drillsProp ?? mergeDrills(BUILTIN_DRILLS, loadSavedLeetcode()),
+  );
   const drillsRef = useRef(drills);
   drillsRef.current = drills;
   const [language, setLanguage] = useState<DrillLanguage>("javascript");
@@ -157,6 +173,8 @@ export function CodeTable({
   const [runError, setRunError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [syntaxErrors, setSyntaxErrors] = useState(0);
+  const [leetcodeText, setLeetcodeText] = useState("");
+  const [leetcodeBusy, setLeetcodeBusy] = useState(false);
   const editorRef = useRef<CodeEditorHandle>(null);
 
   const drill = drills.find((item) => item.id === currentId) ?? drills[0] ?? null;
@@ -254,6 +272,37 @@ export function CodeTable({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, active]);
+
+  const fetchFromLeetcode = async (request: LeetcodeRequest | null) => {
+    if (leetcodeBusy) {
+      return;
+    }
+    if (!request) {
+      setNote("Type a LeetCode number, name or link.");
+      return;
+    }
+    onInput?.();
+    setLeetcodeBusy(true);
+    setNote("Fetching from LeetCode…");
+    try {
+      const fresh = await loadLeetcode(fetchLeetcode, request);
+      saveLeetcode(fresh);
+      setDrills((current) => mergeDrills(current, fresh));
+      const next = fresh.find((item) => item.language === language) ?? fresh[0];
+      setNote(
+        next.language === language
+          ? null
+          : `LeetCode has no ${language === "python" ? "Python" : "JavaScript"} starter for this one.`,
+      );
+      setLeetcodeText("");
+      setLevel(next.level);
+      goTo(next);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLeetcodeBusy(false);
+    }
+  };
 
   const run = async () => {
     if (!drill || running) {
@@ -395,13 +444,61 @@ export function CodeTable({
         </span>
       </div>
 
+      <div className="flex flex-wrap items-center gap-0.5" data-fork-code-leetcode="">
+        <span className="pr-1 text-[11px] text-content/45">LeetCode</span>
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={leetcodeBusy}
+          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+          onClick={() => void fetchFromLeetcode({ kind: "daily" })}
+        >
+          Daily
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={leetcodeBusy}
+          title={`A random ${level} problem`}
+          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+          onClick={() => void fetchFromLeetcode({ kind: "random", level })}
+        >
+          Random
+        </button>
+        <input
+          type="text"
+          value={leetcodeText}
+          disabled={leetcodeBusy}
+          placeholder="number, name or link"
+          aria-label="LeetCode problem"
+          spellCheck={false}
+          className="h-6 w-40 rounded bg-content/5 px-1.5 text-[11px] text-content placeholder:text-content/35 focus:outline-none"
+          onChange={(event) => setLeetcodeText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void fetchFromLeetcode(parseLeetcodeInput(leetcodeText));
+            }
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={leetcodeBusy || !leetcodeText.trim()}
+          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+          onClick={() => void fetchFromLeetcode(parseLeetcodeInput(leetcodeText))}
+        >
+          {leetcodeBusy ? "Fetching…" : "Load"}
+        </button>
+      </div>
+
       <div className="flex items-baseline gap-2">
         <h3 className="text-[13px] font-medium text-content">{drill.title}</h3>
         <span className="text-[11px] text-content/45">
           {drill.topic} · {drill.level}
         </span>
       </div>
-      <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-content/75">
+      <p className="max-h-40 shrink-0 overflow-y-auto text-[12px] leading-relaxed whitespace-pre-wrap text-content/75">
         {drill.task}
       </p>
       {note ? (
@@ -540,7 +637,8 @@ export function CodeTable({
                     data-fork-code-result={result.index}
                     data-pass={result.pass ? "" : undefined}
                   >
-                    {result.pass ? "Pass" : "Fail"} — {drill.tests[result.index]?.call}
+                    {result.pass ? "Pass" : "Fail"} —{" "}
+                    {drill.tests[result.index]?.label ?? drill.tests[result.index]?.call}
                     {!result.pass && result.error
                       ? `: ${result.error}`
                       : !result.pass

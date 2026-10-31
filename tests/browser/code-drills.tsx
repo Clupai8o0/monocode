@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "../../src/styles/index.css";
 import { CodeTable, type RunCode } from "../../src/fork/games/code/CodeTable";
 import { gamesPanel } from "../../src/fork/games/gamesPanelStore";
+import type { LeetcodeFetch } from "../../src/fork/games/code/leetcode";
 import {
   OPEN_DOJO_EVENT,
   type CodeRunResult,
@@ -60,6 +61,55 @@ const drills: Drill[] = [
     solution: "def add(a, b):\n    return a + b\n",
   },
 ];
+
+// Stands in for fork_leetcode_fetch: two-sum works, tree is turned away.
+const fetchLeetcode: LeetcodeFetch = async (kind, value) => {
+  if (kind !== "question") {
+    return {};
+  }
+  if (value === "tree") {
+    return {
+      question: {
+        titleSlug: "tree",
+        isPaidOnly: false,
+        content: "<p>A tree problem.</p>",
+        metaData: JSON.stringify({
+          name: "depth",
+          params: [{ name: "root", type: "TreeNode" }],
+          return: { type: "integer" },
+        }),
+      },
+    };
+  }
+  return {
+    question: {
+      questionFrontendId: "1",
+      title: "Two Sum",
+      titleSlug: "two-sum",
+      difficulty: "Easy",
+      isPaidOnly: false,
+      content:
+        "<p>Return the indices of the two numbers that add up to target.</p>" +
+        "<p><strong>Input:</strong> nums = [2,7,11,15], target = 9</p>\n" +
+        "<p><strong>Output:</strong> [0,1]</p>\n" +
+        "<p><strong>Input:</strong> nums = [3,2,4], target = 6</p>\n" +
+        "<p><strong>Output:</strong> [1,2]</p>",
+      hints: [],
+      metaData: JSON.stringify({
+        name: "twoSum",
+        params: [
+          { name: "nums", type: "integer[]" },
+          { name: "target", type: "integer" },
+        ],
+        return: { type: "integer[]" },
+      }),
+      codeSnippets: [
+        { langSlug: "javascript", code: "var twoSum = function(nums, target) {\n    \n};" },
+      ],
+      topicTags: [{ name: "Array" }],
+    },
+  };
+};
 
 const runCode: RunCode = async (_language, source) => {
   const lines: string[] = [];
@@ -213,6 +263,7 @@ createRoot(document.getElementById("root")!).render(
         runCode={runCode}
         drills={drills}
         hasDojo={() => true}
+        fetchLeetcode={fetchLeetcode}
       />
     </div>
   ),

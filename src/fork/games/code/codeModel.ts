@@ -7,7 +7,8 @@
 export type DrillLevel = "easy" | "mid" | "hard";
 export type DrillLanguage = "javascript" | "python";
 
-export type DrillTest = { call: string; expect: string };
+/** label is what the results show in place of call, when call is wrapped. */
+export type DrillTest = { call: string; expect: string; label?: string };
 
 /** Same shape as the drills.json Dojo writes (see dojoMono.ts). */
 export type Drill = {
@@ -675,7 +676,11 @@ export function validateDrill(value: unknown): Drill | null {
     if (!isRecord(test) || typeof test.call !== "string" || typeof test.expect !== "string") {
       return null;
     }
-    tests.push({ call: test.call, expect: test.expect });
+    tests.push(
+      typeof test.label === "string"
+        ? { call: test.call, expect: test.expect, label: test.label }
+        : { call: test.call, expect: test.expect },
+    );
   }
   const hints: string[] = [];
   for (const hint of value.hints) {
