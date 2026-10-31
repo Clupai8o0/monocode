@@ -2,7 +2,7 @@
  * Fork feature: who can move, the steps' words, and what is kept after a move.
  * No React and no app state: callers pass in what they read.
  */
-import { isClientPath, SESSION_MOVE_CAPABILITY } from "./sessionMoveProtocol";
+import { isClientPath, SESSION_MOVE_CAPABILITY, type MoveAccount } from "./sessionMoveProtocol";
 
 /** Off under the test runner, so upstream tests see no new menu item. */
 export const FORK_SESSION_MOVE = import.meta.env.MODE !== "test";
@@ -161,18 +161,53 @@ export function labKey(providerSessionId: string) {
  * Adds a record, and points older cards for this conversation at where it is now.
  * Back on a host, its lab session is live again there, so the record that it
  * left that host goes: it would lock the next move to this Mac.
+ * Over the limit, only records that lock nothing are dropped, oldest first: a
+ * dropped lock would let a tab take turns while its copy runs elsewhere.
  */
-export function withMoved(map: MovedMap, record: MovedRecord): MovedMap {
+export function withMoved(
+  map: MovedMap,
+  record: MovedRecord,
+  locks: (id: string) => boolean = () => true,
+): MovedMap {
   const back = record.live.kind === "host" ? labKey(record.providerSessionId) : null;
   const entries = Object.entries(map)
     .filter(([id]) => id !== record.sessionId && id !== back)
     .map(([id, value]): [string, MovedRecord] =>
       value.providerSessionId === record.providerSessionId
-        ? [id, { ...value, live: record.live, toName: record.toName, at: record.at }]
+        ? [
+            id,
+            {
+              ...value,
+              live: record.live,
+              toName: record.toName,
+              at: record.at,
+              cwd: record.cwd,
+              branch: record.branch,
+              leftBehind: record.leftBehind,
+              leftBehindMore: record.leftBehindMore,
+            },
+          ]
         : [id, value],
     );
   entries.push([record.sessionId, record]);
-  return Object.fromEntries(entries.slice(-MAX_MOVED));
+  let over = entries.length - MAX_MOVED;
+  const kept = entries.filter(([id]) => {
+    if (over <= 0 || id === record.sessionId || locks(id)) return true;
+    over -= 1;
+    return false;
+  });
+  return Object.fromEntries(kept);
+}
+
+/** The stock account's id, DEFAULT_PROVIDER_ACCOUNT_ID, which is main's. */
+const MAIN_ACCOUNT_ID = "default";
+
+/**
+ * The Mac account for a Claude login: cx's own id, else main's. Always set, so
+ * a tab never falls to whichever account its project picks and starts afresh.
+ */
+export function macAccountFor(account: MoveAccount, cxAccountId: string | undefined): string {
+  return account === "cx" && cxAccountId ? cxAccountId : MAIN_ACCOUNT_ID;
 }
 
 /** The card was saved before the app closed: the move is done, only its journal was left. */

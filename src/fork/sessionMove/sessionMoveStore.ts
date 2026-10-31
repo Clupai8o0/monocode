@@ -10,6 +10,7 @@ import type { ExternalSession, ExternalTurn } from "../externalSessions/external
 import {
   journalFinished,
   labKey,
+  macAccountFor,
   moveAvailability,
   openJournal,
   parseMoved,
@@ -119,6 +120,14 @@ function saveMoved(next: MovedMap) {
   moved = next;
   host?.onMoved();
   bump();
+}
+
+/**
+ * Whether a record still stops something taking turns: a tab that is still
+ * here, or a lab session, whose copy lives on wherever it went.
+ */
+function holdsLock(id: string): boolean {
+  return !host || id.startsWith("lab:") || Boolean(host.session(id));
 }
 
 function readJournal(): MoveJournal[] {
@@ -405,7 +414,7 @@ export function moveTabToHost(sessionId: string, machineId: string, machineName:
       resumeSource: async () => {},
       startTarget: () =>
         remote<{ name: string }>("start", { moveId, sessionId: providerSessionId, name: plan.name }),
-      confirmTarget: (name) => remote("confirm", { sessionId: providerSessionId, name }),
+      confirmTarget: (name) => remote("confirm", { moveId, sessionId: providerSessionId, name }),
       finishSource: (result) => {
         saveMoved(
           withMoved(
@@ -418,6 +427,7 @@ export function moveTabToHost(sessionId: string, machineId: string, machineName:
               { kind: "host", machineId, name: result.name, cwd: result.cwd, source: labSource(result.account) },
               result,
             ),
+            holdsLock,
           ),
         );
       },
@@ -435,8 +445,7 @@ function turnBlocks(turns: readonly ExternalTurn[]): Block[] {
   return blocks;
 }
 
-async function macAccountId(account: MoveAccount): Promise<string | undefined> {
-  if (account !== "cx") return undefined;
+async function macCxAccountId(): Promise<string | undefined> {
   const homes = await loadAccountHomes().catch(() => null);
   return homes?.accounts.find((entry) => entry.role === "cx")?.id;
 }
@@ -456,7 +465,8 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
   const name = moveSlug(session.name, session.id);
   const account: MoveAccount = session.source === "claude-cx" ? "cx" : "main";
   void (async () => {
-    const targetAccountId = await macAccountId(account);
+    const cxAccountId = account === "cx" ? await macCxAccountId() : undefined;
+    const targetAccountId = macAccountFor(account, cxAccountId);
     let tabId = "";
     let turns: readonly ExternalTurn[] = [];
     const plan: MovePlan = {
@@ -494,14 +504,15 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
         resumeSource: async () => {
           await remote("restart", { sessionId: session.id, name, cwd: session.cwd });
         },
-        startTarget: async ({ repo, cwd, branch }) => {
+        startTarget: async ({ repo, cwd, branch, account: landed }) => {
           tabId =
             host?.openMovedTab({
               repo,
               cwd,
               branch,
               providerSessionId: session.id,
-              providerAccountId: targetAccountId,
+              // Where its transcript landed, whatever account the project picks.
+              providerAccountId: macAccountFor(landed, cxAccountId),
               title: session.name ?? name,
               blocks: turnBlocks(turns),
             }) ?? "";
@@ -519,7 +530,11 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
         confirmTarget: async () => ({ state: "up" }),
         finishSource: (result) => {
           saveMoved(
-            withMoved(moved, record(moveId, key, session.id, "this Mac", { kind: "tab", sessionId: tabId }, result)),
+            withMoved(
+              moved,
+              record(moveId, key, session.id, "this Mac", { kind: "tab", sessionId: tabId }, result),
+              holdsLock,
+            ),
           );
           opened.delete(tabId);
           host?.openSession(tabId);

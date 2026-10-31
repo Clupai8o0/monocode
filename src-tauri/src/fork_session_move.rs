@@ -24,6 +24,9 @@ const PACK_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const IGNORED_MAX: usize = 100;
 const PROJECT_KEY_MAX: usize = 200;
 const STALE: Duration = Duration::from_secs(24 * 60 * 60);
+const GIT_TIME: Duration = Duration::from_secs(30);
+const GIT_LONG_TIME: Duration = Duration::from_secs(10 * 60);
+const ACCOUNT_DIRS: [&str; 3] = [".claude", ".claude-exec", ".claude-cx"];
 const SEARCH_DEPTH: usize = 3;
 const SEARCH_MAX: usize = 400;
 const BUNDLE_FILE: &str = "commits.bundle";
@@ -85,11 +88,20 @@ struct Made {
     session_id: Option<String>,
     worktree: Option<String>,
     branch: Option<String>,
+    /// Saved before `git worktree add`; it is only this move's if the add worked.
+    pending: Option<Pending>,
     account_home: Option<String>,
     /// Files that did not exist before.
     files: Vec<String>,
     /// Files replaced, with where the old copy waits.
     replaced: Vec<Replaced>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct Pending {
+    worktree: String,
+    branch: String,
+    head: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -364,32 +376,103 @@ fn lexists(path: &Path) -> bool {
 
 struct GitOut {
     ok: bool,
+    timed_out: bool,
     stdout: String,
     stderr: String,
 }
 
 fn git(cwd: &Path, args: &[&str]) -> Result<GitOut, String> {
-    let output = Command::new("git")
+    git_within(cwd, args, GIT_TIME)
+}
+
+/// Killed at the deadline, as the host does: a hung fetch must not strand a stopped move.
+fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, String> {
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(cwd)
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Its own group, so the deadline also ends what it started (ssh for a fetch).
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command
+        .spawn()
         .map_err(|e| format!("git failed to start: {e}"))?;
+    // Read as it runs, so a full pipe never blocks it.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+    };
+    let stdout = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let started = std::time::Instant::now();
+    let (status, timed_out) = loop {
+        if let Some(status) = child.try_wait().map_err(io_text)? {
+            break (Some(status), false);
+        }
+        if started.elapsed() >= limit {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            break (None, true);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    if timed_out {
+        // Not waited on: anything that slipped the group could hold the pipes open.
+        return Ok(GitOut {
+            ok: false,
+            timed_out,
+            stdout: String::new(),
+            stderr: format!("git {} timed out", args.first().copied().unwrap_or("")),
+        });
+    }
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
     Ok(GitOut {
-        ok: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        ok: status.is_some_and(|status| status.success()),
+        timed_out,
+        stdout,
+        stderr,
     })
 }
 
 fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let result = git(cwd, args)?;
+    git_out_within(cwd, args, GIT_TIME)
+}
+
+fn git_out_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    let result = git_within(cwd, args, limit)?;
     if result.ok {
         return Ok(result.stdout);
     }
+    Err(git_error(&result, args))
+}
+
+fn git_error(result: &GitOut, args: &[&str]) -> String {
     let last: String = result
         .stderr
         .trim()
@@ -400,12 +483,9 @@ fn git_out(cwd: &Path, args: &[&str]) -> Result<String, String> {
         .take(300)
         .collect();
     if last.is_empty() {
-        return Err(format!(
-            "git {} failed",
-            args.first().copied().unwrap_or("")
-        ));
+        return format!("git {} failed", args.first().copied().unwrap_or(""));
     }
-    Err(last)
+    last
 }
 
 /// Makes the parents of `root/rel`, refusing any parent that is a link, so a
@@ -486,17 +566,66 @@ fn drop_stale(env: &Env) {
 
 // ---- finding things ----
 
-fn find_transcript(env: &Env, cwd: &str, session_id: &str) -> Option<PathBuf> {
-    let wanted = format!("{session_id}.jsonl");
-    let root = env.account_home.join("projects");
-    let project = root.join(project_key(cwd));
-    if lexists(&project.join(&wanted)) {
-        return Some(project);
+/// Where the conversation is: its account folder and its project folder.
+struct Transcript {
+    home: PathBuf,
+    project: PathBuf,
+}
+
+/// The selected account and every Claude login, each once.
+fn account_homes(env: &Env) -> Vec<PathBuf> {
+    let mut homes: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let all = std::iter::once(env.account_home.clone())
+        .chain(ACCOUNT_DIRS.iter().map(|dir| env.home.join(dir)));
+    for home in all {
+        let real = home.canonicalize().unwrap_or_else(|_| home.clone());
+        if seen.insert(real) {
+            homes.push(home);
+        }
     }
-    fs::read_dir(&root).ok()?.flatten().find_map(|entry| {
-        let project = entry.path();
-        lexists(&project.join(&wanted)).then_some(project)
-    })
+    homes
+}
+
+/// The newest copy in any account, as the host does: after `claude-acct` moved
+/// a conversation between accounts, both can hold it, and the older one is
+/// missing the latest turns.
+fn find_transcript(env: &Env, cwd: &str, session_id: &str) -> Option<Transcript> {
+    let wanted = format!("{session_id}.jsonl");
+    let homes = account_homes(env);
+    let mut best: Option<(SystemTime, Transcript)> = None;
+    let consider = |best: &mut Option<(SystemTime, Transcript)>, home: &Path, project: PathBuf| {
+        let Ok(at) = fs::metadata(project.join(&wanted)).and_then(|info| info.modified()) else {
+            return;
+        };
+        if best.as_ref().map_or(true, |(seen, _)| at > *seen) {
+            *best = Some((
+                at,
+                Transcript {
+                    home: home.to_path_buf(),
+                    project,
+                },
+            ));
+        }
+    };
+    for home in &homes {
+        consider(
+            &mut best,
+            home,
+            home.join("projects").join(project_key(cwd)),
+        );
+    }
+    if best.is_none() {
+        for home in &homes {
+            let Ok(entries) = fs::read_dir(home.join("projects")) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                consider(&mut best, home, entry.path());
+            }
+        }
+    }
+    best.map(|(_, found)| found)
 }
 
 fn account_name(account_home: &Path) -> &'static str {
@@ -573,6 +702,36 @@ enum Found {
     Missing,
 }
 
+enum RepoKind {
+    Ok,
+    Client,
+    Unknown,
+}
+
+/// Client when the folder, its real path or its git folder is client work, so
+/// a link from elsewhere into a client repository is refused too.
+fn repo_kind(repo: &Path) -> RepoKind {
+    let real = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    if is_client_path(&path_text(repo)) || is_client_path(&path_text(&real)) {
+        return RepoKind::Client;
+    }
+    let Ok(common) = git_out(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ) else {
+        return RepoKind::Unknown;
+    };
+    let dir = PathBuf::from(common.trim());
+    if dir.as_os_str().is_empty() {
+        return RepoKind::Unknown;
+    }
+    let real_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    if is_client_path(&path_text(&dir)) || is_client_path(&path_text(&real_dir)) {
+        return RepoKind::Client;
+    }
+    RepoKind::Ok
+}
+
 fn find_repo(env: &Env, params: &Value, urls: &[String], source_path: &str) -> Found {
     let wanted: Vec<(String, &String)> = urls
         .iter()
@@ -606,9 +765,13 @@ fn find_repo(env: &Env, params: &Value, urls: &[String], source_path: &str) -> F
             let Some((_, matched)) = wanted.iter().find(|(want, _)| *want == normal) else {
                 continue;
             };
-            if is_client_path(&path_text(&repo)) {
-                client = true;
-                break;
+            match repo_kind(&repo) {
+                RepoKind::Ok => {}
+                RepoKind::Client => {
+                    client = true;
+                    break;
+                }
+                RepoKind::Unknown => break,
             }
             hits.push((repo.clone(), name, (*matched).clone()));
             break;
@@ -651,6 +814,7 @@ fn inspect(env: &Env, params: &Value) -> Result<Value, String> {
     if is_client_path(&root) || is_client_path(common.trim()) {
         return Err(CLIENT.into());
     }
+    let found = find_transcript(env, cwd, &session_id);
     let remotes: Vec<Value> = remotes_of(Path::new(&root))
         .into_iter()
         .map(|(name, url)| json!({"name": name, "url": url}))
@@ -658,8 +822,8 @@ fn inspect(env: &Env, params: &Value) -> Result<Value, String> {
     Ok(json!({
         "repoRoot": root,
         "remotes": remotes,
-        "hasTranscript": find_transcript(env, cwd, &session_id).is_some(),
-        "account": account_name(&env.account_home),
+        "hasTranscript": found.is_some(),
+        "account": account_name(found.as_ref().map_or(&env.account_home, |found| &found.home)),
     }))
 }
 
@@ -760,16 +924,17 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
     )?;
     if !local.trim().is_empty() {
         let bundle = path_text(&folder.join(BUNDLE_FILE));
-        git_out(
+        git_out_within(
             root,
             &["bundle", "create", &bundle, "HEAD", "--not", &not_remote],
+            GIT_LONG_TIME,
         )?;
         add_file(&folder, BUNDLE_FILE, &mut files, false)?;
     }
 
     // Staged and unstaged together, with deletions and binary files.
     let output = format!("--output={}", path_text(&folder.join(PATCH_FILE)));
-    git_out(
+    git_out_within(
         root,
         &[
             "diff",
@@ -783,6 +948,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
             &output,
             "HEAD",
         ],
+        GIT_LONG_TIME,
     )?;
     if fs::metadata(folder.join(PATCH_FILE))
         .map_err(io_text)?
@@ -795,7 +961,11 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
     }
 
     let mut ignored: Vec<String> = Vec::new();
-    let untracked = git_out(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let untracked = git_out_within(
+        root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        GIT_LONG_TIME,
+    )?;
     for rel in untracked.split('\0').filter(|rel| !rel.is_empty()) {
         // A folder with its own repository: left behind and named on the card.
         let packed = format!("{UNTRACKED_DIR}/{rel}");
@@ -818,7 +988,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
         }
     }
 
-    let names = git_out(
+    let names = git_out_within(
         root,
         &[
             "ls-files",
@@ -829,6 +999,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
             "--no-empty-directory",
             "-z",
         ],
+        GIT_LONG_TIME,
     )?;
     for rel in names.split('\0').filter(|rel| !rel.is_empty()) {
         if !rel.starts_with(".claude/worktrees/") {
@@ -836,7 +1007,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
         }
     }
 
-    let project = find_transcript(env, cwd, &session_id)
+    let Transcript { home, project } = find_transcript(env, cwd, &session_id)
         .ok_or("Could not find this session's conversation")?;
     pack_tree(
         &project.join(&session_id),
@@ -845,7 +1016,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
         &mut files,
     )?;
     pack_tree(
-        &env.account_home.join("file-history").join(&session_id),
+        &home.join("file-history").join(&session_id),
         &folder,
         &format!("{CONVO_DIR}/history/{session_id}"),
         &mut files,
@@ -986,10 +1157,10 @@ fn bring_commits(
         return Ok(());
     }
     // The remote's own commits first: the bundle builds on them.
-    let _ = git(repo, &["fetch", "--quiet", remote]);
+    let _ = git_within(repo, &["fetch", "--quiet", remote], GIT_LONG_TIME);
     if manifest.files.iter().any(|file| file.path == BUNDLE_FILE) {
         let bundle = path_text(&folder.join(BUNDLE_FILE));
-        git_out(repo, &["fetch", "--quiet", &bundle, "HEAD"])?;
+        git_out_within(repo, &["fetch", "--quiet", &bundle, "HEAD"], GIT_LONG_TIME)?;
     }
     if !has_commit(repo, &manifest.head) {
         return Err(format!(
@@ -1068,9 +1239,15 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
     if project_key(&worktree_text).len() > PROJECT_KEY_MAX {
         return Err("The new folder's path is too long for Claude to resume in".into());
     }
+    // Saved before the add, so a crash just after it still leaves a record.
     let mut made = Made {
         repo: Some(path_text(&repo)),
         session_id: Some(manifest.session_id.clone()),
+        pending: Some(Pending {
+            worktree: worktree_text.clone(),
+            branch: branch.clone(),
+            head: manifest.head.clone(),
+        }),
         ..Made::default()
     };
     save_made(&folder, &made)?;
@@ -1078,30 +1255,37 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
         fs::create_dir_all(parent).map_err(io_text)?;
     }
     // No hooks: one failing would leave a worktree this move can't tell is its own.
-    git_out(
-        &repo,
-        &[
-            "-c",
-            "core.hooksPath=/dev/null",
-            "worktree",
-            "add",
-            "--quiet",
-            "-b",
-            &branch,
-            &worktree_text,
-            &manifest.head,
-        ],
-    )?;
-    // Only now is it this move's: another move may have taken the name first,
-    // and a rollback must not remove that one's worktree.
+    let add_args = [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        &branch,
+        &worktree_text,
+        &manifest.head,
+    ];
+    let added = git_within(&repo, &add_args, GIT_LONG_TIME)?;
+    if !added.ok {
+        // Another move may have taken the name first: that worktree is not this one's.
+        // A timed-out add may still have made it, so the claim stays for undo to check.
+        if !added.timed_out {
+            made.pending = None;
+            save_made(&folder, &made)?;
+        }
+        return Err(git_error(&added, &add_args));
+    }
     made.worktree = Some(worktree_text.clone());
     made.branch = Some(branch.clone());
+    made.pending = None;
     save_made(&folder, &made)?;
     if manifest.files.iter().any(|file| file.path == PATCH_FILE) {
         let patch = path_text(&folder.join(PATCH_FILE));
-        git_out(
+        git_out_within(
             &worktree,
             &["apply", "--binary", "--whitespace=nowarn", &patch],
+            GIT_LONG_TIME,
         )?;
     }
     let prefix = format!("{UNTRACKED_DIR}/");
@@ -1199,6 +1383,37 @@ fn unpack_conversation(env: &Env, params: &Value) -> Result<Value, String> {
     Ok(json!({"account": account_name(&env.account_home)}))
 }
 
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// A worktree add the record never heard back from is this move's only if git
+/// lists it at that path, on that branch, still at the commit it was made from.
+fn added_by_this_move(repo: Option<&str>, pending: &Pending) -> bool {
+    let Some(repo) = repo.map(Path::new) else {
+        return false;
+    };
+    let reference = format!("refs/heads/{}", pending.branch);
+    let tip = git_out(repo, &["rev-parse", "--verify", "--quiet", &reference]);
+    if tip.map(|tip| tip.trim().to_string()).ok().as_deref() != Some(pending.head.as_str()) {
+        return false;
+    }
+    let Ok(list) = git_out(repo, &["worktree", "list", "--porcelain"]) else {
+        return false;
+    };
+    list.split("\n\n").any(|block| {
+        let path = block
+            .lines()
+            .find_map(|line| line.strip_prefix("worktree "));
+        let branch = block.lines().find_map(|line| line.strip_prefix("branch "));
+        branch == Some(reference.as_str())
+            && path.is_some_and(|path| same_path(Path::new(path), Path::new(&pending.worktree)))
+    })
+}
+
 fn remove_empty(folder: &Path) {
     let Ok(entries) = fs::read_dir(folder) else {
         return;
@@ -1214,7 +1429,13 @@ fn remove_empty(folder: &Path) {
 /// Removes what this move made here. Only that: never anything older.
 fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     let folder = move_folder(env, params)?;
-    let made = load_made(&folder)?;
+    let mut made = load_made(&folder)?;
+    if let Some(pending) = made.pending.clone() {
+        if added_by_this_move(made.repo.as_deref(), &pending) {
+            made.worktree = Some(pending.worktree);
+            made.branch = Some(pending.branch);
+        }
+    }
     for file in &made.files {
         let _ = fs::remove_file(file);
     }
@@ -1230,7 +1451,11 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     }
     if let (Some(repo), Some(worktree)) = (&made.repo, &made.worktree) {
         let repo = Path::new(repo);
-        let _ = git(repo, &["worktree", "remove", "--force", worktree]);
+        let _ = git_within(
+            repo,
+            &["worktree", "remove", "--force", worktree],
+            GIT_LONG_TIME,
+        );
         let _ = fs::remove_dir_all(worktree);
         let _ = git(repo, &["worktree", "prune"]);
     }
@@ -1621,6 +1846,118 @@ mod tests {
         );
         let plain = json!({"sourcePath": source, "urls": [url]});
         assert_eq!(check(&fix.to, &plain).unwrap()["reason"], CLIENT);
+    }
+
+    #[test]
+    fn refuses_a_link_from_outside_upwork_into_a_client_repository() {
+        let fix = fixture();
+        let source = path_text(&fix.source);
+        let url = sh(&fix.source, &["remote", "get-url", "origin"]);
+        fs::remove_dir_all(&fix.target_repo).unwrap();
+        let client = fix.to.home.join("Documents/projects/upwork/acme");
+        fs::create_dir_all(client.parent().unwrap()).unwrap();
+        sh(
+            &fix.base,
+            &["clone", "--quiet", &url, path_text(&client).as_str()],
+        );
+        let link = fix.base.join("app-link");
+        std::os::unix::fs::symlink(&client, &link).unwrap();
+        let ask = json!({"sourcePath": source, "urls": [url], "projects": [path_text(&link)]});
+        assert_eq!(check(&fix.to, &ask).unwrap()["reason"], CLIENT);
+
+        // Panoptic is the exception, through a link too.
+        fs::remove_dir_all(&client).unwrap();
+        fs::remove_file(&link).unwrap();
+        let panoptic = fix.to.home.join("Documents/projects/upwork/panoptic/app");
+        fs::create_dir_all(panoptic.parent().unwrap()).unwrap();
+        sh(
+            &fix.base,
+            &["clone", "--quiet", &url, path_text(&panoptic).as_str()],
+        );
+        std::os::unix::fs::symlink(&panoptic, &link).unwrap();
+        assert_eq!(check(&fix.to, &ask).unwrap()["ok"], true);
+    }
+
+    #[test]
+    fn takes_the_newest_transcript_from_any_account() {
+        let fix = fixture();
+        let key = project_key(&path_text(&fix.source));
+        let cx = fix.from.home.join(".claude-exec");
+        let project = cx.join("projects").join(&key);
+        fs::create_dir_all(&project).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(project.join(format!("{ID}.jsonl")), "{\"turn\":2}\n").unwrap();
+        fs::create_dir_all(cx.join("file-history").join(ID)).unwrap();
+        fs::write(cx.join("file-history").join(ID).join("v2"), "v2\n").unwrap();
+        let cwd = path_text(&fix.source);
+        let facts = inspect(&fix.from, &json!({"cwd": cwd, "sessionId": ID})).unwrap();
+        assert_eq!(facts["account"], "cx");
+        let manifest = pack(
+            &fix.from,
+            &json!({"moveId": MOVE, "cwd": cwd, "sessionId": ID, "remoteName": "origin"}),
+        )
+        .unwrap();
+        let staged = fix.from.staging_root.join(MOVE);
+        let transcript = staged.join(format!("{CONVO_DIR}/session/{ID}.jsonl"));
+        assert_eq!(fs::read(transcript).unwrap(), b"{\"turn\":2}\n");
+        assert!(manifest
+            .to_string()
+            .contains(&format!("{CONVO_DIR}/history/{ID}/v2")));
+
+        // Only in an account the tab doesn't use: found all the same.
+        fs::remove_dir_all(fix.from.home.join(".claude/projects")).unwrap();
+        let facts = inspect(&fix.from, &json!({"cwd": cwd, "sessionId": ID})).unwrap();
+        assert_eq!(facts["hasTranscript"], true);
+    }
+
+    #[test]
+    fn undo_removes_an_unconfirmed_worktree_only_if_unchanged() {
+        let fix = fixture();
+        let (manifest, urls) = carry(&fix);
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
+        let folder = fix.to.staging_root.join(MOVE);
+        // As if it crashed between the add and saving that it worked.
+        let crashed = || {
+            let mut made = load_made(&folder).unwrap();
+            made.pending = Some(Pending {
+                worktree: made.worktree.take().unwrap(),
+                branch: made.branch.take().unwrap(),
+                head: manifest["head"].as_str().unwrap().to_string(),
+            });
+            save_made(&folder, &made).unwrap();
+        };
+        crashed();
+        undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
+        assert!(!cwd.exists());
+        assert_eq!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]), "");
+
+        // A branch that has moved on is someone's work, not this move's.
+        let (manifest, urls) = carry(&fix);
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
+        crashed();
+        fs::write(cwd.join("work.txt"), "mine\n").unwrap();
+        sh(&cwd, &["add", "work.txt"]);
+        sh(&cwd, &["commit", "-q", "-m", "work"]);
+        undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
+        assert!(cwd.join("work.txt").exists());
+        assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+    }
+
+    #[test]
+    fn gives_up_on_a_git_command_that_hangs() {
+        let base = std::env::temp_dir();
+        let started = std::time::Instant::now();
+        let result = git_within(
+            &base,
+            &["-c", "alias.nap=!sleep 20", "nap"],
+            Duration::from_millis(300),
+        )
+        .unwrap();
+        assert!(result.timed_out && !result.ok);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(git_error(&result, &["nap"]).contains("timed out"));
     }
 
     #[test]

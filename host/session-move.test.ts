@@ -78,6 +78,7 @@ describe("session move, a real run with two home folders", () => {
     run: runCommand,
     projects: () => [],
     isAlive: (pid) => pid === 4242,
+    commandLine: async () => "claude --resume x",
     kill: () => {},
     sleep: async () => {},
     now: () => 1_000_000,
@@ -520,7 +521,9 @@ describe("session move, a real run with two home folders", () => {
     fake("lab-session", `if [ "$3" = taken ]; then echo "lab-session: window already exists in lab" >&2; exit 1; fi; echo started`);
 
     const { manifest, urls } = await carry();
-    await handleSessionMove(targetEnv, { op: "unpackCode", moveId: MOVE, name: "s", manifest, urls });
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
     // main is over the cap, so it lands on cx although it came from main.
     await expect(
       handleSessionMove(targetEnv, { op: "unpackConversation", moveId: MOVE, manifest, account: "main" }),
@@ -532,13 +535,139 @@ describe("session move, a real run with two home folders", () => {
     expect(calls).toContain(`--resume '${ID}'`);
     expect(calls).toContain("CLAUDE_ACCT=cx");
 
-    await expect(handleSessionMove(targetEnv, { op: "confirm", sessionId: ID, name: "queued-one" })).resolves.toEqual({ state: "queued" });
+    await expect(handleSessionMove(targetEnv, { op: "confirm", moveId: MOVE, sessionId: ID, name: "queued-one" })).resolves.toEqual({ state: "queued" });
     fake("agent-gate", `printf "agent-gate: 1 of 10\\n\\n  pos  name\\n  1    ${"a".repeat(40)} 1 1s 1 x\\n"`);
-    await expect(handleSessionMove(targetEnv, { op: "confirm", sessionId: ID, name: "a".repeat(48) })).resolves.toEqual({ state: "queued" });
+    await expect(handleSessionMove(targetEnv, { op: "confirm", moveId: MOVE, sessionId: ID, name: "a".repeat(48) })).resolves.toEqual({ state: "queued" });
     const dir = join(targetHome, ".claude-exec/sessions");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd: "x", status: "idle" }));
-    await expect(handleSessionMove(targetEnv, { op: "confirm", sessionId: ID, name: "taken-2" })).resolves.toEqual({ state: "up" });
+    // Another process on the conversation, elsewhere, is not this move's copy.
+    writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd: "x", name: "other", status: "idle" }));
+    const elsewhere = (await handleSessionMove(targetEnv, { op: "confirm", moveId: MOVE, sessionId: ID, name: "taken-2" })) as { state: string };
+    expect(elsewhere.state).not.toBe("up");
+    // And with one live, a start refuses rather than run a second.
+    await expect(
+      handleSessionMove(targetEnv, { op: "start", moveId: MOVE, sessionId: ID, name: "again" }),
+    ).rejects.toThrow(/already running/);
+    writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd, status: "idle" }));
+    await expect(handleSessionMove(targetEnv, { op: "confirm", moveId: MOVE, sessionId: ID, name: "taken-2" })).resolves.toEqual({ state: "up" });
+  });
+
+  /** Unpacked and started, with a fake lab-session; the copy's folder. */
+  const started = async () => {
+    const bin = join(targetHome, ".local/bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "lab-session"), "#!/bin/bash\necho started\n");
+    chmodSync(join(bin, "lab-session"), 0o755);
+    const { manifest, urls, account } = await carry();
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    await handleSessionMove(targetEnv, { op: "unpackConversation", moveId: MOVE, manifest, account });
+    await handleSessionMove(targetEnv, { op: "start", moveId: MOVE, sessionId: ID, name: "s" });
+    return { cwd, manifest };
+  };
+
+  const withTmux = (answer: { code: number | null; stderr: string; timedOut: boolean }): SessionMoveEnv => ({
+    ...targetEnv,
+    run: async (command, args, options) =>
+      command === "tmux" ? { ...answer, stdout: "" } : runCommand(command, args, options),
+  });
+
+  it("undo keeps everything when the windows there can't be listed", async () => {
+    const { cwd } = await started();
+    const slow = withTmux({ code: null, stderr: "", timedOut: true });
+    await expect(handleSessionMove(slow, { op: "undo", moveId: MOVE })).rejects.toThrow(/Could not list/);
+    expect(existsSync(cwd)).toBe(true);
+    expect(existsSync(conversation(targetHome, cwd).transcript)).toBe(true);
+    expect(existsSync(join(targetHome, "staging", MOVE, "made.json"))).toBe(true);
+    // No lab session at all is an answer: nothing is running there.
+    const none = withTmux({ code: 1, stderr: "can't find session: lab", timedOut: false });
+    await handleSessionMove(none, { op: "undo", moveId: MOVE });
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  it("refuses a link from outside upwork into a client repository, and keeps Panoptic", async () => {
+    const facts = (await handleSessionMove(sourceEnv, { op: "inspect", cwd: source, sessionId: ID })) as InspectResult;
+    const urls = facts.remotes.map((remote) => remote.url);
+    rmSync(targetRepo, { recursive: true, force: true });
+    const client = join(targetHome, "Documents/projects/upwork/acme");
+    mkdirSync(dirname(client), { recursive: true });
+    execFileSync("git", ["clone", "--quiet", origin, client], { stdio: "ignore" });
+    const link = join(targetHome, "Documents/projects/app");
+    symlinkSync(client, link);
+    const viaLink: SessionMoveEnv = { ...targetEnv, projects: () => [link] };
+    await expect(handleSessionMove(viaLink, { op: "check", sourcePath: source, urls })).resolves.toEqual({
+      ok: false,
+      reason: "Client work stays on the Mac",
+    });
+    const panoptic = join(targetHome, "Documents/projects/upwork/panoptic/app");
+    mkdirSync(dirname(panoptic), { recursive: true });
+    rmSync(client, { recursive: true, force: true });
+    unlinkSync(link);
+    execFileSync("git", ["clone", "--quiet", origin, panoptic], { stdio: "ignore" });
+    symlinkSync(panoptic, link);
+    await expect(handleSessionMove(viaLink, { op: "check", sourcePath: source, urls })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("undo removes a worktree whose add it never heard back from, only if it is unchanged", async () => {
+    const { manifest, urls } = await carry();
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    const record = join(targetHome, "staging", MOVE, "made.json");
+    // As if it crashed between the add and saving that it worked.
+    const crashed = () => {
+      const made = JSON.parse(readFileSync(record, "utf8"));
+      made.pending = { worktree: made.worktree, branch: made.branch, head: manifest.head };
+      delete made.worktree;
+      delete made.branch;
+      writeFileSync(record, JSON.stringify(made));
+    };
+    crashed();
+    await handleSessionMove(targetEnv, { op: "undo", moveId: MOVE });
+    expect(existsSync(cwd)).toBe(false);
+    expect(sh(targetRepo, "branch", "--list", "moved/s")).toBe("");
+
+    // A branch that has moved on is someone's work, not this move's.
+    const again = await carry();
+    const second = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest: again.manifest, urls,
+    })) as { cwd: string };
+    crashed();
+    writeFileSync(join(second.cwd, "work.txt"), "mine\n");
+    sh(second.cwd, "add", "work.txt");
+    execFileSync("git", ["-C", second.cwd, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "work"]);
+    await handleSessionMove(targetEnv, { op: "undo", moveId: MOVE });
+    expect(existsSync(join(second.cwd, "work.txt"))).toBe(true);
+    expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
+  });
+
+  it("signals a PID with no start stamp only when it is still Claude", async () => {
+    const dir = join(targetHome, ".claude/sessions");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "4242.json"), JSON.stringify({ pid: 4242, sessionId: ID, cwd: targetRepo, status: "idle", statusUpdatedAt: 0 }));
+    const signals: string[] = [];
+    const as = (line: string | null): SessionMoveEnv => ({
+      ...targetEnv,
+      commandLine: async () => line,
+      kill: (_pid, signal) => signals.push(signal),
+    });
+    // Reused by something else: the session is gone, and nothing is signalled.
+    await expect(handleSessionMove(as("node server.js"), { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
+    // Can't tell: refused.
+    await expect(handleSessionMove(as(null), { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: false });
+    expect(signals).toEqual([]);
+    let alive = true;
+    const claude: SessionMoveEnv = {
+      ...as("/usr/bin/claude --resume x"),
+      isAlive: () => alive,
+      kill: (_pid, signal) => {
+        signals.push(signal);
+        alive = false;
+      },
+    };
+    await expect(handleSessionMove(claude, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
+    expect(signals).toEqual(["SIGTERM"]);
   });
 });
 
@@ -573,6 +702,7 @@ describe("packs between the Mac and a host", () => {
       run: runCommand,
       projects: () => [],
       isAlive: () => false,
+      commandLine: async () => null,
       kill: () => {},
       sleep: async () => {},
       now: Date.now,
@@ -625,6 +755,7 @@ describe("packs between the Mac and a host", () => {
       run: runCommand,
       projects: () => [],
       isAlive: () => false,
+      commandLine: async () => null,
       kill: () => {},
       sleep: async () => {},
       now: Date.now,

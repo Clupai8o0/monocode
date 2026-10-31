@@ -7,6 +7,7 @@ import {
   movedTitle,
   openJournal,
   parseMoved,
+  macAccountFor,
   withMoved,
   type MoveFacts,
   type MovedRecord,
@@ -203,6 +204,34 @@ describe("moved records", () => {
     expect(map["tab-1"].live).toEqual({ kind: "tab", sessionId: "tab-2" });
     expect(map["tab-1"].toName).toBe("this Mac");
     expect(map["lab-source"]).toEqual(back);
+    // Its folder, branch and what stayed behind are the new copy's too.
+    const moved = withMoved(map, { ...record, sessionId: "tab-2", cwd: "/w2", branch: "moved/s-2", leftBehind: [], leftBehindMore: 0 });
+    expect(moved["tab-1"]).toMatchObject({ cwd: "/w2", branch: "moved/s-2", leftBehind: [], leftBehindMore: 0 });
+  });
+
+  it("never drops a record that still locks a tab to make room", () => {
+    let map = {};
+    for (let n = 0; n < 501; n++) {
+      map = withMoved(map, { ...record, sessionId: `tab-${n}`, providerSessionId: `conv-${n}` });
+    }
+    // Every record locks by default, so the oldest stays.
+    expect(map["tab-0"]).toBeDefined();
+    expect(Object.keys(map)).toHaveLength(501);
+    // Only records whose tab is gone make room, oldest first.
+    const gone = new Set(["tab-3", "tab-7"]);
+    const next = withMoved(map, { ...record, sessionId: "tab-new", providerSessionId: "conv-new" }, (id) => !gone.has(id));
+    expect(Object.keys(next)).toHaveLength(500);
+    expect(next["tab-0"]).toBeDefined();
+    expect(next["tab-3"]).toBeUndefined();
+    expect(next["tab-7"]).toBeUndefined();
+    expect(next["tab-new"]).toBeDefined();
+  });
+
+  it("binds a tab moved to this Mac to the account its transcript landed in", () => {
+    expect(macAccountFor("cx", "account-cx")).toBe("account-cx");
+    expect(macAccountFor("main", "account-cx")).toBe("default");
+    // No cx account here: it landed in main's folder, so it is main's.
+    expect(macAccountFor("cx", undefined)).toBe("default");
   });
 
   it("lets a session moved host, Mac, host move to the Mac again", () => {

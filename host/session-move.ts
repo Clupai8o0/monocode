@@ -66,6 +66,8 @@ export type SessionMoveEnv = {
   /** Project folders this host knows, searched first. */
   projects: () => string[];
   isAlive: (pid: number, procStart: string | undefined) => boolean | Promise<boolean>;
+  /** The process's command line, or null when it can't be read. */
+  commandLine: (pid: number) => Promise<string | null>;
   kill: (pid: number, signal: NodeJS.Signals) => void;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
@@ -78,6 +80,8 @@ type Made = {
   sessionId?: string;
   worktree?: string;
   branch?: string;
+  /** Saved before `git worktree add`; it is only this move's if the add worked. */
+  pending?: { worktree: string; branch: string; head: string };
   account?: "main" | "cx";
   /** Files that did not exist before. */
   files: string[];
@@ -111,10 +115,20 @@ export function defaultSessionMoveEnv(dataDir: string, projects: () => string[])
     run: runCommand,
     projects,
     isAlive: (pid, start) => sessionLiveness()(pid, start),
+    commandLine: readCommandLine,
     kill: (pid, signal) => process.kill(pid, signal),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     now: Date.now,
   };
+}
+
+async function readCommandLine(pid: number): Promise<string | null> {
+  try {
+    return (await readFile(`/proc/${pid}/cmdline`, "utf8")).replace(/\0/g, " ").trim();
+  } catch {
+    const ps = await runCommand("ps", ["-o", "args=", "-p", String(pid)], { timeoutMs: 5_000 });
+    return ps.code === 0 && ps.stdout.trim() ? ps.stdout.trim() : null;
+  }
 }
 
 function firstLine(text: string, fallback: string) {
@@ -262,7 +276,9 @@ function accountOfDir(dir: string): MoveAccount {
   return "cx";
 }
 
-async function liveRecord(env: SessionMoveEnv, sessionId: string): Promise<Live | null> {
+/** Every live registry entry for the conversation; a stale one's PID may be reused. */
+async function liveRecords(env: SessionMoveEnv, sessionId: string): Promise<Live[]> {
+  const found: Live[] = [];
   for (const dir of REGISTRY_DIRS) {
     const folder = join(env.home, dir, "sessions");
     const names = await readdir(folder).catch(() => [] as string[]);
@@ -277,9 +293,9 @@ async function liveRecord(env: SessionMoveEnv, sessionId: string): Promise<Live 
       if (isRelayEntry(raw) || raw.sessionId !== sessionId) continue;
       const pid = Number(raw.pid);
       if (!Number.isInteger(pid) || pid <= 0) continue;
-      const procStart = raw.procStart == null ? undefined : String(raw.procStart);
+      const procStart = raw.procStart == null || raw.procStart === "" ? undefined : String(raw.procStart);
       if (!(await env.isAlive(pid, procStart))) continue;
-      return {
+      found.push({
         pid,
         procStart,
         status: typeof raw.status === "string" ? raw.status : undefined,
@@ -287,10 +303,20 @@ async function liveRecord(env: SessionMoveEnv, sessionId: string): Promise<Live 
         name: typeof raw.name === "string" ? raw.name : undefined,
         cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
         account: accountOfDir(dir),
-      };
+      });
     }
   }
-  return null;
+  return found;
+}
+
+async function liveRecord(env: SessionMoveEnv, sessionId: string): Promise<Live | null> {
+  return (await liveRecords(env, sessionId))[0] ?? null;
+}
+
+async function samePath(a: string | undefined, b: string) {
+  if (!a) return false;
+  const [x, y] = await Promise.all([realpath(a).catch(() => a), realpath(b).catch(() => b)]);
+  return x === y;
 }
 
 function toState(env: SessionMoveEnv, record: Live | null): SourceState {
@@ -316,21 +342,41 @@ async function stopSource(env: SessionMoveEnv, params: Record<string, unknown>) 
   return { stopped: await endProcess(env, record) };
 }
 
-/** SIGTERM, then SIGKILL after 15 s, as `claude-acct` stops a session. */
+/**
+ * Whether the PID is still that session: its start stamp matches, or with no
+ * stamp, its command line is Claude's. A bare PID may be something else's by now.
+ */
+async function identity(env: SessionMoveEnv, record: Live): Promise<"it" | "other" | "unknown"> {
+  if (record.procStart) return (await env.isAlive(record.pid, record.procStart)) ? "it" : "other";
+  const line = await env.commandLine(record.pid);
+  if (line === null) return "unknown";
+  return /(^|[\s/])claude(\s|$)|claude-acct/.test(line) ? "it" : "other";
+}
+
+/**
+ * SIGTERM, then SIGKILL after 15 s, as `claude-acct` stops a session. Each
+ * signal waits on knowing it is still that session; not knowing is a refusal.
+ */
 async function endProcess(env: SessionMoveEnv, record: Live): Promise<boolean> {
-  const signal = (name: NodeJS.Signals) => {
+  const signal = async (name: NodeJS.Signals): Promise<boolean | null> => {
+    const who = await identity(env, record);
+    if (who === "other") return true;
+    if (who === "unknown") return false;
     try {
       env.kill(record.pid, name);
     } catch {
       // It ended on its own just now.
     }
+    return null;
   };
-  signal("SIGTERM");
+  const first = await signal("SIGTERM");
+  if (first !== null) return first;
   for (let poll = 0; poll < STOP_POLLS; poll++) {
     if (!(await env.isAlive(record.pid, record.procStart))) return true;
     await env.sleep(STOP_POLL_MS);
   }
-  signal("SIGKILL");
+  const last = await signal("SIGKILL");
+  if (last !== null) return last;
   await env.sleep(500);
   return !(await env.isAlive(record.pid, record.procStart));
 }
@@ -401,6 +447,21 @@ function homeRelative(path: string) {
   return match ? match[1] : path;
 }
 
+/**
+ * "client" when the folder, its real path or its git folder is client work, so
+ * a link from elsewhere into a client repository is refused too; "unknown"
+ * when git can't say where its git folder is.
+ */
+async function repoKind(env: SessionMoveEnv, repo: string): Promise<"ok" | "client" | "unknown"> {
+  const real = await realpath(repo).catch(() => repo);
+  if (isClientPath(repo) || isClientPath(real)) return "client";
+  const common = await git(env, repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (common.code !== 0 || !common.stdout.trim()) return "unknown";
+  const dir = common.stdout.trim();
+  const realDir = await realpath(dir).catch(() => dir);
+  return isClientPath(dir) || isClientPath(realDir) ? "client" : "ok";
+}
+
 async function findRepo(
   env: SessionMoveEnv,
   urls: string[],
@@ -413,10 +474,9 @@ async function findRepo(
     for (const remote of await remotesOf(env, repo)) {
       const matchedUrl = wanted.get(normalizeRemoteUrl(remote.url));
       if (matchedUrl === undefined) continue;
-      if (isClientPath(repo)) {
-        client = true;
-        break;
-      }
+      const kind = await repoKind(env, repo);
+      if (kind === "client") client = true;
+      if (kind !== "ok") break;
       hits.push({ repo, remoteName: remote.name, matchedUrl });
       break;
     }
@@ -693,15 +753,35 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
   const { worktree, branch } = await freePlace(env, repo, name);
   const key = projectKey(worktree);
   if (key.length > PROJECT_KEY_MAX) throw new Error("The new folder's path is too long for Claude to resume in");
-  const made: Made = { repo, remoteName: found.remoteName, sessionId: manifest.sessionId, files: [] };
+  // Saved before the add, so a crash just after it still leaves a record.
+  const made: Made = {
+    repo,
+    remoteName: found.remoteName,
+    sessionId: manifest.sessionId,
+    files: [],
+    pending: { worktree, branch, head: manifest.head },
+  };
   await saveMade(folder, made);
   await mkdir(dirname(worktree), { recursive: true });
   // No hooks: one failing would leave a worktree this move can't tell is its own.
-  await gitOut(env, repo, ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
-  // Only now is it this move's: another move may have taken the name first,
-  // and a rollback must not remove that one's worktree.
+  const added = await git(
+    env,
+    repo,
+    ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "-b", branch, worktree, manifest.head],
+    GIT_LONG_MS,
+  );
+  if (added.code !== 0) {
+    // Another move may have taken the name first: that worktree is not this one's.
+    // A timed-out add may still have made it, so the claim stays for undo to check.
+    if (!added.timedOut) {
+      delete made.pending;
+      await saveMade(folder, made);
+    }
+    throw new Error(firstLine(added.stderr, "git worktree failed"));
+  }
   made.worktree = worktree;
   made.branch = branch;
+  delete made.pending;
   await saveMade(folder, made);
   if (manifest.files.some((file) => file.path === PATCH_FILE)) {
     await gitOut(env, worktree, ["apply", "--binary", "--whitespace=nowarn", join(folder, PATCH_FILE)], GIT_LONG_MS);
@@ -830,6 +910,8 @@ async function start(env: SessionMoveEnv, params: Record<string, unknown>): Prom
   const made = await loadMade(folder);
   if (!made.worktree || !made.account || made.sessionId !== sessionId)
     throw new Error("The conversation has not been carried yet");
+  // Two copies must never write one conversation.
+  if ((await liveRecord(env, sessionId)) !== null) throw new Error("This conversation is already running on that machine");
   // Recorded before it starts, so an undo can find a window whose start it never heard back from.
   const name = await startWindow(env, made.worktree, sessionId, base, made.account, async (next) => {
     made.window = next;
@@ -838,25 +920,39 @@ async function start(env: SessionMoveEnv, params: Record<string, unknown>): Prom
   return { name };
 }
 
-/** Whether the window of that name is this move's: another's may share the name. */
-async function ownWindow(env: SessionMoveEnv, name: string, worktree: string) {
+/**
+ * The lab tmux session's windows as name and folder; none when it isn't
+ * running. Any other failure throws: a window that couldn't be listed may be alive.
+ */
+async function labWindows(env: SessionMoveEnv): Promise<Array<{ name: string; path: string }>> {
   const list = await env.run(
     "tmux",
     ["list-windows", "-t", `=${LAB_TMUX}`, "-F", "#{window_name}\t#{pane_current_path}"],
     { timeoutMs: 10_000 },
   );
-  if (list.code !== 0) return false;
-  const real = await realpath(worktree).catch(() => worktree);
-  for (const line of list.stdout.split("\n")) {
-    const [window, path] = line.split("\t");
-    if (window === name && path && (await realpath(path).catch(() => path)) === real) return true;
+  if (list.code !== 0) {
+    if (!list.timedOut && list.code !== null && /can't find session|no server running|error connecting to/i.test(list.stderr)) return [];
+    throw new Error(`Could not list that machine's windows: ${firstLine(list.stderr, list.timedOut ? "tmux timed out" : "tmux failed")}`);
+  }
+  return list.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [name, path = ""] = line.split("\t");
+      return { name, path };
+    });
+}
+
+/** Whether the window of that name is this move's: another's may share the name. */
+async function ownWindow(env: SessionMoveEnv, name: string, worktree: string) {
+  for (const window of await labWindows(env)) {
+    if (window.name === name && (await samePath(window.path, worktree))) return true;
   }
   return false;
 }
 
 async function windowAlive(env: SessionMoveEnv, name: string) {
-  const list = await env.run("tmux", ["list-windows", "-t", `=${LAB_TMUX}`, "-F", "#{window_name}"], { timeoutMs: 10_000 });
-  return list.code === 0 && list.stdout.split("\n").includes(name);
+  return (await labWindows(env)).some((window) => window.name === name);
 }
 
 async function inGateQueue(env: SessionMoveEnv, name: string) {
@@ -875,8 +971,13 @@ async function inGateQueue(env: SessionMoveEnv, name: string) {
 async function confirm(env: SessionMoveEnv, params: Record<string, unknown>): Promise<ConfirmResult> {
   const sessionId = sessionIdParam(params);
   const name = nameParam(params);
-  const record = await liveRecord(env, sessionId);
-  if (record) return { state: "up" };
+  const made = await loadMade(moveFolder(env, params));
+  if (!made.worktree || made.sessionId !== sessionId) throw new Error("The conversation has not been carried yet");
+  // This move's copy only: another process on the conversation is not it coming up.
+  for (const record of await liveRecords(env, sessionId)) {
+    if ((await samePath(record.cwd, made.worktree)) || (made.window !== undefined && record.name === made.window))
+      return { state: "up" };
+  }
   if (await inGateQueue(env, name)) return { state: "queued" };
   if (!(await windowAlive(env, name))) return { state: "failed", detail: "It stopped as it started" };
   return { state: "starting" };
@@ -897,11 +998,16 @@ async function restart(env: SessionMoveEnv, params: Record<string, unknown>): Pr
 async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
   const folder = moveFolder(env, params);
   const made = await loadMade(folder);
+  if (made.pending && (await addedByThisMove(env, made.repo, made.pending))) {
+    made.worktree = made.pending.worktree;
+    made.branch = made.pending.branch;
+  }
   if (made.window) {
     // Gone first, and known to be: nothing is removed from under a live copy.
-    const record = made.sessionId ? await liveRecord(env, made.sessionId) : null;
-    if (record && made.worktree && record.cwd === made.worktree && !(await endProcess(env, record)))
-      throw new Error("The copy there would not stop");
+    for (const record of made.sessionId && made.worktree ? await liveRecords(env, made.sessionId) : []) {
+      const ours = (await samePath(record.cwd, made.worktree!)) || record.name === made.window;
+      if (ours && !(await endProcess(env, record))) throw new Error("The copy there would not stop");
+    }
     if (made.worktree && (await ownWindow(env, made.window, made.worktree))) {
       await env.run("tmux", ["kill-window", "-t", `=${LAB_TMUX}:=${made.window}`], { timeoutMs: 10_000 });
       if (await ownWindow(env, made.window, made.worktree)) throw new Error("The copy's window there would not close");
@@ -922,6 +1028,24 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
   if (made.repo && made.branch) await git(env, made.repo, ["branch", "-D", made.branch]);
   await rm(folder, { recursive: true, force: true });
   return {};
+}
+
+/**
+ * A worktree add the record never heard back from is this move's only if git
+ * lists it at that path, on that branch, still at the commit it was made from.
+ */
+async function addedByThisMove(env: SessionMoveEnv, repo: string | undefined, pending: NonNullable<Made["pending"]>) {
+  if (!repo) return false;
+  const tip = await git(env, repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${pending.branch}`]);
+  if (tip.code !== 0 || tip.stdout.trim() !== pending.head) return false;
+  const list = await git(env, repo, ["worktree", "list", "--porcelain"]);
+  if (list.code !== 0) return false;
+  for (const block of list.stdout.split("\n\n")) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    const branch = /^branch (.+)$/m.exec(block)?.[1];
+    if (branch === `refs/heads/${pending.branch}` && (await samePath(path, pending.worktree))) return true;
+  }
+  return false;
 }
 
 async function removeEmpty(folder: string) {
