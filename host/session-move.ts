@@ -15,6 +15,8 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
+  rename,
   rm,
   stat,
   symlink,
@@ -206,17 +208,24 @@ async function sha256File(path: string): Promise<{ sha256: string; size: number 
   return { sha256: hash.digest("hex"), size };
 }
 
+/** Replaced whole, so a crash never leaves half a record to be read as none. */
 async function saveMade(folder: string, made: Made) {
   await mkdir(folder, { recursive: true });
-  await writeFile(join(folder, "made.json"), JSON.stringify(made));
+  const temp = join(folder, "made.json.tmp");
+  await writeFile(temp, JSON.stringify(made));
+  await rename(temp, join(folder, "made.json"));
 }
 
+/** Nothing made yet when there is no record; one it can't read is an error. */
 async function loadMade(folder: string): Promise<Made> {
+  let text: string;
   try {
-    return { files: [], ...(JSON.parse(await readFile(join(folder, "made.json"), "utf8")) as Partial<Made>) };
-  } catch {
-    return { files: [] };
+    text = await readFile(join(folder, "made.json"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { files: [] };
+    throw error;
   }
+  return { files: [], ...(JSON.parse(text) as Partial<Made>) };
 }
 
 async function dropStale(env: SessionMoveEnv) {
@@ -228,6 +237,8 @@ async function dropStale(env: SessionMoveEnv) {
   }
   for (const name of names) {
     const folder = join(env.stagingRoot, name);
+    // An unfinished move's record is what its undo needs, however old.
+    if (await lexists(join(folder, "made.json"))) continue;
     const info = await stat(folder).catch(() => null);
     if (info && env.now() - info.mtimeMs > STALE_MS)
       await rm(folder, { recursive: true, force: true }).catch(() => undefined);
@@ -677,13 +688,15 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
   if (!found) throw new Error("This repository is not on that machine");
   await verifyPack(folder, manifest);
   await bringCommits(env, found.repo, found.remoteName, folder, manifest);
-  const { worktree, branch } = await freePlace(env, found.repo, name);
+  // The real path: it is the one Claude's project key is made from.
+  const repo = await realpath(found.repo);
+  const { worktree, branch } = await freePlace(env, repo, name);
   const key = projectKey(worktree);
   if (key.length > PROJECT_KEY_MAX) throw new Error("The new folder's path is too long for Claude to resume in");
-  const made: Made = { repo: found.repo, remoteName: found.remoteName, sessionId: manifest.sessionId, files: [] };
+  const made: Made = { repo, remoteName: found.remoteName, sessionId: manifest.sessionId, files: [] };
   await saveMade(folder, made);
   await mkdir(dirname(worktree), { recursive: true });
-  await gitOut(env, found.repo, ["worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
+  await gitOut(env, repo, ["worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
   // Only now is it this move's: another move may have taken the name first,
   // and a rollback must not remove that one's worktree.
   made.worktree = worktree;
@@ -701,7 +714,7 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
     if (file.executable) await chmod(target, 0o755);
   }
   await placeLinks(worktree, manifest);
-  return { repo: found.repo, cwd: worktree, branch };
+  return { repo, cwd: worktree, branch };
 }
 
 /** An account with room, by what `claude-acct status` prints. */
@@ -783,11 +796,19 @@ function resumeCommand(env: SessionMoveEnv, sessionId: string, name: string, acc
   );
 }
 
-async function startWindow(env: SessionMoveEnv, cwd: string, sessionId: string, base: string, account: "main" | "cx") {
+async function startWindow(
+  env: SessionMoveEnv,
+  cwd: string,
+  sessionId: string,
+  base: string,
+  account: "main" | "cx",
+  trying: (name: string) => Promise<void> = async () => {},
+) {
   const labSession = join(env.home, ".local/bin/lab-session");
   let last = "";
   for (let n = 1; n <= WINDOWS_TRIED; n++) {
     const name = n === 1 ? base : `${base}-${n}`;
+    await trying(name);
     const result = await env.run(
       labSession,
       ["--cmd", resumeCommand(env, sessionId, name, account), name, cwd],
@@ -808,10 +829,28 @@ async function start(env: SessionMoveEnv, params: Record<string, unknown>): Prom
   const made = await loadMade(folder);
   if (!made.worktree || !made.account || made.sessionId !== sessionId)
     throw new Error("The conversation has not been carried yet");
-  const name = await startWindow(env, made.worktree, sessionId, base, made.account);
-  made.window = name;
-  await saveMade(folder, made);
+  // Recorded before it starts, so an undo can find a window whose start it never heard back from.
+  const name = await startWindow(env, made.worktree, sessionId, base, made.account, async (next) => {
+    made.window = next;
+    await saveMade(folder, made);
+  });
   return { name };
+}
+
+/** Whether the window of that name is this move's: another's may share the name. */
+async function ownWindow(env: SessionMoveEnv, name: string, worktree: string) {
+  const list = await env.run(
+    "tmux",
+    ["list-windows", "-t", `=${LAB_TMUX}`, "-F", "#{window_name}\t#{pane_current_path}"],
+    { timeoutMs: 10_000 },
+  );
+  if (list.code !== 0) return false;
+  const real = await realpath(worktree).catch(() => worktree);
+  for (const line of list.stdout.split("\n")) {
+    const [window, path] = line.split("\t");
+    if (window === name && path && (await realpath(path).catch(() => path)) === real) return true;
+  }
+  return false;
 }
 
 async function windowAlive(env: SessionMoveEnv, name: string) {
@@ -862,8 +901,10 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
     const record = made.sessionId ? await liveRecord(env, made.sessionId) : null;
     if (record && made.worktree && record.cwd === made.worktree && !(await endProcess(env, record)))
       throw new Error("The copy there would not stop");
-    await env.run("tmux", ["kill-window", "-t", `=${LAB_TMUX}:=${made.window}`], { timeoutMs: 10_000 });
-    if (await windowAlive(env, made.window)) throw new Error("The copy's window there would not close");
+    if (made.worktree && (await ownWindow(env, made.window, made.worktree))) {
+      await env.run("tmux", ["kill-window", "-t", `=${LAB_TMUX}:=${made.window}`], { timeoutMs: 10_000 });
+      if (await ownWindow(env, made.window, made.worktree)) throw new Error("The copy's window there would not close");
+    }
   }
   for (const file of made.files) await rm(file, { force: true }).catch(() => undefined);
   for (const old of made.replaced ?? []) await copyFile(old.backup, old.path);

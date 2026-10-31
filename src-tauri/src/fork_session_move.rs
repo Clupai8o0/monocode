@@ -448,14 +448,19 @@ fn sha256_file(path: &Path) -> Result<(String, u64), String> {
 fn save_made(folder: &Path, made: &Made) -> Result<(), String> {
     fs::create_dir_all(folder).map_err(io_text)?;
     let text = serde_json::to_string(made).map_err(|e| e.to_string())?;
-    fs::write(folder.join("made.json"), text).map_err(io_text)
+    // Replaced whole, so a crash never leaves half a record to be read as none.
+    let temp = folder.join("made.json.tmp");
+    fs::write(&temp, text).map_err(io_text)?;
+    fs::rename(&temp, folder.join("made.json")).map_err(io_text)
 }
 
-fn load_made(folder: &Path) -> Made {
-    fs::read_to_string(folder.join("made.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Made>(&text).ok())
-        .unwrap_or_default()
+/// Nothing made yet when there is no record; one it can't read is an error.
+fn load_made(folder: &Path) -> Result<Made, String> {
+    match fs::read_to_string(folder.join("made.json")) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Made::default()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn drop_stale(env: &Env) {
@@ -463,6 +468,10 @@ fn drop_stale(env: &Env) {
         return;
     };
     for entry in entries.flatten() {
+        // An unfinished move's record is what its undo needs, however old.
+        if lexists(&entry.path().join("made.json")) {
+            continue;
+        }
         let old = entry
             .metadata()
             .and_then(|info| info.modified())
@@ -1052,6 +1061,8 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
         };
     verify_pack(&folder, &manifest)?;
     bring_commits(&repo, &remote_name, &folder, &manifest)?;
+    // The real path: it is the one Claude's project key is made from.
+    let repo = repo.canonicalize().map_err(io_text)?;
     let (worktree, branch) = free_place(&repo, &name)?;
     let worktree_text = path_text(&worktree);
     if project_key(&worktree_text).len() > PROJECT_KEY_MAX {
@@ -1141,7 +1152,7 @@ fn place(
 fn unpack_conversation(env: &Env, params: &Value) -> Result<Value, String> {
     let folder = move_folder(env, params)?;
     let manifest = parse_manifest(params.get("manifest"))?;
-    let mut made = load_made(&folder);
+    let mut made = load_made(&folder)?;
     let worktree = made
         .worktree
         .clone()
@@ -1200,7 +1211,7 @@ fn remove_empty(folder: &Path) {
 /// Removes what this move made here. Only that: never anything older.
 fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     let folder = move_folder(env, params)?;
-    let made = load_made(&folder);
+    let made = load_made(&folder)?;
     for file in &made.files {
         let _ = fs::remove_file(file);
     }
@@ -1669,6 +1680,20 @@ mod tests {
         let error = unpack(&fix, "s", &manifest, &urls).unwrap_err();
         assert!(error.contains("through a link"), "{error}");
         assert!(!outside.join("x").exists());
+    }
+
+    #[test]
+    fn keeps_an_unfinished_record_and_refuses_one_it_cannot_read() {
+        let fix = fixture();
+        let (manifest, urls) = carry(&fix);
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        let record = fix.to.staging_root.join(MOVE).join("made.json");
+        assert!(record.is_file());
+        drop_stale(&fix.to);
+        assert!(record.is_file());
+        fs::write(&record, "{\"repo\":\"/x\"").unwrap();
+        assert!(undo(&fix.to, &json!({"moveId": MOVE})).is_err());
+        assert!(Path::new(code["cwd"].as_str().unwrap()).exists());
     }
 
     #[test]

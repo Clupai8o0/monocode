@@ -10947,6 +10947,7 @@ function Workspace({
       session: (id) => sessionsRef.current.find((session) => session.id === id),
       needsInput: sessionNeedsInput,
       isMono: isMonoSession,
+      isOrchestration: (id) => Boolean(orchestrator.forSession(id)),
       openMovedTab: ({ repo, cwd, branch, providerSessionId, providerAccountId, title, blocks }) => {
         const session: Session = {
           ...newSession("claude", repo),

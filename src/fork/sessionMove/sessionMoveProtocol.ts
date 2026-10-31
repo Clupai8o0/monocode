@@ -31,6 +31,7 @@ export const LONG_OPS: ReadonlySet<string> = new Set([
   "pack",
   "unpackCode",
   "unpackConversation",
+  "start",
   "undo",
 ]);
 

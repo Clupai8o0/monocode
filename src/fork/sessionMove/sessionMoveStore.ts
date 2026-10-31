@@ -40,6 +40,8 @@ export type MoveHost = {
   session: (id: string) => Session | undefined;
   needsInput: (session: Session) => boolean;
   isMono: (id: string) => boolean;
+  /** A lead or a worker of an orchestration run. */
+  isOrchestration: (id: string) => boolean;
   /** Opens a tab that resumes the conversation in the new worktree. */
   openMovedTab: (input: {
     repo: string;
@@ -234,12 +236,12 @@ export function tabMoveFacts(session: Session, machineId: string, name: string):
     harness: session.harness,
     cwd: sessionWorkCwd(session),
     isMono: host?.isMono(session.id) ?? false,
-    isOrchestration: Boolean(session.orchestrationLeadId),
+    isOrchestration: Boolean(session.orchestrationLeadId) || (host?.isOrchestration(session.id) ?? false),
     worktreeRemoved: session.worktreeRemoved,
     hasConversation: Boolean(session.providerSessionId),
     needsInput: host?.needsInput(session) ?? false,
     moved: isSessionMoved(session.id),
-    moving: active.has(session.id),
+    moving: active.has(session.id) || stuck.has(session.id),
     target: targetFacts(machineId, name),
   };
 }
@@ -254,7 +256,7 @@ export function labMoveAvailability(session: ExternalSession) {
     hasConversation: session.hasTranscript,
     needsInput: false,
     moved: false,
-    moving: active.has(labKey(session.id)),
+    moving: active.has(labKey(session.id)) || stuck.has(labKey(session.id)),
     target: { name: "this Mac", online: true, known: true, capabilities: [SESSION_MOVE_CAPABILITY] },
   });
 }
@@ -339,7 +341,7 @@ function labSource(account: MoveAccount) {
 export function moveTabToHost(sessionId: string, machineId: string, machineName: string) {
   const session = host?.session(sessionId);
   const providerSessionId = session?.providerSessionId;
-  if (!session || !providerSessionId || active.has(sessionId)) {
+  if (!session || !providerSessionId || active.has(sessionId) || isMoveLocked(sessionId)) {
     return;
   }
   const remote = hostCall(machineId);
@@ -415,7 +417,7 @@ async function macAccountId(account: MoveAccount): Promise<string | undefined> {
 /** A host's lab session to a tab on this Mac. */
 export function moveLabToMac(session: ExternalSession, machineId: string) {
   const key = labKey(session.id);
-  if (active.has(key)) {
+  if (active.has(key) || isMoveLocked(key)) {
     return;
   }
   // Taken now: the account lookup below waits, and a second click must not start another.

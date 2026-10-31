@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -376,6 +377,43 @@ describe("session move, a real run with two home folders", () => {
     };
     await expect(handleSessionMove(stopping, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
     expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  it("keeps an unfinished move's record however old, and refuses one it can't read", async () => {
+    const { manifest, urls } = await carry();
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    const later: SessionMoveEnv = { ...targetEnv, now: () => Date.now() + 48 * 3_600_000 };
+    await handleSessionMove(later, { op: "check", sourcePath: source, urls });
+    const record = join(targetHome, "staging", MOVE, "made.json");
+    expect(existsSync(record)).toBe(true);
+
+    writeFileSync(record, '{"repo":"/x"');
+    await expect(handleSessionMove(targetEnv, { op: "undo", moveId: MOVE })).rejects.toThrow();
+    expect(existsSync(cwd)).toBe(true);
+  });
+
+  it("drops an abandoned pack that has no record", async () => {
+    await carry();
+    const later: SessionMoveEnv = { ...sourceEnv, now: () => Date.now() + 48 * 3_600_000 };
+    await handleSessionMove(later, { op: "check", sourcePath: source, urls: ["https://example.com/x"] });
+    expect(existsSync(join(sourceEnv.home, "staging", MOVE))).toBe(false);
+  });
+
+  it("works from the real path when the project is reached through a link", async () => {
+    const { manifest, urls } = await carry();
+    const link = join(base, "link-to-repo");
+    symlinkSync(targetRepo, link);
+    const viaLink: SessionMoveEnv = { ...targetEnv, projects: () => [link] };
+    rmSync(join(targetHome, "Documents"), { recursive: true, force: true, maxRetries: 0 });
+    mkdirSync(dirname(targetRepo), { recursive: true });
+    execFileSync("git", ["clone", "--quiet", origin, targetRepo], { stdio: "ignore" });
+    const { cwd, repo } = (await handleSessionMove(viaLink, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string; repo: string };
+    expect(repo).toBe(realpathSync(targetRepo));
+    expect(cwd.startsWith(realpathSync(targetRepo))).toBe(true);
   });
 
   it("takes the newest copy when both accounts hold the conversation", async () => {
