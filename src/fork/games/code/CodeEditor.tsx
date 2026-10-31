@@ -10,6 +10,7 @@ import type {
   CompletionResult,
 } from "@codemirror/autocomplete";
 import type { Compartment, Extension } from "@codemirror/state";
+import type { Diagnostic } from "@codemirror/lint";
 import type { EditorView } from "@codemirror/view";
 import { useColorScheme } from "../../../shared/hooks/useColorScheme";
 import {
@@ -18,6 +19,7 @@ import {
   finishPythonSource,
   indentFor,
 } from "./codeEditorModel";
+import { nameWarnings } from "./codeNames";
 import type { DrillLanguage } from "./codeModel";
 
 /**
@@ -48,10 +50,21 @@ type Props = {
   onChange: (value: string) => void;
   onRun: () => void;
   onSyntaxErrors?: (count: number) => void;
+  onNameWarnings?: (count: number) => void;
+  testNames?: readonly string[];
 };
 
 export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
-  { drillId, language, value, onChange, onRun, onSyntaxErrors },
+  {
+    drillId,
+    language,
+    value,
+    onChange,
+    onRun,
+    onSyntaxErrors,
+    onNameWarnings,
+    testNames,
+  },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
@@ -73,6 +86,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
   onRunRef.current = onRun;
   const onSyntaxErrorsRef = useRef(onSyntaxErrors);
   onSyntaxErrorsRef.current = onSyntaxErrors;
+  const onNameWarningsRef = useRef(onNameWarnings);
+  onNameWarningsRef.current = onNameWarnings;
+  const testNamesRef = useRef(testNames);
+  testNamesRef.current = testNames;
   const schemeRef = useRef(scheme);
   schemeRef.current = scheme;
 
@@ -119,6 +136,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         { editorLint },
         { formatText },
         { completionStatus },
+        { forEachDiagnostic, linter },
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -131,6 +149,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         import("../../../features/files/editor/editorLint"),
         import("../../../shared/lib/format"),
         import("@codemirror/autocomplete"),
+        import("@codemirror/lint"),
       ]);
       if (disposed) {
         return;
@@ -230,12 +249,97 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           textDecorationThickness: "1.5px",
           textUnderlineOffset: "3px",
         },
+        ".cm-lintRange-warning": {
+          backgroundImage: "none",
+          textDecoration: "underline wavy #f59e0b",
+          textDecorationSkipInk: "none",
+          textUnderlineOffset: "3px",
+        },
+        ".cm-lintPoint-warning:after": {
+          borderBottomColor: "#f59e0b",
+        },
+        ".cm-tooltip-lint .cm-diagnostic-warning": {
+          borderLeft: "none",
+        },
       });
       drillThemeRef.current = drillTheme;
 
       const completionData = EditorState.languageData.of(() => [
         { autocomplete: completionSource },
       ]);
+
+      // A second linter beside the syntax one: names read but never bound.
+      // It reads testNames through a ref so a drill's tests can change
+      // without rebuilding the view.
+      const nameLint = linter(
+        (view) => {
+          const doc = view.state.doc.toString();
+          const tree =
+            ensureSyntaxTree(view.state, view.state.doc.length, 500) ??
+            syntaxTree(view.state);
+          const diagnostics: Diagnostic[] = [];
+          for (const warning of nameWarnings(
+            language,
+            doc,
+            tree,
+            testNamesRef.current ?? [],
+          )) {
+            const diagnostic: Diagnostic = {
+              from: warning.from,
+              to: warning.to,
+              severity: "warning",
+              message: warning.message,
+            };
+            const suggestion = warning.suggestion;
+            // The top-of-doc test warning covers a whole line, not the name;
+            // only a warning that sits exactly on its name gets the fix.
+            if (
+              suggestion !== undefined &&
+              doc.slice(warning.from, warning.to) === warning.name
+            ) {
+              diagnostic.actions = [
+                {
+                  name: `Change to ${suggestion}`,
+                  apply: (target, from, to) => {
+                    target.dispatch({
+                      changes: { from, to, insert: suggestion },
+                    });
+                  },
+                },
+              ];
+            }
+            diagnostics.push(diagnostic);
+          }
+          return diagnostics;
+        },
+        {
+          delay: 700,
+          needsRefresh: (update) =>
+            syntaxTree(update.state) !== syntaxTree(update.startState),
+        },
+      );
+
+      let reportedSyntax = -1;
+      let reportedNames = -1;
+      const diagnosticReporter = EditorView.updateListener.of((update) => {
+        let syntax = 0;
+        let names = 0;
+        forEachDiagnostic(update.state, (diagnostic) => {
+          if (diagnostic.severity === "error") {
+            syntax += 1;
+          } else if (diagnostic.severity === "warning") {
+            names += 1;
+          }
+        });
+        if (syntax !== reportedSyntax) {
+          reportedSyntax = syntax;
+          onSyntaxErrorsRef.current?.(syntax);
+        }
+        if (names !== reportedNames) {
+          reportedNames = names;
+          onNameWarningsRef.current?.(names);
+        }
+      });
 
       const view = new EditorView({
         doc: valueRef.current,
@@ -274,9 +378,9 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           editorMatching,
           editorTyping(drillPath(language)),
           editorAutocomplete,
-          editorLint(drillPath(language), (count) =>
-            onSyntaxErrorsRef.current?.(count),
-          ),
+          editorLint(drillPath(language)),
+          nameLint,
+          diagnosticReporter,
           drillTheme,
           errorLineField,
           errorLineDecorations,
@@ -436,6 +540,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
       goToLineRef.current = null;
       setErrorLineRef.current = null;
       onSyntaxErrorsRef.current?.(0);
+      onNameWarningsRef.current?.(0);
       setReady(false);
     };
   }, [drillId, language]);
