@@ -16,7 +16,7 @@ const MANIFEST = {
   sourcePath: PLAN.cwd,
   files: [
     { path: "changes.patch", size: 4, sha256: "0".repeat(64) },
-    { path: "empty", size: 0, sha256: "0".repeat(64) },
+    { path: "untracked/empty", size: 0, sha256: "0".repeat(64) },
   ],
   links: [],
   ignored: [".env"],
@@ -191,6 +191,35 @@ describe("runMove", () => {
       rollbackProblem: "Could not resume it here: no window",
       resumeFailed: true,
     });
+  });
+
+  it("asks again when a confirm reply is lost, and gives up after a run of them", async () => {
+    let lost = 2;
+    const { deps, log } = harness({
+      confirmTarget: async () => {
+        log.push("confirm");
+        if (lost-- > 0) throw new Error("connection dropped");
+        return { state: "up" };
+      },
+    });
+    expect((await runMove(PLAN, deps, () => {}, nothing)).kind).toBe("moved");
+    expect(log.filter((entry) => entry === "confirm")).toHaveLength(3);
+    const gone = harness({
+      confirmTarget: async () => {
+        throw new Error("connection dropped");
+      },
+    });
+    expect(await runMove(PLAN, gone.deps, () => {}, nothing)).toMatchObject({ kind: "failed", reason: "connection dropped" });
+  });
+
+  it("refuses a manifest the card couldn't show", async () => {
+    const { deps, log } = harness();
+    const source = deps.source;
+    deps.source = (async (name: string, params: Record<string, unknown>) =>
+      name === "pack" ? { ...MANIFEST, ignored: undefined } : source(name, params)) as MoveDeps["source"];
+    expect((await runMove(PLAN, deps, () => {}, nothing)).kind).toBe("failed");
+    expect(log).not.toContain("card");
+    expect(log).toContain("target:undo");
   });
 
   it("says what the other machine kept because new commits were made there", async () => {

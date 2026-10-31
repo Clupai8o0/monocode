@@ -594,8 +594,13 @@ const STUCK_TEXT = "An earlier move couldn't be undone, so it stays stopped here
 /** After an app restart mid-move: back to where it was. */
 async function recoverJournal() {
   for (const entry of readJournal()) {
-    const finished = journalFinished(moved, entry.plan.sessionId, entry.plan.moveId);
-    const done = await recoverEntry(entry);
+    const key = entry.plan.sessionId;
+    // Taken for the duration, so Try again can't start a second undo meanwhile.
+    if (recovering.has(key)) continue;
+    recovering.add(key);
+    bump();
+    const finished = journalFinished(moved, key, entry.plan.moveId);
+    const done = await recoverEntry(entry).finally(() => recovering.delete(key));
     if (done) {
       const undone = "The app closed during the move, so it was undone";
       if (!finished) failures.set(entry.plan.sessionId, done.kept ? `${undone}. ${done.kept}` : undone);

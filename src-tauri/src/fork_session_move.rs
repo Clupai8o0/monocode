@@ -809,7 +809,7 @@ fn find_repo(env: &Env, params: &Value, urls: &[String], source_path: &str) -> F
     let source = home_relative(source_path);
     let at = hits
         .iter()
-        .position(|(repo, _, _)| source.starts_with(home_relative(&path_text(repo))))
+        .position(|(repo, _, _)| within(&source, &home_relative(&path_text(repo))))
         .unwrap_or(0);
     let (repo, remote_name, matched_url) = hits.swap_remove(at);
     Found::Repo {
@@ -817,6 +817,15 @@ fn find_repo(env: &Env, params: &Value, urls: &[String], source_path: &str) -> F
         remote_name,
         matched_url,
     }
+}
+
+/// The folder itself or one inside it: `app` doesn't hold `application`.
+fn within(path: &str, root: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 // ---- ops: source ----
@@ -862,10 +871,19 @@ fn add_file(
         sha256,
         executable,
     });
+    room_for(files, 0)
+}
+
+/// Checked before each copy, so a pack too big to carry never fills the disk first.
+fn room_for(files: &[PackFile], size: u64) -> Result<(), String> {
+    if files.iter().map(|file| file.size).sum::<u64>() + size > PACK_MAX_BYTES {
+        return Err("This session's work is over 2 GB, too big to carry".into());
+    }
     Ok(())
 }
 
-fn pack_copy(from: &Path, folder: &Path, rel: &str) -> Result<(), String> {
+fn pack_copy(from: &Path, folder: &Path, rel: &str, files: &[PackFile]) -> Result<(), String> {
+    room_for(files, fs::metadata(from).map_err(io_text)?.len())?;
     let to = folder.join(rel);
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(io_text)?;
@@ -892,7 +910,7 @@ fn pack_tree(
         if kind.is_dir() {
             pack_tree(&entry.path(), folder, &to, files)?;
         } else if kind.is_file() {
-            pack_copy(&entry.path(), folder, &to)?;
+            pack_copy(&entry.path(), folder, &to, files)?;
             add_file(folder, &to, files, false)?;
         }
     }
@@ -1005,7 +1023,7 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
                 target: path_text(&fs::read_link(&from).map_err(io_text)?),
             });
         } else if info.is_file() {
-            pack_copy(&from, &folder, &packed)?;
+            pack_copy(&from, &folder, &packed, &files)?;
             add_file(&folder, &packed, &mut files, is_executable(&info))?;
         }
     }
@@ -1048,12 +1066,9 @@ fn pack(env: &Env, params: &Value) -> Result<Value, String> {
         &project.join(format!("{session_id}.jsonl")),
         &folder,
         &transcript,
+        &files,
     )?;
     add_file(&folder, &transcript, &mut files, false)?;
-
-    if files.iter().map(|file| file.size).sum::<u64>() > PACK_MAX_BYTES {
-        return Err("This session's work is over 2 GB, too big to carry".into());
-    }
     let ignored_more = ignored.len().saturating_sub(IGNORED_MAX) as u64;
     ignored.truncate(IGNORED_MAX);
     let manifest = Manifest {
@@ -2000,6 +2015,40 @@ mod tests {
         undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
         assert!(cwd.join("work.txt").exists());
         assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+    }
+
+    #[test]
+    fn a_folder_holds_only_what_is_inside_it() {
+        assert!(within("Documents/projects/app", "Documents/projects/app"));
+        assert!(within(
+            "Documents/projects/app/sub",
+            "Documents/projects/app"
+        ));
+        assert!(!within(
+            "Documents/projects/application",
+            "Documents/projects/app"
+        ));
+    }
+
+    #[test]
+    fn stops_before_copying_past_the_size_limit() {
+        let fix = fixture();
+        let big = fs::File::create(fix.source.join("big.bin")).unwrap();
+        // Sparse: as big as that on paper, nothing on the disk.
+        big.set_len(PACK_MAX_BYTES + 1).unwrap();
+        let error = pack(
+            &fix.from,
+            &json!({"moveId": MOVE, "cwd": path_text(&fix.source), "sessionId": ID, "remoteName": "origin"}),
+        )
+        .unwrap_err();
+        assert!(error.contains("over 2 GB"), "{error}");
+        let copied = fix
+            .from
+            .staging_root
+            .join(MOVE)
+            .join(UNTRACKED_DIR)
+            .join("big.bin");
+        assert!(!copied.exists());
     }
 
     #[test]

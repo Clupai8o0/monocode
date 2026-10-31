@@ -9,6 +9,7 @@
 import { CANCELLABLE, type MoveStep } from "./sessionMoveModel";
 import {
   CHUNK_BYTES,
+  manifestProblem,
   type CheckResult,
   type InspectResult,
   type MoveAccount,
@@ -92,6 +93,7 @@ export type MoveOutcome =
 
 const WAIT_POLL_MS = 1_500;
 const CONFIRM_POLL_MS = 2_000;
+const CONFIRM_MISSES = 5;
 /** Time to come up once it is out of the gate's line. */
 const START_TIMEOUT_MS = 90_000;
 const QUEUE_TIMEOUT_MS = 15 * 60_000;
@@ -188,6 +190,8 @@ export async function runMove(
       "pack",
       { ...base, cwd: plan.cwd, remoteName: sourceRemote, accountId: plan.sourceAccountId },
     );
+    const problem = manifestProblem(manifest);
+    if (problem) throw new Error(problem);
     const total = manifest.files.reduce((sum, file) => sum + file.size, 0);
     let sent = 0;
     for (const file of manifest.files) {
@@ -264,8 +268,20 @@ async function waitUp(
 ): Promise<void> {
   const began = deps.now();
   let outOfLine = deps.now();
+  let misses = 0;
   for (;;) {
-    const { state, detail } = await deps.confirmTarget(name);
+    let answer;
+    try {
+      answer = await deps.confirmTarget(name);
+      misses = 0;
+    } catch (error) {
+      // A dropped reply isn't a failed start: only a run of them is an answer.
+      misses += 1;
+      if (misses >= CONFIRM_MISSES) throw error;
+      await deps.sleep(CONFIRM_POLL_MS);
+      continue;
+    }
+    const { state, detail } = answer;
     if (state === "up") return;
     if (state === "failed") throw new Error(detail ?? "It did not start on the other machine");
     if (state === "queued") {

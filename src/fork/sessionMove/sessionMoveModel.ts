@@ -144,7 +144,13 @@ export function parseMoved(text: string | null): MovedMap {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const out: MovedMap = {};
     for (const [id, value] of Object.entries(parsed as Record<string, MovedRecord>)) {
-      if (value && typeof value.providerSessionId === "string" && value.live) out[id] = value;
+      if (!value || typeof value.providerSessionId !== "string" || !value.live) continue;
+      // Older or damaged records: the card reads both.
+      out[id] = {
+        ...value,
+        leftBehind: Array.isArray(value.leftBehind) ? value.leftBehind.filter((name) => typeof name === "string") : [],
+        leftBehindMore: Number.isSafeInteger(value.leftBehindMore) ? value.leftBehindMore : 0,
+      };
     }
     return out;
   } catch {

@@ -169,6 +169,14 @@ export function manifestProblem(value: unknown): string | null {
   if (typeof manifest.sourcePath !== "string") return "Invalid source folder";
   if (!Array.isArray(manifest.files) || !Array.isArray(manifest.links))
     return "The move's file list is not one this machine reads";
+  // The card lists them, so a missing list would break it after the move.
+  if (
+    !Array.isArray(manifest.ignored) ||
+    !manifest.ignored.every((name) => typeof name === "string") ||
+    !Number.isSafeInteger(manifest.ignoredMore) ||
+    manifest.ignoredMore < 0
+  )
+    return "The move's file list is not one this machine reads";
   for (const file of manifest.files) {
     if (
       !file ||

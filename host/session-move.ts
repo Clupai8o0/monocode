@@ -4,6 +4,7 @@
  * Mac's half (src-tauri/src/fork_session_move.rs) does the same. The source's
  * worktree and transcript are only ever read, and never deleted.
  */
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFile,
@@ -57,7 +58,7 @@ import {
 } from "../src/fork/sessionMove/sessionMoveProtocol";
 import { isRelayEntry } from "../src/fork/lab/labProtocol";
 import { sessionLiveness } from "./external-sessions";
-import { runCommand, type CommandRunner } from "./lab-system";
+import { runCommand, systemdEnvironment, type CommandOptions, type CommandResult, type CommandRunner } from "./lab-system";
 
 export type SessionMoveEnv = {
   home: string;
@@ -115,7 +116,8 @@ export function defaultSessionMoveEnv(dataDir: string, projects: () => string[])
   return {
     home: process.env.HOME ?? "",
     stagingRoot: join(dataDir, "session-move"),
-    run: runCommand,
+    // Git in its own group: a helper it starts can't outlive the deadline or hold the job open.
+    run: (command, args, options) => (command === "git" ? runGrouped(command, args, options) : runCommand(command, args, options)),
     projects,
     isAlive: (pid, start) => sessionLiveness()(pid, start),
     commandLine: readCommandLine,
@@ -123,6 +125,45 @@ export function defaultSessionMoveEnv(dataDir: string, projects: () => string[])
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     now: Date.now,
   };
+}
+
+/**
+ * Runs in a new process group and answers by the deadline whatever happens:
+ * at the deadline the whole group is killed, and pipes a helper still holds
+ * after the command exits are not waited on past it.
+ */
+export function runGrouped(command: string, args: string[], options: CommandOptions): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { env: options.env ?? process.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let code: number | null = null;
+    let finished = false;
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => void (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => void (stderr += chunk));
+    const finish = (timedOut: boolean) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (timedOut) {
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+        child.stdout.destroy();
+        child.stderr.destroy();
+      }
+      resolve({ code: timedOut ? null : code, stdout, stderr: stderr || (timedOut ? `${command} timed out` : ""), timedOut });
+    };
+    const timer = setTimeout(() => finish(true), options.timeoutMs);
+    child.on("error", (error) => {
+      stderr ||= error.message;
+      finish(false);
+    });
+    child.on("exit", (exitCode) => void (code = exitCode));
+    child.on("close", () => finish(false));
+  });
 }
 
 async function readCommandLine(pid: number): Promise<string[] | null> {
@@ -471,6 +512,11 @@ async function searchRepos(env: SessionMoveEnv): Promise<string[]> {
   return [...found];
 }
 
+/** The folder itself or one inside it: `app` doesn't hold `application`. */
+export function within(path: string, root: string) {
+  return path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+}
+
 function homeRelative(path: string) {
   const match = /(Documents\/projects\/.*)$/.exec(path);
   return match ? match[1] : path;
@@ -511,7 +557,9 @@ async function findRepo(
     }
   }
   if (hits.length === 0) return client ? "client" : null;
-  const same = hits.find((hit) => sourcePath.startsWith(homeRelative(hit.repo)) || homeRelative(sourcePath).startsWith(homeRelative(hit.repo)));
+  const same = hits.find(
+    (hit) => within(sourcePath, hit.repo) || within(homeRelative(sourcePath), homeRelative(hit.repo)),
+  );
   return same ?? hits[0];
 }
 
@@ -545,6 +593,20 @@ async function inspect(env: SessionMoveEnv, params: Record<string, unknown>): Pr
 async function addFile(folder: string, rel: string, files: PackFile[], executable = false) {
   const { sha256, size } = await sha256File(join(folder, rel));
   files.push({ path: rel, size, sha256, ...(executable ? { executable: true } : {}) });
+  roomFor(files, 0);
+}
+
+/** Checked before each copy, so a pack too big to carry never fills the disk first. */
+function roomFor(files: PackFile[], size: number) {
+  if (files.reduce((sum, file) => sum + file.size, 0) + size > PACK_MAX_BYTES)
+    throw new Error("This session's work is over 2 GB, too big to carry");
+}
+
+async function copyIn(from: string, folder: string, rel: string, files: PackFile[], executable = false) {
+  roomFor(files, (await stat(from)).size);
+  await mkdir(dirname(join(folder, rel)), { recursive: true });
+  await copyFile(from, join(folder, rel));
+  await addFile(folder, rel, files, executable);
 }
 
 async function packTree(source: string, folder: string, rel: string, files: PackFile[]) {
@@ -558,9 +620,7 @@ async function packTree(source: string, folder: string, rel: string, files: Pack
     if (entry.isDirectory()) {
       await packTree(from, folder, to, files);
     } else if (entry.isFile()) {
-      await mkdir(dirname(join(folder, to)), { recursive: true });
-      await copyFile(from, join(folder, to));
-      await addFile(folder, to, files);
+      await copyIn(from, folder, to, files);
     }
   }
 }
@@ -626,9 +686,7 @@ async function pack(env: SessionMoveEnv, params: Record<string, unknown>): Promi
     if (info.isSymbolicLink()) {
       links.push({ path: packed, target: await readlink(from) });
     } else if (info.isFile()) {
-      await mkdir(dirname(join(folder, packed)), { recursive: true });
-      await copyFile(from, join(folder, packed));
-      await addFile(folder, packed, files, (info.mode & 0o111) !== 0);
+      await copyIn(from, folder, packed, files, (info.mode & 0o111) !== 0);
     }
   }
 
@@ -646,13 +704,7 @@ async function pack(env: SessionMoveEnv, params: Record<string, unknown>): Promi
   if (!found) throw new Error("Could not find this session's conversation");
   await packTree(join(found.project, sessionId), folder, `${CONVO_DIR}/session/${sessionId}`, files);
   await packTree(join(found.home, "file-history", sessionId), folder, `${CONVO_DIR}/history/${sessionId}`, files);
-  const transcript = `${CONVO_DIR}/session/${sessionId}.jsonl`;
-  await mkdir(dirname(join(folder, transcript)), { recursive: true });
-  await copyFile(join(found.project, `${sessionId}.jsonl`), join(folder, transcript));
-  await addFile(folder, transcript, files);
-
-  const total = files.reduce((sum, file) => sum + file.size, 0);
-  if (total > PACK_MAX_BYTES) throw new Error("This session's work is over 2 GB, too big to carry");
+  await copyIn(join(found.project, `${sessionId}.jsonl`), folder, `${CONVO_DIR}/session/${sessionId}.jsonl`, files);
   const manifest: MoveManifest = {
     version: 1,
     sessionId,
@@ -920,6 +972,11 @@ function resumeCommand(env: SessionMoveEnv, sessionId: string, name: string, acc
   );
 }
 
+/** As other lab commands get it: a host run as a service may lack the user bus. */
+export function windowEnv(home: string, base: NodeJS.ProcessEnv = process.env) {
+  return systemdEnvironment({ ...base, PATH: `${join(home, ".local/bin")}:${base.PATH ?? ""}` });
+}
+
 async function startWindow(
   env: SessionMoveEnv,
   cwd: string,
@@ -936,7 +993,7 @@ async function startWindow(
     const result = await env.run(
       labSession,
       ["--cmd", resumeCommand(env, sessionId, name, account), name, cwd],
-      { timeoutMs: 30_000, env: { ...process.env, PATH: `${join(env.home, ".local/bin")}:${process.env.PATH ?? ""}` } },
+      { timeoutMs: 30_000, env: windowEnv(env.home) },
     );
     if (result.code === 0) return name;
     last = firstLine(result.stderr, "lab-session failed");

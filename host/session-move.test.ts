@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  truncateSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -21,11 +22,20 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CHUNK_BYTES,
+  PACK_MAX_BYTES,
   type CheckResult,
   type InspectResult,
   type MoveManifest,
 } from "../src/fork/sessionMove/sessionMoveProtocol";
-import { accountHasRoom, handleSessionMove, runsClaude, type SessionMoveEnv } from "./session-move";
+import {
+  accountHasRoom,
+  handleSessionMove,
+  runGrouped,
+  runsClaude,
+  windowEnv,
+  within,
+  type SessionMoveEnv,
+} from "./session-move";
 import { runCommand } from "./lab-system";
 
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -685,6 +695,16 @@ describe("session move, a real run with two home folders", () => {
     expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
   });
 
+  it("stops before copying past the size limit", async () => {
+    // Sparse: as big as that on paper, nothing on the disk.
+    writeFileSync(join(source, "big.bin"), "");
+    truncateSync(join(source, "big.bin"), PACK_MAX_BYTES + 1);
+    await expect(
+      handleSessionMove(sourceEnv, { op: "pack", moveId: MOVE, cwd: source, sessionId: ID, remoteName: "origin" }),
+    ).rejects.toThrow(/over 2 GB/);
+    expect(existsSync(join(sourceEnv.stagingRoot, MOVE, "untracked", "big.bin"))).toBe(false);
+  });
+
   it("undo keeps a confirmed worktree once new commits are made in it", async () => {
     const { manifest, urls } = await carry();
     const { cwd } = (await handleSessionMove(targetEnv, {
@@ -742,6 +762,35 @@ describe("session move, a real run with two home folders", () => {
     };
     await expect(handleSessionMove(claude, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
     expect(signals).toEqual(["SIGTERM"]);
+  });
+});
+
+describe("within", () => {
+  it("holds the folder and what is inside it, not a longer name", () => {
+    expect(within("Documents/projects/app", "Documents/projects/app")).toBe(true);
+    expect(within("Documents/projects/app/sub", "Documents/projects/app")).toBe(true);
+    expect(within("Documents/projects/application", "Documents/projects/app")).toBe(false);
+  });
+});
+
+describe("windowEnv", () => {
+  it("adds the user bus a service lacks, and the lab's commands", () => {
+    const next = windowEnv("/home/me", { PATH: "/usr/bin" });
+    expect(next.PATH).toBe("/home/me/.local/bin:/usr/bin");
+    if (process.getuid) expect(next.DBUS_SESSION_BUS_ADDRESS).toMatch(/^unix:path=/);
+  });
+});
+
+describe("runGrouped", () => {
+  it("gives up on a helper that holds git's output past the deadline", async () => {
+    const started = Date.now();
+    const result = await runGrouped("git", ["-c", "alias.hang=!sleep 30 &", "hang"], { timeoutMs: 1_000 });
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("answers a command that ends normally", async () => {
+    await expect(runGrouped("git", ["--version"], { timeoutMs: 10_000 })).resolves.toMatchObject({ code: 0, timedOut: false });
   });
 });
 

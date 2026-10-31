@@ -159,6 +159,11 @@ describe("protocol checks", () => {
     expect(manifestProblem({ ...good, version: 2 })).toBeTruthy();
     expect(manifestProblem({ ...good, sessionId: "../x" })).toBe("Invalid session id");
     expect(manifestProblem({ ...good, head: "HEAD" })).toBe("Invalid commit id");
+    // The card reads both, so a manifest without them is refused before the move.
+    const { ignored: _ignored, ...noIgnored } = good as { ignored: unknown };
+    expect(manifestProblem(noIgnored)).toBeTruthy();
+    expect(manifestProblem({ ...good, ignoredMore: -1 })).toBeTruthy();
+    expect(manifestProblem({ ...good, ignored: [3] })).toBeTruthy();
     expect(manifestProblem({ ...good, files: [{ path: "../x", size: 1, sha256: "b".repeat(64) }] })).toContain("Refused");
     expect(manifestProblem({ ...good, links: [{ path: "convo/session/conv-1.jsonl", target: "t" }] })).toContain("Refused");
   });
@@ -183,6 +188,8 @@ describe("moved records", () => {
     expect(parseMoved("[1]")).toEqual({});
     expect(parseMoved(JSON.stringify({ x: { nope: 1 } }))).toEqual({});
     expect(parseMoved(null)).toEqual({});
+    const { leftBehind: _left, leftBehindMore: _more, ...older } = record;
+    expect(parseMoved(JSON.stringify({ "tab-1": older }))["tab-1"]).toMatchObject({ leftBehind: [], leftBehindMore: 0 });
   });
 
   it("says where it went and what stayed", () => {

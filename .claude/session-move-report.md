@@ -1,5 +1,42 @@
 # Move a session: report for the Mac orchestrator
 
+## Fixes from the Mac review and DeepSeek (31 Oct, round 8)
+
+**All 13 fixed (6 from the Mac, 7 from DeepSeek), each with a test. No Codex pass, as asked.**
+
+| # | Fix | Test |
+|---|---|---|
+| 1 | The worktree's starting commit is saved for good. Undo keeps the worktree and branch if the branch or the worktree has moved past it, and says so on the card | Host and Rust: a confirmed worktree with a new commit is kept. Runner: the note reaches the reason and recovery |
+| 2 | Two live PIDs on one conversation: `state` fails with "open twice", and `stop` refuses | Host |
+| 3 | The new tab is saved (`saveMovedTab`, awaited) before the card. If saving fails, the move rolls back | Store: save fails, so the tab is closed, the lab copy is restarted, and nothing is marked moved |
+| 4 | If the lab copy can't be restarted, the move is kept as recoverable, so Try again shows | Store: Try again appears, and it clears once the restart works |
+| 5 | The check reads the program being run (claude, its versions folder, node or bun running Claude, or a shell running `claude-acct`), not any word in the arguments | Host: `vim …/claude-acct` gets no signal |
+| 6 | Rust: once git exits, reading its output still stops at the deadline, and the process group is killed | Rust: a helper holding the pipe gives up in under 10 s |
+| 7 | `confirm` is asked again after a lost reply, and fails only after 5 in a row | Runner |
+| 8 | Host git runs in its own process group. At the deadline the group is killed, and pipes are not waited on | Host: `runGrouped` |
+| 9 | Lab windows start with `systemdEnvironment` | Host: `windowEnv` |
+| 10 | Path matching needs an exact match or a `/` after the folder name | Host and Rust: `app` doesn't match `application` |
+| 11 | A manifest without `ignored`/`ignoredMore` is refused, the runner checks it, and `parseMoved` fills in defaults | Model, runner |
+| 12 | The 2 GB limit is checked before each copy | Host and Rust: a sparse file over 2 GB is refused before it is copied |
+| 13 | Launch recovery marks each entry as recovering, so Try again can't start a second undo | Store |
+
+**Behaviour changes worth knowing:**
+- #3: if the turns can't be read at the stop, the new tab has no user message. The store won't save a tab like that, so the move fails and rolls back instead of leaving a tab that can't be found later.
+- #1: undo can now return `{ kept }`. `recoverMove` returns `false | { kept? }` instead of a boolean.
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit`, web and host | Clean |
+| Vitest `src/fork/sessionMove` | 47 passed |
+| Vitest host `session-move` | 34 passed, 2 skipped |
+| Vitest host, everything | 6 failed in `child-backend`, `cli`, `lab-uresourced`, `mobile-terminal`, `providers`. The same 6 fail on the base `b54488cf`, so they are not from this branch |
+| Vitest web, everything | 6710 passed. 1 to 10 failed in file-pane navigation and Mono habits, a different set each run. This branch doesn't touch those files |
+| Rust module, scratch crate | 22 passed, 2 ignored. `rustfmt` clean |
+
+`cargo check --lib` on the Mac still applies: `App.tsx`'s `saveMovedTab` is new wiring that has never run in the app.
+
+---
+
 ## Fixes from the Mac review (31 Oct, round 7)
 
 **All 10 fixed, each with a test. Codex (high) found 3 more Highs in the fixes, all fixed. Its 2 Mediums are left open (listed below).**

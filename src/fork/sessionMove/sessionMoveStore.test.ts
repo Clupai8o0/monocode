@@ -7,7 +7,7 @@ const calls = vi.hoisted(() => {
     setItem: (key: string, value: string) => void items.set(key, value),
     removeItem: (key: string) => void items.delete(key),
   };
-  return { log: [] as string[], fail: new Set<string>() };
+  return { log: [] as string[], fail: new Set<string>(), hold: new Map<string, Promise<void>>(), items };
 });
 
 vi.mock("react", () => ({ useSyncExternalStore: (_: unknown, get: () => unknown) => get() }));
@@ -30,6 +30,7 @@ vi.mock("../../features/connections/model/connections", () => ({
   remoteRequest: async (_: string, __: string, { op, inner }: { op: string; inner?: unknown }) => {
     const name = op === "begin" ? (inner as { op: string }).op : op;
     if (op !== "poll") calls.log.push(`lab:${name}`);
+    await calls.hold.get(name);
     if (calls.fail.has(name)) throw new Error(`${name} failed`);
     switch (op) {
       case "inspect":
@@ -92,6 +93,7 @@ describe("moving a lab session to this Mac", () => {
   beforeEach(() => {
     calls.log.length = 0;
     calls.fail.clear();
+    calls.hold.clear();
   });
 
   it("is only moved once the new tab is saved", async () => {
@@ -121,5 +123,24 @@ describe("moving a lab session to this Mac", () => {
     retry!();
     await vi.waitFor(() => expect(isMoveLocked(key)).toBe(false));
     expect(useMoveView(key).failure).toBeUndefined();
+  });
+});
+
+describe("undoing moves after a restart", () => {
+  it("offers no Try again while launch recovery is still undoing it", async () => {
+    vi.resetModules();
+    const key = "tab-9";
+    const plan = { moveId: "move-9999", sessionId: key, providerSessionId: "conv-9", name: "s", cwd: "/w" };
+    calls.items.set("monocode.fork.moveJournal", JSON.stringify([{ plan, machineId: "lab", direction: "to-host" }]));
+    let release = () => {};
+    calls.hold.set("undo", new Promise<void>((done) => (release = done)));
+    const store = await import("./sessionMoveStore");
+    expect(store.useMoveView(key).retry).toBeDefined();
+    store.registerMoveHost(macHost());
+    await vi.waitFor(() => expect(calls.log).toContain("lab:undo"));
+    expect(store.useMoveView(key).retry).toBeUndefined();
+    release();
+    await vi.waitFor(() => expect(store.isMoveLocked(key)).toBe(false), { timeout: 5_000 });
+    calls.hold.clear();
   });
 });
