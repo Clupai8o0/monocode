@@ -34,6 +34,8 @@ import { AgentTabView } from "../../sessions/ui/AgentTabView";
 import { MarkdownPreview } from "../../sessions/ui/AgentMarkdown";
 import { BinaryFileView } from "./BinaryFileView";
 import { isPdfPath } from "../../../fork/pdf/pdfDocument";
+import { AskChatRegion } from "../../../fork/askChat/AskChatRegion"; // Fork
+import { describeHeading } from "../../../fork/askChat/askChatDescribe"; // Fork
 import { PdfView } from "../../../fork/pdf/PdfView";
 import { isSpreadsheetPath } from "../../../fork/table/xlsx";
 import { SpreadsheetView } from "../../../fork/table/SpreadsheetView";
@@ -42,6 +44,8 @@ import { OfficeView } from "../../../fork/office/OfficeView";
 import { ReleaseNotesSurface } from "../../../app/ui/ReleaseNotesSurface";
 import { WorkingTreeDiffSurface as WorkingTreeDiff } from "../../source-control/ui/workingTreeDiffSurface";
 import { isRemoteProjectPath } from "../../projects/model/recents";
+
+const RELEASE_NOTES_REFERENCE = describeHeading("Release notes"); // Fork
 
 const CommitDiff = lazySurface(async () => {
   const module = await import("../../source-control/ui/CommitDiff");
@@ -198,7 +202,9 @@ function FilePaneComponent({
                   onBuildPlan={onBuildPlan}
                 />
               ) : isReleaseNotesTab(file) ? (
+                <AskChatRegion describe={RELEASE_NOTES_REFERENCE}>{/* Fork */}
                 <ReleaseNotesSurface source={file.releaseNotes} />
+                </AskChatRegion>
               ) : isTerminalTab(file) ? (
                 <TerminalView
                   id={file.id}
@@ -346,12 +352,14 @@ function PlanSurface({
         mode={mode}
         onModeChange={setMode}
         preview={
+          <AskChatRegion describe={describeHeading(`Plan "${plan.title}"`)}>{/* Fork */}
           <MarkdownPreview
             text={block.text}
             streaming={block.streaming}
             cwd={file.cwd}
             onOpenFile={onOpenFile}
           />
+          </AskChatRegion>
         }
         actions={
           <div className="flex items-center font-sans">
