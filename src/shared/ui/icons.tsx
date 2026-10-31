@@ -119,6 +119,7 @@ import Location01Icon from "@hugeicons/core-free-icons/Location01Icon";
 // Fork: the footer Home lab button.
 import HomeWifiIcon from "@hugeicons/core-free-icons/HomeWifiIcon";
 import LaptopIcon from "@hugeicons/core-free-icons/LaptopIcon";
+import ServerStack01Icon from "@hugeicons/core-free-icons/ServerStack01Icon"; // Fork
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -310,3 +311,4 @@ export const Bell = wrap(Notification01Icon, "Bell");
 export const MapPin = wrap(Location01Icon, "MapPin");
 // Fork: the footer Home lab button.
 export const HomeLab = wrap(HomeWifiIcon, "HomeLab");
+export const ServerStack = wrap(ServerStack01Icon, "ServerStack"); // Fork

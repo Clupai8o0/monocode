@@ -82,14 +82,12 @@ test("app tabs retain their state and keep usage and resource pressure in the fo
   await nav.getByRole("button", { name: /^search/i }).click();
   await expect(appTab("search")).toHaveCount(1);
 
-  await expect(
-    footer.getByRole("button", { name: "High resource usage", exact: true }),
-  ).toBeVisible({ timeout: 15_000 });
+  // High usage shows on the Machines chip.
+  const machines = footer.locator("[data-fork-machines]");
+  await expect(machines).toHaveAttribute("title", /High/, { timeout: 15_000 });
   for (const view of ["inbox", "notes", "automations", "search"]) {
     await appTab(view).click();
-    await expect(
-      footer.getByRole("button", { name: "High resource usage", exact: true }),
-    ).toBeVisible();
+    await expect(machines).toHaveAttribute("title", /High/);
     const bounds = await footer.boundingBox();
     expect(bounds!.y + bounds!.height).toBeGreaterThanOrEqual(898);
   }

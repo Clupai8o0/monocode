@@ -159,7 +159,7 @@ if (new URLSearchParams(location.search).get("theme") === "light") {
 }
 
 // The store and the button read the mock when they load, so import after it.
-const { LabButton } = await import("../../src/fork/lab/LabButton");
+const { MachinesButton } = await import("../../src/fork/machines/MachinesButton");
 const { LabSettings } = await import("../../src/fork/lab/LabSettings");
 
 // ?view=settings: the Settings > Home lab page instead of the footer.
@@ -176,7 +176,7 @@ createRoot(document.getElementById("root")!).render(
       <footer className="flex h-7 shrink-0 items-center gap-1.5 px-3 text-[11px] text-content/55">
         <span>Claude · 42%</span>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <LabButton />
+          <MachinesButton />
           <span className="px-1.5">Stacks · 2 up</span>
         </div>
       </footer>

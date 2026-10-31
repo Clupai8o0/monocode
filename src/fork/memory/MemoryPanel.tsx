@@ -15,7 +15,7 @@ export const PRESSURE_DOT: Record<MemoryPressure, string> = {
   critical: "bg-red-500",
 };
 
-const PRESSURE_TEXT: Record<MemoryPressure, string> = {
+export const PRESSURE_TEXT: Record<MemoryPressure, string> = {
   normal: "Memory is fine",
   warn: "Memory is getting tight",
   critical: "Memory is very tight",
@@ -24,6 +24,8 @@ const PRESSURE_TEXT: Record<MemoryPressure, string> = {
 type Props = {
   report: MemoryReport;
   rows: readonly MemoryRow[];
+  /** What the sessions hold between them, in bytes. */
+  total: number;
   suggestion: Suggestion;
   parked: readonly ParkedSession[];
   parking: ReadonlySet<string>;
@@ -45,6 +47,7 @@ const parkButton =
 export function MemoryPanel({
   report,
   rows,
+  total,
   suggestion,
   parked,
   parking,
@@ -61,21 +64,7 @@ export function MemoryPanel({
   return (
     <div className="flex flex-col gap-3 p-3 text-[12px]" aria-label="Memory">
       {pressureReasons?.length ? (
-        <button
-          type="button"
-          data-fork-review-work=""
-          className="flex items-center gap-2 rounded-lg bg-amber-500/12 px-3 py-1.5 text-left text-[12px] text-content transition-colors hover:bg-amber-500/20"
-          onClick={onReviewWork}
-        >
-          <CircleAlert
-            className="size-3.5 shrink-0 text-amber-500 dark:text-amber-400"
-            strokeWidth={1.75}
-            aria-hidden
-          />
-          <span className="min-w-0">
-            {pressureReasons.join(" · ")} · Review running work
-          </span>
-        </button>
+        <ReviewWorkRow reasons={pressureReasons} onReviewWork={onReviewWork} />
       ) : null}
       <div className="flex items-center gap-2">
         <span
@@ -87,6 +76,11 @@ export function MemoryPanel({
         </span>
         <span className="ml-auto tabular-nums text-content/45">{available}</span>
       </div>
+      {total > 0 ? (
+        <p data-fork-memory-total="" className="-mt-2 tabular-nums text-content/55">
+          Memory · {formatBytes(total)}
+        </p>
+      ) : null}
 
       {suggestion.rows.length > 0 ? (
         <button
@@ -163,5 +157,29 @@ export function MemoryPanel({
         Parking keeps the conversation. Your next message picks it up again.
       </p>
     </div>
+  );
+}
+
+export function ReviewWorkRow({
+  reasons,
+  onReviewWork,
+}: {
+  reasons: readonly string[];
+  onReviewWork?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-fork-review-work=""
+      className="flex items-center gap-2 rounded-lg bg-amber-500/12 px-3 py-1.5 text-left text-[12px] text-content transition-colors hover:bg-amber-500/20"
+      onClick={onReviewWork}
+    >
+      <CircleAlert
+        className="size-3.5 shrink-0 text-amber-500 dark:text-amber-400"
+        strokeWidth={1.75}
+        aria-hidden
+      />
+      <span className="min-w-0">{reasons.join(" · ")} · Review running work</span>
+    </button>
   );
 }

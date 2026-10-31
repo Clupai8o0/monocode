@@ -44,13 +44,10 @@ import {
   type UsageChipVariant,
 } from "./UsageProviderChip";
 import { PiUsage } from "./PiUsage";
-import { FORK_STACKS, StacksButton } from "../../fork/stacks/StacksButton";
+import { FORK_MACHINES, MachinesButton } from "../../fork/machines/MachinesButton"; // Fork
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
-import { BroadcastButton } from "../../fork/broadcast/BroadcastButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
-import { RingButton } from "../../fork/location/RingButton"; // Fork
-import { LabButton } from "../../fork/lab/LabButton"; // Fork
-import { GamesButton } from "../../fork/games/GamesButton"; // Fork
+import { MoreButton } from "../../fork/more/MoreButton"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
 import { useAutoAccountUsage } from "../../fork/accounts/autoResolver"; // Fork
@@ -171,17 +168,14 @@ export function UsageFooter({
       />
       {/* Fork: every account's usage, whichever agent this session runs. */}
       <AllUsageChip className={USAGE_CHIP_CLASSES[inset ? "inset" : "footer"]} />
-      {/* Fork: the Stacks button always shows, so the right-hand group does too. */}
-      {showTerminals || showTerminalButton || pressureSlot || FORK_STACKS ? (
+      {/* Fork: Machines always shows, so the right-hand group does too. */}
+      {showTerminals || showTerminalButton || pressureSlot || FORK_MACHINES ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <RingButton />
           {/* Fork: no visible button; keeps File > Workspaces… working. */}
           <WorkspacesButton />
-          <GamesButton />
-          <BroadcastButton />
-          <MessagesButton />
-          <LabButton />
-          <StacksButton />
+          <MessagesButton inset={inset} />
+          <MachinesButton inset={inset} />
+          <MoreButton inset={inset} />
           {pressureSlot ? (
             <span
               ref={pressureSlot}

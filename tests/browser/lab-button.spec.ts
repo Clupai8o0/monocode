@@ -13,14 +13,16 @@ for (const theme of ["dark", "light"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/tests/browser/lab-button.html?theme=${theme}`);
-    const chip = page.locator("[data-fork-lab]");
-    await expect(chip).toHaveText("Vivobook · 3 running");
-    await expect(chip).toHaveAttribute("aria-label", /Remote Control on every machine, relay on/);
+    const chip = page.locator("[data-fork-machines]");
+    await expect(chip).toHaveText("Machines");
+    await expect(chip).toHaveAttribute("title", "Vivobook · 3 running");
     await chip.screenshot({ path: `${dir}/lab-chip-${theme}.png` });
 
     await chip.click();
     const popover = page.getByRole("radiogroup", { name: "Remote Control scope" });
     await expect(popover).toBeVisible();
+    await expect(page.locator("[data-fork-lab-words]")).toHaveText("Vivobook · 3 running");
+    await expect(page.locator('[aria-label="Home lab"]')).toHaveAttribute("title", /Remote Control on every machine, relay on/);
     await expect(page.locator("[data-fork-lab-running]")).toHaveText("Vivobook · 3 sessions running");
     await expect(page.getByRole("button", { name: "New session on Vivobook" })).toBeEnabled();
     await expect(page.getByRole("radio", { name: "Every machine" })).toHaveAttribute("aria-checked", "true");
@@ -77,9 +79,9 @@ for (const theme of ["dark", "light"] as const) {
     await expect(chip).toBeFocused();
     await chip.screenshot({ path: `${dir}/lab-chip-dot-${theme}.png` });
 
-    // Narrow: the icon and the dot only.
+    // Narrow: the icon and the dot only (Machines keeps its dot slot).
     await page.setViewportSize({ width: 900, height: 720 });
-    await expect(chip.locator("span.tabular-nums")).toBeHidden();
+    await expect(chip.locator("span:not([data-fork-machines-dot])")).toBeHidden();
   });
 }
 
