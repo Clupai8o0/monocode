@@ -43,10 +43,18 @@ function drill(id: string, over: Partial<Drill> = {}): Drill {
 
 /** Runs built JavaScript with a capturing console, as node would print it. */
 function runJs(source: string): string {
-  const lines: string[] = [];
-  const fakeConsole = { log: (...args: unknown[]) => lines.push(args.map(String).join(" ")) };
-  new Function("console", source)(fakeConsole);
-  return lines.join("\n");
+  let out = "";
+  const fakeConsole = {
+    log: (...args: unknown[]) => {
+      out += `${args.map(String).join(" ")}\n`;
+    },
+  };
+  // Stands in for process.stdout.write, which has no trailing newline.
+  const write = (text: string) => {
+    out += text;
+  };
+  new Function("console", "write", source)(fakeConsole, write);
+  return out;
 }
 
 describe("buildSource and parseResults", () => {
@@ -89,6 +97,27 @@ describe("buildSource and parseResults", () => {
     const results = parseResults(stdout, marker, 1);
     expect(results[0].pass).toBe(false);
     expect(results[0].error).toMatch(/No result/);
+  });
+
+  it("keeps a result after output that did not end in a newline", () => {
+    const marker = makeMarker(() => 0.5);
+    const one = drill("no-newline");
+    // write() is process.stdout.write: the harness has to start its own line.
+    const code = "write(\"still typing\");\nfunction f(x) { return x; }\n";
+    const stdout = runJs(buildSource(one, code, marker));
+    expect(stdout.startsWith("still typing\n")).toBe(true);
+    expect(parseResults(stdout, marker, 1)[0]).toMatchObject({ index: 0, pass: true });
+  });
+
+  it("puts that newline in front of every python marker too", () => {
+    const js = buildSource(drill("js-nl"), "console.log('x');\n", "__dojo_nl__:");
+    const py = buildSource(
+      drill("py-nl", { language: "python" }),
+      "print('x')\n",
+      "__dojo_nl__:",
+    );
+    expect(js).toContain('console.log("\\n" + "__dojo_nl__:"');
+    expect(py).toContain('print("\\n" + "__dojo_nl__:"');
   });
 
   it("makes a fresh marker each time", () => {
@@ -152,6 +181,45 @@ describe("progress", () => {
     expect(again.earned).toBe(0);
     expect(again.progress.totalPoints).toBe(65);
     expect(solvedTodayCount(again.progress, NOW)).toBe(1);
+  });
+
+  it("only counts a review when the drill was due", () => {
+    const first = recordRun(
+      emptyProgress(),
+      "a",
+      { allPassed: true, tries: 1, hintsUsed: 0 },
+      NOW,
+    ).progress;
+    expect(first.drills.a.solvedAt).toBe(NOW);
+    expect(first.drills.a.reviewsDone).toBe(0);
+
+    // Pressing Run again on solved code is not a review.
+    const early = recordRun(
+      first,
+      "a",
+      { allPassed: true, tries: 1, hintsUsed: 0 },
+      NOW + DAY / 2,
+    ).progress;
+    expect(early.drills.a.reviewsDone).toBe(0);
+    expect(early.drills.a.solvedAt).toBe(NOW);
+
+    const due = recordRun(
+      early,
+      "a",
+      { allPassed: true, tries: 1, hintsUsed: 0 },
+      NOW + DAY,
+    ).progress;
+    expect(due.drills.a.reviewsDone).toBe(1);
+    expect(due.drills.a.solvedAt).toBe(NOW + DAY);
+
+    const earlyAgain = recordRun(
+      due,
+      "a",
+      { allPassed: true, tries: 1, hintsUsed: 0 },
+      NOW + DAY + DAY / 2,
+    ).progress;
+    expect(earlyAgain.drills.a.reviewsDone).toBe(1);
+    expect(earlyAgain.drills.a.solvedAt).toBe(NOW + DAY);
   });
 
   it("keeps a streak over days in a row, alive the next morning", () => {

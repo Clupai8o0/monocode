@@ -29,6 +29,8 @@ export type CodeRunResult = {
   stderr: string;
   timedOut: boolean;
   exitCode: number | null;
+  /** Stdout was longer than the runner keeps, so early lines are gone. */
+  truncated: boolean;
 };
 
 export type TestResult = {
@@ -81,9 +83,9 @@ export function buildSource(drill: Drill, code: string, marker: string): string 
         (test, index) => `try:
     __actual = (${test.call})
     __expect = (${test.expect})
-    print(${mark} + json.dumps({"index": ${index}, "pass": bool(__actual == __expect), "actual": __show(__actual), "expect": __show(__expect)}))
+    print("\\n" + ${mark} + json.dumps({"index": ${index}, "pass": bool(__actual == __expect), "actual": __show(__actual), "expect": __show(__expect)}))
 except Exception as __error:
-    print(${mark} + json.dumps({"index": ${index}, "pass": False, "error": str(__error) or type(__error).__name__}))`,
+    print("\\n" + ${mark} + json.dumps({"index": ${index}, "pass": False, "error": str(__error) or type(__error).__name__}))`,
       )
       .join("\n");
     return `${code}
@@ -105,9 +107,9 @@ ${runs}
       (test, index) => `try {
   const __actual = (${test.call});
   const __expect = (${test.expect});
-  console.log(${mark} + JSON.stringify({ index: ${index}, pass: __same(__actual, __expect), actual: __show(__actual), expect: __show(__expect) }));
+  console.log("\\n" + ${mark} + JSON.stringify({ index: ${index}, pass: __same(__actual, __expect), actual: __show(__actual), expect: __show(__expect) }));
 } catch (__error) {
-  console.log(${mark} + JSON.stringify({ index: ${index}, pass: false, error: __error instanceof Error ? __error.message : String(__error) }));
+  console.log("\\n" + ${mark} + JSON.stringify({ index: ${index}, pass: false, error: __error instanceof Error ? __error.message : String(__error) }));
 }`,
     )
     .join("\n");
@@ -292,11 +294,14 @@ export function recordRun(
     score = scoreFor(run.tries, run.hintsUsed);
     earned = Math.max(0, score - before.bestScore);
     next.bestScore = Math.max(before.bestScore, score);
-    next.reviewsDone =
-      before.solvedAt === null
-        ? before.reviewsDone
-        : Math.min(REVIEW_DAYS.length, before.reviewsDone + 1);
-    next.solvedAt = now;
+    // A review only counts when it was actually due; pressing Run again on
+    // code that is already solved must not use one up or move the date.
+    if (before.solvedAt === null) {
+      next.solvedAt = now;
+    } else if (isDue(before, now)) {
+      next.reviewsDone = Math.min(REVIEW_DAYS.length, before.reviewsDone + 1);
+      next.solvedAt = now;
+    }
     const day = dayKey(now);
     const solvedToday = solvedByDay[day] ?? [];
     if (!solvedToday.includes(drillId)) {

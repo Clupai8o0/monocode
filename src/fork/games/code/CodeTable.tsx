@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 import { readTextFile, writeTextFile } from "../../../platform/tauri/fs";
-import { DOJO_FOLDER } from "../../starterMonos/dojoMono";
+import { DOJO_FOLDER, DOJO_MONO } from "../../starterMonos/dojoMono";
+import { starterMonoId } from "../../starterMonos/starterMono";
 import { gamesPanel } from "../gamesPanelStore";
 import { BUILTIN_DRILLS } from "./codeDrills";
 import {
@@ -51,6 +52,9 @@ export type RunCode = (language: DrillLanguage, source: string) => Promise<CodeR
 const nativeRunCode: RunCode = (language, source) =>
   invoke<CodeRunResult>("fork_code_run", { language, source });
 
+/** Ask Dojo only closes the panel while its Mono is still there. */
+const hasDojoMono = () => starterMonoId(DOJO_MONO) !== undefined;
+
 /** Dojo's own drills, when the folder and file are there. Missing is normal. */
 async function loadDojoDrills(): Promise<{ drills: Drill[]; invalid: string[] }> {
   let text: string;
@@ -90,6 +94,7 @@ type LastRun = {
   output: string;
   stderr: string;
   timedOut: boolean;
+  truncated: boolean;
   score: number;
   allPassed: boolean;
 };
@@ -99,11 +104,13 @@ type Session = { tries: number; failed: number };
 export function CodeTable({
   mode,
   runId,
+  active,
   onInput,
   runCode = nativeRunCode,
   drills: drillsProp,
   loadExtraDrills = loadDojoDrills,
   saveProgressFile = saveDojoProgress,
+  hasDojo = hasDojoMono,
 }: {
   mode: ArcadeMode;
   runId: number;
@@ -115,6 +122,7 @@ export function CodeTable({
   drills?: Drill[];
   loadExtraDrills?: typeof loadDojoDrills;
   saveProgressFile?: typeof saveDojoProgress;
+  hasDojo?: () => boolean;
 }) {
   const [progress, setProgress] = useState<CodeProgress>(loadProgress);
   const progressRef = useRef(progress);
@@ -148,9 +156,12 @@ export function CodeTable({
   const hintsShown = drill ? (hintsById[drill.id] ?? 0) : 0;
   const lastRun = drill ? lastRunById[drill.id] : undefined;
 
-  // Dojo's drills load once. A test harness that hands drills in skips this.
+  // Dojo's drills load whenever this tab is shown. The panel keeps it
+  // mounted, so a drill Dojo writes later would otherwise never appear.
+  // The editor's code lives apart from this list, so it survives the reload.
+  // A test harness that hands drills in skips this.
   useEffect(() => {
-    if (drillsProp) {
+    if (drillsProp || active === false) {
       return;
     }
     let live = true;
@@ -172,7 +183,7 @@ export function CodeTable({
     return () => {
       live = false;
     };
-  }, [drillsProp, loadExtraDrills]);
+  }, [active, drillsProp, loadExtraDrills]);
 
   const goTo = (next: Drill | null) => {
     if (!next || next.id === currentId) {
@@ -207,13 +218,18 @@ export function CodeTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeLevel]);
 
-  // The panel's New game button moves on to another drill.
+  // The panel's New game button moves on to another drill. The other table
+  // games share that counter, so only a run started while this tab is up
+  // may move the hidden Code tab to a different drill.
   const seenRun = useRef(runId);
   useEffect(() => {
     if (seenRun.current === runId) {
       return;
     }
     seenRun.current = runId;
+    if (!active) {
+      return;
+    }
     goTo(
       pickNextDrill(
         drillsRef.current,
@@ -224,7 +240,7 @@ export function CodeTable({
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  }, [runId, active]);
 
   const run = async () => {
     if (!drill || running) {
@@ -241,8 +257,12 @@ export function CodeTable({
       const lines = outcome.stdout.split("\n");
       const results = parseResults(outcome.stdout, marker, drill.tests.length);
       const allPassed = results.every((result) => result.pass);
+      // Another window may have scored since this one last saved, so start
+      // from the store's copy instead of overwriting those points.
+      const latest = loadProgress();
+      progressRef.current = latest;
       const recorded = recordRun(
-        progressRef.current,
+        latest,
         drill.id,
         { allPassed, tries, hintsUsed: hintsShown },
         Date.now(),
@@ -266,6 +286,7 @@ export function CodeTable({
             .trim(),
           stderr: outcome.stderr.trim(),
           timedOut: outcome.timedOut,
+          truncated: outcome.truncated,
           score: recorded.score,
           allPassed,
         },
@@ -454,6 +475,10 @@ export function CodeTable({
           className={`${CHIP} ${CHIP_OFF} ml-auto`}
           onClick={() => {
             onInput?.();
+            if (!hasDojo()) {
+              setNote("Dojo was removed.");
+              return;
+            }
             window.dispatchEvent(new Event(OPEN_DOJO_EVENT));
             gamesPanel.hide();
           }}
@@ -520,7 +545,13 @@ export function CodeTable({
           {lastRun.output ? (
             <div>
               <p className="text-[11px] text-content/45">Your output</p>
-              <pre className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/75">
+              <pre
+                data-fork-code-output=""
+                className="overflow-x-auto rounded bg-content/5 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-content/75"
+              >
+                {lastRun.truncated
+                  ? "Earlier output was cut; this is the last 64 KB.\n"
+                  : ""}
                 {lastRun.output.slice(0, 2000)}
               </pre>
             </div>

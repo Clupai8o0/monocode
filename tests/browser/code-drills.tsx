@@ -1,6 +1,8 @@
+import { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/styles/index.css";
 import { CodeTable, type RunCode } from "../../src/fork/games/code/CodeTable";
+import { gamesPanel } from "../../src/fork/games/gamesPanelStore";
 import {
   OPEN_DOJO_EVENT,
   type Drill,
@@ -53,19 +55,37 @@ const runCode: RunCode = async (_language, source) => {
   };
   try {
     new Function("console", source)(fakeConsole);
-    return { stdout: lines.join("\n"), stderr: "", timedOut: false, exitCode: 0 };
+    return {
+      stdout: lines.join("\n"),
+      stderr: "",
+      timedOut: false,
+      exitCode: 0,
+      truncated: false,
+    };
   } catch (error) {
     return {
       stdout: lines.join("\n"),
       stderr: error instanceof Error ? error.message : String(error),
       timedOut: false,
       exitCode: 1,
+      truncated: false,
     };
   }
 };
 
+// The lab runner always reports cut output, so the notice has some output
+// to sit above.
+const labRunCode: RunCode = async (language, source) => {
+  const outcome = await runCode(language, source);
+  return { ...outcome, stdout: `earlier lines\n${outcome.stdout}`, truncated: true };
+};
+
 // Stands in for the panel's game keys: editor typing must never reach it.
-const page = window as unknown as { gameKeys: string[]; dojoOpened: boolean };
+const page = window as unknown as {
+  gameKeys: string[];
+  dojoOpened: boolean;
+  lab?: Lab;
+};
 page.gameKeys = [];
 page.dojoOpened = false;
 window.addEventListener("keydown", (event) => {
@@ -75,11 +95,91 @@ window.addEventListener(OPEN_DOJO_EVENT, () => {
   page.dojoOpened = true;
 });
 
+/** One drill Dojo writes after the tab was first opened. */
+function dojoDrill(title: string): Drill {
+  return {
+    id: "js-add",
+    title,
+    topic: "logic",
+    level: "easy",
+    language: "javascript",
+    task: "A drill Dojo wrote while the Code tab was hidden.",
+    starter: "function add(a, b) {\n  // a later starter\n}\n",
+    tests: [{ call: "add(1, 2)", expect: "3" }],
+    hints: [],
+    solution: "function add(a, b) {\n  return a + b;\n}\n",
+  };
+}
+
+type Lab = {
+  setActive: (active: boolean) => void;
+  newRun: () => void;
+  setDojoTitle: (title: string) => void;
+  setDojoAvailable: (available: boolean) => void;
+  openPanel: () => void;
+  panelOpen: () => boolean;
+  loads: () => number;
+  dojoOpened: () => boolean;
+};
+
+/** The mutable page the browser checks drive through `window.lab`. */
+function LabHarness() {
+  const [active, setActive] = useState(false);
+  const [runId, setRunId] = useState(0);
+  const [dojoAvailable, setDojoAvailable] = useState(true);
+  const extra = useRef<Drill[]>([]);
+  const loads = useRef(0);
+  const loadExtraDrills = useCallback(async () => {
+    loads.current += 1;
+    return { drills: extra.current, invalid: [] };
+  }, []);
+  page.lab = {
+    setActive,
+    newRun: () => setRunId((value) => value + 1),
+    setDojoTitle: (title) => {
+      extra.current = [dojoDrill(title)];
+    },
+    setDojoAvailable,
+    openPanel: () => {
+      gamesPanel.hide();
+      gamesPanel.toggle();
+    },
+    panelOpen: () => gamesPanel.isOpen(),
+    loads: () => loads.current,
+    dojoOpened: () => page.dojoOpened,
+  };
+  return (
+    <div
+      className="text-content"
+      style={{ width: 720, height: 560, margin: "24px auto" }}
+    >
+      <CodeTable
+        mode="low"
+        runId={runId}
+        active={active}
+        runCode={labRunCode}
+        loadExtraDrills={loadExtraDrills}
+        hasDojo={() => dojoAvailable}
+      />
+    </div>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
-  <div
-    className="text-content"
-    style={{ width: 720, height: 560, margin: "24px auto" }}
-  >
-    <CodeTable mode="low" runId={0} runCode={runCode} drills={drills} />
-  </div>,
+  params.get("lab") === "1" ? (
+    <LabHarness />
+  ) : (
+    <div
+      className="text-content"
+      style={{ width: 720, height: 560, margin: "24px auto" }}
+    >
+      <CodeTable
+        mode="low"
+        runId={0}
+        runCode={runCode}
+        drills={drills}
+        hasDojo={() => true}
+      />
+    </div>
+  ),
 );
