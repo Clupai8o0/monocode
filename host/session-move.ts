@@ -78,6 +78,8 @@ type Made = {
   account?: "main" | "cx";
   /** Files that did not exist before. */
   files: string[];
+  /** Files replaced, with where the old copy waits. */
+  replaced?: Array<{ path: string; backup: string }>;
   window?: string;
 };
 
@@ -590,7 +592,9 @@ async function writePiece(env: SessionMoveEnv, params: Record<string, unknown>) 
   const sessionId = sessionIdParam(params);
   const path = stringParam(params, "path");
   if (!packPathOk(path, sessionId)) throw new Error(`Refused a file in the move: ${path}`);
-  const data = stringParam(params, "data");
+  // An empty file has no data, and still has to arrive.
+  const data = params.data;
+  if (typeof data !== "string") throw new Error("Missing data");
   if (data.length > WRITE_MAX_BASE64) throw new Error("That piece is too big");
   const offset = Number(params.offset);
   await mkdir(folder, { recursive: true });
@@ -666,10 +670,12 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
   const made: Made = { repo: found.repo, remoteName: found.remoteName, sessionId: manifest.sessionId, files: [] };
   await saveMade(folder, made);
   await mkdir(dirname(worktree), { recursive: true });
+  await gitOut(env, found.repo, ["worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
+  // Only now is it this move's: another move may have taken the name first,
+  // and a rollback must not remove that one's worktree.
   made.worktree = worktree;
   made.branch = branch;
   await saveMade(folder, made);
-  await gitOut(env, found.repo, ["worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
   if (manifest.files.some((file) => file.path === PATCH_FILE)) {
     await gitOut(env, worktree, ["apply", "--binary", "--whitespace=nowarn", join(folder, PATCH_FILE)], GIT_LONG_MS);
   }
@@ -724,11 +730,16 @@ async function unpackConversation(env: SessionMoveEnv, params: Record<string, un
   const transcriptRel = `${CONVO_DIR}/session/${id}.jsonl`;
   const place = async (from: string, root: string, rel: string) => {
     const target = await safeTarget(root, rel);
-    const fresh = !(await lexists(target));
-    if (fresh) {
+    if (await lexists(target)) {
+      const replaced = (made.replaced ??= []);
+      const backup = join(folder, "backup", String(replaced.length));
+      await mkdir(dirname(backup), { recursive: true });
+      await copyFile(target, backup);
+      replaced.push({ path: target, backup });
+    } else {
       made.files.push(target);
-      await saveMade(folder, made);
     }
+    await saveMade(folder, made);
     await copyFile(from, target);
   };
   for (const file of manifest.files) {
@@ -843,6 +854,7 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
     await env.run("tmux", ["kill-window", "-t", `=${LAB_TMUX}:=${made.window}`], { timeoutMs: 10_000 });
   }
   for (const file of made.files) await rm(file, { force: true }).catch(() => undefined);
+  for (const old of made.replaced ?? []) await copyFile(old.backup, old.path);
   if (made.account && made.worktree) {
     const home = join(env.home, ACCOUNT_DIRS[made.account]);
     await removeEmpty(join(home, "projects", projectKey(made.worktree)));

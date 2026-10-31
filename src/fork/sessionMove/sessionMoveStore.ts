@@ -392,6 +392,7 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
   void (async () => {
     const targetAccountId = await macAccountId(account);
     let tabId = "";
+    let turns: readonly ExternalTurn[] = [];
     const plan: MovePlan = {
       moveId,
       sessionId: key,
@@ -408,15 +409,19 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
         source: remote,
         target: localCall,
         sourceState: async () => (await remote<SourceState>("state", { sessionId: session.id })).state,
-        stopSource: async () => (await remote<{ stopped: boolean }>("stop", { sessionId: session.id }, LONG_MS)).stopped,
-        resumeSource: async () => {
-          await remote("restart", { sessionId: session.id, name, cwd: session.cwd });
-        },
-        startTarget: async ({ repo, cwd, branch }) => {
+        stopSource: async () => {
+          // Read now: a stopped session can't be read through its host any more.
           const page = await readExternalSession(
             { kind: "remote", machineId, projectId: "" },
             session.id,
           ).catch(() => null);
+          turns = page?.turns ?? [];
+          return (await remote<{ stopped: boolean }>("stop", { sessionId: session.id }, LONG_MS)).stopped;
+        },
+        resumeSource: async () => {
+          await remote("restart", { sessionId: session.id, name, cwd: session.cwd });
+        },
+        startTarget: async ({ repo, cwd, branch }) => {
           tabId =
             host?.openMovedTab({
               repo,
@@ -425,7 +430,7 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
               providerSessionId: session.id,
               providerAccountId: targetAccountId,
               title: session.name ?? name,
-              blocks: turnBlocks(page?.turns ?? []),
+              blocks: turnBlocks(turns),
             }) ?? "";
           if (!tabId) throw new Error("Could not open a tab for it");
           return { name };

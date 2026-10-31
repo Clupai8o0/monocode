@@ -261,6 +261,16 @@ describe("runMove", () => {
     }
   });
 
+  it("keeps the journal when the rollback itself failed, for the next launch", async () => {
+    const ended: string[] = [];
+    const { deps } = harness(
+      { journal: { begin: () => {}, end: () => ended.push("end") } },
+      { "target:unpackCode": "boom", "target:undo": "offline" },
+    );
+    expect((await runMove(PLAN, deps, () => {}, nothing)).kind).toBe("failed");
+    expect(ended).toEqual([]);
+  });
+
   it("undoes a move the app closed in the middle of", async () => {
     const journal = { plan: PLAN, machineId: "m", direction: "to-host" as const };
     const { deps, log } = harness();

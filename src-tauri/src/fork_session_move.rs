@@ -88,6 +88,14 @@ struct Made {
     account_home: Option<String>,
     /// Files that did not exist before.
     files: Vec<String>,
+    /// Files replaced, with where the old copy waits.
+    replaced: Vec<Replaced>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Replaced {
+    path: String,
+    backup: String,
 }
 
 struct Env {
@@ -1049,11 +1057,9 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
     if project_key(&worktree_text).len() > PROJECT_KEY_MAX {
         return Err("The new folder's path is too long for Claude to resume in".into());
     }
-    let made = Made {
+    let mut made = Made {
         repo: Some(path_text(&repo)),
         session_id: Some(manifest.session_id.clone()),
-        worktree: Some(worktree_text.clone()),
-        branch: Some(branch.clone()),
         ..Made::default()
     };
     save_made(&folder, &made)?;
@@ -1072,6 +1078,11 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
             &manifest.head,
         ],
     )?;
+    // Only now is it this move's: another move may have taken the name first,
+    // and a rollback must not remove that one's worktree.
+    made.worktree = Some(worktree_text.clone());
+    made.branch = Some(branch.clone());
+    save_made(&folder, &made)?;
     if manifest.files.iter().any(|file| file.path == PATCH_FILE) {
         let patch = path_text(&folder.join(PATCH_FILE));
         git_out(
@@ -1112,10 +1123,18 @@ fn place(
     made: &mut Made,
 ) -> Result<(), String> {
     let target = safe_target(root, rel)?;
-    if !lexists(&target) {
+    if lexists(&target) {
+        let backup = folder.join("backup").join(made.replaced.len().to_string());
+        fs::create_dir_all(folder.join("backup")).map_err(io_text)?;
+        fs::copy(&target, &backup).map_err(io_text)?;
+        made.replaced.push(Replaced {
+            path: path_text(&target),
+            backup: path_text(&backup),
+        });
+    } else {
         made.files.push(path_text(&target));
-        save_made(folder, made)?;
     }
+    save_made(folder, made)?;
     crate::codex_mono_store::copy_durable(from, &target).map_err(io_text)
 }
 
@@ -1184,6 +1203,9 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     let made = load_made(&folder);
     for file in &made.files {
         let _ = fs::remove_file(file);
+    }
+    for old in &made.replaced {
+        fs::copy(&old.backup, &old.path).map_err(io_text)?;
     }
     if let (Some(home), Some(worktree)) = (&made.account_home, &made.worktree) {
         let home = Path::new(home);
@@ -1335,6 +1357,7 @@ mod tests {
         sh(source, &["add", "staged.txt"]);
         fs::create_dir_all(source.join("new/deep")).unwrap();
         fs::write(source.join("new/deep/file with space.bin"), [0u8, 255, 0]).unwrap();
+        fs::write(source.join("new/empty"), "").unwrap();
         fs::write(source.join("new/run.sh"), "#!/bin/sh\n").unwrap();
         make_executable(&source.join("new/run.sh")).unwrap();
         make_link("keep.txt", &source.join("new/link")).unwrap();
@@ -1391,6 +1414,13 @@ mod tests {
             let path = file["path"].as_str().unwrap();
             let size = file["size"].as_u64().unwrap();
             let mut offset = 0u64;
+            if size == 0 {
+                write_piece(
+                    &fix.to,
+                    &json!({"moveId": MOVE, "sessionId": ID, "path": path, "offset": 0, "data": ""}),
+                )
+                .unwrap();
+            }
             while offset < size {
                 let piece = read_piece(
                     &fix.from,
@@ -1509,6 +1539,7 @@ mod tests {
         let history = fix.to.account_home.join("file-history").join(ID);
         fs::create_dir_all(&history).unwrap();
         fs::write(history.join("older"), "older").unwrap();
+        fs::write(history.join("v1"), "the older v1").unwrap();
         let code = unpack(&fix, "s", &manifest, &urls).unwrap();
         let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
         unpack_conversation(&fix.to, &json!({"moveId": MOVE, "manifest": manifest})).unwrap();
@@ -1523,7 +1554,7 @@ mod tests {
 
         assert!(!cwd.exists());
         assert!(!project.exists());
-        assert!(!history.join("v1").exists());
+        assert_eq!(fs::read(history.join("v1")).unwrap(), b"the older v1");
         assert_eq!(fs::read(history.join("older")).unwrap(), b"older");
         assert_eq!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]), "");
         assert!(!sh(&fix.target_repo, &["worktree", "list"]).contains("moved-s"));

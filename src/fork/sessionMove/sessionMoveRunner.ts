@@ -147,9 +147,7 @@ export async function runMove(
         if (await deps.stopSource()) break;
       } catch (error) {
         // It may be half stopped, so it gets the full rollback.
-        const outcome = await rollback(plan, deps, text(error));
-        deps.journal?.end();
-        return outcome;
+        return rollback(plan, deps, text(error));
       }
       deps.journal?.end();
     }
@@ -224,9 +222,7 @@ export async function runMove(
     await deps.source("done", { moveId: plan.moveId }).catch(() => undefined);
     return { kind: "moved", result };
   } catch (error) {
-    const outcome = await rollback(plan, deps, text(error));
-    deps.journal?.end();
-    return outcome;
+    return rollback(plan, deps, text(error));
   }
 }
 
@@ -270,6 +266,8 @@ async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise
   await deps.resumeSource().catch((error: unknown) => {
     problems.push(`Could not resume it here: ${text(error)}`);
   });
+  // A rollback that went wrong is tried again at the next launch.
+  if (problems.length === 0) deps.journal?.end();
   return {
     kind: "failed",
     reason,

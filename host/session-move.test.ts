@@ -135,6 +135,7 @@ describe("session move, a real run with two home folders", () => {
     sh(source, "add", "staged.txt");
     mkdirSync(join(source, "new/deep"), { recursive: true });
     writeFileSync(join(source, "new/deep/file with space.bin"), Buffer.from([0, 255, 0]));
+    writeFileSync(join(source, "new/empty"), "");
     writeFileSync(join(source, "new/run.sh"), "#!/bin/sh\n");
     chmodSync(join(source, "new/run.sh"), 0o755);
     symlinkSync("keep.txt", join(source, "new/link"));
@@ -157,7 +158,7 @@ describe("session move, a real run with two home folders", () => {
     for (const file of manifest.files) {
       let offset = 0;
       if (file.size === 0) {
-        await handleSessionMove(to, { op: "write", moveId: MOVE, sessionId: ID, path: file.path, offset, data: "" }).catch(() => undefined);
+        await handleSessionMove(to, { op: "write", moveId: MOVE, sessionId: ID, path: file.path, offset, data: "" });
       }
       while (offset < file.size) {
         const { data } = (await handleSessionMove(from, { op: "read", moveId: MOVE, path: file.path, offset })) as { data: string };
@@ -231,6 +232,9 @@ describe("session move, a real run with two home folders", () => {
     const older = join(targetHome, ".claude/file-history", ID, "older");
     mkdirSync(dirname(older), { recursive: true });
     writeFileSync(older, "older");
+    // Carried over by this move, and put back by its undo.
+    const replaced = join(targetHome, ".claude/file-history", ID, "v1");
+    writeFileSync(replaced, "the older v1");
     const { cwd } = (await handleSessionMove(targetEnv, {
       op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
     })) as { cwd: string };
@@ -242,11 +246,34 @@ describe("session move, a real run with two home folders", () => {
 
     expect(existsSync(cwd)).toBe(false);
     expect(existsSync(to.transcript)).toBe(false);
-    expect(existsSync(to.history)).toBe(false);
+    expect(readFileSync(to.history, "utf8")).toBe("the older v1");
     expect(readFileSync(older, "utf8")).toBe("older");
     expect(sh(targetRepo, "branch", "--list", "moved/s")).toBe("");
     expect(sh(targetRepo, "worktree", "list")).not.toContain("moved-s");
     expect(existsSync(join(targetHome, "staging", MOVE))).toBe(false);
+  });
+
+  it("a rollback leaves alone a worktree another move took first", async () => {
+    const { manifest, urls } = await carry();
+    let raced = "";
+    const racing: SessionMoveEnv = {
+      ...targetEnv,
+      run: async (command, args, options) => {
+        const at = args.indexOf("add");
+        if (args.includes("worktree") && at >= 0 && !raced) {
+          // The other move gets there between the name check and this add.
+          raced = args[at + 4];
+          sh(targetRepo, "worktree", "add", "-q", "-b", args[at + 3], raced, args[at + 5]);
+        }
+        return runCommand(command, args, options);
+      },
+    };
+    await expect(
+      handleSessionMove(racing, { op: "unpackCode", moveId: MOVE, name: "s", manifest, urls }),
+    ).rejects.toThrow();
+    await handleSessionMove(racing, { op: "undo", moveId: MOVE });
+    expect(existsSync(raced)).toBe(true);
+    expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
   });
 
   it("undo after a failed code step leaves no worktree", async () => {
