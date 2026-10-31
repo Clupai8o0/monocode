@@ -363,7 +363,7 @@ export function GamesPanel() {
         className="relative z-[1] flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 pt-2 pb-1.5"
         onMouseDown={(event) => event.preventDefault()}
       >
-        <div className="flex items-center gap-0.5" role="tablist" aria-label="Game">
+        <div className="flex flex-wrap items-center gap-0.5" role="tablist" aria-label="Game">
           {[...GRID_GAMES, ...TABLE_GAMES].map((item) => (
             <button
               key={item.id}

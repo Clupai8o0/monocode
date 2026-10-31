@@ -359,6 +359,9 @@ test("the panel stops at its minimum size", async ({ page }) => {
   // Anchored bottom-right, so it grew towards the window's corner.
   expect(after.x - before.x).toBe(before.width - 420);
   expect(after.y - before.y).toBe(before.height - 360);
+  // Every game tab still fits: the list wraps rather than clipping Code.
+  const code = (await panel(page).getByRole("tab", { name: "Code" }).boundingBox())!;
+  expect(code.x + code.width).toBeLessThanOrEqual(after.x + after.width);
 });
 
 test("double-clicking the grip resets the grid default", async ({ page }) => {
