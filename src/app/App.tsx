@@ -11008,6 +11008,7 @@ function Workspace({
       if (current && remoteProjectFor(current.cwd))
         return remoteSessionActions(sessionId)?.compact() ?? false;
       if (!current || current.busy || current.worktreeRemoved) return false;
+      if (isMoveLocked(sessionId)) return false; // Fork: stopped for a move, or moved.
       if (!canCompactHarnessContext(current.harness)) {
         const unsupported = sessionsRef.current.map((session) =>
           session.id === sessionId

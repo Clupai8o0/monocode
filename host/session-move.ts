@@ -696,7 +696,8 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
   const made: Made = { repo, remoteName: found.remoteName, sessionId: manifest.sessionId, files: [] };
   await saveMade(folder, made);
   await mkdir(dirname(worktree), { recursive: true });
-  await gitOut(env, repo, ["worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
+  // No hooks: one failing would leave a worktree this move can't tell is its own.
+  await gitOut(env, repo, ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet", "-b", branch, worktree, manifest.head], GIT_LONG_MS);
   // Only now is it this move's: another move may have taken the name first,
   // and a rollback must not remove that one's worktree.
   made.worktree = worktree;

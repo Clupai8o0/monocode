@@ -96,13 +96,17 @@ function readMoved(): MovedMap {
   }
 }
 
+/**
+ * Throws when it can't be stored: the runner then rolls the move back, because
+ * after a restart this tab would take turns again while the other copy runs.
+ */
 function saveMoved(next: MovedMap) {
-  moved = next;
   try {
     localStorage.setItem(MOVED_KEY, JSON.stringify(next));
   } catch {
-    // Storage blocked: the card lasts until the app closes.
+    throw new Error("Could not save the move on this Mac");
   }
+  moved = next;
   host?.onMoved();
   bump();
 }

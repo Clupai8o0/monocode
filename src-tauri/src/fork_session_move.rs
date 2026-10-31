@@ -1077,9 +1077,12 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
     if let Some(parent) = worktree.parent() {
         fs::create_dir_all(parent).map_err(io_text)?;
     }
+    // No hooks: one failing would leave a worktree this move can't tell is its own.
     git_out(
         &repo,
         &[
+            "-c",
+            "core.hooksPath=/dev/null",
             "worktree",
             "add",
             "--quiet",
