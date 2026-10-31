@@ -3,6 +3,8 @@
 //! and no file writes outside its own temp folder, and anything that can't
 //! be sandboxed is refused instead of run bare.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
+
 use std::collections::HashSet;
 #[cfg(target_os = "macos")]
 use std::ffi::OsStr;
@@ -418,9 +420,10 @@ fn run_code(language: &str, source: &str) -> Result<CodeRunResult, String> {
         }
     }
 
-    // The child is gone, but its pipes may still be draining. Never wait for
-    // a reader past the deadline: the buffers hold whatever arrived by then.
-    while !readers_done(&[&stdout_out, &stderr_out]) && Instant::now() < deadline {
+    // The child is gone, but its pipes may still be draining. Give the readers
+    // a moment of their own, even after a timeout, then take what arrived.
+    let drain_until: Instant = Instant::now() + Duration::from_millis(250);
+    while !readers_done(&[&stdout_out, &stderr_out]) && Instant::now() < drain_until {
         std::thread::sleep(Duration::from_millis(10));
     }
     let drained: bool = readers_done(&[&stdout_out, &stderr_out]);
@@ -473,7 +476,7 @@ pub async fn fork_code_run(
     result
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

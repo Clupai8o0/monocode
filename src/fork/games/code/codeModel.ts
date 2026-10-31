@@ -119,6 +119,10 @@ function __same(a, b) {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  if (a instanceof Date) return a.getTime() === b.getTime();
+  if (a instanceof RegExp) return String(a) === String(b);
+  if (a instanceof Map || a instanceof Set) return __same([...a], [...b]);
   if (Array.isArray(a) && a.length !== b.length) return false;
   const keysA = Object.keys(a);
   const keysB = Object.keys(b);
@@ -320,19 +324,46 @@ export function recordRun(
   };
 }
 
+/** The same time a calendar day earlier; 24 hours can skip a day at a clock change. */
+function dayBefore(time: number): number {
+  const date = new Date(time);
+  date.setDate(date.getDate() - 1);
+  return date.getTime();
+}
+
 /** Days in a row with at least one solve, counting back from today. */
 export function streakDays(progress: CodeProgress, now: number): number {
   let streak = 0;
   let cursor = now;
   // A streak is still alive in the morning, before today's first solve.
   if (!progress.solvedByDay[dayKey(cursor)]?.length) {
-    cursor -= DAY_MS;
+    cursor = dayBefore(cursor);
   }
   while (progress.solvedByDay[dayKey(cursor)]?.length) {
     streak += 1;
-    cursor -= DAY_MS;
+    cursor = dayBefore(cursor);
   }
   return streak;
+}
+
+/** Tab in the editor: a caret gets one indent, a selection indents its whole lines. */
+export function indentText(
+  value: string,
+  start: number,
+  end: number,
+  indent: string,
+): { value: string; start: number; end: number } {
+  if (start === end) {
+    const caret = start + indent.length;
+    return { value: value.slice(0, start) + indent + value.slice(end), start: caret, end: caret };
+  }
+  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+  const block = value.slice(lineStart, end).replace(/^/gm, indent);
+  return {
+    value: value.slice(0, lineStart) + block + value.slice(end),
+    start: start + indent.length,
+    end: lineStart + block.length,
+  };
 }
 
 export function solvedTodayCount(progress: CodeProgress, now: number): number {

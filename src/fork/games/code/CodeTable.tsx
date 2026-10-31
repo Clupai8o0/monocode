@@ -10,6 +10,7 @@ import {
   CODE_PROGRESS_EVENT,
   OPEN_DOJO_EVENT,
   buildSource,
+  indentText,
   levelForMode,
   loadProgress,
   makeMarker,
@@ -317,15 +318,11 @@ export function CodeTable({
       }
       const box = event.currentTarget;
       const indent = drill.language === "python" ? "    " : "  ";
-      const next =
-        box.value.slice(0, box.selectionStart) +
-        indent +
-        box.value.slice(box.selectionEnd);
-      const caret = box.selectionStart + indent.length;
-      setCodeById((current) => ({ ...current, [drill.id]: next }));
+      const next = indentText(box.value, box.selectionStart, box.selectionEnd, indent);
+      setCodeById((current) => ({ ...current, [drill.id]: next.value }));
       requestAnimationFrame(() => {
-        box.selectionStart = caret;
-        box.selectionEnd = caret;
+        box.selectionStart = next.start;
+        box.selectionEnd = next.end;
       });
     }
   };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REVIEW_DAYS,
   buildSource,
+  indentText,
   dayKey,
   emptyProgress,
   isDue,
@@ -85,6 +86,20 @@ describe("buildSource and parseResults", () => {
     const results = parseResults(runJs(buildSource(shapes, code, marker)), marker, 2);
     expect(results.map((result) => result.pass)).toEqual([true, false]);
     expect(results[1].actual).toBe('{"b":2}');
+  });
+
+  it("compares sets, dates and class instances by what they hold", () => {
+    const marker = makeMarker(() => 0.25);
+    const kinds = drill("kinds", {
+      tests: [
+        { call: "new Set([1])", expect: "new Set([2])" },
+        { call: "new Date(0)", expect: "new Date(5)" },
+        { call: "({})", expect: "new Map()" },
+        { call: "new Map([[1, 2]])", expect: "new Map([[1, 2]])" },
+      ],
+    });
+    const results = parseResults(runJs(buildSource(kinds, "", marker)), marker, 4);
+    expect(results.map((result) => result.pass)).toEqual([false, false, false, true]);
   });
 
   it("fails a list with an extra empty slot", () => {
@@ -363,5 +378,17 @@ describe("drills.json handling", () => {
     const merged = mergeDrills(builtin, extra);
     expect(merged.map((item) => item.id)).toEqual(["a", "b", "c"]);
     expect(merged[1].title).toBe("Dojo's b");
+  });
+});
+
+describe("indentText", () => {
+  it("adds one indent at a caret", () => {
+    expect(indentText("ab", 1, 1, "  ")).toEqual({ value: "a  b", start: 3, end: 3 });
+  });
+
+  it("indents the selected lines and deletes nothing", () => {
+    const next = indentText("one\ntwo\nthree", 5, 9, "  ");
+    expect(next.value).toBe("one\n  two\n  three");
+    expect(next.value.slice(next.start, next.end)).toBe("wo\n  t");
   });
 });
