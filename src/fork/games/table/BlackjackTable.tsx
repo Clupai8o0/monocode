@@ -199,7 +199,7 @@ export function BlackjackTable({ mode, runId, active, waiting, onExit, onInput }
       return;
     }
     if (!chipsInPlay.claim("blackjack")) {
-      setNote("Finish your poker hand first.");
+      setNote("Leave the poker table first.");
       return;
     }
     const nextIds = pickedRef.current.slice(0, MAX_AGENTS);

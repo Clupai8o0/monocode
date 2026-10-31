@@ -31,6 +31,35 @@ const tokens = async (page: Page) =>
 const phase = (page: Page, game: string) =>
   page.locator(`[data-table-board="${game}"] [data-table-phase]`);
 
+const youStack = async (page: Page) =>
+  Number(
+    await page
+      .locator('[data-table-board="Poker table"] [data-seat="you"]')
+      .getAttribute("data-you-stack"),
+  );
+
+const youBet = async (page: Page) =>
+  Number(
+    await page
+      .locator('[data-table-board="Poker table"] [data-seat="you"]')
+      .getAttribute("data-you-bet"),
+  );
+
+/** Sets the carried stacks through the dev-only seam the table exposes. */
+async function setPokerStacks(page: Page, stacks: number[], hands?: number) {
+  await page.evaluate(
+    ({ stacks, hands }) => {
+      const seam = (
+        window as unknown as {
+          __setPokerStacks?: (stacks: number[], hands?: number) => void;
+        }
+      ).__setPokerStacks;
+      seam?.(stacks, hands);
+    },
+    { stacks, hands },
+  );
+}
+
 /** Plays a poker hand to the end, calling everything, by keyboard. */
 async function playPokerHand(page: Page, key = "c") {
   const board = phase(page, "Poker table");
@@ -81,12 +110,19 @@ for (const theme of THEMES) {
     }
     await playPokerHand(page);
     await expect(page.locator("[data-table-status]").first()).not.toBeEmpty();
-    await shoot(page, `poker-result-${theme}`, dir);
 
     // Tokens are what's on the table: the stack, the bankroll, the score row agree.
-    const after = await tokens(page);
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("monocode.fork.games.tokens")!));
-    expect(saved.tokens).toBe(after);
+    // Read both in one go, so an auto-dealt next hand can't land in between.
+    const after = await page.evaluate(() => ({
+      saved: JSON.parse(localStorage.getItem("monocode.fork.games.tokens")!).tokens,
+      score: Number(
+        document
+          .querySelector("[data-fork-games-score]")!
+          .getAttribute("data-fork-games-score"),
+      ),
+    }));
+    expect(after.score).toBe(after.saved);
+    await shoot(page, `poker-result-${theme}`, dir);
 
     // A folded hand: F, and the next hand goes by Space.
     await page.keyboard.press(" ");
@@ -182,6 +218,79 @@ for (const theme of THEMES) {
     expect(errors).toEqual([]);
   });
 }
+
+test("a stack carries into the next hand, and the next hand deals itself", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "poker");
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop");
+  await playPokerHand(page);
+
+  // Your bankroll and your stack agree after the hand; nothing was topped up.
+  const score = Number(
+    await page.locator("[data-fork-games-score]").getAttribute("data-fork-games-score"),
+  );
+  expect(await youStack(page)).toBe(score - 5000);
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-table-status]'),
+  ).toContainText("blinds 25/50 · hand 2");
+
+  // A known carried stack, and no key: the next hand deals itself from it.
+  await setPokerStacks(page, [4200, 5000, 5000, 5000, 5000]);
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop", {
+    timeout: 8000,
+  });
+  expect((await youStack(page)) + (await youBet(page))).toBe(4200);
+});
+
+test("Leave table ends the game, and blackjack opens up afterwards", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "poker");
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-action="fold"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-action="leave"]')).toHaveCount(0);
+
+  await page.keyboard.press("f");
+  await page.locator('[data-action="leave"]').click();
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-table-status]'),
+  ).toContainText("You left with");
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-action="deal"]'),
+  ).toHaveText(/New game/);
+
+  // The chip claim went with it.
+  await page.getByRole("tab", { name: "blackjack" }).click();
+  await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Blackjack table")).not.toHaveAttribute("data-table-phase", "idle");
+});
+
+test("a game played to the end shows the result and New game", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "poker");
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-action="fold"]')).toBeVisible({ timeout: 30_000 });
+  await page.keyboard.press("f");
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done", {
+    timeout: 60_000,
+  });
+
+  // Park the table so the auto-deal cannot start a hand under the seam.
+  await page.getByRole("tab", { name: "blackjack" }).click();
+  await setPokerStacks(page, [9200, 0, 0, 0, 0], 31);
+  await page.getByRole("tab", { name: "poker" }).click();
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-table-status]'),
+  ).toHaveText("You took the table: +4.2k in 31 hands");
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-action="deal"]'),
+  ).toHaveText(/New game/);
+
+  // Space starts another game from a fresh buy-in.
+  await page.keyboard.press(" ");
+  await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop");
+});
 
 test("chess promotion picker, and mate is seen", async ({ page }, testInfo) => {
   const dir = process.env.GAME_SHOTS ?? testInfo.outputDir;
@@ -366,13 +475,25 @@ test("only one card game holds chips at a time, and New game leaves a parked gri
   await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
   await page.keyboard.press(" ");
   await expect(phase(page, "Blackjack table")).toHaveAttribute("data-table-phase", "idle");
-  await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Finish your poker hand first.");
+  await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Leave the poker table first.");
 
-  // Finish the hand, and blackjack opens up.
+  // The hand ends, but the game still holds the chips, so blackjack stays shut.
   await page.getByRole("tab", { name: "poker" }).click();
   await page.keyboard.press("f");
   await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done", { timeout: 60_000 });
   await page.getByRole("tab", { name: "blackjack" }).click();
+  await page.keyboard.press(" ");
+  await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Leave the poker table first.");
+
+  // Leave between hands releases the table, and blackjack opens up.
+  await page.getByRole("tab", { name: "poker" }).click();
+  await page.locator('[data-action="leave"]').click();
+  await expect(page.locator('[data-table-board="Poker table"] [data-table-status]')).toContainText("You left with");
+  await expect(
+    page.locator('[data-table-board="Poker table"] [data-action="deal"]'),
+  ).toHaveText(/New game/);
+  await page.getByRole("tab", { name: "blackjack" }).click();
+  await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
   await page.keyboard.press(" ");
   await expect(phase(page, "Blackjack table")).not.toHaveAttribute("data-table-phase", "idle");
 

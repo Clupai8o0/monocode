@@ -42,6 +42,15 @@ import {
 } from "./poker";
 import { decidePoker, equityRuns } from "./pokerAi";
 import { handName } from "./pokerEval";
+import {
+  blindsForHand,
+  finishedStacks,
+  gameOver,
+  nextHandPlayers,
+  resultLine,
+  startGame,
+  type PokerGame,
+} from "./pokerGame";
 import { BUTTON_MARK } from "./sprites";
 import { chipsInPlay, formatTokens, rivalShares, tokenStore } from "./tokens";
 
@@ -51,8 +60,8 @@ const YOU = "you";
 const MAX_AGENTS = 5;
 const MIN_AGENTS = 2;
 const EQUITY_RUNS = 300;
-const STACK_BIGS = 100;
 const STREET_MS = 700;
+const AUTO_DEAL_MS = 2500;
 
 const seatSelector = (id: string) => `[data-seat="${id}"]`;
 
@@ -83,6 +92,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
 
   const [picked, setPicked] = useState(() => initialSeats(talkRandom));
   const [hand, setHand] = useState<PokerState | null>(null);
+  const [game, setGame] = useState<PokerGame | null>(null);
   const [ids, setIds] = useState<AgentId[]>([]);
   const [thinking, setThinking] = useState<AgentId | null>(null);
   const [raiseTo, setRaiseTo] = useState(0);
@@ -94,14 +104,23 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   handRef.current = hand;
   const idsRef = useRef(ids);
   idsRef.current = ids;
-  const stacks = useRef(new Map<AgentId, number>());
+  const gameRef = useRef<PokerGame | null>(null);
   const tilt = useRef(new Map<AgentId, number>());
   const bluffs = useRef(new Set<AgentId>());
   const button = useRef(-1);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
 
   const stakes = POKER_STAKES[mode];
   const seated = hand ? ids : picked;
   useCoworkerLine(waiting, seated, say, talkRandom);
+
+  const putGame = useCallback((next: PokerGame | null) => {
+    gameRef.current = next;
+    setGame(next);
+  }, []);
 
   /** Every state change goes through here: the tokens follow your stack. */
   const commit = useCallback(
@@ -118,11 +137,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
       }
       handRef.current = next;
       setHand(next);
-      next.seats.forEach((seat, index) => {
-        if (index > 0) {
-          stacks.current.set(seatIds[index] as AgentId, seat.stack);
-        }
-      });
       if (next.street === "done" && next.result && before?.street !== "done") {
         settle(next, seatIds);
       }
@@ -136,7 +150,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (!result) {
       return;
     }
-    chipsInPlay.release("poker");
     for (const pot of result.pots) {
       for (const winner of pot.winners) {
         flyCoins(root.current, "[data-pot]", seatSelector(seatIds[winner]!), 4);
@@ -179,7 +192,27 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
         say(agent, "lose", 0.7);
       }
     });
-    setLastWords(describeResult(done, seatIds));
+
+    const run = gameRef.current;
+    const stacks = finishedStacks(done.seats);
+    if (run) {
+      const end = gameOver(stacks);
+      if (end.over) {
+        const finished: PokerGame = {
+          ...run,
+          stacks,
+          result: end.winner === "you" ? "won" : "lost",
+        };
+        putGame(finished);
+        chipsInPlay.release("poker");
+        setLastWords(resultLine(finished));
+      } else {
+        putGame({ ...run, stacks });
+        setLastWords(describeResult(done, seatIds));
+      }
+    } else {
+      setLastWords(describeResult(done, seatIds));
+    }
   };
 
   const dealNext = useCallback(() => {
@@ -187,49 +220,51 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     if (current && current.street !== "done") {
       return;
     }
-    const tokens = tokenStore.bankroll().tokens;
-    const { small, big } = POKER_STAKES[modeRef.current];
-    if (tokens < big) {
-      return;
+    let run = gameRef.current;
+    if (!run || run.result !== "playing") {
+      const base = POKER_STAKES[modeRef.current];
+      const tokens = tokenStore.bankroll().tokens;
+      // A new game needs the big blind, not a full stack.
+      if (tokens < base.big) {
+        return;
+      }
+      if (!chipsInPlay.claim("poker")) {
+        setLastWords("Leave the blackjack table first.");
+        return;
+      }
+      const nextIds = fillSeats(pickedRef.current, MIN_AGENTS).slice(0, MAX_AGENTS);
+      run = startGame(tokens, nextIds.length, base);
+      idsRef.current = nextIds;
+      setIds(nextIds);
+      button.current = -1;
+      tilt.current.clear();
     }
-    if (!chipsInPlay.claim("poker")) {
-      setLastWords("Finish your blackjack round first.");
-      return;
-    }
-    const nextIds = fillSeats(pickedRef.current, MIN_AGENTS).slice(0, MAX_AGENTS);
-    const cap = big * STACK_BIGS;
-    const players = [
-      { id: YOU, stack: Math.min(tokens, cap) },
-      ...nextIds.map((id) => {
-        const stack = stacks.current.get(id) ?? 0;
-        // A busted agent, or one seated at a bigger table, buys back in.
-        return { id, stack: stack >= big ? stack : cap };
-      }),
-    ];
-    const start = startHand(players, button.current, small, big, dealRandom);
+    const handNumber = run.hands + 1;
+    const blinds = blindsForHand(handNumber, run.stakes);
+    const players = nextHandPlayers(YOU, idsRef.current, run.stacks);
+    const start = startHand(
+      players,
+      button.current,
+      blinds.small,
+      blinds.big,
+      dealRandom,
+    );
     button.current = start.button;
     bluffs.current.clear();
     setLastWords("");
-    idsRef.current = nextIds;
-    setIds(nextIds);
+    putGame({
+      ...run,
+      hands: handNumber,
+      stacks: finishedStacks(start.seats),
+    });
     tokenStore.add(start.seats[0]!.stack - players[0]!.stack);
     handRef.current = start;
     setHand(start);
-    const seatIds = [YOU, ...nextIds];
+    const seatIds = [YOU, ...idsRef.current];
     for (const blind of [start.sbSeat, start.bbSeat]) {
       flyCoins(root.current, seatSelector(seatIds[blind]!), "[data-pot]", 2);
     }
-    start.seats.forEach((seat, index) => {
-      if (index > 0) {
-        stacks.current.set(nextIds[index - 1]!, seat.stack);
-      }
-    });
-  }, [dealRandom]);
-
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const pickedRef = useRef(picked);
-  pickedRef.current = picked;
+  }, [dealRandom, putGame]);
 
   // New game: chips already in the pot stay lost, as if you'd folded.
   const seenRun = useRef(runId);
@@ -246,10 +281,12 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     setHand(null);
     setIds([]);
     setLastWords("");
-    stacks.current.clear();
+    putGame(null);
     tilt.current.clear();
+    bluffs.current.clear();
     button.current = -1;
-  }, [runId, active]);
+    setThinking(null);
+  }, [runId, active, putGame]);
 
   // The dealer and the agents act here, one step per state, while it's showing.
   useEffect(() => {
@@ -291,7 +328,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
       const decision = decidePoker(
         hand,
         agent.poker,
-        { noise: POKER_STAKES[modeRef.current].noise },
+        { noise: gameRef.current?.stakes.noise ?? POKER_STAKES[modeRef.current].noise },
         equity,
         tilt.current.get(id) ?? 0,
         aiRandom,
@@ -325,12 +362,31 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     };
   }, [hand, active, ids, commit, aiRandom, say]);
 
+  const running = game?.result === "playing";
+  const ended = !!game && game.result !== "playing";
+
+  // Between hands the next one deals itself; a hidden or paused table waits.
+  useEffect(() => {
+    if (!active || !running || hand?.street !== "done") {
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (gameRef.current?.result === "playing") {
+        dealNext();
+      }
+    }, AUTO_DEAL_MS);
+    return () => clearTimeout(timer);
+  }, [active, running, hand, dealNext]);
+
   const yourTurn = !!hand && hand.street !== "done" && hand.toAct === 0;
   const legal = yourTurn && hand ? legalActions(hand, 0) : null;
   const pot = hand ? potTotal(hand) : 0;
   const owed = legal?.callAmount ?? 0;
   const raiseLow = legal ? Math.min(legal.minRaiseTo, legal.maxRaiseTo) : 0;
   const raiseHigh = legal?.maxRaiseTo ?? 0;
+  const nextHand = game ? game.hands + 1 : 1;
+  const nextBlinds = game ? blindsForHand(nextHand, game.stakes) : stakes;
+  const blindsLine = `blinds ${formatTokens(nextBlinds.small)}/${formatTokens(nextBlinds.big)} · hand ${nextHand}`;
 
   // A fresh turn starts the slider at the smallest raise.
   const turnKey = yourTurn && hand ? `${hand.street}:${hand.currentBet}` : "";
@@ -360,7 +416,58 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     }
   };
 
-  const broke = !hand || hand.street === "done" ? bankroll.tokens < stakes.big : false;
+  const broke = !running && bankroll.tokens < stakes.big;
+
+  const leave = () => {
+    const current = handRef.current;
+    const run = gameRef.current;
+    if (!run || run.result !== "playing" || !current || current.street !== "done") {
+      return;
+    }
+    const finished: PokerGame = {
+      ...run,
+      stacks: finishedStacks(current.seats),
+      result: "left",
+    };
+    putGame(finished);
+    chipsInPlay.release("poker");
+    setLastWords(resultLine(finished));
+  };
+
+  // Test-only: the browser spec sets the carried stacks so a game can end at
+  // once. Nothing in the app calls this.
+  const testSeam = useRef<(stacks: number[], hands?: number) => void>(() => {});
+  testSeam.current = (stacks, hands) => {
+    const current = handRef.current;
+    const run = gameRef.current;
+    if (!run || run.result !== "playing" || !current || current.street !== "done") {
+      return;
+    }
+    const next: PokerGame = {
+      ...run,
+      hands: hands ?? run.hands,
+      stacks: stacks.map((stack) => Math.max(0, stack)),
+    };
+    const end = gameOver(next.stacks);
+    if (end.over) {
+      next.result = end.winner === "you" ? "won" : "lost";
+      chipsInPlay.release("poker");
+      setLastWords(resultLine(next));
+    }
+    putGame(next);
+  };
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    const testWindow = window as unknown as {
+      __setPokerStacks?: (stacks: number[], hands?: number) => void;
+    };
+    testWindow.__setPokerStacks = (stacks, hands) => testSeam.current(stacks, hands);
+    return () => {
+      delete testWindow.__setPokerStacks;
+    };
+  }, []);
 
   const onKey = (key: string) => {
     if (key === " ") {
@@ -400,14 +507,16 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
               const seatIndex = offset + 1;
               const seat = hand?.seats[seatIndex];
               const inHand = seat && !seat.out;
+              const isOut = !!seat && (seat.out || (hand?.street === "done" && seat.stack <= 0));
               const isThinking = thinking === id;
               const reveal = seat && shown[seatIndex] !== undefined;
               return (
                 <div
                   key={id}
                   data-seat={id}
+                  data-out={isOut ? "" : undefined}
                   className={`relative flex w-[126px] flex-col items-center gap-0.5 ${
-                    seat?.folded || seat?.out ? "opacity-45" : ""
+                    seat?.folded || isOut ? "opacity-45" : ""
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
@@ -479,8 +588,10 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
             <div role="status" data-table-status="" className="h-4 truncate font-mono text-[11px] text-content/70">
               {thinking ? (
                 <ThinkingLabel id={thinking} />
-              ) : hand?.street === "done" ? (
+              ) : ended ? (
                 lastWords
+              ) : hand?.street === "done" ? (
+                lastWords ? `${blindsLine} · ${lastWords}` : blindsLine
               ) : yourTurn ? (
                 "your turn"
               ) : !hand ? (
@@ -492,7 +603,12 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
           </div>
 
           <div className="relative z-10 flex h-[122px] shrink-0 items-end gap-3 px-3 pb-2.5">
-            <div data-seat={YOU} className="flex shrink-0 flex-col gap-1">
+            <div
+              data-seat={YOU}
+              data-you-stack={you?.stack}
+              data-you-bet={you?.bet}
+              className="flex shrink-0 flex-col gap-1"
+            >
               <div className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums text-content/80">
                 <span>you</span>
                 <span className="text-content/55">
@@ -584,7 +700,23 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                   </div>
                 </>
               ) : !hand || hand.street === "done" ? (
-                broke ? (
+                running ? (
+                  <div className="flex items-center gap-3">
+                    <ActionButton
+                      icon="deal"
+                      primary
+                      label="Next hand"
+                      keyHint="Space"
+                      data-action="deal"
+                      onClick={dealNext}
+                    />
+                    <ActionButton
+                      label="Leave table"
+                      data-action="leave"
+                      onClick={leave}
+                    />
+                  </div>
+                ) : broke ? (
                   <QuotaBump needed={stakes.big} />
                 ) : (
                   <div className="flex items-center gap-3">
@@ -599,7 +731,7 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                     <ActionButton
                       icon="deal"
                       primary
-                      label={hand ? "Next hand" : "Deal"}
+                      label={game ? "New game" : "Deal"}
                       keyHint="Space"
                       data-action="deal"
                       onClick={dealNext}
