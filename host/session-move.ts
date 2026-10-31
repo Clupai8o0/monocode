@@ -67,8 +67,8 @@ export type SessionMoveEnv = {
   /** Project folders this host knows, searched first. */
   projects: () => string[];
   isAlive: (pid: number, procStart: string | undefined) => boolean | Promise<boolean>;
-  /** The process's command line, or null when it can't be read. */
-  commandLine: (pid: number) => Promise<string | null>;
+  /** The process's arguments, program first, or null when they can't be read. */
+  commandLine: (pid: number) => Promise<string[] | null>;
   kill: (pid: number, signal: NodeJS.Signals) => void;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
@@ -83,6 +83,8 @@ type Made = {
   branch?: string;
   /** Saved before `git worktree add`; it is only this move's if the add worked. */
   pending?: { worktree: string; branch: string; head: string };
+  /** The commit the worktree was made at, kept for good: new commits past it are never undone. */
+  head?: string;
   account?: "main" | "cx";
   /** Files that did not exist before. */
   files: string[];
@@ -123,12 +125,14 @@ export function defaultSessionMoveEnv(dataDir: string, projects: () => string[])
   };
 }
 
-async function readCommandLine(pid: number): Promise<string | null> {
+async function readCommandLine(pid: number): Promise<string[] | null> {
   try {
-    return (await readFile(`/proc/${pid}/cmdline`, "utf8")).replace(/\0/g, " ").trim();
+    const args = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").filter(Boolean);
+    return args.length ? args : null;
   } catch {
+    // macOS has no /proc; ps joins the arguments, so a path with a space splits wrongly and fails the check.
     const ps = await runCommand("ps", ["-o", "args=", "-p", String(pid)], { timeoutMs: 5_000 });
-    return ps.code === 0 && ps.stdout.trim() ? ps.stdout.trim() : null;
+    return ps.code === 0 && ps.stdout.trim() ? ps.stdout.trim().split(/\s+/) : null;
   }
 }
 
@@ -333,11 +337,17 @@ function toState(env: SessionMoveEnv, record: Live | null): SourceState {
 }
 
 async function sourceState(env: SessionMoveEnv, params: Record<string, unknown>): Promise<SourceState> {
-  return toState(env, await liveRecord(env, sessionIdParam(params)));
+  const records = await liveRecords(env, sessionIdParam(params));
+  if (new Set(records.map((r) => r.pid)).size > 1)
+    throw new Error("It is open twice on that machine. Close one copy, then move it");
+  return toState(env, records[0] ?? null);
 }
 
 async function stopSource(env: SessionMoveEnv, params: Record<string, unknown>) {
-  const record = await liveRecord(env, sessionIdParam(params));
+  const records = await liveRecords(env, sessionIdParam(params));
+  // Two processes on one conversation: stopping one would leave the other writing to it.
+  if (new Set(records.map((r) => r.pid)).size > 1) return { stopped: false };
+  const record = records[0];
   if (!record) return { stopped: true };
   if (toState(env, record).state !== "idle") return { stopped: false };
   return { stopped: await endProcess(env, record) };
@@ -349,9 +359,27 @@ async function stopSource(env: SessionMoveEnv, params: Record<string, unknown>) 
  */
 async function identity(env: SessionMoveEnv, record: Live): Promise<"it" | "other" | "unknown"> {
   if (record.procStart) return (await env.isAlive(record.pid, record.procStart)) ? "it" : "other";
-  const line = await env.commandLine(record.pid);
-  if (line === null) return "unknown";
-  return /(^|[\s/])claude(\s|$)|claude-acct/.test(line) ? "it" : "other";
+  const args = await env.commandLine(record.pid);
+  if (args === null) return "unknown";
+  return runsClaude(args) ? "it" : "other";
+}
+
+const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+const RUNTIMES = new Set(["node", "bun"]);
+
+/**
+ * The program itself is Claude or its launcher, not merely named in the
+ * arguments: `vim ~/.local/bin/claude-acct` mentions it but is an editor.
+ */
+export function runsClaude(args: string[]) {
+  const name = (arg: string | undefined) => (arg ?? "").split("/").pop()?.replace(/^-/, "") ?? "";
+  const [program, script] = args;
+  if (name(program) === "claude" || name(program) === "claude-acct") return true;
+  // The native build runs from its versions folder, under its version number.
+  if (/\/claude\/versions\/[^/]+$/.test(program ?? "")) return true;
+  if (RUNTIMES.has(name(program))) return name(script) === "claude" || /claude-code\/cli\.m?js$/.test(script ?? "");
+  if (SHELLS.has(name(program))) return name(script) === "claude-acct" || name(script) === "claude";
+  return false;
 }
 
 /**
@@ -773,6 +801,7 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
     sessionId: manifest.sessionId,
     files: [],
     pending: { worktree, branch, head: manifest.head },
+    head: manifest.head,
   };
   await saveMade(folder, made);
   // No hooks: one failing would leave a worktree this move can't tell is its own.
@@ -1038,6 +1067,11 @@ async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
   }
   for (const file of made.files) await rm(file, { force: true }).catch(() => undefined);
   for (const old of made.replaced ?? []) await copyFile(old.backup, old.path);
+  // Someone committed there after the move: that work stays, worktree and branch both.
+  if (made.repo && made.worktree && made.branch && made.head && (await movedOn(env, made, made.head))) {
+    await rm(folder, { recursive: true, force: true });
+    return { kept: `New commits were made in ${made.worktree} on that machine, so it was kept` };
+  }
   if (made.account && made.worktree) {
     const home = join(env.home, ACCOUNT_DIRS[made.account]);
     await removeEmpty(join(home, "projects", projectKey(made.worktree)));
@@ -1069,6 +1103,16 @@ async function addedByThisMove(env: SessionMoveEnv, repo: string | undefined, pe
     if (branch === `refs/heads/${pending.branch}` && (await samePath(path, pending.worktree))) return true;
   }
   return false;
+}
+
+/** The branch or the worktree's HEAD is no longer at the commit the move made it at. */
+async function movedOn(env: SessionMoveEnv, made: Made, head: string) {
+  const tip = await git(env, made.repo!, ["rev-parse", "--verify", "--quiet", `refs/heads/${made.branch}`]);
+  if (tip.code === 0 && tip.stdout.trim() !== head) return true;
+  // Without its own .git, git would answer for the repository above it.
+  if (!(await stat(join(made.worktree!, ".git")).catch(() => null))) return false;
+  const at = await git(env, made.worktree!, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+  return at.code === 0 && at.stdout.trim() !== head;
 }
 
 /** Removes a folder only if it is empty. */

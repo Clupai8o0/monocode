@@ -81,7 +81,14 @@ export type MoveOutcome =
   | { kind: "moved"; result: MoveResult }
   | { kind: "cancelled" }
   /** Refused or failed, in one plain line; the source runs as before. */
-  | { kind: "failed"; reason: string; rollbackProblem?: string; targetMayRun?: boolean };
+  | {
+      kind: "failed";
+      reason: string;
+      rollbackProblem?: string;
+      targetMayRun?: boolean;
+      /** Cleaned up there but not resumed here: stopped, with the journal kept for Try again. */
+      resumeFailed?: boolean;
+    };
 
 const WAIT_POLL_MS = 1_500;
 const CONFIRM_POLL_MS = 2_000;
@@ -272,11 +279,13 @@ async function waitUp(
   }
 }
 
-async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise<MoveOutcome> {
+async function rollback(plan: MovePlan, deps: MoveDeps, failure: string): Promise<MoveOutcome> {
+  let reason = failure;
   try {
     // A tab left open would take turns on the conversation in a removed folder.
     await deps.closeTarget?.();
-    await deps.target("undo", { moveId: plan.moveId });
+    const undone = await deps.target<{ kept?: string } | undefined>("undo", { moveId: plan.moveId });
+    if (undone?.kept) reason = `${reason}. ${undone.kept}`;
   } catch (error) {
     // The copy there may be running, so this one stays stopped: two copies must
     // never write at once. The journal stays too, and the next launch retries.
@@ -291,7 +300,7 @@ async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise
   try {
     await deps.resumeSource();
   } catch (error) {
-    return { kind: "failed", reason, rollbackProblem: `Could not resume it here: ${text(error)}` };
+    return { kind: "failed", reason, rollbackProblem: `Could not resume it here: ${text(error)}`, resumeFailed: true };
   }
   try {
     deps.journal?.end();
@@ -303,26 +312,27 @@ async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise
 
 /**
  * The app closed mid-move. The journal is only written once the source stops,
- * so undo what the target has and resume the source. True when both worked;
- * otherwise the journal stays and it tries again later. `finished` is a move
- * whose card was saved before the journal could be cleared: it stays moved.
+ * so undo what the target has and resume the source. What the undo kept when
+ * both worked; otherwise false, the journal stays and it tries again later.
+ * `finished` is a move whose card was saved before the journal could be
+ * cleared: it stays moved.
  */
 export async function recoverMove(
   journal: MoveJournal,
   deps: Pick<MoveDeps, "source" | "target" | "resumeSource" | "closeTarget">,
   finished = false,
-): Promise<boolean> {
+): Promise<false | { kept?: string }> {
   if (finished) {
     await deps.target("done", { moveId: journal.plan.moveId }).catch(() => undefined);
     await deps.source("done", { moveId: journal.plan.moveId }).catch(() => undefined);
-    return true;
+    return {};
   }
   try {
     await deps.closeTarget?.();
-    await deps.target("undo", { moveId: journal.plan.moveId });
+    const undone = await deps.target<{ kept?: string } | undefined>("undo", { moveId: journal.plan.moveId });
     await deps.source("done", { moveId: journal.plan.moveId });
     await deps.resumeSource();
-    return true;
+    return undone?.kept ? { kept: undone.kept } : {};
   } catch {
     return false;
   }

@@ -10965,6 +10965,13 @@ function Workspace({
         appendTab(newTab(session.id), repo);
         return session.id;
       },
+      // Saved before the move counts as done, so its card never points at a tab a crash lost.
+      saveMovedTab: async (id) => {
+        const session = sessionsRef.current.find((entry) => entry.id === id);
+        const summary = session ? await upsertSession(session) : null;
+        if (!session || !summary) throw new Error("Could not save the new tab here");
+        lastPersisted.current.set(id, persistFingerprint(session));
+      },
       // Undone before it was ever the app's: deleted, so history can't reopen it.
       closeMovedTab: async (id) => {
         if (!(await removeSessionRef.current(id, "delete", true, "cli"))) {

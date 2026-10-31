@@ -56,6 +56,8 @@ export type MoveHost = {
     title: string;
     blocks: Block[];
   }) => string;
+  /** Saves that tab's record; throws when it can't. */
+  saveMovedTab: (id: string) => Promise<void>;
   /** Deletes a tab `openMovedTab` opened, and its saved record. */
   closeMovedTab: (id: string) => Promise<void>;
   openSession: (id: string) => void;
@@ -333,7 +335,7 @@ async function run(
     cancel,
   );
   active.delete(key);
-  if (outcome.kind === "failed" && outcome.targetMayRun) {
+  if (outcome.kind === "failed" && (outcome.targetMayRun || outcome.resumeFailed)) {
     stuck.add(key);
   }
   if (outcome.kind === "failed") {
@@ -523,6 +525,9 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
           writeJournal(
             readJournal().map((entry) => (entry.plan.moveId === moveId ? { ...entry, tabId } : entry)),
           );
+          // Before the card: a tab only in memory would be gone after a crash.
+          if (!host) throw new Error("The app is closing");
+          await host.saveMovedTab(tabId);
           return { name };
         },
         closeTarget: closeTab,
@@ -545,8 +550,11 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
   })();
 }
 
-/** Undoes one move the app lost track of, or settles one that had finished. */
-async function recoverEntry(entry: MoveJournal): Promise<boolean> {
+/**
+ * Undoes one move the app lost track of, or settles one that had finished.
+ * False when it must be tried again; otherwise what the other machine kept.
+ */
+async function recoverEntry(entry: MoveJournal): Promise<false | { kept?: string }> {
   const remote = hostCall(entry.machineId);
   const toHost = entry.direction === "to-host";
   const finished = journalFinished(moved, entry.plan.sessionId, entry.plan.moveId);
@@ -578,7 +586,7 @@ async function recoverEntry(entry: MoveJournal): Promise<boolean> {
   }
   stuck.delete(entry.plan.sessionId);
   if (entry.tabId) stuck.delete(entry.tabId);
-  return true;
+  return done;
 }
 
 const STUCK_TEXT = "An earlier move couldn't be undone, so it stays stopped here";
@@ -587,8 +595,10 @@ const STUCK_TEXT = "An earlier move couldn't be undone, so it stays stopped here
 async function recoverJournal() {
   for (const entry of readJournal()) {
     const finished = journalFinished(moved, entry.plan.sessionId, entry.plan.moveId);
-    if (await recoverEntry(entry)) {
-      if (!finished) failures.set(entry.plan.sessionId, "The app closed during the move, so it was undone");
+    const done = await recoverEntry(entry);
+    if (done) {
+      const undone = "The app closed during the move, so it was undone";
+      if (!finished) failures.set(entry.plan.sessionId, done.kept ? `${undone}. ${done.kept}` : undone);
     } else {
       failures.set(entry.plan.sessionId, STUCK_TEXT);
     }
@@ -604,9 +614,10 @@ async function retryEntry(entry: MoveJournal) {
   failures.set(key, "Undoing it now");
   bump();
   try {
-    const done = await recoverEntry(entry).catch(() => false);
+    const done = await recoverEntry(entry).catch(() => false as const);
     if (done) {
-      failures.delete(key);
+      if (done.kept) failures.set(key, done.kept);
+      else failures.delete(key);
     } else {
       failures.set(key, `${STUCK_TEXT}. Try again once the other machine is back`);
     }

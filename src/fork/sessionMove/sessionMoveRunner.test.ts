@@ -189,7 +189,19 @@ describe("runMove", () => {
       kind: "failed",
       reason: "boom",
       rollbackProblem: "Could not resume it here: no window",
+      resumeFailed: true,
     });
+  });
+
+  it("says what the other machine kept because new commits were made there", async () => {
+    const kept = "New commits were made in /r/w on that machine, so it was kept";
+    const { deps } = harness({}, { start: "boom" });
+    const target = deps.target;
+    deps.target = (async (name: string, params: Record<string, unknown>) =>
+      name === "undo" ? { kept } : target(name, params)) as MoveDeps["target"];
+    expect(await runMove(PLAN, deps, () => {}, nothing)).toEqual({ kind: "failed", reason: `boom. ${kept}` });
+    const journal = { plan: PLAN, machineId: "m", direction: "to-host" as const };
+    expect(await recoverMove(journal, deps)).toEqual({ kept });
   });
 
   it("a busy session waits, a new turn keeps it waiting, and Cancel works until the stop", async () => {
@@ -280,7 +292,7 @@ describe("runMove", () => {
   it("undoes a move the app closed in the middle of", async () => {
     const journal = { plan: PLAN, machineId: "m", direction: "to-host" as const };
     const { deps, log } = harness();
-    expect(await recoverMove(journal, deps)).toBe(true);
+    expect(await recoverMove(journal, deps)).toEqual({});
     expect(log).toEqual(["target:undo", "source:done", "resume"]);
     const stuck = harness({}, { "target:undo": "offline" });
     expect(await recoverMove(journal, stuck.deps)).toBe(false);
@@ -328,10 +340,10 @@ describe("runMove", () => {
   it("settles a move whose card was saved before the app closed, without undoing it", async () => {
     const journal = { plan: PLAN, machineId: "m", direction: "to-mac" as const, tabId: "tab-2" };
     const { deps, log } = harness({ closeTarget: () => void log.push("close") });
-    expect(await recoverMove(journal, deps, true)).toBe(true);
+    expect(await recoverMove(journal, deps, true)).toEqual({});
     expect(log).toEqual(["target:done", "source:done"]);
     const undone = harness({ closeTarget: () => void undone.log.push("close") });
-    expect(await recoverMove(journal, undone.deps)).toBe(true);
+    expect(await recoverMove(journal, undone.deps)).toEqual({});
     expect(undone.log).toEqual(["close", "target:undo", "source:done", "resume"]);
   });
 });

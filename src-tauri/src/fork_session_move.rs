@@ -90,6 +90,8 @@ struct Made {
     branch: Option<String>,
     /// Saved before `git worktree add`; it is only this move's if the add worked.
     pending: Option<Pending>,
+    /// The commit the worktree was made at, kept for good: new commits past it are never undone.
+    head: Option<String>,
     account_home: Option<String>,
     /// Files that did not exist before.
     files: Vec<String>,
@@ -403,15 +405,18 @@ fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Stri
     let mut child = command
         .spawn()
         .map_err(|e| format!("git failed to start: {e}"))?;
-    // Read as it runs, so a full pipe never blocks it.
+    // Read as it runs, so a full pipe never blocks it. Answered over a channel,
+    // so the deadline covers reading too: a helper can hold a pipe open after git exits.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (send, receive) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
             if let Some(mut pipe) = pipe {
                 let _ = pipe.read_to_end(&mut bytes);
             }
-            String::from_utf8_lossy(&bytes).into_owned()
-        })
+            let _ = send.send(String::from_utf8_lossy(&bytes).into_owned());
+        });
+        receive
     };
     let stdout = drain(
         child
@@ -450,8 +455,25 @@ fn git_within(cwd: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Stri
             stderr: format!("git {} timed out", args.first().copied().unwrap_or("")),
         });
     }
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
+    let left = |receive: &std::sync::mpsc::Receiver<String>| {
+        receive.recv_timeout(limit.saturating_sub(started.elapsed()))
+    };
+    let (Ok(stdout), Ok(stderr)) = (left(&stdout), left(&stderr)) else {
+        // Git is done, but something it started still holds its output.
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+        }
+        return Ok(GitOut {
+            ok: false,
+            timed_out: true,
+            stdout: String::new(),
+            stderr: format!(
+                "git {} left a helper running past the deadline",
+                args.first().copied().unwrap_or("")
+            ),
+        });
+    };
     Ok(GitOut {
         ok: status.is_some_and(|status| status.success()),
         timed_out,
@@ -1253,6 +1275,7 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
             branch: branch.clone(),
             head: manifest.head.clone(),
         }),
+        head: Some(manifest.head.clone()),
         ..Made::default()
     };
     save_made(&folder, &made)?;
@@ -1418,6 +1441,22 @@ fn added_by_this_move(repo: Option<&str>, pending: &Pending) -> bool {
     })
 }
 
+/// The branch or the worktree's HEAD is no longer at the commit the move made it at.
+fn moved_on(repo: &Path, worktree: &Path, branch: &str, head: &str) -> bool {
+    let reference = format!("refs/heads/{branch}");
+    if let Ok(tip) = git_out(repo, &["rev-parse", "--verify", "--quiet", &reference]) {
+        if tip.trim() != head {
+            return true;
+        }
+    }
+    // Without its own .git, git would answer for the repository above it.
+    if !worktree.join(".git").exists() {
+        return false;
+    }
+    git_out(worktree, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .is_ok_and(|at| at.trim() != head)
+}
+
 fn remove_empty(folder: &Path) {
     let Ok(entries) = fs::read_dir(folder) else {
         return;
@@ -1448,6 +1487,17 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
     }
     for old in &made.replaced {
         fs::copy(&old.backup, &old.path).map_err(io_text)?;
+    }
+    // Someone committed there after the move: that work stays, worktree and branch both.
+    if let (Some(repo), Some(worktree), Some(branch), Some(head)) =
+        (&made.repo, &made.worktree, &made.branch, &made.head)
+    {
+        if moved_on(Path::new(repo), Path::new(worktree), branch, head) {
+            let _ = fs::remove_dir_all(&folder);
+            return Ok(json!({
+                "kept": format!("New commits were made in {worktree} on this Mac, so it was kept")
+            }));
+        }
     }
     if let (Some(home), Some(worktree)) = (&made.account_home, &made.worktree) {
         let home = Path::new(home);
@@ -1950,6 +2000,36 @@ mod tests {
         undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
         assert!(cwd.join("work.txt").exists());
         assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+    }
+
+    #[test]
+    fn undo_keeps_a_confirmed_worktree_with_new_commits() {
+        let fix = fixture();
+        let (manifest, urls) = carry(&fix);
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
+        fs::write(cwd.join("work.txt"), "mine\n").unwrap();
+        sh(&cwd, &["add", "work.txt"]);
+        sh(&cwd, &["commit", "-q", "-m", "work"]);
+        let undone = undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
+        assert!(undone["kept"].as_str().unwrap().contains("kept"));
+        assert!(cwd.join("work.txt").exists());
+        assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+        assert!(!fix.to.staging_root.join(MOVE).exists());
+    }
+
+    #[test]
+    fn git_gives_up_on_a_helper_that_holds_its_output() {
+        let fix = fixture();
+        let started = std::time::Instant::now();
+        let out = git_within(
+            &fix.target_repo,
+            &["-c", "alias.hang=!sleep 30 &", "hang"],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(out.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

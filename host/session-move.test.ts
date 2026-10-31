@@ -25,7 +25,7 @@ import {
   type InspectResult,
   type MoveManifest,
 } from "../src/fork/sessionMove/sessionMoveProtocol";
-import { accountHasRoom, handleSessionMove, type SessionMoveEnv } from "./session-move";
+import { accountHasRoom, handleSessionMove, runsClaude, type SessionMoveEnv } from "./session-move";
 import { runCommand } from "./lab-system";
 
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -78,7 +78,7 @@ describe("session move, a real run with two home folders", () => {
     run: runCommand,
     projects: () => [],
     isAlive: (pid) => pid === 4242,
-    commandLine: async () => "claude --resume x",
+    commandLine: async () => ["claude", "--resume", "x"],
     kill: () => {},
     sleep: async () => {},
     now: () => 1_000_000,
@@ -685,6 +685,33 @@ describe("session move, a real run with two home folders", () => {
     expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
   });
 
+  it("undo keeps a confirmed worktree once new commits are made in it", async () => {
+    const { manifest, urls } = await carry();
+    const { cwd } = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: MOVE, name: "s", manifest, urls,
+    })) as { cwd: string };
+    writeFileSync(join(cwd, "work.txt"), "mine\n");
+    sh(cwd, "add", "work.txt");
+    execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "work"]);
+    const undone = (await handleSessionMove(targetEnv, { op: "undo", moveId: MOVE })) as { kept?: string };
+    expect(undone.kept).toContain(cwd);
+    expect(existsSync(join(cwd, "work.txt"))).toBe(true);
+    expect(sh(targetRepo, "branch", "--list", "moved/s")).toContain("moved/s");
+    expect(existsSync(join(targetHome, "staging", MOVE))).toBe(false);
+  });
+
+  it("won't stop a conversation two processes have open", async () => {
+    const dir = join(targetHome, ".claude/sessions");
+    mkdirSync(dir, { recursive: true });
+    for (const pid of [4242, 4343])
+      writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, sessionId: ID, cwd: targetRepo, status: "idle", statusUpdatedAt: 0 }));
+    const signals: number[] = [];
+    const both: SessionMoveEnv = { ...targetEnv, isAlive: () => true, kill: (pid) => void signals.push(pid) };
+    await expect(handleSessionMove(both, { op: "state", sessionId: ID })).rejects.toThrow(/open twice/);
+    await expect(handleSessionMove(both, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: false });
+    expect(signals).toEqual([]);
+  });
+
   it("signals a PID with no start stamp only when it is still Claude", async () => {
     const dir = join(targetHome, ".claude/sessions");
     mkdirSync(dir, { recursive: true });
@@ -692,13 +719,17 @@ describe("session move, a real run with two home folders", () => {
     const signals: string[] = [];
     const as = (line: string | null): SessionMoveEnv => ({
       ...targetEnv,
-      commandLine: async () => line,
+      commandLine: async () => (line === null ? null : line.split(" ")),
       kill: (_pid, signal) => signals.push(signal),
     });
     // Reused by something else: the session is gone, and nothing is signalled.
     await expect(handleSessionMove(as("node server.js"), { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
     // Can't tell: refused.
     await expect(handleSessionMove(as(null), { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: false });
+    // Naming the launcher in its arguments doesn't make an editor Claude.
+    await expect(
+      handleSessionMove(as("vim /home/me/.local/bin/claude-acct"), { op: "stop", sessionId: ID }),
+    ).resolves.toEqual({ stopped: true });
     expect(signals).toEqual([]);
     let alive = true;
     const claude: SessionMoveEnv = {
@@ -711,6 +742,18 @@ describe("session move, a real run with two home folders", () => {
     };
     await expect(handleSessionMove(claude, { op: "stop", sessionId: ID })).resolves.toEqual({ stopped: true });
     expect(signals).toEqual(["SIGTERM"]);
+  });
+});
+
+describe("runsClaude", () => {
+  it("is the program that runs, not a word in its arguments", () => {
+    expect(runsClaude(["claude", "--resume", "x"])).toBe(true);
+    expect(runsClaude(["/home/me/.local/share/claude/versions/2.1.3", "--resume", "x"])).toBe(true);
+    expect(runsClaude(["node", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"])).toBe(true);
+    expect(runsClaude(["/bin/bash", "/home/me/.local/bin/claude-acct", "run"])).toBe(true);
+    expect(runsClaude(["vim", "/home/me/.local/bin/claude-acct"])).toBe(false);
+    expect(runsClaude(["less", "claude"])).toBe(false);
+    expect(runsClaude(["bash", "-c", "claude"])).toBe(false);
   });
 });
 
