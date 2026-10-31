@@ -165,6 +165,25 @@ describe("memory popover", () => {
     }
   });
 
+  it("says so when memory can't be read at all, instead of checking forever", async () => {
+    invoke.mockRejectedValue(new Error("no such command"));
+    const footer = document.createElement("span");
+    const tab = document.createElement("div");
+    document.body.append(footer, tab);
+    await act(async () => {
+      root.render(
+        createElement(MemoryWatcher, { sessions: { current: [] }, isForeground: () => false, chipHost: footer }),
+      );
+      setMachinesHost(tab);
+      pickMachineTab("memory");
+      openMachines();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(tab.querySelector('[role="alert"]')?.textContent).toContain("Couldn't read memory use");
+  });
+
   it("with auto-park on, parks the idle session after a minute of pressure and says so quietly", async () => {
     setMemorySettings({ autoPark: true, idleMinutes: 1 });
     invoke.mockImplementation(async (command: string) => {

@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { ServerStack } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
 import { useZonePickerOpen } from "../lab/agentTimeZone";
@@ -44,6 +44,8 @@ function Machines({ inset }: { inset: boolean }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const tone = worstTone(signals);
   const hover = machinesHover(signals);
+  // The footer goes away for Settings; the popover shouldn't come back with it.
+  useEffect(() => closeMachines, []);
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;

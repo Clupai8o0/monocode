@@ -252,7 +252,13 @@ export function MemoryWatcher({
             ) : (
               <div className="flex flex-col gap-3 p-3 text-[12px] text-content/50" aria-label="Memory">
                 {highUsage ? <ReviewWorkRow reasons={pressure.reasons} onReviewWork={reviewWork} /> : null}
-                <p>Checking memory…</p>
+                {error ? (
+                  <p role="alert" className="text-[11px] text-red-500 dark:text-red-400" title={error}>
+                    Couldn't read memory use. Trying again…
+                  </p>
+                ) : (
+                  <p>Checking memory…</p>
+                )}
               </div>
             ),
             host,
