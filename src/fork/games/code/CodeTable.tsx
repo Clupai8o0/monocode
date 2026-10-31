@@ -35,7 +35,10 @@ import {
   saveSnapshot,
   snapshotForDojo,
   syncLeetcode,
+  verdictLine,
+  waitForVerdict,
   type LeetcodePick,
+  type LeetcodeVerdict,
   type LeetcodeSnapshot,
   type LeetcodeSubmission,
 } from "./leetcodeAccount";
@@ -107,6 +110,8 @@ export type LeetcodeAccountApi = {
   writeForDojo: (text: string) => Promise<void>;
   /** Dojo's leetcode-picks.json, or "" when there is none. */
   readPicks: () => Promise<string>;
+  /** Sends an answer to LeetCode's judge; gives back the submission id. */
+  submit: (slug: string, language: DrillLanguage, code: string) => Promise<string>;
 };
 
 async function dojoFolderExists(): Promise<boolean> {
@@ -135,6 +140,8 @@ const nativeLeetcodeAccount: LeetcodeAccountApi = {
       await writeTextFile(`${DOJO_FOLDER}/leetcode.json`, text);
     }
   },
+  submit: (slug, language, code) =>
+    invoke<string>("fork_leetcode_submit", { slug, lang: language, code }),
   readPicks: async () => {
     try {
       return await readTextFile(`${DOJO_FOLDER}/leetcode-picks.json`);
@@ -262,6 +269,10 @@ export function CodeTable({
   const [lcPanel, setLcPanel] = useState<"account" | "paste" | null>(null);
   const [lcPaste, setLcPaste] = useState({ session: "", csrf: "" });
   const [lcPicks, setLcPicks] = useState<LeetcodePick[]>([]);
+  // LeetCode's verdict on the last answer sent from each drill.
+  const [lcVerdicts, setLcVerdicts] = useState<
+    Record<string, { judging: true } | { judging: false; verdict: LeetcodeVerdict }>
+  >({});
   const [lcSubmissions, setLcSubmissions] = useState<{
     slug: string;
     list: LeetcodeSubmission[] | null;
@@ -541,6 +552,35 @@ export function CodeTable({
       goTo(into);
       setNote(`Loaded your ${submission.status.toLowerCase()} submission from ${ago(submission.time)}.`);
     } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** Sends this drill's code to LeetCode, and shows the verdict here. */
+  const submitToLeetcode = async () => {
+    const target = drill;
+    const targetSlug = target ? drillSlug(target.id) : null;
+    if (!target || !targetSlug || lcVerdicts[target.id]?.judging) {
+      return;
+    }
+    onInput?.();
+    const answer = codeById[target.id] ?? target.starter;
+    setLcVerdicts((current) => ({ ...current, [target.id]: { judging: true } }));
+    try {
+      const id = await leetcodeAccount.submit(targetSlug, target.language, answer);
+      const verdict = await waitForVerdict(fetchLeetcode, id);
+      setLcVerdicts((current) => ({ ...current, [target.id]: { judging: false, verdict } }));
+      // The solved list, Dojo's copy and Your submissions catch up.
+      setLcSubmissions((current) => (current?.slug === targetSlug ? null : current));
+      if (verdict.accepted && lcUser) {
+        void syncAccount(lcUser);
+      }
+    } catch (error) {
+      setLcVerdicts((current) => {
+        const next = { ...current };
+        delete next[target.id];
+        return next;
+      });
       setNote(error instanceof Error ? error.message : String(error));
     }
   };
@@ -988,6 +1028,19 @@ export function CodeTable({
         >
           {running ? "Running…" : "Run"}
         </button>
+        {lcUser && slug ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={lcVerdicts[drill.id]?.judging === true}
+            title="Send this answer to LeetCode's judge, as you"
+            data-fork-leetcode-submit=""
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+            onClick={() => void submitToLeetcode()}
+          >
+            {lcVerdicts[drill.id]?.judging ? "Judging…" : "Submit to LeetCode"}
+          </button>
+        ) : null}
         {syntaxErrors > 0 ? (
           <span
             data-fork-code-syntax-errors=""
@@ -1062,6 +1115,28 @@ export function CodeTable({
             Hint: {hint}
           </p>
         ))}
+
+        {(() => {
+          const entry = lcVerdicts[drill.id];
+          if (!entry || entry.judging) {
+            return null;
+          }
+          const { verdict } = entry;
+          return (
+            <div className="flex flex-col gap-0.5" data-fork-leetcode-verdict={verdict.status}>
+              <p
+                className={`text-[12px] ${verdict.accepted ? "font-medium text-content" : "text-content/80"}`}
+              >
+                LeetCode: {verdictLine(verdict)}
+              </p>
+              {verdict.detail ? (
+                <pre className="font-mono text-[11px] whitespace-pre-wrap text-content/60">
+                  {verdict.detail}
+                </pre>
+              ) : null}
+            </div>
+          );
+        })()}
 
         {runError ? (
           <p role="alert" className="text-[12px] text-content/80">

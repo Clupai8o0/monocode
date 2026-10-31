@@ -43,7 +43,11 @@ const SUBMISSIONS: &str = "query s($slug: String!) { questionSubmissionList(offs
 limit: 20, questionSlug: $slug) { submissions { id title titleSlug statusDisplay lang \
 timestamp runtime memory } } }";
 const SUBMISSION: &str = "query d($id: Int!) { submissionDetails(submissionId: $id) { \
-code timestamp statusCode lang { name } question { titleSlug } } }";
+code timestamp statusCode lang { name } question { titleSlug } runtimeDisplay memoryDisplay \
+totalCorrect totalTestcases lastTestcase expectedOutput codeOutput compileError runtimeError } }";
+const QUESTION_ID: &str = "query i($slug: String!) { question(titleSlug: $slug) { questionId } }";
+/// LeetCode turns away answers past this size; so does the Code tab.
+const MAX_SUBMIT: usize = 100_000;
 
 const KEYCHAIN_SERVICE: &str = "monocode.fork.leetcode";
 const KEYCHAIN_USER: &str = "account";
@@ -234,6 +238,85 @@ fn fetch(kind: &str, value: &str) -> Result<serde_json::Value, String> {
     Ok(data)
 }
 
+/// The language names LeetCode's judge takes, for the two the tab runs.
+fn judge_lang(lang: &str) -> Option<&'static str> {
+    match lang {
+        "javascript" => Some("javascript"),
+        "python" | "python3" => Some("python3"),
+        _ => None,
+    }
+}
+
+/// Sends an answer to LeetCode's judge as the connected user. Gives back the
+/// submission id; its verdict is read with fork_leetcode_fetch("submission").
+fn submit(slug: &str, lang: &str, code: &str) -> Result<String, String> {
+    let account = read_account().ok_or("Connect LeetCode first.")?;
+    if !valid_slug(slug) {
+        return Err("That is not a LeetCode problem name.".into());
+    }
+    let lang = judge_lang(lang).ok_or("LeetCode submissions work for JavaScript and Python.")?;
+    if code.trim().is_empty() || code.len() > MAX_SUBMIT {
+        return Err("There is no answer to submit.".into());
+    }
+    let keys = Some((account.session.as_str(), account.csrf.as_str()));
+    let data = post(QUESTION_ID, serde_json::json!({ "slug": slug }), keys)?;
+    let question_id = data["question"]["questionId"]
+        .as_str()
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
+        .ok_or("LeetCode did not send the problem.")?
+        .to_string();
+    let referer = format!("https://leetcode.com/problems/{slug}/");
+    let response = ureq::post(&format!("https://leetcode.com/problems/{slug}/submit/"))
+        .set("Content-Type", "application/json")
+        .set("Referer", &referer)
+        .set("Origin", "https://leetcode.com")
+        .set("User-Agent", "Mozilla/5.0 (Macintosh) MonoCode")
+        .set(
+            "Cookie",
+            &format!(
+                "LEETCODE_SESSION={}; csrftoken={}",
+                account.session, account.csrf
+            ),
+        )
+        .set("x-csrftoken", &account.csrf)
+        .timeout(Duration::from_secs(20))
+        .send_string(
+            &serde_json::json!({ "lang": lang, "question_id": question_id, "typed_code": code })
+                .to_string(),
+        );
+    let response = match response {
+        Ok(response) => response,
+        Err(ureq::Error::Status(429, _)) => {
+            return Err("LeetCode says too many submissions. Wait a minute and try again.".into());
+        }
+        Err(ureq::Error::Status(401 | 403 | 499, _)) => {
+            return Err("LeetCode refused the submission. Connect your account again.".into());
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            return Err(format!("LeetCode answered HTTP {code}. Try again soon."));
+        }
+        Err(_) => return Err("Could not reach LeetCode. Check the connection.".into()),
+    };
+    let mut body = String::new();
+    response
+        .into_reader()
+        .take(MAX_BODY)
+        .read_to_string(&mut body)
+        .map_err(|_| "LeetCode's answer could not be read.".to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|_| "LeetCode refused the submission. Connect your account again.".to_string())?;
+    match &parsed["submission_id"] {
+        serde_json::Value::Number(id) => Ok(id.to_string()),
+        serde_json::Value::String(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) => {
+            Ok(id.clone())
+        }
+        _ => Err(parsed["error"]
+            .as_str()
+            .map(|error| format!("LeetCode: {error}"))
+            .unwrap_or_else(|| "LeetCode did not take the submission.".into())),
+    }
+}
+
 /// Checks a session with LeetCode and gives back its username.
 fn verify(session: &str, csrf: &str) -> Result<String, String> {
     if !cookie_safe(session) || !cookie_safe(csrf) {
@@ -346,6 +429,15 @@ pub async fn fork_leetcode_connect_paste(session: String, csrf: String) -> Resul
         .map_err(|error: tauri::Error| error.to_string())?
 }
 
+/// Submits `code` for problem `slug` in `lang` (javascript or python) as the
+/// connected user. Gives back the submission id.
+#[tauri::command]
+pub async fn fork_leetcode_submit(slug: String, lang: String, code: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || submit(&slug, &lang, &code))
+        .await
+        .map_err(|error: tauri::Error| error.to_string())?
+}
+
 /// The connected username, or null. Reads the keychain only.
 #[tauri::command]
 pub async fn fork_leetcode_account() -> Result<Option<String>, String> {
@@ -400,6 +492,13 @@ mod tests {
         assert!(request("profile", "", Some("sam")).is_ok());
         assert!(needs_account("recent"));
         assert!(!needs_account("question"));
+    }
+
+    #[test]
+    fn only_runnable_languages_are_judged() {
+        assert_eq!(judge_lang("python"), Some("python3"));
+        assert_eq!(judge_lang("javascript"), Some("javascript"));
+        assert_eq!(judge_lang("cpp"), None);
     }
 
     #[test]

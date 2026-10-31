@@ -135,6 +135,23 @@ const fetchLeetcode: LeetcodeFetch = async (kind, value) => {
       },
     };
   }
+  if (kind === "submission" && value === "wrong") {
+    return {
+      submissionDetails: {
+        statusCode: 11,
+        totalCorrect: 1,
+        totalTestcases: 63,
+        lastTestcase: "[3,3]\n6",
+        expectedOutput: "[0,1]",
+        codeOutput: "[0,0]",
+      },
+    };
+  }
+  if (kind === "submission" && value === "right") {
+    return {
+      submissionDetails: { statusCode: 10, totalCorrect: 63, totalTestcases: 63, runtimeDisplay: "52 ms", memoryDisplay: "17 MB" },
+    };
+  }
   if (kind === "submission") {
     return {
       submissionDetails: {
@@ -262,6 +279,7 @@ const leetcodeAccount: LeetcodeAccountApi = {
     (window as unknown as { dojoLeetcode: string }).dojoLeetcode = text;
   },
   readPicks: async () => JSON.stringify([{ slug: "two-sum", why: "warm-up on hashing" }]),
+  submit: async (_slug, _language, code) => (code.includes("my old answer") ? "wrong" : "right"),
 };
 
 // Stands in for the panel's game keys: editor typing must never reach it.

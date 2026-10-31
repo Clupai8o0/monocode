@@ -169,3 +169,43 @@ describe("submissions", () => {
     expect(pickPrompt("/d")).toContain("/d/leetcode-picks.json");
   });
 });
+
+describe("verdicts", () => {
+  it("reads judged submissions and waits while pending", async () => {
+    const { readVerdict, waitForVerdict, verdictLine } = await import("./leetcodeAccount");
+    expect(readVerdict({ submissionDetails: null })).toBeNull();
+    expect(readVerdict({ submissionDetails: { statusCode: 0 } })).toBeNull();
+    const accepted = readVerdict({
+      submissionDetails: { statusCode: 10, totalCorrect: 63, totalTestcases: 63, runtimeDisplay: "52 ms", memoryDisplay: "17.1 MB" },
+    });
+    expect(accepted && verdictLine(accepted)).toBe("Accepted · 63/63 tests · 52 ms · 17.1 MB");
+    const wrong = readVerdict({
+      submissionDetails: {
+        statusCode: 11,
+        totalCorrect: 2,
+        totalTestcases: 63,
+        lastTestcase: "[3,3]\n6",
+        expectedOutput: "[0,1]",
+        codeOutput: "[]",
+      },
+    });
+    expect(wrong?.accepted).toBe(false);
+    expect(wrong && verdictLine(wrong)).toBe("Wrong Answer · 2/63 tests");
+    expect(wrong?.detail).toBe("Input: [3,3], 6\nExpected: [0,1]\nGot: []");
+    expect(readVerdict({ submissionDetails: { statusCode: 20, compileError: "Line 1: oops" } })?.detail).toBe(
+      "Line 1: oops",
+    );
+
+    let calls = 0;
+    const fetch: LeetcodeFetch = async () => {
+      calls += 1;
+      return calls < 3 ? { submissionDetails: null } : { submissionDetails: { statusCode: 14 } };
+    };
+    const verdict = await waitForVerdict(fetch, "9", { wait: async () => undefined });
+    expect(verdict.status).toBe("Time Limit Exceeded");
+    expect(calls).toBe(3);
+    await expect(
+      waitForVerdict(async () => ({}), "9", { tries: 2, wait: async () => undefined }),
+    ).rejects.toThrow("still judging");
+  });
+});

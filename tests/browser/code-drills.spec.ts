@@ -502,6 +502,21 @@ test("a connected LeetCode account shows what you solved, Dojo's picks and your 
   await expect(page.locator(".cm-content")).toContainText("my old answer");
   await expect(page.locator("[data-fork-code-note]")).toContainText("accepted submission");
 
+  // Submitting the old answer gets LeetCode's Wrong Answer, with the case.
+  await page.locator("[data-fork-leetcode-submit]").click();
+  const verdict = page.locator("[data-fork-leetcode-verdict]");
+  await expect(verdict).toHaveAttribute("data-fork-leetcode-verdict", "Wrong Answer");
+  await expect(verdict).toContainText("1/63 tests");
+  await expect(verdict).toContainText("Expected: [0,1]");
+
+  await setCode(
+    page,
+    "var twoSum = function(nums, target) {\n  return [0, 1];\n};\n",
+  );
+  await page.locator("[data-fork-leetcode-submit]").click();
+  await expect(verdict).toHaveAttribute("data-fork-leetcode-verdict", "Accepted");
+  await expect(verdict).toContainText("Accepted · 63/63 tests · 52 ms");
+
   await account.getByRole("button", { name: "Pick for me" }).click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { dojoPrompt?: string }).dojoPrompt ?? ""))

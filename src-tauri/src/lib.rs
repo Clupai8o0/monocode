@@ -729,6 +729,7 @@ pub fn run() {
             fork_leetcode::fork_leetcode_connect_paste,  // Fork
             fork_leetcode::fork_leetcode_account,  // Fork
             fork_leetcode::fork_leetcode_disconnect,  // Fork
+            fork_leetcode::fork_leetcode_submit,  // Fork
             fork_shows::fork_shows_cache_write, // Fork
             fork_shows::fork_shows_cache_prune, // Fork
             fork_shows::fork_shows_cache_root,  // Fork

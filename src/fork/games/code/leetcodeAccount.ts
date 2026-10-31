@@ -325,3 +325,107 @@ export function pickPrompt(dojoFolder: string): string {
     "Then tell me in a few lines why these, and update progress.md.",
   ].join("\n");
 }
+
+/** LeetCode's judge on one submission. */
+export type LeetcodeVerdict = {
+  accepted: boolean;
+  status: string;
+  passed: number | null;
+  total: number | null;
+  runtime: string;
+  memory: string;
+  /** What went wrong, in a few lines, or "". */
+  detail: string;
+};
+
+const VERDICTS: Record<number, string> = {
+  10: "Accepted",
+  11: "Wrong Answer",
+  12: "Memory Limit Exceeded",
+  13: "Output Limit Exceeded",
+  14: "Time Limit Exceeded",
+  15: "Runtime Error",
+  16: "Internal Error",
+  20: "Compile Error",
+};
+
+const clip = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/** A judged submission's verdict, or null while LeetCode is still judging. */
+export function readVerdict(raw: unknown): LeetcodeVerdict | null {
+  const details = asRecord(asRecord(raw).submissionDetails);
+  const code = Number(details.statusCode);
+  const status = VERDICTS[code];
+  if (!status) {
+    return null;
+  }
+  const total = Number.isFinite(Number(details.totalTestcases)) && details.totalTestcases != null
+    ? Number(details.totalTestcases)
+    : null;
+  const passed = Number.isFinite(Number(details.totalCorrect)) && details.totalCorrect != null
+    ? Number(details.totalCorrect)
+    : null;
+  const lines: string[] = [];
+  const compile = asString(details.compileError);
+  const runtime = asString(details.runtimeError);
+  const input = asString(details.lastTestcase);
+  if (code === 20 && compile) {
+    lines.push(clip(compile));
+  }
+  if (code === 15 && runtime) {
+    lines.push(clip(runtime));
+  }
+  if (code !== 10 && code !== 20 && input) {
+    lines.push(`Input: ${clip(input.replace(/\n/g, ", "))}`);
+    const expected = asString(details.expectedOutput);
+    const got = asString(details.codeOutput);
+    if (code === 11 && expected) {
+      lines.push(`Expected: ${clip(expected)}`);
+    }
+    if (code === 11 && got) {
+      lines.push(`Got: ${clip(got)}`);
+    }
+  }
+  return {
+    accepted: code === 10,
+    status,
+    passed,
+    total,
+    runtime: asString(details.runtimeDisplay),
+    memory: asString(details.memoryDisplay),
+    detail: lines.join("\n"),
+  };
+}
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Asks for the verdict until LeetCode has judged it, about a minute at most. */
+export async function waitForVerdict(
+  fetch: LeetcodeFetch,
+  id: string,
+  { tries = 40, wait = pause }: { tries?: number; wait?: (ms: number) => Promise<void> } = {},
+): Promise<LeetcodeVerdict> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    await wait(attempt === 0 ? 1000 : 1500);
+    const verdict = readVerdict(await fetch("submission", id));
+    if (verdict) {
+      return verdict;
+    }
+  }
+  throw new Error("LeetCode is still judging. Its verdict will show in Your submissions.");
+}
+
+/** "Accepted · 3/3 tests · 52 ms · 17.1 MB" */
+export function verdictLine(verdict: LeetcodeVerdict): string {
+  const parts = [verdict.status];
+  if (verdict.passed !== null && verdict.total !== null) {
+    parts.push(`${verdict.passed}/${verdict.total} tests`);
+  }
+  if (verdict.accepted && verdict.runtime) {
+    parts.push(verdict.runtime);
+  }
+  if (verdict.accepted && verdict.memory) {
+    parts.push(verdict.memory);
+  }
+  return parts.join(" · ");
+}
