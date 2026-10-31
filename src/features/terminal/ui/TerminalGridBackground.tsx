@@ -618,14 +618,11 @@ export function TerminalGridBackground({
       const isSpace = event.key === " ";
       // Fork: P pauses or resumes without playing a move.
       const pauseKey = hostRef.current?.onPauseKey;
-      if (
-        (event.key === "p" || event.key === "P") &&
-        !event.repeat &&
-        pauseKey
-      ) {
+      if ((event.key === "p" || event.key === "P") && pauseKey) {
         event.preventDefault();
         event.stopPropagation();
-        pauseKey();
+        // A held P toggles once.
+        if (!event.repeat) pauseKey();
         return;
       }
       // Fork: while it's the board's turn, letters don't reach the app, where
