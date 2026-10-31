@@ -4,6 +4,8 @@ import { createSnakeArcade } from "./snakeArcade";
 import { createBlocksArcade } from "../../../fork/games/blocksArcade"; // Fork
 import { createPlatformerArcade } from "../../../fork/games/platformerArcade"; // Fork
 import { createRunnerArcade } from "../../../fork/games/runnerArcade"; // Fork
+import { createSandArcade } from "../../../fork/games/sandArcade"; // Fork
+import { createStackArcade } from "../../../fork/games/stackArcade"; // Fork
 
 /** How long an idle board stays up before the slider moves on. */
 export const SLIDE_HOLD_MS = 16_000;
@@ -82,6 +84,29 @@ export const GRID_GAMES: readonly GridGame[] = [
     hint: "arrows run · space jumps",
     hasAction: true,
     create: createPlatformerArcade,
+  },
+  // Fork: calm ones, for when a round of anything else is too much.
+  {
+    id: "stack",
+    label: "stack",
+    playLabel:
+      "Stack tower. Space or down drops the block; line it up to keep its width. Escape to release.",
+    idleDim: 0.5,
+    lives: false,
+    hint: "space drops · line it up",
+    hasAction: true,
+    create: createStackArcade,
+  },
+  {
+    id: "sand",
+    label: "sand",
+    playLabel:
+      "Sand drop. Left and right move the spout, Space or down pours, up changes shade. Escape to release.",
+    idleDim: 0.5,
+    lives: false,
+    hint: "arrows steer · space pours · up shade",
+    hasAction: true,
+    create: createSandArcade,
   },
 ];
 
