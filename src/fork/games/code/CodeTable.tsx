@@ -565,6 +565,8 @@ export function CodeTable({
     }
     onInput?.();
     const answer = codeById[target.id] ?? target.starter;
+    // A connect or disconnect while judging means lcUser no longer matches the account.
+    const generation = lcGeneration.current;
     setLcVerdicts((current) => ({ ...current, [target.id]: { judging: true } }));
     try {
       const id = await leetcodeAccount.submit(targetSlug, target.language, answer);
@@ -572,7 +574,7 @@ export function CodeTable({
       setLcVerdicts((current) => ({ ...current, [target.id]: { judging: false, verdict } }));
       // The solved list, Dojo's copy and Your submissions catch up.
       setLcSubmissions((current) => (current?.slug === targetSlug ? null : current));
-      if (verdict.accepted && lcUser) {
+      if (verdict.accepted && lcUser && generation === lcGeneration.current) {
         void syncAccount(lcUser);
       }
     } catch (error) {
