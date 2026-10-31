@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LEETCODE_STORE_KEY,
   htmlToText,
+  innerOrderFree,
   leetcodeDrills,
   loadLeetcode,
   loadSavedLeetcode,
@@ -137,18 +138,29 @@ describe("leetcodeDrills", () => {
     expect(js.task).toContain("10^4");
   });
 
-  it("rounds doubles", () => {
+  it("lets doubles be close, not exact", () => {
     const result = leetcodeDrills(
       withMeta(
         { name: "myPow", params: [{ name: "x", type: "double" }, { name: "n", type: "integer" }], return: { type: "double" } },
         { content: "<p><strong>Input:</strong> x = 2.10000, n = 3\n<strong>Output:</strong> 9.26100\n</p>" },
       ),
     );
-    expect("drills" in result && result.drills[1].tests[0]).toEqual({
-      call: "round(Solution().myPow(2.10000, 3), 5)",
-      expect: "round(9.26100, 5)",
-      label: "myPow(2.10000, 3)",
-    });
+    if (!("drills" in result)) {
+      throw new Error(result.problem);
+    }
+    const [js, py] = result.drills;
+    expect(js.tests[0].expect).toBe("9.26100");
+    expect(py.tests[0].label).toBe("myPow(2.10000, 3)");
+    const check = (x: number) => new Function("myPow", `return ${js.tests[0].call};`)(() => x);
+    expect(check(9.261000004)).toBe(9.261);
+    expect(check(9.27)).toBe(9.27);
+  });
+
+  it("sorts inside inner lists only when that keeps the meaning", () => {
+    expect(innerOrderFree('[["eat","tea"],["bat"]]')).toBe(true);
+    expect(innerOrderFree("[[1,2],[2,1]]")).toBe(false);
+    expect(innerOrderFree("[0,1]")).toBe(true);
+    expect(innerOrderFree("nope")).toBe(false);
   });
 
   it("says why a problem cannot be a drill", () => {

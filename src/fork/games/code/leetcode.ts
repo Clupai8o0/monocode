@@ -267,6 +267,32 @@ function pythonStarter(code: string): string {
   return `${starter}\n`;
 }
 
+/**
+ * Whether sorting inside each inner list keeps the answer's meaning. It does
+ * for groups and combinations; it does not when two inner lists hold the
+ * same items in different orders (permutations), so those keep their order.
+ */
+export function innerOrderFree(output: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  const keys = value.map((item) =>
+    JSON.stringify(Array.isArray(item) ? [...(item as unknown[])].map((v) => JSON.stringify(v)).sort() : item),
+  );
+  return new Set(keys).size === keys.length;
+}
+
+// Doubles pass within 1e-5, absolute or relative, as LeetCode's judge does.
+const JS_CLOSE = "((a, b) => typeof a === \"number\" && Math.abs(a - b) <= 1e-5 * Math.max(1, Math.abs(b)) ? b : a)";
+const PY_CLOSE =
+  "(lambda a, b: b if isinstance(a, (int, float)) and not isinstance(a, bool) and abs(a - b) <= 1e-5 * max(1, abs(b)) else a)";
+
 function tests(
   meta: Meta,
   examples: { args: string[]; output: string }[],
@@ -281,14 +307,13 @@ function tests(
     let call = python ? `Solution().${label}` : label;
     let expect = python ? toPython(output) : output;
     if (isDouble) {
-      [call, expect] = [call, expect].map((value) =>
-        python ? `round(${value}, 5)` : `Math.round((${value}) * 1e5) / 1e5`,
-      );
+      call = python ? `${PY_CLOSE}(${call}, ${expect})` : `${JS_CLOSE}(${call}, ${expect})`;
     } else if (sorted) {
+      const inner = innerOrderFree(output);
       [call, expect] = [call, expect].map((value) =>
         python
-          ? `(lambda x: sorted(json.dumps(sorted(v) if isinstance(v, list) else v) for v in x) if isinstance(x, list) else x)(${value})`
-          : `((x) => Array.isArray(x) ? x.map((v) => JSON.stringify(Array.isArray(v) ? [...v].sort() : v)).sort() : x)(${value})`,
+          ? `(lambda x: sorted(json.dumps(${inner ? "sorted(v) if isinstance(v, list) else v" : "v"}) for v in x) if isinstance(x, list) else x)(${value})`
+          : `((x) => Array.isArray(x) ? x.map((v) => JSON.stringify(${inner ? "Array.isArray(v) ? [...v].sort() : v" : "v"})).sort() : x)(${value})`,
       );
     }
     return { call, expect, label };
