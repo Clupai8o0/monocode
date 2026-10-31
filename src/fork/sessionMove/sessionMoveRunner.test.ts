@@ -286,4 +286,52 @@ describe("runMove", () => {
     expect(await recoverMove(journal, stuck.deps)).toBe(false);
     expect(stuck.log).not.toContain("resume");
   });
+
+  it("closes the tab it opened before the undo removes its folder", async () => {
+    const { deps, log } = harness({ closeTarget: () => void log.push("close") }, { card: "full" });
+    expect(await runMove(PLAN, deps, () => {}, nothing)).toMatchObject({ kind: "failed", reason: "full" });
+    expect(log.indexOf("close")).toBeGreaterThan(log.indexOf("card"));
+    expect(log.indexOf("close")).toBeLessThan(log.indexOf("target:undo"));
+    expect(log.indexOf("resume")).toBeGreaterThan(log.indexOf("target:undo"));
+  });
+
+  it("never stops the source when the journal can't be saved", async () => {
+    const { deps, log } = harness({
+      journal: {
+        begin: () => {
+          throw new Error("quota");
+        },
+        end: () => {},
+      },
+    });
+    expect(await runMove(PLAN, deps, () => {}, nothing)).toEqual({
+      kind: "failed",
+      reason: "Could not save the move on this Mac, so it did not start",
+    });
+    expect(log).not.toContain("stop");
+    expect(log).not.toContain("source:pack");
+  });
+
+  it("stays moved when the journal can't be cleared after the card", async () => {
+    const { deps, log } = harness({
+      journal: {
+        begin: () => {},
+        end: () => {
+          throw new Error("quota");
+        },
+      },
+    });
+    expect((await runMove(PLAN, deps, () => {}, nothing)).kind).toBe("moved");
+    expect(log).not.toContain("target:undo");
+  });
+
+  it("settles a move whose card was saved before the app closed, without undoing it", async () => {
+    const journal = { plan: PLAN, machineId: "m", direction: "to-mac" as const, tabId: "tab-2" };
+    const { deps, log } = harness({ closeTarget: () => void log.push("close") });
+    expect(await recoverMove(journal, deps, true)).toBe(true);
+    expect(log).toEqual(["target:done", "source:done"]);
+    const undone = harness({ closeTarget: () => void undone.log.push("close") });
+    expect(await recoverMove(journal, undone.deps)).toBe(true);
+    expect(undone.log).toEqual(["close", "target:undo", "source:done", "resume"]);
+  });
 });

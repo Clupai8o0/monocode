@@ -33,6 +33,11 @@ createRoot(document.getElementById("root")!).render(
       <MoveLineView text={stepText("code", "Vivobook", { percent: 42 })} />
       <MoveLineView text={stepText("confirm", "Vivobook", { queued: true })} />
       <MoveLineView failure="This repository is not on that machine" onDismiss={noop} />
+      <MoveLineView
+        failure="An earlier move couldn't be undone, so it stays stopped here"
+        onDismiss={noop}
+        onRetry={noop}
+      />
     </div>
     <div data-shot="card" className="flex flex-col gap-2">
       <MovedCardView

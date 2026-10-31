@@ -933,14 +933,26 @@ async function removeEmpty(folder: string) {
 
 async function done(env: SessionMoveEnv, params: Record<string, unknown>) {
   await rm(moveFolder(env, params), { recursive: true, force: true });
+  const job = jobs.get(stringParam(params, "moveId"));
+  if (job?.settled) jobs.delete(stringParam(params, "moveId"));
   return {};
 }
 
 // The desktop gives up on a request after a minute, and these can take longer,
 // so they start with `begin` and are asked after with `poll`. One at a time per
 // move, and undo waits its turn, so it never races a step still running.
+// A finished answer stays until the move's next step, its `done`, or an hour,
+// so a poll whose reply was lost gets the same answer again.
 type JobEnd = { done: true; result?: unknown; error?: string };
-const jobs = new Map<string, { op: string; end: Promise<JobEnd>; settled?: JobEnd }>();
+type Job = { op: string; end: Promise<JobEnd>; settled?: JobEnd; settledAt?: number };
+const jobs = new Map<string, Job>();
+const JOB_KEEP_MS = 60 * 60_000;
+
+function sweepJobs(now: number) {
+  for (const [moveId, job] of jobs) {
+    if (job.settledAt !== undefined && now - job.settledAt > JOB_KEEP_MS) jobs.delete(moveId);
+  }
+}
 
 function beginJob(env: SessionMoveEnv, params: Record<string, unknown>) {
   const inner = params.inner as Record<string, unknown> | undefined;
@@ -955,10 +967,12 @@ function beginJob(env: SessionMoveEnv, params: Record<string, unknown>) {
       (result): JobEnd => ({ done: true, result }),
       (error: unknown): JobEnd => ({ done: true, error: error instanceof Error ? error.message : String(error) }),
     );
-  const job: { op: string; end: Promise<JobEnd>; settled?: JobEnd } = { op, end };
+  const job: Job = { op, end };
   void end.then((settled) => {
     job.settled = settled;
+    job.settledAt = Date.now();
   });
+  sweepJobs(Date.now());
   jobs.set(moveId, job);
   return {};
 }
@@ -968,7 +982,6 @@ function pollJob(params: Record<string, unknown>) {
   const job = jobs.get(moveId);
   if (!job || job.op !== params.inner) throw new Error("That machine restarted during the move");
   if (!job.settled) return { done: false };
-  jobs.delete(moveId);
   return job.settled;
 }
 

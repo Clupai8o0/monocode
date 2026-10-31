@@ -25,11 +25,14 @@ export function MoveLineView({
   failure,
   onCancel,
   onDismiss,
+  onRetry,
 }: {
   text?: string;
   failure?: string;
   onCancel?: () => void;
   onDismiss?: () => void;
+  /** A move that stayed stopped: undo it again now. */
+  onRetry?: () => void;
 }) {
   if (!text && !failure) return null;
   return (
@@ -53,7 +56,17 @@ export function MoveLineView({
           Cancel
         </button>
       ) : null}
-      {!text && onDismiss ? (
+      {!text && onRetry ? (
+        <button
+          type="button"
+          data-fork-move-retry=""
+          onClick={onRetry}
+          className={`shrink-0 rounded-md px-1.5 py-0.5 font-medium text-content/70 hover:bg-content/8 hover:text-content ${PRESS}`}
+        >
+          Try again
+        </button>
+      ) : null}
+      {!text && onDismiss && !onRetry ? (
         <button
           type="button"
           aria-label="Dismiss"
@@ -68,13 +81,14 @@ export function MoveLineView({
 }
 
 export function MoveLine({ sessionId }: { sessionId: string }) {
-  const { view, failure, clearFailure } = useMoveView(sessionId);
+  const { view, failure, clearFailure, retry } = useMoveView(sessionId);
   return (
     <MoveLineView
       text={view?.text}
       failure={failure}
       onCancel={view?.cancel}
       onDismiss={clearFailure}
+      onRetry={retry}
     />
   );
 }
@@ -162,13 +176,19 @@ export function MoveToMacButton({
   session: ExternalSession;
   machineId: string;
 }) {
-  const { view, failure, clearFailure } = useMoveView(labKey(session.id));
+  const { view, failure, clearFailure, retry } = useMoveView(labKey(session.id));
   const availability = labMoveAvailability(session);
   if (!availability.show && !view && !failure) return null;
   return (
     <>
       {view || failure ? (
-        <MoveLineView text={view?.text} failure={failure} onCancel={view?.cancel} onDismiss={clearFailure} />
+        <MoveLineView
+          text={view?.text}
+          failure={failure}
+          onCancel={view?.cancel}
+          onDismiss={clearFailure}
+          onRetry={retry}
+        />
       ) : null}
       {availability.show && !view ? (
         <button

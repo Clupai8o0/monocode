@@ -19,6 +19,9 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.getByText("Carrying the code and conversation to Vivobook, 42%")).toBeVisible();
     await expect(page.getByText("Vivobook is full, so it is waiting in line")).toBeVisible();
     await expect(page.getByText("Did not move. This repository is not on that machine")).toBeVisible();
+    // A move that stayed stopped can be undone again; it can't be waved away.
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Dismiss" })).toHaveCount(1);
 
     // The card.
     await expect(page.getByText(/^Moved to Vivobook at 10.42/)).toBeVisible();

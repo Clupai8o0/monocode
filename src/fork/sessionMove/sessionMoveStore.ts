@@ -8,6 +8,8 @@ import { loadAccountHomes } from "../accounts/accountHomes";
 import { knownLocalProjectPaths, readExternalSession } from "../externalSessions/externalSessionsStore";
 import type { ExternalSession, ExternalTurn } from "../externalSessions/externalSessionsModel";
 import {
+  journalFinished,
+  labKey,
   moveAvailability,
   parseMoved,
   stepText,
@@ -52,6 +54,8 @@ export type MoveHost = {
     title: string;
     blocks: Block[];
   }) => string;
+  /** Closes a tab `openMovedTab` opened and lets go of its conversation. */
+  closeMovedTab: (id: string) => void;
   openSession: (id: string) => void;
   /** A tab just became a card, so its conversation is no longer the app's. */
   onMoved: () => void;
@@ -76,7 +80,12 @@ let moved: MovedMap = readMoved();
 const active = new Map<string, MoveView & { locked: boolean }>();
 const failures = new Map<string, string>();
 /** Failed moves whose copy on the target may still run: no new turn here. */
-const stuck = new Set<string>(readJournal().map((entry) => entry.plan.sessionId));
+const stuck = new Set<string>(
+  readJournal().flatMap((entry) => (entry.tabId ? [entry.plan.sessionId, entry.tabId] : [entry.plan.sessionId])),
+);
+/** Tabs a move to this Mac opened and hasn't finished with: no turn yet. */
+const opened = new Set<string>();
+const recovering = new Set<string>();
 const targets = new Map<string, TargetInfo>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -120,12 +129,13 @@ function readJournal(): MoveJournal[] {
   }
 }
 
+/** Throws when it can't be stored: a move without one must not stop the source. */
 function writeJournal(next: MoveJournal[]) {
-  try {
-    localStorage.setItem(JOURNAL_KEY, JSON.stringify(next));
-  } catch {
-    // Without it, a crash mid-move leaves the target's copy to be cleared by hand.
-  }
+  localStorage.setItem(JOURNAL_KEY, JSON.stringify(next));
+}
+
+function dropJournal(moveId: string) {
+  writeJournal(readJournal().filter((entry) => entry.plan.moveId !== moveId));
 }
 
 const localCall: MoveCall = (op, params) =>
@@ -173,7 +183,7 @@ export function isSessionMoved(id: string): boolean {
 
 /** No new turn may start: stopped for a move, or already moved. */
 export function isMoveLocked(id: string): boolean {
-  return Boolean(moved[id]) || stuck.has(id) || active.get(id)?.locked === true;
+  return Boolean(moved[id]) || stuck.has(id) || opened.has(id) || active.get(id)?.locked === true;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -194,11 +204,18 @@ export function useMovedRecord(id: string): MovedRecord | undefined {
   return moved[id];
 }
 
-export function useMoveView(id: string): { view?: MoveView; failure?: string; clearFailure: () => void } {
+export function useMoveView(id: string): {
+  view?: MoveView;
+  failure?: string;
+  clearFailure: () => void;
+  retry?: () => void;
+} {
   useMoveVersion();
+  const entry = stuck.has(id) && !recovering.has(id) ? readJournal().find((one) => one.plan.sessionId === id) : undefined;
   return {
     view: active.get(id),
     failure: failures.get(id),
+    retry: entry ? () => void retryEntry(entry) : undefined,
     clearFailure: () => {
       failures.delete(id);
       bump();
@@ -265,9 +282,7 @@ export function labMoveAvailability(session: ExternalSession) {
   });
 }
 
-export function labKey(providerSessionId: string) {
-  return `lab:${providerSessionId}`;
-}
+export { labKey };
 
 // ---- running a move ----
 
@@ -297,7 +312,7 @@ async function run(
       now: Date.now,
       journal: {
         begin: () => writeJournal([...readJournal().filter((entry) => entry.plan.moveId !== plan.moveId), journal]),
-        end: () => writeJournal(readJournal().filter((entry) => entry.plan.moveId !== plan.moveId)),
+        end: () => dropJournal(plan.moveId),
       },
     },
     report,
@@ -318,6 +333,7 @@ async function run(
 }
 
 function record(
+  moveId: string,
   sessionId: string,
   providerSessionId: string,
   toName: string,
@@ -327,6 +343,7 @@ function record(
   return {
     sessionId,
     providerSessionId,
+    moveId,
     toName,
     at: Date.now(),
     live,
@@ -389,6 +406,7 @@ export function moveTabToHost(sessionId: string, machineId: string, machineName:
           withMoved(
             moved,
             record(
+              moveId,
               sessionId,
               providerSessionId,
               machineName,
@@ -444,6 +462,13 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
       cwd: session.cwd,
       targetAccountId,
     };
+    const journal: MoveJournal = { plan, machineId, direction: "to-mac" };
+    const closeTab = () => {
+      if (!tabId) return;
+      host?.closeMovedTab(tabId);
+      opened.delete(tabId);
+      tabId = "";
+    };
     await run(
       key,
       plan,
@@ -476,30 +501,43 @@ export function moveLabToMac(session: ExternalSession, machineId: string) {
               blocks: turnBlocks(turns),
             }) ?? "";
           if (!tabId) throw new Error("Could not open a tab for it");
+          opened.add(tabId);
+          bump();
+          // So a crash from here closes it again; a journal that can't take it fails the move.
+          writeJournal(
+            readJournal().map((entry) => (entry.plan.moveId === moveId ? { ...entry, tabId } : entry)),
+          );
           return { name };
         },
+        closeTarget: closeTab,
         // Claude resumes with the tab's first turn; its transcript is in place.
         confirmTarget: async () => ({ state: "up" }),
         finishSource: (result) => {
           saveMoved(
-            withMoved(moved, record(key, session.id, "this Mac", { kind: "tab", sessionId: tabId }, result)),
+            withMoved(moved, record(moveId, key, session.id, "this Mac", { kind: "tab", sessionId: tabId }, result)),
           );
+          opened.delete(tabId);
           host?.openSession(tabId);
         },
       },
-      { plan, machineId, direction: "to-mac" },
+      journal,
     );
   })();
 }
 
-/** After an app restart mid-move: back to where it was. */
-async function recoverJournal() {
-  for (const entry of readJournal()) {
-    const remote = hostCall(entry.machineId);
-    const toHost = entry.direction === "to-host";
-    const done = await recoverMove(entry, {
+/** Undoes one move the app lost track of, or settles one that had finished. */
+async function recoverEntry(entry: MoveJournal): Promise<boolean> {
+  const remote = hostCall(entry.machineId);
+  const toHost = entry.direction === "to-host";
+  const finished = journalFinished(moved, entry.plan.sessionId, entry.plan.moveId);
+  const done = await recoverMove(
+    entry,
+    {
       source: toHost ? localCall : remote,
       target: toHost ? remote : localCall,
+      closeTarget: () => {
+        if (entry.tabId) host?.closeMovedTab(entry.tabId);
+      },
       resumeSource: async () => {
         if (!toHost) {
           await remote("restart", {
@@ -509,19 +547,53 @@ async function recoverJournal() {
           });
         }
       },
-    });
-    if (done) {
-      writeJournal(readJournal().filter((other) => other.plan.moveId !== entry.plan.moveId));
-      stuck.delete(entry.plan.sessionId);
-      failures.set(entry.plan.sessionId, "The app closed during the move, so it was undone");
+    },
+    finished,
+  );
+  if (!done) return false;
+  try {
+    dropJournal(entry.plan.moveId);
+  } catch {
+    return false;
+  }
+  stuck.delete(entry.plan.sessionId);
+  if (entry.tabId) stuck.delete(entry.tabId);
+  return true;
+}
+
+const STUCK_TEXT = "An earlier move couldn't be undone, so it stays stopped here";
+
+/** After an app restart mid-move: back to where it was. */
+async function recoverJournal() {
+  for (const entry of readJournal()) {
+    const finished = journalFinished(moved, entry.plan.sessionId, entry.plan.moveId);
+    if (await recoverEntry(entry)) {
+      if (!finished) failures.set(entry.plan.sessionId, "The app closed during the move, so it was undone");
     } else {
-      failures.set(
-        entry.plan.sessionId,
-        "An earlier move couldn't be undone, so it stays stopped here. It tries again when the app next opens",
-      );
+      failures.set(entry.plan.sessionId, STUCK_TEXT);
     }
   }
   bump();
+}
+
+/** Try again on a move that stayed stopped, without an app restart. */
+async function retryEntry(entry: MoveJournal) {
+  const key = entry.plan.sessionId;
+  if (recovering.has(key)) return;
+  recovering.add(key);
+  failures.set(key, "Undoing it now");
+  bump();
+  try {
+    const done = await recoverEntry(entry).catch(() => false);
+    if (done) {
+      failures.delete(key);
+    } else {
+      failures.set(key, `${STUCK_TEXT}. Try again once the other machine is back`);
+    }
+  } finally {
+    recovering.delete(key);
+    bump();
+  }
 }
 
 let recovered = false;

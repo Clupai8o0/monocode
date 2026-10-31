@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  journalFinished,
+  labKey,
   leftBehindText,
   moveAvailability,
   movedTitle,
@@ -200,5 +202,22 @@ describe("moved records", () => {
     expect(map["tab-1"].live).toEqual({ kind: "tab", sessionId: "tab-2" });
     expect(map["tab-1"].toName).toBe("this Mac");
     expect(map["lab-source"]).toEqual(back);
+  });
+
+  it("lets a session moved host, Mac, host move to the Mac again", () => {
+    const toMac: MovedRecord = { ...record, sessionId: labKey("conv-1"), live: { kind: "tab", sessionId: "tab-2" } };
+    const backToHost: MovedRecord = { ...record, sessionId: "tab-2", at: record.at + 1000 };
+    const map = withMoved(withMoved({}, toMac), backToHost);
+    expect(map[labKey("conv-1")]).toBeUndefined();
+    expect(map["tab-2"]).toEqual(backToHost);
+    // A move to this Mac keeps its own record.
+    expect(withMoved({}, toMac)[labKey("conv-1")]).toEqual(toMac);
+  });
+
+  it("knows a journal whose card was saved belongs to a finished move", () => {
+    const map = withMoved({}, { ...record, moveId: "move-1" });
+    expect(journalFinished(map, "tab-1", "move-1")).toBe(true);
+    expect(journalFinished(map, "tab-1", "move-2")).toBe(false);
+    expect(journalFinished(map, "tab-9", "move-1")).toBe(false);
   });
 });

@@ -465,6 +465,27 @@ describe("session move, a real run with two home folders", () => {
     await expect(handleSessionMove(slow, { op: "begin", inner: { op: "read", moveId: MOVE } })).rejects.toThrow(/Unsupported/);
   });
 
+  it("answers a repeated poll the same, until the move is done", async () => {
+    const { manifest, urls } = await carry();
+    await handleSessionMove(targetEnv, {
+      op: "begin",
+      inner: { op: "unpackCode", moveId: MOVE, name: "s", manifest, urls },
+    });
+    let first: { done: boolean; result?: unknown; error?: string };
+    for (;;) {
+      first = (await handleSessionMove(targetEnv, { op: "poll", moveId: MOVE, inner: "unpackCode" })) as typeof first;
+      if (first.done) break;
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    expect(first.error).toBeUndefined();
+    // The reply was lost: asking again must not read as a restart.
+    expect(await handleSessionMove(targetEnv, { op: "poll", moveId: MOVE, inner: "unpackCode" })).toEqual(first);
+    await handleSessionMove(targetEnv, { op: "done", moveId: MOVE });
+    await expect(
+      handleSessionMove(targetEnv, { op: "poll", moveId: MOVE, inner: "unpackCode" }),
+    ).rejects.toThrow(/restarted/);
+  });
+
   it("undo won't remove anything while the copy there refuses to stop", async () => {
     const { manifest, urls, account } = await carry();
     const bin = join(targetHome, ".local/bin");

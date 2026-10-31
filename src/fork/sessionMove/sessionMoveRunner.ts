@@ -29,13 +29,18 @@ export type MoveDeps = {
   resumeSource: () => Promise<void>;
   /** Starts it on the target; a Mac opens a tab, a host a lab session. */
   startTarget: (input: { repo: string; cwd: string; branch: string; account: MoveAccount }) => Promise<{ name: string }>;
+  /** Closes what `startTarget` opened here, before the undo removes its folder. */
+  closeTarget?: () => Promise<void> | void;
   /** Whether it has come up on this session id. */
   confirmTarget: (name: string) => Promise<{ state: "up" | "queued" | "starting" | "failed"; detail?: string }>;
   /** Turns the source into a card. */
   finishSource: (result: MoveResult) => Promise<void> | void;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
-  /** Written just before the stop and cleared after, so a crash can be undone. */
+  /**
+   * Written just before the stop and cleared after, so a crash can be undone.
+   * `begin` throws when it can't be saved, and the move then never stops the source.
+   */
   journal?: { begin: () => void; end: () => void };
 };
 
@@ -44,6 +49,8 @@ export type MoveJournal = {
   plan: MovePlan;
   machineId: string;
   direction: "to-host" | "to-mac";
+  /** The tab a move to this Mac opened, closed again on undo. */
+  tabId?: string;
 };
 
 export type MovePlan = {
@@ -100,6 +107,13 @@ export async function runMove(
   const step = (name: MoveStep, extra: Partial<MoveProgress> = {}) =>
     report({ step: name, cancellable: CANCELLABLE.has(name), ...extra });
   const base = { moveId: plan.moveId, sessionId: plan.providerSessionId };
+  const endJournal = () => {
+    try {
+      deps.journal?.end();
+    } catch {
+      // A journal left behind is settled at the next launch.
+    }
+  };
 
   // 1. Refuse early.
   step("check");
@@ -141,14 +155,19 @@ export async function runMove(
     if (state === "idle") {
       if (cancel.cancelled) return { kind: "cancelled" };
       step("stop");
-      deps.journal?.begin();
+      try {
+        deps.journal?.begin();
+      } catch {
+        // Without it, a crash after the target starts would leave two copies running.
+        return { kind: "failed", reason: "Could not save the move on this Mac, so it did not start" };
+      }
       try {
         if (await deps.stopSource()) break;
       } catch (error) {
         // It may be half stopped, so it gets the full rollback.
         return rollback(plan, deps, text(error));
       }
-      deps.journal?.end();
+      endJournal();
     }
     step("wait");
     await deps.sleep(WAIT_POLL_MS);
@@ -213,7 +232,7 @@ export async function runMove(
       leftBehindMore: manifest.ignoredMore,
     };
     await deps.finishSource(result);
-    deps.journal?.end();
+    endJournal();
     await deps.target("done", { moveId: plan.moveId }).catch(() => undefined);
     await deps.source("done", { moveId: plan.moveId }).catch(() => undefined);
     return { kind: "moved", result };
@@ -255,6 +274,8 @@ async function waitUp(
 
 async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise<MoveOutcome> {
   try {
+    // A tab left open would take turns on the conversation in a removed folder.
+    await deps.closeTarget?.();
     await deps.target("undo", { moveId: plan.moveId });
   } catch (error) {
     // The copy there may be running, so this one stays stopped: two copies must
@@ -272,20 +293,32 @@ async function rollback(plan: MovePlan, deps: MoveDeps, reason: string): Promise
   } catch (error) {
     return { kind: "failed", reason, rollbackProblem: `Could not resume it here: ${text(error)}` };
   }
-  deps.journal?.end();
+  try {
+    deps.journal?.end();
+  } catch {
+    // Settled at the next launch.
+  }
   return { kind: "failed", reason };
 }
 
 /**
  * The app closed mid-move. The journal is only written once the source stops,
  * so undo what the target has and resume the source. True when both worked;
- * otherwise the journal stays and it tries again next launch.
+ * otherwise the journal stays and it tries again later. `finished` is a move
+ * whose card was saved before the journal could be cleared: it stays moved.
  */
 export async function recoverMove(
   journal: MoveJournal,
-  deps: Pick<MoveDeps, "source" | "target" | "resumeSource">,
+  deps: Pick<MoveDeps, "source" | "target" | "resumeSource" | "closeTarget">,
+  finished = false,
 ): Promise<boolean> {
+  if (finished) {
+    await deps.target("done", { moveId: journal.plan.moveId }).catch(() => undefined);
+    await deps.source("done", { moveId: journal.plan.moveId }).catch(() => undefined);
+    return true;
+  }
   try {
+    await deps.closeTarget?.();
     await deps.target("undo", { moveId: journal.plan.moveId });
     await deps.source("done", { moveId: journal.plan.moveId });
     await deps.resumeSource();

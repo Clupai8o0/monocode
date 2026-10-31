@@ -118,6 +118,8 @@ export type MovedRecord = {
   /** The MonoCode session whose tab this is. */
   sessionId: string;
   providerSessionId: string;
+  /** The move that made it, so a crash after saving it isn't undone. */
+  moveId?: string;
   toName: string;
   at: number;
   /** The live session: a machine's lab session, or a tab on this Mac. */
@@ -150,10 +152,20 @@ export function parseMoved(text: string | null): MovedMap {
   }
 }
 
-/** Adds a record, and points older cards for this conversation at where it is now. */
+/** A lab session's key; it has no tab here, so it is named by its conversation. */
+export function labKey(providerSessionId: string) {
+  return `lab:${providerSessionId}`;
+}
+
+/**
+ * Adds a record, and points older cards for this conversation at where it is now.
+ * Back on a host, its lab session is live again there, so the record that it
+ * left that host goes: it would lock the next move to this Mac.
+ */
 export function withMoved(map: MovedMap, record: MovedRecord): MovedMap {
+  const back = record.live.kind === "host" ? labKey(record.providerSessionId) : null;
   const entries = Object.entries(map)
-    .filter(([id]) => id !== record.sessionId)
+    .filter(([id]) => id !== record.sessionId && id !== back)
     .map(([id, value]): [string, MovedRecord] =>
       value.providerSessionId === record.providerSessionId
         ? [id, { ...value, live: record.live, toName: record.toName, at: record.at }]
@@ -161,6 +173,11 @@ export function withMoved(map: MovedMap, record: MovedRecord): MovedMap {
     );
   entries.push([record.sessionId, record]);
   return Object.fromEntries(entries.slice(-MAX_MOVED));
+}
+
+/** The card was saved before the app closed: the move is done, only its journal was left. */
+export function journalFinished(map: MovedMap, sessionId: string, moveId: string): boolean {
+  return map[sessionId]?.moveId === moveId;
 }
 
 /** The record's time as "10:42". */
