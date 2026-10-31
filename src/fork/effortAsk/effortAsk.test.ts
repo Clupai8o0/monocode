@@ -10,7 +10,12 @@ import {
   effortChangeFor,
   effortChangesOfEndedTurns,
   parseEffortNeeded,
+  resumeText,
+  resumeLevelFor,
+  resumeIntentFor,
+  noteEffortStop,
   sessionsGoneIdle,
+  stoppedAtEffortLine,
   withEffortChange,
 } from "./effortAsk";
 
@@ -324,5 +329,145 @@ describe("withEffortChange", () => {
 describe("effortAutoFor", () => {
   it("is off under the test runner", () => {
     expect(effortAutoFor("s1")).toBe(false);
+  });
+});
+
+describe("stoppedAtEffortLine", () => {
+  it("is true when the reply is the line alone", () => {
+    expect(stoppedAtEffortLine([block("reasoning", "hm"), block("assistant", LINE)])).toBe(true);
+  });
+
+  it("allows status notes before the line", () => {
+    expect(stoppedAtEffortLine([block("system", "Compacted"), block("assistant", LINE)])).toBe(true);
+  });
+
+  it("is false for a short finished answer after the line", () => {
+    expect(stoppedAtEffortLine([block("assistant", `${LINE}\nNo findings.`)])).toBe(false);
+  });
+
+  it("is false once the model did work after the line", () => {
+    expect(stoppedAtEffortLine([block("assistant", LINE), block("tool", "ls")])).toBe(false);
+    expect(
+      stoppedAtEffortLine([block("assistant", `${LINE}\n${"answer ".repeat(60)}`)]),
+    ).toBe(false);
+  });
+
+  it("is false when the turn was interrupted after the line", () => {
+    expect(
+      stoppedAtEffortLine([
+        block("assistant", LINE),
+        block("system", "Interrupted", { notice: "interrupt" } as Partial<Block>),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false when work came before the line", () => {
+    expect(stoppedAtEffortLine([block("tool", "ls"), block("assistant", LINE)])).toBe(false);
+  });
+});
+
+describe("resume after a raise", () => {
+  const stopped = [block("user", "build it"), block("assistant", LINE)];
+  const resumeOf = (s: Session) => resumeLevelFor(s, effortChangeFor(s));
+
+  it("sends the turn on at the new level when the model stopped for a raise", () => {
+    expect(resumeOf(session(stopped))).toBe("xhigh");
+    expect(resumeText("xhigh")).toBe("Continue at xhigh effort.");
+  });
+
+  it("does not send on when the line asked for less", () => {
+    expect(
+      resumeOf(
+        session([block("user", "x"), block("assistant", "Effort: max now, low needed (x).")], {
+          modelSettings: { effort: "max" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("does not send on when the user already queued a message", () => {
+    expect(
+      resumeOf(session(stopped, { queuedMessages: [{ blockId: "other" }] } as Partial<Session>)),
+    ).toBeNull();
+  });
+
+  it("does not send on when the model did the work anyway", () => {
+    expect(
+      resumeOf(session([...stopped, block("tool", "ls"), block("assistant", "Done.")])),
+    ).toBeNull();
+  });
+});
+
+describe("resumeLevelFor", () => {
+  const staleLine = "Effort: low now, high needed (big build).";
+  const stale = (first: string, extra?: Partial<Session>) =>
+    session([block("user", first), block("assistant", staleLine)], extra);
+
+  it("sends on once when the session already has the needed level", () => {
+    expect(resumeLevelFor(stale("build it"), null)).toBe("high");
+  });
+
+  it("never answers its own send without a change, so a stale level cannot loop", () => {
+    expect(resumeLevelFor(stale(resumeText("high")), null)).toBeNull();
+  });
+
+  it("follows the line, not the session: a stale low asking medium still resumes", () => {
+    const s = session(
+      [block("user", "x"), block("assistant", "Effort: low now, medium needed (x).")],
+      { modelSettings: { effort: "high" } },
+    );
+    const change = effortChangeFor(s);
+    expect(resumeLevelFor(s, change)).toBe(change?.value ?? "high");
+  });
+
+  it("is null when the line did not ask for more or the model kept working", () => {
+    expect(
+      resumeLevelFor(
+        session([block("user", "x"), block("assistant", "Effort: high now, high needed (x).")]),
+        null,
+      ),
+    ).toBeNull();
+    expect(
+      resumeLevelFor(
+        session([block("user", "x"), block("assistant", staleLine), block("tool", "ls")]),
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("resumes a plan-mode turn in plan mode", () => {
+    const s = session([
+      block("user", "plan auth", { intent: "plan" } as Partial<Block>),
+      block("plan", LINE),
+    ]);
+    expect(resumeLevelFor(s, effortChangeFor(s))).toBe("xhigh");
+    expect(resumeIntentFor(s)).toBe("plan");
+  });
+});
+
+describe("unsupported levels", () => {
+  it("takes the nearest level above one the model lacks", () => {
+    const s = session([block("user", "x"), block("assistant", "Effort: low now, medium needed (x).")], {
+      modelSettings: { effort: "low" },
+    });
+    expect(effortChangeFor(s)?.value).toBe("high");
+  });
+});
+
+describe("Stop", () => {
+  it("does not send on a turn the user stopped", () => {
+    const wasBusy = new Set<string>(["s1"]);
+    const seen = new Map<string, string>([["s1", "old"]]);
+    const user = block("user", "build it");
+    const s = session([user, block("assistant", "Effort: high now, xhigh needed (x).")]);
+    noteEffortStop("s1");
+    const changes = effortChangesOfEndedTurns([s], wasBusy, seen, new Map());
+    expect(changes.get("s1")?.resume).toBe(false);
+  });
+
+  it("sends on the same turn when nobody stopped it", () => {
+    const s = session([block("user", "build it"), block("assistant", "Effort: high now, xhigh needed (x).")]);
+    const changes = effortChangesOfEndedTurns([s], new Set(["s1"]), new Map([["s1", "old"]]), new Map());
+    expect(changes.get("s1")?.resume).toBe(true);
   });
 });
