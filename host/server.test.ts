@@ -136,6 +136,7 @@ describe("remote host API", () => {
     const s = await setup();
     const capabilities = (await s.call("environment.describe")).value.result.capabilities;
     expect(capabilities).toContain("messages.v1");
+    expect(capabilities).toContain("session.move.v1");
     expect(capabilities).toContain("relay.traffic.v1");
     const listed = (await s.call("messages.list", { windowHours: 2 })).value.result;
     expect(listed).toMatchObject({ version: 1, full: true, windowHours: 2 });

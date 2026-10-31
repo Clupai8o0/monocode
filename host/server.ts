@@ -28,6 +28,8 @@ import {
 import { hostLabHealth } from "./lab-health";
 import { MESSAGES_CAPABILITY, RELAY_TRAFFIC_CAPABILITY } from "../src/fork/messageLog/messageLogProtocol";
 import { listMessages } from "./messages";
+import { SESSION_MOVE_CAPABILITY } from "../src/fork/sessionMove/sessionMoveProtocol"; // Fork
+import { defaultSessionMoveEnv, handleSessionMove } from "./session-move"; // Fork
 import { hostOsName } from "./os-name";
 import { dataDirOf } from "./desktop-import";
 import { writeAttachmentChunk, readAttachmentChunk } from "./attachments";
@@ -400,6 +402,7 @@ export function createHostServer(
                 RELAY_CAPABILITY,
                 MESSAGES_CAPABILITY,
                 RELAY_TRAFFIC_CAPABILITY,
+                SESSION_MOVE_CAPABILITY, // Fork
               ],
             };
             break;
@@ -774,6 +777,14 @@ export function createHostServer(
               params,
               engine.store.device(token),
               hostRelay({ dataDir: dataDirOf(engine.store), store: engine.store }).machineName,
+            );
+            break;
+          // Fork: moving a session between machines.
+          case "sessionMove":
+            result = await handleSessionMove(
+              defaultSessionMoveEnv(dataDirOf(engine.store), () =>
+                engine.store.projects().map((project) => project.cwd)),
+              params,
             );
             break;
           case "relay.sync":
