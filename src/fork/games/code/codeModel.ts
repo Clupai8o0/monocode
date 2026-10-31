@@ -119,6 +119,7 @@ function __same(a, b) {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && a.length !== b.length) return false;
   const keysA = Object.keys(a);
   const keysB = Object.keys(b);
   if (keysA.length !== keysB.length) return false;
@@ -396,6 +397,7 @@ export function validateDrill(value: unknown): Drill | null {
   const language = text("language");
   if (
     !id ||
+    id in Object.prototype ||
     !title ||
     topic === null ||
     !task ||

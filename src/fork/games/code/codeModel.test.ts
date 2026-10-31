@@ -87,6 +87,14 @@ describe("buildSource and parseResults", () => {
     expect(results[1].actual).toBe('{"b":2}');
   });
 
+  it("fails a list with an extra empty slot", () => {
+    const marker = makeMarker(() => 0.25);
+    const list = drill("list", { tests: [{ call: "f(1)", expect: "[1, 2]" }] });
+    const code = "function f(x) { return [1, 2, , ]; }\n";
+    const results = parseResults(runJs(buildSource(list, code, marker)), marker, 1);
+    expect(results[0].pass).toBe(false);
+  });
+
   it("ignores printouts that fake a pass without the run's marker", () => {
     const marker = makeMarker(() => 0.75);
     const stdout = [
@@ -342,9 +350,10 @@ describe("drills.json handling", () => {
       { title: "nameless" },
       "text",
       { ...good, id: "bad-level", level: "steep" },
+      { ...good, id: "constructor" },
     ]);
     expect(drills).toEqual([good]);
-    expect(invalid).toEqual(["no-tests", "the drill at place 3", "the drill at place 4", "bad-level"]);
+    expect(invalid).toEqual(["no-tests", "the drill at place 3", "the drill at place 4", "bad-level", "constructor"]);
     expect(validateDrills({ not: "a list" }).invalid).toHaveLength(1);
   });
 

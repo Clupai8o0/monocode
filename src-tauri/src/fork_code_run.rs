@@ -362,9 +362,14 @@ fn run_code(language: &str, source: &str) -> Result<CodeRunResult, String> {
         .arg(&binary)
         .arg(&source_file)
         .current_dir(&real_folder)
+        // The app's environment holds API keys; drill code gets none of it.
+        .env_clear()
         .env("PATH", crate::harness::gui_search_path())
         .env("HOME", &real_folder)
         .env("TMPDIR", &real_folder)
+        .env("LANG", "en_US.UTF-8")
+        // So results printed before a timeout still come through.
+        .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -603,6 +608,16 @@ mod tests {
         assert_eq!(result.stdout.trim(), "3");
         assert!(!result.timed_out);
         assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[test]
+    fn the_app_environment_stays_out() {
+        if !installed("javascript") || !sandbox_usable() {
+            return;
+        }
+        std::env::set_var("FORK_CODE_RUN_SECRET", "hidden");
+        let result = run_code("javascript", "console.log(process.env.FORK_CODE_RUN_SECRET)").unwrap();
+        assert_eq!(result.stdout.trim(), "undefined", "{}", result.stderr);
     }
 
     #[test]
