@@ -18,6 +18,7 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
   symlink,
   writeFile,
@@ -711,15 +712,24 @@ async function bringCommits(env: SessionMoveEnv, repo: string, remote: string, f
     throw new Error(`This machine can't get commit ${manifest.head.slice(0, 8)}; push it first`);
 }
 
+/**
+ * A free name, reserved by making its folder: only one move can make it, so a
+ * folder in this move's record is this move's even if it crashed before the add.
+ */
 async function freePlace(env: SessionMoveEnv, repo: string, name: string) {
+  await mkdir(join(repo, ".claude", "worktrees"), { recursive: true });
   for (let n = 1; n < 50; n++) {
     const suffix = n === 1 ? "" : `-${n}`;
     const worktree = join(repo, ".claude", "worktrees", `moved-${name}${suffix}`);
     const branch = `moved/${name}${suffix}`;
-    const taken =
-      (await lexists(worktree)) ||
-      (await git(env, repo, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
-    if (!taken) return { worktree, branch };
+    if ((await git(env, repo, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0) continue;
+    try {
+      await mkdir(worktree);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      throw error;
+    }
+    return { worktree, branch };
   }
   throw new Error("Too many moved copies of this session on that machine");
 }
@@ -752,7 +762,10 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
   const repo = await realpath(found.repo);
   const { worktree, branch } = await freePlace(env, repo, name);
   const key = projectKey(worktree);
-  if (key.length > PROJECT_KEY_MAX) throw new Error("The new folder's path is too long for Claude to resume in");
+  if (key.length > PROJECT_KEY_MAX) {
+    await rmdirQuiet(worktree);
+    throw new Error("The new folder's path is too long for Claude to resume in");
+  }
   // Saved before the add, so a crash just after it still leaves a record.
   const made: Made = {
     repo,
@@ -762,7 +775,6 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
     pending: { worktree, branch, head: manifest.head },
   };
   await saveMade(folder, made);
-  await mkdir(dirname(worktree), { recursive: true });
   // No hooks: one failing would leave a worktree this move can't tell is its own.
   const added = await git(
     env,
@@ -776,6 +788,8 @@ async function unpackCode(env: SessionMoveEnv, params: Record<string, unknown>):
     if (!added.timedOut) {
       delete made.pending;
       await saveMade(folder, made);
+      // The reserved folder, if the add left it empty; never anyone's files.
+      await rmdirQuiet(worktree);
     }
     throw new Error(firstLine(added.stderr, "git worktree failed"));
   }
@@ -910,6 +924,9 @@ async function start(env: SessionMoveEnv, params: Record<string, unknown>): Prom
   const made = await loadMade(folder);
   if (!made.worktree || !made.account || made.sessionId !== sessionId)
     throw new Error("The conversation has not been carried yet");
+  // A repeated start gets the launch already made: it may not have registered yet.
+  if (made.window && ((await windowAlive(env, made.window)) || (await inGateQueue(env, made.window))))
+    return { name: made.window };
   // Two copies must never write one conversation.
   if ((await liveRecord(env, sessionId)) !== null) throw new Error("This conversation is already running on that machine");
   // Recorded before it starts, so an undo can find a window whose start it never heard back from.
@@ -931,7 +948,7 @@ async function labWindows(env: SessionMoveEnv): Promise<Array<{ name: string; pa
     { timeoutMs: 10_000 },
   );
   if (list.code !== 0) {
-    if (!list.timedOut && list.code !== null && /can't find session|no server running|error connecting to/i.test(list.stderr)) return [];
+    if (!list.timedOut && list.code !== null && /can't find session|no server running|error connecting to .*\(No such file or directory\)/i.test(list.stderr)) return [];
     throw new Error(`Could not list that machine's windows: ${firstLine(list.stderr, list.timedOut ? "tmux timed out" : "tmux failed")}`);
   }
   return list.stdout
@@ -998,9 +1015,13 @@ async function restart(env: SessionMoveEnv, params: Record<string, unknown>): Pr
 async function undo(env: SessionMoveEnv, params: Record<string, unknown>) {
   const folder = moveFolder(env, params);
   const made = await loadMade(folder);
-  if (made.pending && (await addedByThisMove(env, made.repo, made.pending))) {
-    made.worktree = made.pending.worktree;
-    made.branch = made.pending.branch;
+  if (made.pending) {
+    if (await addedByThisMove(env, made.repo, made.pending)) {
+      made.worktree = made.pending.worktree;
+      made.branch = made.pending.branch;
+    } else {
+      await rmdirQuiet(made.pending.worktree);
+    }
   }
   if (made.window) {
     // Gone first, and known to be: nothing is removed from under a live copy.
@@ -1046,6 +1067,11 @@ async function addedByThisMove(env: SessionMoveEnv, repo: string | undefined, pe
     if (branch === `refs/heads/${pending.branch}` && (await samePath(path, pending.worktree))) return true;
   }
   return false;
+}
+
+/** Removes a folder only if it is empty. */
+async function rmdirQuiet(folder: string) {
+  await rmdir(folder).catch(() => undefined);
 }
 
 async function removeEmpty(folder: string) {

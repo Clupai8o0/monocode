@@ -1171,23 +1171,27 @@ fn bring_commits(
     Ok(())
 }
 
+/// A free name, reserved by making its folder: only one move can make it, so a
+/// folder in this move's record is this move's even if it crashed before the add.
 fn free_place(repo: &Path, name: &str) -> Result<(PathBuf, String), String> {
+    let root = repo.join(".claude").join("worktrees");
+    fs::create_dir_all(&root).map_err(io_text)?;
     for n in 1..50 {
         let suffix = if n == 1 {
             String::new()
         } else {
             format!("-{n}")
         };
-        let worktree = repo
-            .join(".claude")
-            .join("worktrees")
-            .join(format!("moved-{name}{suffix}"));
+        let worktree = root.join(format!("moved-{name}{suffix}"));
         let branch = format!("moved/{name}{suffix}");
         let reference = format!("refs/heads/{branch}");
-        let taken =
-            lexists(&worktree) || git(repo, &["show-ref", "--verify", "--quiet", &reference])?.ok;
-        if !taken {
-            return Ok((worktree, branch));
+        if git(repo, &["show-ref", "--verify", "--quiet", &reference])?.ok {
+            continue;
+        }
+        match fs::create_dir(&worktree) {
+            Ok(()) => return Ok((worktree, branch)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
         }
     }
     Err("Too many moved copies of this session on that machine".into())
@@ -1237,6 +1241,7 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
     let (worktree, branch) = free_place(&repo, &name)?;
     let worktree_text = path_text(&worktree);
     if project_key(&worktree_text).len() > PROJECT_KEY_MAX {
+        let _ = fs::remove_dir(&worktree);
         return Err("The new folder's path is too long for Claude to resume in".into());
     }
     // Saved before the add, so a crash just after it still leaves a record.
@@ -1251,9 +1256,6 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
         ..Made::default()
     };
     save_made(&folder, &made)?;
-    if let Some(parent) = worktree.parent() {
-        fs::create_dir_all(parent).map_err(io_text)?;
-    }
     // No hooks: one failing would leave a worktree this move can't tell is its own.
     let add_args = [
         "-c",
@@ -1273,6 +1275,8 @@ fn unpack_code(env: &Env, params: &Value) -> Result<Value, String> {
         if !added.timed_out {
             made.pending = None;
             save_made(&folder, &made)?;
+            // The reserved folder, if the add left it empty; never anyone's files.
+            let _ = fs::remove_dir(&worktree);
         }
         return Err(git_error(&added, &add_args));
     }
@@ -1434,6 +1438,9 @@ fn undo(env: &Env, params: &Value) -> Result<Value, String> {
         if added_by_this_move(made.repo.as_deref(), &pending) {
             made.worktree = Some(pending.worktree);
             made.branch = Some(pending.branch);
+        } else {
+            // Only if empty: the reserved folder of an add that never ran.
+            let _ = fs::remove_dir(&pending.worktree);
         }
     }
     for file in &made.files {
@@ -1943,6 +1950,36 @@ mod tests {
         undo(&fix.to, &json!({"moveId": MOVE})).unwrap();
         assert!(cwd.join("work.txt").exists());
         assert!(sh(&fix.target_repo, &["branch", "--list", "moved/s"]).contains("moved/s"));
+    }
+
+    #[test]
+    fn a_reserved_name_is_skipped_and_its_undo_takes_nothing_else() {
+        let fix = fixture();
+        let (manifest, urls) = carry(&fix);
+        // As if a move reserved the name and crashed before its add.
+        let repo = fix.target_repo.canonicalize().unwrap();
+        let reserved = repo.join(".claude/worktrees/moved-s");
+        fs::create_dir_all(&reserved).unwrap();
+        let other = fix.to.staging_root.join("move-0002-abcdef");
+        save_made(
+            &other,
+            &Made {
+                repo: Some(path_text(&repo)),
+                session_id: Some(ID.into()),
+                pending: Some(Pending {
+                    worktree: path_text(&reserved),
+                    branch: "moved/s".into(),
+                    head: manifest["head"].as_str().unwrap().to_string(),
+                }),
+                ..Made::default()
+            },
+        )
+        .unwrap();
+        let code = unpack(&fix, "s", &manifest, &urls).unwrap();
+        assert_eq!(code["branch"], "moved/s-2");
+        undo(&fix.to, &json!({"moveId": "move-0002-abcdef"})).unwrap();
+        assert!(!reserved.exists());
+        assert!(PathBuf::from(code["cwd"].as_str().unwrap()).exists());
     }
 
     #[test]

@@ -1,5 +1,43 @@
 # Move a session: report for the Mac orchestrator
 
+## Fixes from the Mac review (31 Oct, round 7)
+
+**All 10 fixed, each with a test. Codex (high) found 3 more Highs in the fixes, all fixed. Its 2 Mediums are left open (listed below).**
+
+| # | Fix | Test |
+|---|---|---|
+| 1 | A tab moved to this Mac always has an account: cx's id, or main's (`default`) | Model: `macAccountFor` |
+| 2 | Past 500 records, only records that lock nothing are dropped (a tab that's gone). Locking records are never dropped. | Model: 501 records, the oldest stays |
+| 3 | Undo throws if tmux can't list windows, and the journal stays | Host: timeout and "permission denied" keep every file |
+| 4 | Rust searches every account home and takes the newest copy, history included | Rust: newer copy in `.claude-exec` |
+| 5 | A repo counts as client work if its folder, real path or git folder is client work. Panoptic is still allowed. | Host and Rust: a link into `upwork/acme` is refused, a link into Panoptic passes |
+| 6 | `start` refuses if a copy is already live. `confirm` only counts this move's worktree or window. | Host |
+| 7 | Ownership is saved before `git worktree add`. Undo removes the worktree only if the branch tip still equals `manifest.head`. | Host and Rust: a branch with a new commit is kept |
+| 8 | No signal unless the start stamp matches or the command line is Claude's. If it can't tell, it refuses. | Host: reused PID gets no signal |
+| 9 | Mac git calls stop at a deadline (30 s, or 10 min for long steps), which kills git and whatever it started | Rust: a hanging git call gives up in under 5 s |
+| 10 | Older cards take the new cwd, branch and left-behind list | Model |
+
+**Codex's 3 Highs, fixed:**
+- A crash before the add left the name open, so the next move could take it and the first move's undo would delete it. Now a move reserves the name by creating its folder, which only one move can do. Tests on host and Rust.
+- tmux's "error connecting … (Permission denied)" counted as "no windows". Now only a missing server or socket counts as no windows.
+- A repeated `start` could open a second window before the first one registered. Now it returns the window that is already running or queued.
+
+**Left open (Codex Medium):**
+- An unstamped PID reused by, say, `vim ~/.local/bin/claude-acct` would pass the command-line check. A tighter check would look at the executable itself.
+- If git exits but a helper it started keeps the output pipes open, the Rust reader can still wait past the deadline. The deadline only covers git running.
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit`, web and host | Clean |
+| Vitest `src/fork` | 964 passed |
+| Vitest host (`session-move`, `server`, `external-sessions`) | 75 passed, 2 skipped (interop, run on its own) |
+| Rust module, scratch crate | 18 passed, 2 ignored. `rustfmt` clean. |
+| Packs, Rust to TypeScript and back | Pass |
+
+The app's Rust build is still unchecked here, as in earlier rounds. `git_within` uses `libc` and `process_group`, so run `cargo check --lib` on the Mac. DeepSeek and Grok didn't run, because they can't run on this machine.
+
+---
+
 ## Fixes from the Mac review (31 Oct, round 6)
 
 **All five fixed with a test each, plus a Try again button. Codex (high) reviewed the fixes: 2 more found and fixed, then no defects.**

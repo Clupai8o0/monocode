@@ -567,10 +567,13 @@ describe("session move, a real run with two home folders", () => {
     return { cwd, manifest };
   };
 
-  const withTmux = (answer: { code: number | null; stderr: string; timedOut: boolean }): SessionMoveEnv => ({
-    ...targetEnv,
+  const withTmux = (
+    answer: { code: number | null; stderr: string; timedOut: boolean; stdout?: string },
+    base: SessionMoveEnv = targetEnv,
+  ): SessionMoveEnv => ({
+    ...base,
     run: async (command, args, options) =>
-      command === "tmux" ? { ...answer, stdout: "" } : runCommand(command, args, options),
+      command === "tmux" ? { stdout: "", ...answer } : base.run(command, args, options),
   });
 
   it("undo keeps everything when the windows there can't be listed", async () => {
@@ -580,10 +583,50 @@ describe("session move, a real run with two home folders", () => {
     expect(existsSync(cwd)).toBe(true);
     expect(existsSync(conversation(targetHome, cwd).transcript)).toBe(true);
     expect(existsSync(join(targetHome, "staging", MOVE, "made.json"))).toBe(true);
+    // A server it may not reach is not an absent one.
+    const denied = withTmux({ code: 1, stderr: "error connecting to /tmp/tmux-1000/default (Permission denied)", timedOut: false });
+    await expect(handleSessionMove(denied, { op: "undo", moveId: MOVE })).rejects.toThrow(/Could not list/);
+    expect(existsSync(cwd)).toBe(true);
     // No lab session at all is an answer: nothing is running there.
     const none = withTmux({ code: 1, stderr: "can't find session: lab", timedOut: false });
     await handleSessionMove(none, { op: "undo", moveId: MOVE });
     expect(existsSync(cwd)).toBe(false);
+  });
+
+  it("a repeated start gets the launch already made", async () => {
+    const { cwd } = await started();
+    const calls = join(base, "starts");
+    writeFileSync(join(targetHome, ".local/bin/lab-session"), `#!/bin/bash\necho "$3" >> '${calls}'\n`);
+    const up = withTmux({ code: 0, stderr: "", timedOut: false, stdout: `s\t${cwd}\n` });
+    await expect(handleSessionMove(up, { op: "start", moveId: MOVE, sessionId: ID, name: "s" })).resolves.toEqual({ name: "s" });
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  it("a move that crashed before its add leaves the name reserved, and its undo takes nothing else", async () => {
+    const { manifest, urls } = await carry();
+    const crashing: SessionMoveEnv = {
+      ...targetEnv,
+      run: async (command, args, options) => {
+        if (args.includes("worktree") && args.includes("add")) throw new Error("crashed");
+        return runCommand(command, args, options);
+      },
+    };
+    await expect(
+      handleSessionMove(crashing, { op: "unpackCode", moveId: MOVE, name: "s", manifest, urls }),
+    ).rejects.toThrow(/crashed/);
+    const other = "move-0002-abcdef";
+    for (const file of manifest.files) {
+      const from = join(targetHome, "staging", MOVE, file.path);
+      mkdirSync(dirname(join(targetHome, "staging", other, file.path)), { recursive: true });
+      writeFileSync(join(targetHome, "staging", other, file.path), readFileSync(from));
+    }
+    const second = (await handleSessionMove(targetEnv, {
+      op: "unpackCode", moveId: other, name: "s", manifest, urls,
+    })) as { cwd: string; branch: string };
+    expect(second.branch).toBe("moved/s-2");
+    await handleSessionMove(targetEnv, { op: "undo", moveId: MOVE });
+    expect(existsSync(second.cwd)).toBe(true);
+    expect(existsSync(join(targetRepo, ".claude/worktrees/moved-s"))).toBe(false);
   });
 
   it("refuses a link from outside upwork into a client repository, and keeps Panoptic", async () => {
