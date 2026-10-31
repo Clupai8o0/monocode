@@ -191,7 +191,7 @@ function StacksPanel({
           )}
         </button>
       </div>
-      {error ? <p className="px-1 text-red-300">{error}</p> : null}
+      {error ? <p className="px-1 text-red-600 dark:text-red-300">{error}</p> : null}
       {snapshot?.rows.map((row) => (
         <Row key={row.name} row={row} />
       ))}
@@ -303,7 +303,7 @@ function Row({ row }: { row: StackRow }) {
           <button
             type="button"
             disabled={stop.step === "stopping"}
-            className={`${row.kind === "stack" ? "ml-auto " : ""}shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent`}
+            className={`${row.kind === "stack" ? "ml-auto " : ""}shrink-0 rounded px-1.5 text-[11px] font-medium text-content/55 hover:bg-red-400/15 hover:text-red-600 dark:hover:text-red-300 disabled:opacity-60 disabled:hover:bg-transparent`}
             onClick={() => {
               const question = stopQuestion(row);
               if (question) {
@@ -318,17 +318,17 @@ function Row({ row }: { row: StackRow }) {
         ) : null}
       </div>
       <p
-        className={`truncate pl-3.5 text-[11px] ${forgotten ? "text-amber-300" : "text-content/50"}`}
+        className={`truncate pl-3.5 text-[11px] ${forgotten ? "text-amber-700 dark:text-amber-300" : "text-content/50"}`}
         title={rowDetail(row)}
       >
         {rowDetail(row)}
       </p>
       {stop.step === "asking" ? (
         <div className="flex items-center gap-2 pl-3.5 text-[11px]">
-          <span className="min-w-0 flex-1 text-amber-300">{stop.question}</span>
+          <span className="min-w-0 flex-1 text-amber-700 dark:text-amber-300">{stop.question}</span>
           <button
             type="button"
-            className="shrink-0 rounded bg-red-400/20 px-1.5 font-semibold text-red-200 hover:bg-red-400/30"
+            className="shrink-0 rounded bg-red-400/20 px-1.5 font-semibold text-red-700 dark:text-red-200 hover:bg-red-400/30"
             onClick={doStop}
           >
             Stop
@@ -343,7 +343,7 @@ function Row({ row }: { row: StackRow }) {
         </div>
       ) : null}
       {stop.step === "failed" ? (
-        <p className="pl-3.5 text-[11px] text-red-300">{stop.message}</p>
+        <p className="pl-3.5 text-[11px] text-red-600 dark:text-red-300">{stop.message}</p>
       ) : null}
     </div>
   );

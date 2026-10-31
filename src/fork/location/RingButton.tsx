@@ -1,6 +1,5 @@
-import { useRef, useState, useSyncExternalStore } from "react";
-import { Bell, BellOff, MapPin, X } from "../../shared/ui/icons";
-import { Popover } from "../../shared/ui/Popover";
+import { useState, useSyncExternalStore } from "react";
+import { MapPin, X } from "../../shared/ui/icons";
 import {
   addPlace,
   FORK_LOCATION,
@@ -8,7 +7,6 @@ import {
   locationStatus,
   openLocationSettings,
   removePlace,
-  ringLabel,
   ringSentence,
   setRingMode,
   subscribeLocation,
@@ -26,64 +24,32 @@ const MODES: { mode: RingMode; label: string; title: string }[] = [
   { mode: "never", label: "Never", title: "Never ring; banners still show" },
 ];
 
-/**
- * Fork: footer button saying whether alerts ring here. Alerts ring only at
- * saved places (home, or any place added here); elsewhere banners still show
- * without a sound.
- */
-export function RingButton() {
-  return FORK_LOCATION ? <Ring /> : null;
-}
-
-function Ring() {
+/** Off (null) when location isn't in use, under the test runner. */
+export function useRingStatus(): LocationStatus | null {
   const status = useSyncExternalStore(
     subscribeLocation,
     locationStatus,
     locationStatus,
   );
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
-  const ringing = status?.ring ?? true;
-  const Icon = ringing ? Bell : BellOff;
+  return FORK_LOCATION ? status : null;
+}
 
+/** Something's wrong with the sounds, rather than it being a quiet place. */
+export function ringAlert(status: LocationStatus | null): boolean {
   return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        data-fork-ring=""
-        className={`inline-flex h-5 min-w-0 max-w-[140px] shrink items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open
-            ? "text-accent"
-            : ringing
-              ? "text-content/70 hover:text-content"
-              : "text-content/40 hover:text-content"
-        }`}
-        aria-expanded={open}
-        title={status ? ringSentence(status) : "Alert sounds"}
-        onClick={() => setOpen(!open)}
-      >
-        <Icon className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-        <span className="truncate">{ringLabel(status)}</span>
-      </button>
-      {open && status ? (
-        <Popover
-          anchor={anchor}
-          side="top"
-          align="end"
-          gap={6}
-          width={320}
-          ignore="[data-fork-ring]"
-          onDismiss={() => setOpen(false)}
-        >
-          <RingPanel status={status} />
-        </Popover>
-      ) : null}
-    </>
+    !!status &&
+    (!!status.error ||
+      (status.mode === "places" &&
+        (status.permission === "denied" || status.permission === "off")))
   );
 }
 
-function RingPanel({ status }: { status: LocationStatus }) {
+/**
+ * Fork: alert sounds, in the footer's More chip. Alerts ring only at saved
+ * places (home, or any place added here); elsewhere banners still show without
+ * a sound.
+ */
+export function RingPanel({ status }: { status: LocationStatus }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,7 +78,7 @@ function RingPanel({ status }: { status: LocationStatus }) {
   const shown = error ?? status.error;
 
   return (
-    <div className="flex max-h-[440px] flex-col gap-2 p-2 text-[12px]">
+    <div data-fork-ring="" className="flex flex-col gap-2 p-2 text-[12px]">
       <div className="flex flex-col gap-0.5 px-1">
         <span className="font-semibold text-content">Alert sounds</span>
         <span className="text-content/60">{ringSentence(status)}</span>
@@ -152,7 +118,7 @@ function RingPanel({ status }: { status: LocationStatus }) {
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+      <div className="flex flex-col gap-0.5">
         {status.places.length === 0 ? (
           <span className="px-1.5 py-1 text-content/45">
             No places yet. Add home below.
@@ -207,7 +173,7 @@ function RingPanel({ status }: { status: LocationStatus }) {
       </div>
 
       <form
-        className="flex flex-col gap-1 border-t border-content/10 px-1 pt-2"
+        className="flex flex-col gap-1 px-1 pt-1"
         onSubmit={(event) => {
           event.preventDefault();
           if (name.trim() && address.trim()) {

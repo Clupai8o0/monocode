@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { remoteSessionActions } from "../../features/connections/model/remoteSessionActions";
 import { isMonoSession } from "../../features/monos/model/mono";
@@ -61,63 +61,101 @@ function factsFor(scope: BroadcastScope, project: string | undefined): Broadcast
   };
 }
 
+let barOpen = false;
+let returnFocus: HTMLElement | null = null;
+const listeners = new Set<() => void>();
+
+function setBarOpen(next: boolean) {
+  if (next !== barOpen) {
+    barOpen = next;
+    listeners.forEach((listener) => listener());
+  }
+}
+
+function subscribeBar(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function useBroadcastOpen() {
+  return useSyncExternalStore(subscribeBar, () => barOpen);
+}
+
 /**
- * Fork: footer button "Send to all". Opens a bar above the footer with one
- * text box, a scope switch and the sessions it will reach; nothing goes out
- * until its send button is clicked. App lends it the sessions and the
- * composer's send path (BROADCAST_EVENT).
+ * Fork: "Send to all", a row in the Messages popover. Opens a bar above the
+ * footer with one text box, a scope switch and the sessions it will reach;
+ * nothing goes out until its send button is clicked. App lends it the sessions
+ * and the composer's send path (BROADCAST_EVENT). This mounts the bar.
  */
 export function BroadcastButton() {
   return FORK_BROADCAST ? <Broadcast /> : null;
 }
 
+export function BroadcastRow({
+  focusAfter,
+  onOpen,
+}: {
+  /** Where focus goes when the bar closes; the row itself if not given. */
+  focusAfter?: HTMLElement | null;
+  onOpen?: () => void;
+}) {
+  const open = useBroadcastOpen();
+  return (
+    <button
+      type="button"
+      data-fork-broadcast=""
+      aria-expanded={open}
+      title="Send one message to many sessions"
+      onClick={(event) => {
+        returnFocus = focusAfter ?? event.currentTarget;
+        setBarOpen(!open);
+        onOpen?.();
+      }}
+      className="mb-1 flex items-center justify-between rounded-md bg-content/[0.06] px-2 py-1.5 text-left font-medium text-content hover:bg-content/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    >
+      <span className="flex items-center gap-2">
+        <Send className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+        Send to all
+      </span>
+      <span className="text-[11px] font-normal text-content/45">One message to many sessions</span>
+    </button>
+  );
+}
+
 function Broadcast() {
-  const [open, setOpen] = useState(false);
+  const open = useBroadcastOpen();
+  // Its text goes with the footer, so the open bar has to as well.
+  useEffect(() => () => setBarOpen(false), []);
   // Kept while closed, so a slip of the Escape key loses nothing.
   const [text, setText] = useState("");
   // So are these: closing mid-send must not allow a second send or lose results.
   const [sending, setSending] = useState(false);
   const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
   const [results, setResults] = useState<ReadonlyMap<string, BroadcastResult>>(new Map());
-  const anchor = useRef<HTMLButtonElement>(null);
-  return (
-    <>
-      <button
-        ref={anchor}
-        type="button"
-        data-fork-broadcast=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open ? "text-accent" : "text-content/40 hover:text-content"
-        }`}
-        aria-expanded={open}
-        aria-label="Send to all"
-        title="Send one message to many sessions"
-        onClick={() => setOpen(!open)}
-      >
-        <Send className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-        <span className="hidden min-[1100px]:inline">Send to all</span>
-      </button>
-      {open
-        ? createPortal(
-            <BroadcastBar
-              text={text}
-              onText={setText}
-              sending={sending}
-              onSending={setSending}
-              unticked={unticked}
-              onUnticked={setUnticked}
-              results={results}
-              onResults={setResults}
-              onClose={() => {
-                setOpen(false);
-                anchor.current?.focus();
-              }}
-            />,
-            document.body,
-          )
-        : null}
-    </>
-  );
+  return open
+    ? createPortal(
+        <BroadcastBar
+          text={text}
+          onText={setText}
+          sending={sending}
+          onSending={setSending}
+          unticked={unticked}
+          onUnticked={setUnticked}
+          results={results}
+          onResults={setResults}
+          onClose={() => {
+            setBarOpen(false);
+            const target = returnFocus?.isConnected
+              ? returnFocus
+              : document.querySelector<HTMLElement>("[data-fork-messages]");
+            target?.focus();
+          }}
+        />,
+        document.body,
+      )
+    : null;
 }
 
 function BroadcastBar({

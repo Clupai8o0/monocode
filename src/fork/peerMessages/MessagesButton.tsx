@@ -3,6 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { NOTIFICATION_CLICK_EVENT } from "../../features/notifications/model/notifications";
 import { Mail } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
+import { BroadcastButton, BroadcastRow, useBroadcastOpen } from "../broadcast/BroadcastButton";
 import { openLabSettings } from "../lab/labStore";
 import { MessagesWindow } from "../messageLog/MessagesWindow";
 import {
@@ -30,12 +31,15 @@ export const FORK_MESSAGES = import.meta.env.MODE !== "test";
  * project; a row opens the session it went to. A red count shows messages
  * between sessions that went wrong in the last hour; a row in the popover
  * explains it and opens the Messages window (src/fork/messageLog) on them.
+ * Send to all opens from here too. The chip grows leftwards inside a slot of
+ * fixed width, so nothing around it moves when a count comes or goes.
  */
-export function MessagesButton() {
+export function MessagesButton({ inset = false }: { inset?: boolean }) {
   return FORK_MESSAGES ? (
     <>
-      <Messages />
+      <Messages inset={inset} />
       <MessagesWindowHost />
+      <BroadcastButton />
     </>
   ) : null;
 }
@@ -75,7 +79,7 @@ function OpenMessagesWindow({ request }: { request: MessagesWindowRequest }) {
   );
 }
 
-function Messages() {
+function Messages({ inset }: { inset: boolean }) {
   useSyncExternalStore(subscribePeerStats, peerStatsVersion, peerStatsVersion);
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
@@ -83,15 +87,18 @@ function Messages() {
   const problems = useMessageLog(false).recentProblems;
   const unread = rows.filter((r) => r.unread);
   const urgent = unread.some((r) => r.urgent);
-  const label = unread.length ? `Messages · ${unread.length}` : "Messages";
+  const barOpen = useBroadcastOpen();
+  const count = unread.length > 99 ? "99+" : `${unread.length}`;
   return (
-    <>
+    <span data-fork-messages-slot="" className="flex w-[96px] shrink-0 justify-end min-[1100px]:w-[166px]">
       <button
         ref={anchor}
         type="button"
         data-fork-messages=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 hover:bg-content/10 ${
-          open
+        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap hover:bg-content/10 ${
+          inset ? "rounded-full px-2" : "rounded px-1.5"
+        } ${
+          open || barOpen
             ? "text-accent"
             : unread.length
               ? "text-content/70 hover:text-content"
@@ -111,7 +118,12 @@ function Messages() {
         onClick={() => setOpen(!open)}
       >
         <Mail className="size-3.5" strokeWidth={1.75} aria-hidden />
-        <span className="tabular-nums">{label}</span>
+        <span className="tabular-nums">
+          <span data-fork-messages-word="" className="hidden min-[1100px]:inline">
+            Messages{unread.length ? " · " : ""}
+          </span>
+          {unread.length ? count : null}
+        </span>
         {urgent ? (
           <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
         ) : null}
@@ -132,22 +144,36 @@ function Messages() {
           gap={6}
           width={380}
           ignore="[data-fork-messages]"
-          onDismiss={() => setOpen(false)}
+          autoFocus
+          tabIndex={-1}
+          onDismiss={(reason) => {
+            setOpen(false);
+            if (reason === "escape") {
+              anchor.current?.focus();
+            }
+          }}
         >
-          <MessagesPanel rows={rows} problems={problems} onOpen={() => setOpen(false)} />
+          <MessagesPanel
+            rows={rows}
+            problems={problems}
+            sendFocus={anchor.current}
+            onOpen={() => setOpen(false)}
+          />
         </Popover>
       ) : null}
-    </>
+    </span>
   );
 }
 
 function MessagesPanel({
   rows,
   problems,
+  sendFocus,
   onOpen,
 }: {
   rows: InboxRow[];
   problems: number;
+  sendFocus: HTMLElement | null;
   onOpen: () => void;
 }) {
   const [project, setProject] = useState<string | null>(null);
@@ -167,6 +193,7 @@ function MessagesPanel({
         Open messages view
         <span className="text-[11px] font-normal text-content/45">Every session, every machine</span>
       </button>
+      <BroadcastRow focusAfter={sendFocus} onOpen={onOpen} />
       {problems ? (
         <button
           type="button"

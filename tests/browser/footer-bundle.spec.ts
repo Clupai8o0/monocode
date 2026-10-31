@@ -220,7 +220,7 @@ for (const theme of ["light", "dark"] as const) {
     await load(page, `theme=${theme}&alerts=${ALL_ALERTS}`);
     await expect(page.locator("[data-fork-messages-problems]")).toHaveText("99+", { timeout: 15_000 });
     const shot = (name: string) =>
-      page.screenshot({ path: `${dir}/${name}-${theme}.png`, clip: { x: 1300 - 560, y: 800 - 620, width: 560, height: 620 } });
+      page.screenshot({ path: `${dir}/${name}-${theme}.png`, clip: { x: 1300 - 760, y: 800 - 620, width: 760, height: 620 } });
     await shot("footer-alerts");
     await page.locator("[data-fork-machines]").click();
     for (const tab of ["Lab", "Stacks", "Memory"]) {

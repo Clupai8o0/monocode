@@ -46,10 +46,8 @@ import {
 import { PiUsage } from "./PiUsage";
 import { FORK_MACHINES, MachinesButton } from "../../fork/machines/MachinesButton"; // Fork
 import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
-import { BroadcastButton } from "../../fork/broadcast/BroadcastButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
-import { RingButton } from "../../fork/location/RingButton"; // Fork
-import { GamesButton } from "../../fork/games/GamesButton"; // Fork
+import { MoreButton } from "../../fork/more/MoreButton"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
 import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
 import { useAutoAccountUsage } from "../../fork/accounts/autoResolver"; // Fork
@@ -173,13 +171,11 @@ export function UsageFooter({
       {/* Fork: Machines always shows, so the right-hand group does too. */}
       {showTerminals || showTerminalButton || pressureSlot || FORK_MACHINES ? (
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <RingButton />
           {/* Fork: no visible button; keeps File > Workspaces… working. */}
           <WorkspacesButton />
-          <GamesButton />
-          <BroadcastButton />
-          <MessagesButton />
+          <MessagesButton inset={inset} />
           <MachinesButton inset={inset} />
+          <MoreButton inset={inset} />
           {pressureSlot ? (
             <span
               ref={pressureSlot}

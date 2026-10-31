@@ -127,7 +127,7 @@ function Machines({ inset }: { inset: boolean }) {
                   aria-selected={selected}
                   tabIndex={selected ? 0 : -1}
                   title={lit ? signals[id].why : undefined}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded px-1.5 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded px-1.5 py-1 focus-visible:outline-2 focus-visible:outline-accent ${
                     selected ? "bg-content/10 font-semibold text-content" : "text-content/60 hover:text-content"
                   }`}
                   onClick={() => pickMachineTab(id)}
