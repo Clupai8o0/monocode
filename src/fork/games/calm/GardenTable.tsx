@@ -105,9 +105,16 @@ export function GardenTable({ active, onExit, onInput }: TableProps) {
     }
     setShown(state.sunshine);
     updateGarden(seenSunshine);
+  }, [state.sunshine]);
+
+  // Its own timer: clearing the counter above mustn't cancel the fade.
+  useEffect(() => {
+    if (shown <= 0) {
+      return;
+    }
     const timer = setTimeout(() => setShown(0), 2400);
     return () => clearTimeout(timer);
-  }, [state.sunshine]);
+  }, [shown]);
 
   const onTend = (index: number) => updateGarden((current) => tend(current, index));
   const onSeed = (kind: SeedKind) =>

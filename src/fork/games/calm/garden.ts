@@ -174,11 +174,15 @@ export function tick(state: GardenState, now: number): GardenState {
   return { ...next, lastTick };
 }
 
-/** One sunshine for each agent that stopped working. */
+/**
+ * One sunshine for each agent that finished. A session stopping on an approval
+ * or a question is still busy, so only a drop in working plus waiting counts.
+ */
 export function applyActivity(state: GardenState, activity: AgentActivity, now: number): GardenState {
-  const finished = Math.max(0, state.lastWorking - activity.working);
+  const busy = activity.working + activity.waiting;
+  const finished = Math.max(0, state.lastWorking - busy);
   const next = tick(state, now);
-  return { ...shine(next, finished * AGENT_SUN), lastWorking: activity.working };
+  return { ...shine(next, finished * AGENT_SUN), lastWorking: busy };
 }
 
 /** Sunshine the UI has shown; only clears the counter. */
@@ -234,7 +238,14 @@ export function parseGarden(raw: string | null, now: number): GardenState {
   }
 }
 
+// The last state a save couldn't store, so a full or blocked store doesn't
+// undo each click on the next load.
+let unsaved: GardenState | null = null;
+
 export function loadGarden(now = Date.now()): GardenState {
+  if (unsaved) {
+    return unsaved;
+  }
   try {
     return parseGarden(localStorage.getItem(GARDEN_KEY), now);
   } catch {
@@ -245,8 +256,10 @@ export function loadGarden(now = Date.now()): GardenState {
 export function saveGarden(state: GardenState) {
   try {
     localStorage.setItem(GARDEN_KEY, JSON.stringify(state));
+    unsaved = null;
   } catch {
     // Storage full or off: the garden still grows this session.
+    unsaved = state;
   }
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(GARDEN_EVENT));

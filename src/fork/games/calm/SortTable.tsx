@@ -113,7 +113,11 @@ export function SortTable({ mode, runId, active, onExit, onInput }: TableProps) 
       return;
     }
     const upcoming = level + 1;
-    localStorage.setItem(LEVEL_KEY, JSON.stringify({ ...readLevels(), [mode]: upcoming }));
+    try {
+      localStorage.setItem(LEVEL_KEY, JSON.stringify({ ...readLevels(), [mode]: upcoming }));
+    } catch {
+      // A full or blocked store only forgets the level number.
+    }
     setLevel(upcoming);
     start(upcoming);
   };

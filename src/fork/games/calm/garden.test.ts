@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_SUN,
   BEDS,
@@ -20,9 +20,11 @@ import {
   noteAgentActivity,
   parseGarden,
   plant,
+  saveGarden,
   shine,
   tend,
   tick,
+  updateGarden,
   water,
 } from "./garden";
 
@@ -124,12 +126,29 @@ describe("garden", () => {
     };
     window.addEventListener(GARDEN_EVENT, onEvent);
     noteAgentActivity({ working: 2, waiting: 0 }, T0);
-    noteAgentActivity({ working: 0, waiting: 1 }, T0);
+    // Stopping on an approval is still busy: no sunshine yet.
+    noteAgentActivity({ working: 1, waiting: 1 }, T0);
+    expect(loadGarden(T0).sunshine).toBe(0);
+    noteAgentActivity({ working: 0, waiting: 0 }, T0);
     window.removeEventListener(GARDEN_EVENT, onEvent);
     expect(events).toBe(2);
     const saved = loadGarden(T0);
     expect(saved.lastWorking).toBe(0);
     expect(saved.sunshine).toBe(2 * AGENT_SUN);
+  });
+
+  it("keeps changes in memory when storage writes fail", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("full");
+    });
+    try {
+      updateGarden((state) => plant(state, 0), T0);
+      expect(loadGarden(T0).beds[0]).not.toBeNull();
+    } finally {
+      setItem.mockRestore();
+    }
+    // A save that works clears the in-memory copy for later tests.
+    saveGarden(createGarden(T0));
   });
 
   it("survives bad storage", () => {

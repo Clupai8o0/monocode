@@ -129,7 +129,7 @@ export function SolitaireTable({ mode, runId, active, onExit, onInput }: TablePr
   const finishing = canAutoFinish(state);
 
   useEffect(() => {
-    if (!finishing) {
+    if (!finishing || !active) {
       return;
     }
     const timer = setTimeout(() => {
@@ -139,7 +139,7 @@ export function SolitaireTable({ mode, runId, active, onExit, onInput }: TablePr
       }
     }, reducedMotion() ? 0 : FINISH_MS);
     return () => clearTimeout(timer);
-  }, [finishing, state, commit]);
+  }, [finishing, active, state, commit]);
 
   const clickCard = (source: From) => {
     const move = autoMove(stateRef.current, source);
