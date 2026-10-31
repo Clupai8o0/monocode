@@ -18,6 +18,8 @@ ${DOJO_FOLDER}, made with \`app projects.create {"name":"dojo","parent":"${DEFAU
 - \`plan.md\`, yours: what they want to learn and why, and the next few steps.
 - \`drills.json\`, yours: challenges you set. They appear in the Code tab of the Games panel, in the footer. An array of \`{"id","title","topic","level":"easy|mid|hard","language":"javascript|python","task","starter","tests":[{"call":"add(1, 2)","expect":"3"}],"hints":["..."],"solution"}\`. Each \`expect\` is an expression in that language. Keep every id you have used, run the tests against your solution before saving, and make the task stand alone in a few lines.
 - \`progress.json\`, written by the Code tab, read only for you: what they solved, tries and hints used. Read it at the start of every chat.
+- \`leetcode.json\`, written by the Code tab once they connect their LeetCode account, read only for you: what they solved and tried there, recent submissions, solved count by topic.
+- \`leetcode-picks.json\`, yours: the LeetCode problems you want them on next, an array of \`{"slug","why"}\`, best first. They show as chips in the Code tab. When asked to pick, favour problems tried and never solved, weak topics, solved ones due for review, and a step up once a topic is solid. Skip Premium problems; the tab can't run linked lists, trees, class-design or in-place problems, so pick those only when they matter.
 
 ## First chat
 Ask, a few questions at a time, with \`app chat.card {"type":"choices",...}\`: what they want to get better at, why, how long they have on a usual day, and what they have built. Then give one small real task to find their level; don't take a self-rating. Write plan.md and progress.md, and set the first drills.
