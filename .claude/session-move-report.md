@@ -1,5 +1,44 @@
 # Move a session: report for the Mac orchestrator
 
+## Fixes from the Mac review (31 Oct, round 6)
+
+**All five fixed with a test each, plus a Try again button. Codex (high) reviewed the fixes: 2 more found and fixed, then no defects.**
+
+Commits: `8d0533fc`, the follow-up, and this report, on top of the Mac's `07a6b47f`.
+
+| Sev | Problem | Fix | Test |
+|---|---|---|---|
+| High | Undo left the new Mac tab open on the conversation | Undo closes the tab first, and deletes its saved record so history can't reopen it. The tab can't take a turn until the move finishes. | Runner: close runs after the failed card, before `undo` |
+| High | Journal writes failed silently | A move that can't save its journal fails before stopping the source | Runner: no stop, no pack |
+| Medium | Crash between card and journal clear undid a finished move | Each card records its move id; recovery sees a saved card and only cleans up. A failed clear no longer rolls back. | Model and runner |
+| Medium | Host, Mac, host locked the next move to the Mac | Landing on a host again drops the old `lab:<id>` record | Model |
+| Medium | A lost poll reply rolled back a finished step | The host keeps finished answers until the move's next step, its `done`, or an hour | Host: same answer twice, then gone after `done` |
+
+**Codex's two extra findings, both fixed:**
+- A finished move's leftover journal is dropped before a later move replaces its card. Otherwise the next launch would undo it.
+- The undone tab is deleted through the app's own delete path, not just closed.
+
+**Retry without a restart:** a move that stayed stopped now shows "Try again" in its line. It runs the same undo as the app launch does, and the line can't be dismissed while the move is stuck.
+
+A move to this Mac now saves the new tab's id in its journal, so recovery after a crash closes that tab too.
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit`, web and host | Clean |
+| Vitest `src/fork` | 962 passed |
+| Vitest host (`session-move`, `server`, `external-sessions`) | 69 passed, 2 skipped (interop, as before) |
+| `tests/browser/session-move.spec.ts`, Chromium, light and dark | 2 passed. I opened both screenshots; the Try again line is in them. |
+| Rust | Not touched this round |
+
+**Only in tests, never in the real app:** the tab's close and delete (`closeMovedTab` in `App.tsx`), the Try again button inside a real stuck move, and recovery closing a tab after a restart. Watch these on the Mac:
+1. Make a move to this Mac fail after the tab opens (stop Vivobook's host mid-move). The tab should close, and should not come back in history.
+2. Make a rollback fail (Vivobook offline), then bring it back and press Try again. The line should clear and the session should take turns.
+3. Move host, Mac, host, then Mac again. The last move should start.
+
+---
+
+## Earlier report (round 5)
+
 **Built and pushed, but never run end to end. The app can't be built on Vivobook, so the first real move is yours.**
 
 Commits: `4f9d5912..` this report, on `lab/session-move`. 2 commits behind `origin/mine` (HTML preview, Add to chat); a trial merge has no conflicts.
