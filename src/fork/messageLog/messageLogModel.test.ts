@@ -256,6 +256,10 @@ describe("buildMessageLogView", () => {
       send("fails-again", NOW - 19 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-5" }),
       send("long-first", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-6", preview: "same start, one ending" }),
       send("long-second", NOW - 19 * MIN, { status: "sent", to: "new", key: "k-6", preview: "same start, other ending" }),
+      send("cut-first", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-7", digest: "d-1" }),
+      send("cut-second", NOW - 19 * MIN, { status: "sent", to: "new", key: "k-7", digest: "d-2" }),
+      send("cut-same", NOW - 20 * MIN, { status: "failed", error: "No agent named old", to: "old", key: "k-8", digest: "d-3" }),
+      send("cut-resent", NOW - 19 * MIN, { status: "sent", to: "new", key: "k-8", digest: "d-3" }),
     ])]);
     const by = Object.fromEntries(view.rows.map((r) => [r.id, r]));
     expect(by.retried).toMatchObject({
@@ -264,9 +268,10 @@ describe("buildMessageLogView", () => {
       problem: false,
       settled: true,
     });
-    for (const id of ["other-text", "too-late", "other-session", "fails-too", "fails-again", "long-first"]) {
+    for (const id of ["other-text", "too-late", "other-session", "fails-too", "fails-again", "long-first", "cut-first"]) {
       expect(by[id].problem).toBe(true);
     }
+    expect(by["cut-same"].problem).toBe(false);
   });
 
   it("pairs a message a busy session read long after it was sent", () => {

@@ -30,13 +30,15 @@ const sessions = [
 ];
 
 const sent: { id: string; text: string }[] = [];
-(window as unknown as { sent: typeof sent }).sent = sent;
+const page = window as unknown as { sent: typeof sent; hold?: Promise<void>; release?: () => void };
+page.sent = sent;
 
 window.addEventListener(BROADCAST_EVENT, (event) => {
   (event as CustomEvent<(app: BroadcastApp<Session>) => void>).detail({
     sessions: () => sessions,
     project: () => "/repo",
-    submit: (id, text) => {
+    submit: async (id, text) => {
+      await page.hold;
       if (id === "refuses") {
         return false;
       }

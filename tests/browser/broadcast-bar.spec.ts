@@ -56,3 +56,34 @@ test("sends only on the click, says what happened, and keeps the text if any fai
   await expect(bar).toHaveCount(0);
   await expect(page.locator("[data-fork-broadcast]")).toBeFocused();
 });
+
+test("closing mid-send can't send twice, and the send still finishes", async ({ page }) => {
+  await page.goto("/tests/browser/broadcast-bar.html");
+  await page.evaluate(() => {
+    const held = window as unknown as { hold: Promise<void>; release: () => void };
+    held.hold = new Promise((resolve) => {
+      held.release = resolve;
+    });
+  });
+  const chip = page.locator("[data-fork-broadcast]");
+  await chip.click();
+  const bar = page.locator("[data-fork-broadcast-bar]");
+  const message = bar.getByLabel("Message", { exact: true });
+  await message.fill("Run the tests");
+  await bar.locator('[data-fork-broadcast-session="refuses"] input').uncheck();
+  await bar.getByRole("button", { name: /^Send to 2 sessions/ }).click();
+  await expect(bar.getByRole("button", { name: "Sending…" })).toBeDisabled();
+
+  await page.keyboard.press("Escape");
+  await expect(bar).toHaveCount(0);
+  await chip.click();
+  await expect(bar.getByRole("button", { name: "Sending…" })).toBeDisabled();
+  await expect(message).toHaveJSProperty("readOnly", true);
+  await expect(message).toHaveValue("Run the tests");
+
+  await page.evaluate(() => (window as unknown as { release: () => void }).release());
+  await expect(message).toHaveValue("");
+  await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toContainText("Sent");
+  await expect(bar.locator('[data-fork-broadcast-session="busy"]')).toContainText("Queued for after this turn");
+  expect(await page.evaluate(() => (window as unknown as { sent: unknown[] }).sent)).toHaveLength(2);
+});

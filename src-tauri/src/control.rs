@@ -317,7 +317,7 @@ fn serve(mut stream: TcpStream, app: &AppHandle, inner: &Arc<Mutex<Inner>>) {
             mcp_caller: mcp.as_ref().map(|(_, client)| client.into()),
         };
         let delivered = app.emit_to(grant.window.as_str(), "monocode-control-request", event);
-        let result = if delivered.is_err() {
+        let result: Result<Value, String> = if delivered.is_err() {
             Err("MonoCode executor is unavailable".into())
         } else {
             rx.recv_timeout(Duration::from_secs(35))

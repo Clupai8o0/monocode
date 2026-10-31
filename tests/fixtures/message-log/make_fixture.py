@@ -13,6 +13,7 @@ Record order in the transcripts is not always by time, on purpose: a reader
 must not depend on it.
 """
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -57,6 +58,10 @@ def preview(body):
 
 def key(body):
     return re.sub(r"[\t\n\x0b\x0c\r ]+", " ", scrub(body).strip(WS))[:160].rstrip(WS)
+
+
+def digest(body):
+    return hashlib.sha256(scrub(body).strip(WS).encode()).hexdigest()
 
 
 def summary(s):
@@ -323,7 +328,7 @@ def send_ev(tid, at, updated, to, address, body, status, rev=1, summary_=None, t
         e["target"] = target
     if summary_:
         e["summary"] = summary(summary_)
-    e.update({"preview": preview(body), "key": key(body)})
+    e.update({"preview": preview(body), "key": key(body), "digest": digest(body)})
     if msg_id:
         e["msgId"] = msg_id
     e["status"] = status

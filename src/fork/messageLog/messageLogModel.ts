@@ -488,6 +488,13 @@ function sendRow(
   return row;
 }
 
+/** Previews and keys are cut, so only digests tell long messages apart. */
+function sameText(a: SendEvent, b: SendEvent): boolean {
+  return a.digest && b.digest
+    ? a.digest === b.digest
+    : a.key === b.key && a.preview === b.preview;
+}
+
 /** A lost send isn't a problem once its session sent the same text again. */
 function settleResent(
   input: BuildInput,
@@ -506,8 +513,7 @@ function settleResent(
         !lost(rows[otherIndex]) &&
         other.source === sends[index].source &&
         other.event.sessionId === event.sessionId &&
-        other.event.key === event.key &&
-        other.event.preview === event.preview &&
+        sameText(other.event, event) &&
         other.event.at > event.at &&
         other.event.at - event.at <= RESEND_MS,
     );

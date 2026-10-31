@@ -75,6 +75,10 @@ function Broadcast() {
   const [open, setOpen] = useState(false);
   // Kept while closed, so a slip of the Escape key loses nothing.
   const [text, setText] = useState("");
+  // So are these: closing mid-send must not allow a second send or lose results.
+  const [sending, setSending] = useState(false);
+  const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
+  const [results, setResults] = useState<ReadonlyMap<string, BroadcastResult>>(new Map());
   const anchor = useRef<HTMLButtonElement>(null);
   return (
     <>
@@ -98,6 +102,12 @@ function Broadcast() {
             <BroadcastBar
               text={text}
               onText={setText}
+              sending={sending}
+              onSending={setSending}
+              unticked={unticked}
+              onUnticked={setUnticked}
+              results={results}
+              onResults={setResults}
               onClose={() => {
                 setOpen(false);
                 anchor.current?.focus();
@@ -113,16 +123,26 @@ function Broadcast() {
 function BroadcastBar({
   text,
   onText,
+  sending,
+  onSending,
+  unticked,
+  onUnticked,
+  results,
+  onResults,
   onClose,
 }: {
   text: string;
   onText: (text: string) => void;
+  sending: boolean;
+  onSending: (sending: boolean) => void;
+  unticked: ReadonlySet<string>;
+  onUnticked: (unticked: ReadonlySet<string>) => void;
+  results: ReadonlyMap<string, BroadcastResult>;
+  onResults: (results: ReadonlyMap<string, BroadcastResult>) => void;
   onClose: () => void;
 }) {
   const [choice, setChoice] = useState<ScopeChoice>("project");
   const [picked, setPicked] = useState<string>();
-  const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
-  const [results, setResults] = useState<ReadonlyMap<string, BroadcastResult>>(new Map());
   const [app, setApp] = useState<BroadcastApp<Session> | null>(() => connectBroadcast<Session>());
   // Sessions come and go, and turn busy, while the bar is open.
   const [, setTick] = useState(0);
@@ -152,7 +172,6 @@ function BroadcastBar({
   const chosen = plan.targets.filter(
     (target) => !target.blocked && !unticked.has(target.id),
   );
-  const [sending, setSending] = useState(false);
   const canSend = !!app && !!text.trim() && chosen.length > 0 && !sending;
   const failed = [...results.values()].filter((result) => result.outcome === "failed");
 
@@ -162,20 +181,20 @@ function BroadcastBar({
       return;
     }
     const fresh = planBroadcast(live.sessions(), factsFor(scope, live.project()));
-    setSending(true);
+    onSending(true);
     const outcome = await sendBroadcast(
       new Set(chosen.map((target) => target.id)),
       fresh,
       text,
       live.submit,
     );
-    setSending(false);
-    setResults(new Map(outcome.map((result) => [result.id, result])));
+    onSending(false);
+    onResults(new Map(outcome.map((result) => [result.id, result])));
     // A second click only tries the ones that failed.
     const failedIds = new Set(
       outcome.filter((result) => result.outcome === "failed").map((result) => result.id),
     );
-    setUnticked(
+    onUnticked(
       failedIds.size
         ? new Set(plan.targets.map((target) => target.id).filter((id) => !failedIds.has(id)))
         : new Set(),
@@ -192,7 +211,7 @@ function BroadcastBar({
     } else {
       next.add(id);
     }
-    setUnticked(next);
+    onUnticked(next);
   };
 
   const leftOut = leftOutLine(plan.leftOut);
@@ -219,7 +238,7 @@ function BroadcastBar({
         placeholder="Message for these sessions"
         onChange={(event) => {
           onText(event.target.value);
-          setResults(new Map());
+          onResults(new Map());
         }}
         className="min-h-12 resize-none rounded-lg bg-content/5 px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-content/35 focus:bg-content/8"
       />

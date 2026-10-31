@@ -14,14 +14,14 @@ for (const theme of ["dark", "light"] as const) {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/tests/browser/lab-button.html?theme=${theme}`);
     const chip = page.locator("[data-fork-lab]");
-    await expect(chip).toHaveText("Vivobook · 4 running");
+    await expect(chip).toHaveText("Vivobook · 3 running");
     await expect(chip).toHaveAttribute("aria-label", /Remote Control on every machine, relay on/);
     await chip.screenshot({ path: `${dir}/lab-chip-${theme}.png` });
 
     await chip.click();
     const popover = page.getByRole("radiogroup", { name: "Remote Control scope" });
     await expect(popover).toBeVisible();
-    await expect(page.locator("[data-fork-lab-running]")).toHaveText("Vivobook · 4 sessions running");
+    await expect(page.locator("[data-fork-lab-running]")).toHaveText("Vivobook · 3 sessions running");
     await expect(page.getByRole("button", { name: "New session on Vivobook" })).toBeEnabled();
     await expect(page.getByRole("radio", { name: "Every machine" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("switch", { name: "Relay on vivobook" })).toHaveAttribute("aria-checked", "true");

@@ -112,6 +112,8 @@
  * - `key` = scrub(body), trimmed, every whitespace run turned into one space,
  *   first KEY_MAX code points, end trimmed. Both ends compute it the same way,
  *   so a send and its receive have the same key.
+ * - `digest` (sends only) = lowercase hex SHA-256 of the UTF-8 of scrub(body),
+ *   trimmed. Tells apart long messages whose preview and key are cut the same.
  * - `summary` = scrub(summary), trimmed, first SUMMARY_MAX, end trimmed; left
  *   out when empty. `error` the same with ERROR_MAX.
  *
@@ -225,6 +227,8 @@ export type SendEvent = {
   summary?: string;
   preview: string;
   key: string;
+  /** Left out by a host older than this field. */
+  digest?: string;
   msgId?: string;
   status: SendStatus;
   /** Plain words from the tool or the notice, scrubbed; failed sends only. */

@@ -71,6 +71,7 @@
             "summary": "Ask beta to review",
             "preview": "Please review   the\nlab diff when you can.",
             "key": "Please review the lab diff when you can.",
+            "digest": "4b55655f590b5984b3bcc0cfec33cd66a4f6691642e854738a9100a3b1724763",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000001",
             "status": "sent"
           },
@@ -115,6 +116,7 @@
             "summary": "Hand over to the vivobook",
             "preview": "Handover: branch msg/ui is pushed.",
             "key": "Handover: branch msg/ui is pushed.",
+            "digest": "56cf52ba76df7d53d1bf79eca38cd315c5d03800318637248248910bc11e3a5c",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000002",
             "status": "sent"
           },
@@ -130,6 +132,7 @@
             "toAddress": "name",
             "preview": "Are you there?",
             "key": "Are you there?",
+            "digest": "9d83ff719dded6f2099bffed51853f4c927ff8c2dab5622f604669292b485d1c",
             "status": "failed",
             "error": "No agent named 'ghost' is reachable.\nUse ListAgents to see everyone you can message."
           },
@@ -146,6 +149,7 @@
             "summary": "Ping old session",
             "preview": "Ping",
             "key": "Ping",
+            "digest": "6a4c3a4483b0448883299321ec2677f99a20afbf6a60bc5447bf2243d23b7152",
             "status": "failed",
             "error": "Failed to send to uds:…: ENOENT: no such file or directory, lstat '…' — the peer process may have restarted, so this socket path is stale. Call ListAgents to get the current address."
           },
@@ -162,6 +166,7 @@
             "summary": "Ask gamma",
             "preview": "Can you take the host deploy?",
             "key": "Can you take the host deploy?",
+            "digest": "565a0a9757bccf7b2d961fed761361c0324de2faac51bbb776628bfc9e18d397",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000004",
             "status": "released"
           },
@@ -185,6 +190,7 @@
             "summary": "Follow-up",
             "preview": "One more thing",
             "key": "One more thing",
+            "digest": "7e5b5850d0896ce5f47ea27b710a5109ce5f63b1de6349d19ab3b804c5b994af",
             "status": "pending"
           },
           {
@@ -208,6 +214,7 @@
             "summary": "Check in",
             "preview": "Status?",
             "key": "Status?",
+            "digest": "7fa2d11897a567998b667f4b453ac20b68a6813fde68222e583f90a5bf453b96",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000009",
             "status": "sent"
           },
@@ -252,6 +259,7 @@
             "summary": "Late ask",
             "preview": "Can you also check the APK?",
             "key": "Can you also check the APK?",
+            "digest": "cf5c2f83ae4dfe7d3e15abb2168c0e11be5723c4b36220b73fdc1e6c494694b9",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000010",
             "status": "expired"
           },
@@ -267,6 +275,7 @@
             "toAddress": "name",
             "preview": "Refuse test",
             "key": "Refuse test",
+            "digest": "95ed531a69628a4e6cd5431af969b9118a110f6e8631546e810e9040d68c7c1e",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000011",
             "status": "failed",
             "error": "Refused: that session is not accepting messages from other sessions"
@@ -290,6 +299,7 @@
             },
             "preview": "Denied test",
             "key": "Denied test",
+            "digest": "ab6c2e18944b714c3ce2c13b8868b7ab697f7f7af5401ae72551b3a0b03793aa",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000012",
             "status": "failed",
             "error": "Denied by that session's user"
@@ -334,6 +344,7 @@
             },
             "preview": "Still there?",
             "key": "Still there?",
+            "digest": "99deb8c91ee981ae70d61260edd8da8c059dbb682de135c6b6a0e84fdcae040b",
             "status": "pending"
           },
           {
@@ -356,6 +367,7 @@
             "summary": "📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦",
             "preview": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
             "key": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "digest": "67ceb1975310fc0a4b0ed1c450dcec0c57263b94f1083627861383663ddec0a0",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000015",
             "status": "sent"
           },
@@ -432,6 +444,7 @@
             "summary": "Follow-up",
             "preview": "One more thing",
             "key": "One more thing",
+            "digest": "7e5b5850d0896ce5f47ea27b710a5109ce5f63b1de6349d19ab3b804c5b994af",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000007",
             "status": "sent"
           },
@@ -539,6 +552,7 @@
             "summary": "Ask beta to review",
             "preview": "Please review   the\nlab diff when you can.",
             "key": "Please review the lab diff when you can.",
+            "digest": "4b55655f590b5984b3bcc0cfec33cd66a4f6691642e854738a9100a3b1724763",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000001",
             "status": "sent"
           },
@@ -583,6 +597,7 @@
             "summary": "Hand over to the vivobook",
             "preview": "Handover: branch msg/ui is pushed.",
             "key": "Handover: branch msg/ui is pushed.",
+            "digest": "56cf52ba76df7d53d1bf79eca38cd315c5d03800318637248248910bc11e3a5c",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000002",
             "status": "sent"
           },
@@ -598,6 +613,7 @@
             "toAddress": "name",
             "preview": "Are you there?",
             "key": "Are you there?",
+            "digest": "9d83ff719dded6f2099bffed51853f4c927ff8c2dab5622f604669292b485d1c",
             "status": "failed",
             "error": "No agent named 'ghost' is reachable.\nUse ListAgents to see everyone you can message."
           },
@@ -614,6 +630,7 @@
             "summary": "Ping old session",
             "preview": "Ping",
             "key": "Ping",
+            "digest": "6a4c3a4483b0448883299321ec2677f99a20afbf6a60bc5447bf2243d23b7152",
             "status": "failed",
             "error": "Failed to send to uds:…: ENOENT: no such file or directory, lstat '…' — the peer process may have restarted, so this socket path is stale. Call ListAgents to get the current address."
           },
@@ -630,6 +647,7 @@
             "summary": "Ask gamma",
             "preview": "Can you take the host deploy?",
             "key": "Can you take the host deploy?",
+            "digest": "565a0a9757bccf7b2d961fed761361c0324de2faac51bbb776628bfc9e18d397",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000004",
             "status": "released"
           },
@@ -653,6 +671,7 @@
             "summary": "Follow-up",
             "preview": "One more thing",
             "key": "One more thing",
+            "digest": "7e5b5850d0896ce5f47ea27b710a5109ce5f63b1de6349d19ab3b804c5b994af",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000007",
             "status": "sent"
           },
@@ -677,6 +696,7 @@
             "summary": "Check in",
             "preview": "Status?",
             "key": "Status?",
+            "digest": "7fa2d11897a567998b667f4b453ac20b68a6813fde68222e583f90a5bf453b96",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000009",
             "status": "sent"
           },
@@ -721,6 +741,7 @@
             "summary": "Late ask",
             "preview": "Can you also check the APK?",
             "key": "Can you also check the APK?",
+            "digest": "cf5c2f83ae4dfe7d3e15abb2168c0e11be5723c4b36220b73fdc1e6c494694b9",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000010",
             "status": "expired"
           },
@@ -736,6 +757,7 @@
             "toAddress": "name",
             "preview": "Refuse test",
             "key": "Refuse test",
+            "digest": "95ed531a69628a4e6cd5431af969b9118a110f6e8631546e810e9040d68c7c1e",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000011",
             "status": "failed",
             "error": "Refused: that session is not accepting messages from other sessions"
@@ -759,6 +781,7 @@
             },
             "preview": "Denied test",
             "key": "Denied test",
+            "digest": "ab6c2e18944b714c3ce2c13b8868b7ab697f7f7af5401ae72551b3a0b03793aa",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000012",
             "status": "failed",
             "error": "Denied by that session's user"
@@ -803,6 +826,7 @@
             },
             "preview": "Still there?",
             "key": "Still there?",
+            "digest": "99deb8c91ee981ae70d61260edd8da8c059dbb682de135c6b6a0e84fdcae040b",
             "status": "pending"
           },
           {
@@ -825,6 +849,7 @@
             "summary": "📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦📦",
             "preview": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
             "key": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+            "digest": "67ceb1975310fc0a4b0ed1c450dcec0c57263b94f1083627861383663ddec0a0",
             "msgId": "aaaaaaaa-0000-4000-8000-000000000015",
             "status": "sent"
           },

@@ -5,7 +5,7 @@
  * the Mac's reader (src-tauri/src/fork_messages.rs) does the same.
  * Read-only: nothing here touches a session.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -117,6 +117,10 @@ export function previewOf(body: string) {
 
 export function keyOf(body: string) {
   return trimEnd(codePoints(trim(scrub(body)).replace(WS_RUN, " "), KEY_MAX));
+}
+
+export function digestOf(body: string) {
+  return createHash("sha256").update(trim(scrub(body))).digest("hex");
 }
 
 // ---- registries ----
@@ -594,6 +598,7 @@ export class MessageReader {
       ...(summary ? { summary } : {}),
       preview: previewOf(text),
       key: keyOf(text),
+      digest: digestOf(text),
       status: "pending",
     };
     this.events.set(id, { event, address: to, lookup: address === "name" ? event.to : undefined });

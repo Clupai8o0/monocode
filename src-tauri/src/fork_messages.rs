@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 const NOTICE_PREFIX: &str = "[Cross-session delivery notice]";
 const LINE_HINTS: [&str; 4] = ["SendMessage", "cross-session", "\"peer\"", "delivery notice"];
@@ -85,6 +86,9 @@ pub struct LogEvent {
     pub summary: Option<String>,
     pub preview: String,
     pub key: String,
+    /// Sends only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -221,6 +225,15 @@ pub(crate) fn preview_of(body: &str) -> String {
     take(trim(&scrubbed), PREVIEW_MAX)
         .trim_end_matches(is_ws)
         .to_string()
+}
+
+/// Tells apart long messages whose preview and key are cut the same.
+pub(crate) fn digest_of(body: &str) -> String {
+    let scrubbed = scrub(body);
+    Sha256::digest(trim(&scrubbed).as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The text a send, its receive and a relay hop share.
@@ -582,6 +595,7 @@ impl FileState {
                 summary: input["summary"].as_str().and_then(|s| clip(s, SUMMARY_MAX)),
                 preview: preview_of(body),
                 key: key_of(body),
+                digest: Some(digest_of(body)),
                 msg_id: None,
                 status: Some("pending"),
                 error: None,
@@ -748,6 +762,7 @@ impl FileState {
             summary: None,
             preview: preview_of(&body),
             key: key_of(&body),
+            digest: None,
             msg_id: str_of(&origin["msg_id"]).filter(|m| !m.is_empty()),
             status: None,
             error: None,
