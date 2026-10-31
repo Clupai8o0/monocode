@@ -165,9 +165,6 @@ export function GardenTable({ active, onExit, onInput }: TableProps) {
         </div>
 
         <div className="relative z-10 mt-auto flex flex-col items-center gap-2 pb-3">
-          <span className="font-mono text-[10px] text-content/45">
-            tap a bed to plant, water, or pick · watered plants grow twice as fast
-          </span>
           <div className="flex flex-wrap justify-center gap-1" role="group" aria-label="Seeds">
             {SEEDS.map((seed, index) => {
               const owned = state.owned.includes(seed.id);
