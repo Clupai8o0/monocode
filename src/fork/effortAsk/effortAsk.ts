@@ -104,6 +104,10 @@ export type EffortChange = {
 };
 
 
+/** The line and nothing else, not even an answer on the same line. */
+const BARE_LINE =
+  /^effort\s*:\s*[\w-]+\s+now\s*,\s*[\w-]+\s+needed\s*(\([^)\n]*\))?\s*\.?$/i;
+
 /** A plan-mode reply has been moved to a plan block by the time a turn ends. */
 function isEffortLineBlock(block: Pick<Block, "role" | "text">): boolean {
   return (
@@ -143,7 +147,7 @@ export function stoppedAtEffortLine(
   ) {
     return false;
   }
-  return !blocks[line].text.trim().includes("\n");
+  return BARE_LINE.test(blocks[line].text.replace(/[*`_]/g, "").trim());
 }
 
 /** What MonoCode sends to carry on a turn the model stopped for a raise. */

@@ -341,8 +341,10 @@ describe("stoppedAtEffortLine", () => {
     expect(stoppedAtEffortLine([block("system", "Compacted"), block("assistant", LINE)])).toBe(true);
   });
 
-  it("is false for a short finished answer after the line", () => {
+  it("is false for a short finished answer after the line, or on it", () => {
     expect(stoppedAtEffortLine([block("assistant", `${LINE}\nNo findings.`)])).toBe(false);
+    expect(stoppedAtEffortLine([block("assistant", `${LINE} No findings.`)])).toBe(false);
+    expect(stoppedAtEffortLine([block("assistant", `**${LINE}**`)])).toBe(true);
   });
 
   it("is false once the model did work after the line", () => {
