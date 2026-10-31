@@ -8,13 +8,20 @@ if (process.env.GAME_BROWSER) {
 
 const THEMES = ["dark", "light"] as const;
 
+async function pickGame(page: Page, name: string) {
+  await page.getByRole("button", { name: "Game", exact: true }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
+const gameSelect = (page: Page) => page.getByRole("button", { name: "Game", exact: true });
+
 async function open(page: Page, tab: string, query = "", theme = "dark") {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/tests/browser/table-games.html?theme=${theme}${query}`);
   await page.locator("[data-fork-games]").click();
   const panel = page.getByRole("dialog", { name: "Games" });
   await expect(panel).toBeVisible();
-  await page.getByRole("tab", { name: tab }).click();
+  await pickGame(page, tab);
   return panel;
 }
 
@@ -260,7 +267,7 @@ test("Leave table ends the game, and blackjack opens up afterwards", async ({ pa
   ).toHaveText(/New game/);
 
   // The chip claim went with it.
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
   await page.keyboard.press(" ");
   await expect(phase(page, "Blackjack table")).not.toHaveAttribute("data-table-phase", "idle");
@@ -277,9 +284,9 @@ test("a game played to the end shows the result and New game", async ({ page }) 
   });
 
   // Park the table so the auto-deal cannot start a hand under the seam.
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await setPokerStacks(page, [9200, 0, 0, 0, 0], 31);
-  await page.getByRole("tab", { name: "poker" }).click();
+  await pickGame(page, "poker");
   await expect(
     page.locator('[data-table-board="Poker table"] [data-table-status]'),
   ).toHaveText("You took the table: +4.2k in 31 hands");
@@ -401,7 +408,7 @@ test("broke: a quota bump refills, and the grid games still work", async ({ page
   );
   await page.reload();
   await page.locator("[data-fork-games]").click();
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await expect(page.locator('[data-action="bump"]')).toBeVisible();
   await shoot(page, "blackjack-broke-dark", dir);
   await page.locator('[data-action="bump"]').click();
@@ -409,13 +416,13 @@ test("broke: a quota bump refills, and the grid games still work", async ({ page
   await expect(page.locator('[data-action="deal"]').last()).toBeVisible();
 
   // Back to a grid game: it takes the keys, and the last game is remembered.
-  await page.getByRole("tab", { name: "snake" }).click();
+  await pickGame(page, "snake");
   await expect(page.locator("[data-grid-board]")).toBeFocused();
   expect((await page.getByRole("dialog", { name: "Games" }).boundingBox())!.width).toBe(600);
-  await page.getByRole("tab", { name: "chess" }).click();
+  await pickGame(page, "chess");
   await page.reload();
   await page.locator("[data-fork-games]").click();
-  await expect(page.getByRole("tab", { name: "chess" })).toHaveAttribute("aria-selected", "true");
+  await expect(gameSelect(page)).toHaveText("chess");
 });
 
 test("with motion on: coins land and clear, and chess runs in a worker", async ({ page }, testInfo) => {
@@ -434,7 +441,7 @@ test("with motion on: coins land and clear, and chess runs in a worker", async (
   // Nothing's left behind on the table from the flying coins.
   await expect(page.locator('[data-table-phase] > svg[aria-hidden="true"]')).toHaveCount(0);
 
-  await page.getByRole("tab", { name: "chess" }).click();
+  await pickGame(page, "chess");
   await page.locator('[data-square="e2"]').click();
   await page.locator('[data-square="e4"]').click();
   await expect.poll(async () => (await page.locator("[data-move-list]").innerText()).split(" ").length, { timeout: 15_000 }).toBe(2);
@@ -448,7 +455,7 @@ test("a small window still fits every control", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 800, height: 560 });
   await page.goto("/tests/browser/table-games.html");
   await page.locator("[data-fork-games]").click();
-  await page.getByRole("tab", { name: "poker" }).click();
+  await pickGame(page, "poker");
   await page.keyboard.press(" ");
   await expect(page.locator('[data-action="fold"]')).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: `${dir}/poker-small-window.png` });
@@ -458,7 +465,7 @@ test("a small window still fits every control", async ({ page }, testInfo) => {
     expect(box.y + box.height).toBeLessThanOrEqual(panel.y + panel.height);
     expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width);
   }
-  await page.getByRole("tab", { name: "chess" }).click();
+  await pickGame(page, "chess");
   await page.screenshot({ path: `${dir}/chess-small-window.png` });
   const board = (await page.locator("[data-chess-board]").boundingBox())!;
   expect(board.y + board.height).toBeLessThanOrEqual(panel.y + panel.height);
@@ -471,41 +478,41 @@ test("only one card game holds chips at a time, and New game leaves a parked gri
   await page.keyboard.press(" ");
   await expect(page.locator('[data-action="fold"]')).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
   await page.keyboard.press(" ");
   await expect(phase(page, "Blackjack table")).toHaveAttribute("data-table-phase", "idle");
   await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Leave the poker table first.");
 
   // The hand ends, but the game still holds the chips, so blackjack stays shut.
-  await page.getByRole("tab", { name: "poker" }).click();
+  await pickGame(page, "poker");
   await page.keyboard.press("f");
   await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done", { timeout: 60_000 });
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await page.keyboard.press(" ");
   await expect(page.locator('[data-table-board="Blackjack table"] [data-table-status]')).toHaveText("Leave the poker table first.");
 
   // Leave between hands releases the table, and blackjack opens up.
-  await page.getByRole("tab", { name: "poker" }).click();
+  await pickGame(page, "poker");
   await page.locator('[data-action="leave"]').click();
   await expect(page.locator('[data-table-board="Poker table"] [data-table-status]')).toContainText("You left with");
   await expect(
     page.locator('[data-table-board="Poker table"] [data-action="deal"]'),
   ).toHaveText(/New game/);
-  await page.getByRole("tab", { name: "blackjack" }).click();
+  await pickGame(page, "blackjack");
   await expect(page.locator('[data-table-board="Blackjack table"]')).toBeFocused();
   await page.keyboard.press(" ");
   await expect(phase(page, "Blackjack table")).not.toHaveAttribute("data-table-phase", "idle");
 
   // A grid game's score survives New game at a table.
-  await page.getByRole("tab", { name: "agent run" }).click();
+  await pickGame(page, "agent run");
   await expect(page.locator("[data-grid-board]")).toBeFocused();
   await page.keyboard.press(" ");
   await expect.poll(() => tokens(page), { timeout: 8000 }).toBeGreaterThan(2);
   const before = await tokens(page);
-  await page.getByRole("tab", { name: "chess" }).click();
+  await pickGame(page, "chess");
   await page.getByRole("button", { name: "New game" }).click();
-  await page.getByRole("tab", { name: "agent run" }).click();
+  await pickGame(page, "agent run");
   expect(await tokens(page)).toBeGreaterThanOrEqual(before);
 });
 
