@@ -239,3 +239,14 @@ describe("name checks that are skipped", () => {
     expect(javascript(code)).toEqual([]);
   });
 });
+
+describe("review fixes", () => {
+  it("knows the other standard globals", () => {
+    const src = "const s = new WeakSet(); Reflect.ownKeys({}); new Uint8Array(2); throw new SyntaxError('x');";
+    expect(nameWarnings("javascript", src, javascriptLanguage.parser.parse(src))).toEqual([]);
+  });
+  it("doesn't count a label as a variable", () => {
+    const src = "outer: { break outer; } console.log(outer);";
+    expect(nameWarnings("javascript", src, javascriptLanguage.parser.parse(src)).map((w) => w.name)).toEqual(["outer"]);
+  });
+});

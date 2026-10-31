@@ -27,7 +27,14 @@ const JS_GLOBALS = new Set(
   Symbol BigInt Date RegExp Error TypeError RangeError parseInt parseFloat
   isNaN isFinite Infinity NaN undefined globalThis structuredClone setTimeout
   clearTimeout setInterval clearInterval queueMicrotask require module exports
-  process Buffer arguments this`
+  process Buffer arguments this WeakSet WeakRef FinalizationRegistry Reflect
+  Proxy Intl Atomics Iterator Function ArrayBuffer SharedArrayBuffer DataView
+  Int8Array Uint8Array Uint8ClampedArray Int16Array Uint16Array Int32Array
+  Uint32Array Float32Array Float64Array BigInt64Array BigUint64Array
+  EvalError SyntaxError ReferenceError URIError AggregateError eval encodeURI
+  encodeURIComponent decodeURI decodeURIComponent TextEncoder TextDecoder URL
+  URLSearchParams AbortController fetch performance crypto setImmediate
+  clearImmediate atob btoa`
     .trim()
     .split(/\s+/),
 );
@@ -190,7 +197,7 @@ function collectDefinitions(
   }
   tree.iterate({
     enter(node) {
-      if (node.name === "VariableDefinition" || node.name === "Label") {
+      if (node.name === "VariableDefinition") {
         addDefinition(definitions, doc, node.node);
       } else if (node.name === "PatternProperty") {
         // `{ total }` and `{ total = 1 }` bind the property name itself;

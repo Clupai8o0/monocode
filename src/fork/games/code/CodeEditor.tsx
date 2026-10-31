@@ -90,6 +90,12 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
   onNameWarningsRef.current = onNameWarnings;
   const testNamesRef = useRef(testNames);
   testNamesRef.current = testNames;
+  // New tests for the same code (Dojo rewrote the drill) need a fresh check.
+  const testNamesKey = (testNames ?? []).join("\n");
+  const forceLintRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    forceLintRef.current?.();
+  }, [testNamesKey]);
   const schemeRef = useRef(scheme);
   schemeRef.current = scheme;
 
@@ -136,7 +142,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         { editorLint },
         { formatText },
         { completionStatus },
-        { forEachDiagnostic, linter },
+        { forceLinting, forEachDiagnostic, linter },
       ] = await Promise.all([
         import("@codemirror/view"),
         import("@codemirror/state"),
@@ -271,6 +277,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
       // A second linter beside the syntax one: names read but never bound.
       // It reads testNames through a ref so a drill's tests can change
       // without rebuilding the view.
+      // Asks the name check to run again when only the drill's tests changed.
+      const refreshNames = StateEffect.define<null>();
       const nameLint = linter(
         (view) => {
           const doc = view.state.doc.toString();
@@ -315,7 +323,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         {
           delay: 700,
           needsRefresh: (update) =>
-            syntaxTree(update.state) !== syntaxTree(update.startState),
+            syntaxTree(update.state) !== syntaxTree(update.startState) ||
+            update.transactions.some((transaction) =>
+              transaction.effects.some((effect) => effect.is(refreshNames)),
+            ),
         },
       );
 
@@ -431,6 +442,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         ],
       });
       viewRef.current = view;
+      forceLintRef.current = () => {
+        view.dispatch({ effects: refreshNames.of(null) });
+        forceLinting(view);
+      };
       view.contentDOM.setAttribute("data-fork-code-cursor-line", "1");
 
       const setErrorLine = (line: number | null) => {
@@ -533,6 +548,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         restoreFocus.current = view.hasFocus;
         view.destroy();
         viewRef.current = null;
+        forceLintRef.current = null;
       }
       schemeCompartment.current = null;
       drillThemeRef.current = null;
