@@ -993,7 +993,7 @@ export function CodeTable({
           )}
         </div>
       ) : null}
-      <p className="max-h-40 shrink-0 overflow-y-auto text-[12px] leading-relaxed whitespace-pre-wrap text-content/75">
+      <p className="max-h-40 min-h-10 overflow-y-auto text-[12px] leading-relaxed whitespace-pre-wrap text-content/75">
         {drill.task}
       </p>
       {note ? (
@@ -1109,7 +1109,7 @@ export function CodeTable({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+      <div className="flex min-h-16 shrink-0 flex-col gap-2 overflow-y-auto empty:hidden max-h-[40%]">
         {drill.hints.slice(0, hintsShown).map((hint, index) => (
           <p key={index} className="text-[12px] leading-relaxed text-content/65">
             Hint: {hint}
