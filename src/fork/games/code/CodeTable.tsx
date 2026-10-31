@@ -574,7 +574,7 @@ export function CodeTable({
       setLcVerdicts((current) => ({ ...current, [target.id]: { judging: false, verdict } }));
       // The solved list, Dojo's copy and Your submissions catch up.
       setLcSubmissions((current) => (current?.slug === targetSlug ? null : current));
-      if (verdict.accepted && lcUser && generation === lcGeneration.current) {
+      if (lcUser && generation === lcGeneration.current) {
         void syncAccount(lcUser);
       }
     } catch (error) {
