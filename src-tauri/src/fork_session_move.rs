@@ -1478,9 +1478,16 @@ mod tests {
         let cwd = PathBuf::from(code["cwd"].as_str().unwrap());
         assert_eq!(
             cwd,
-            fix.target_repo.join(".claude/worktrees/moved-my-session")
+            // Canonical: macOS temp folders sit behind the /var symlink.
+            fix.target_repo
+                .canonicalize()
+                .unwrap()
+                .join(".claude/worktrees/moved-my-session")
         );
-        assert_eq!(code["repo"], path_text(&fix.target_repo));
+        assert_eq!(
+            code["repo"],
+            path_text(&fix.target_repo.canonicalize().unwrap())
+        );
         unpack_conversation(&fix.to, &json!({"moveId": MOVE, "manifest": manifest})).unwrap();
 
         assert_eq!(

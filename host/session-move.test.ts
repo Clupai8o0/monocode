@@ -178,7 +178,7 @@ describe("session move, a real run with two home folders", () => {
       op: "unpackCode", moveId: MOVE, name: "my-session", manifest, urls,
     })) as { cwd: string; branch: string };
     expect(branch).toBe("moved/my-session");
-    expect(cwd).toBe(join(targetRepo, ".claude/worktrees/moved-my-session"));
+    expect(cwd).toBe(join(realpathSync(targetRepo), ".claude/worktrees/moved-my-session"));
     await handleSessionMove(targetEnv, { op: "unpackConversation", moveId: MOVE, manifest, account });
 
     const ignored = (rel: string) => rel === ".env" || rel.startsWith("node_modules");
