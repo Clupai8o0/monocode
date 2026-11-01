@@ -621,6 +621,7 @@ import {
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
+import { useNarrowWindowSidebar } from "../fork/narrowWindow/narrowWindow";
 import {
   effortAutoFor,
   endedForEffortRaise,
@@ -1359,6 +1360,8 @@ function Workspace({
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(
     loadSessionSidebarOpen,
   );
+  // Fork: a half-screen window hides the sidebar so the chat keeps its room.
+  useNarrowWindowSidebar(sessionSidebarOpen, setSessionSidebarOpen);
   const tabCloseScope = "project" as const;
   const currentProjectDock = findProjectTerminal(projectTerminals, projectCwd);
   const dockVisible = !!currentProjectDock?.open;
