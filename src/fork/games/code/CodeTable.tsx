@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 import { readTextFile, writeTextFile } from "../../../platform/tauri/fs";
+import { createAgentProject, DEFAULT_PROJECTS_PARENT } from "../../starterMonos/agentProjectCreate";
 import { DOJO_FOLDER, DOJO_MONO } from "../../starterMonos/dojoMono";
 import { starterMonoId } from "../../starterMonos/starterMono";
 import { ChipSelect } from "../ChipSelect";
@@ -106,8 +107,13 @@ export type LeetcodeAccountApi = {
   paste: (session: string, csrf: string) => Promise<string>;
   disconnect: () => Promise<void>;
   onChange: (listener: (event: { username?: string | null; error?: string | null }) => void) => () => void;
-  /** leetcode.json for Dojo, only while its folder exists. */
-  writeForDojo: (text: string) => Promise<void>;
+  /**
+   * leetcode.json for Dojo, while its folder exists. With makeFolder, makes
+   * the folder first (Pick for me), so syncs never bring back a deleted one.
+   * Gives back whether it wrote. stillWanted is asked again right before the
+   * write, since making the folder can wait on other Monos.
+   */
+  writeForDojo: (text: string, makeFolder?: boolean, stillWanted?: () => boolean) => Promise<boolean>;
   /** Dojo's leetcode-picks.json, or "" when there is none. */
   readPicks: () => Promise<string>;
   /** Sends an answer to LeetCode's judge; gives back the submission id. */
@@ -135,10 +141,25 @@ const nativeLeetcodeAccount: LeetcodeAccountApi = {
       void pending.then((unlisten) => unlisten()).catch(() => undefined);
     };
   },
-  writeForDojo: async (text) => {
-    if (await dojoFolderExists()) {
-      await writeTextFile(`${DOJO_FOLDER}/leetcode.json`, text);
+  writeForDojo: async (text, makeFolder, stillWanted) => {
+    if (!(await dojoFolderExists())) {
+      // Dojo makes its folder on its first chat; Pick for me before then would
+      // leave Dojo nothing to pick from, so make it here, the way Dojo would
+      // (projects.create). Without Dojo nobody reads the file.
+      const dojo = starterMonoId(DOJO_MONO);
+      if (!makeFolder || !dojo) {
+        return false;
+      }
+      await createAgentProject(dojo, { name: "dojo", parent: DEFAULT_PROJECTS_PARENT }).catch(() => undefined);
+      if (!(await dojoFolderExists())) {
+        throw new Error(`Couldn't make Dojo's folder, ${DOJO_FOLDER}.`);
+      }
     }
+    if (stillWanted && !stillWanted()) {
+      return false;
+    }
+    await writeTextFile(`${DOJO_FOLDER}/leetcode.json`, text);
+    return true;
   },
   submit: (slug, language, code) =>
     invoke<string>("fork_leetcode_submit", { slug, lang: language, code }),
@@ -265,6 +286,8 @@ export function CodeTable({
   // The connected LeetCode account: undefined until the keychain answers.
   const [lcUser, setLcUser] = useState<string | null | undefined>(undefined);
   const [lcSnapshot, setLcSnapshot] = useState<LeetcodeSnapshot | null>(loadSnapshot);
+  const lcSnapshotRef = useRef(lcSnapshot);
+  lcSnapshotRef.current = lcSnapshot;
   const [lcSyncing, setLcSyncing] = useState(false);
   const [lcPanel, setLcPanel] = useState<"account" | "paste" | null>(null);
   const [lcPaste, setLcPaste] = useState({ session: "", csrf: "" });
@@ -378,6 +401,25 @@ export function CodeTable({
   // Each sign-in or sign-out starts a new generation; a sync from an older
   // one finishes without touching anything.
   const lcGeneration = useRef(0);
+  // One leetcode.json write at a time, and never an older snapshot over a
+  // newer one: a sync and Pick for me can both be writing.
+  const dojoWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const dojoWrittenAt = useRef(0);
+  const writeDojoSnapshot = (snapshot: LeetcodeSnapshot, makeFolder = false) => {
+    const generation = lcGeneration.current;
+    const write = dojoWrites.current.catch(() => undefined).then(async () => {
+      // Signed out or switched while queued: that account's history stays out.
+      if (generation !== lcGeneration.current || snapshot.syncedAt < dojoWrittenAt.current) {
+        return;
+      }
+      const current = () => generation === lcGeneration.current;
+      if (await leetcodeAccount.writeForDojo(snapshotForDojo(snapshot), makeFolder, current)) {
+        dojoWrittenAt.current = Math.max(dojoWrittenAt.current, snapshot.syncedAt);
+      }
+    });
+    dojoWrites.current = write;
+    return write;
+  };
   const syncAccount = async (username: string) => {
     const generation = lcGeneration.current;
     setLcSyncing(true);
@@ -386,9 +428,15 @@ export function CodeTable({
       if (generation !== lcGeneration.current) {
         return false;
       }
+      // Two syncs can finish out of order; keep the newer one.
+      if (lcSnapshotRef.current && lcSnapshotRef.current.username === snapshot.username
+        && lcSnapshotRef.current.syncedAt > snapshot.syncedAt) {
+        return true;
+      }
+      lcSnapshotRef.current = snapshot;
       setLcSnapshot(snapshot);
       saveSnapshot(snapshot);
-      await leetcodeAccount.writeForDojo(snapshotForDojo(snapshot)).catch(() => undefined);
+      await writeDojoSnapshot(snapshot).catch(() => undefined);
       return true;
     } catch (error) {
       if (generation === lcGeneration.current) {
@@ -516,6 +564,26 @@ export function CodeTable({
     window.dispatchEvent(new CustomEvent(OPEN_DOJO_EVENT, { detail: prompt ? { prompt } : null }));
     // Dojo's chat on the left, this drill on the right.
     gamesPanel.dock(true);
+  };
+
+  /** Puts the latest snapshot in Dojo's folder, then asks Dojo to pick. */
+  const pickForMe = async () => {
+    const generation = lcGeneration.current;
+    if (!lcSnapshot || lcSnapshot.username !== lcUser) {
+      setNote("Still loading your LeetCode history. Try Pick for me again in a moment.");
+      return;
+    }
+    try {
+      await writeDojoSnapshot(lcSnapshot, true);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    // Signed out or switched accounts while writing: don't ask for the old one.
+    if (generation !== lcGeneration.current) {
+      return;
+    }
+    askDojo(pickPrompt(DOJO_FOLDER));
   };
 
   const showSubmissions = async (slug: string) => {
@@ -803,7 +871,7 @@ export function CodeTable({
                 title="Dojo picks your next problems from your LeetCode history"
                 className={`${CHIP} ${CHIP_OFF}`}
                 data-fork-leetcode-pick=""
-                onClick={() => askDojo(pickPrompt(DOJO_FOLDER))}
+                onClick={() => void pickForMe()}
               >
                 Pick for me
               </button>

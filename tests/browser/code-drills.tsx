@@ -275,8 +275,10 @@ const leetcodeAccount: LeetcodeAccountApi = {
     connected = null;
   },
   onChange: () => () => undefined,
-  writeForDojo: async (text) => {
+  writeForDojo: async (text, makeFolder) => {
     (window as unknown as { dojoLeetcode: string }).dojoLeetcode = text;
+    (window as unknown as { dojoMadeFolder: boolean }).dojoMadeFolder = makeFolder === true;
+    return true;
   },
   readPicks: async () => JSON.stringify([{ slug: "two-sum", why: "warm-up on hashing" }]),
   submit: async (_slug, _language, code) => (code.includes("my old answer") ? "wrong" : "right"),

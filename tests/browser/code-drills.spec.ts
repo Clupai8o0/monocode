@@ -517,10 +517,19 @@ test("a connected LeetCode account shows what you solved, Dojo's picks and your 
   await expect(verdict).toHaveAttribute("data-fork-leetcode-verdict", "Accepted");
   await expect(verdict).toContainText("Accepted · 63/63 tests · 52 ms");
 
+  // Pick for me hands Dojo the latest snapshot before it asks.
+  await page.evaluate(() => {
+    (window as unknown as { dojoLeetcode: string }).dojoLeetcode = "";
+  });
   await account.getByRole("button", { name: "Pick for me" }).click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { dojoPrompt?: string }).dojoPrompt ?? ""))
     .toContain("leetcode-picks.json");
+  expect(await page.evaluate(() => (window as unknown as { dojoLeetcode: string }).dojoLeetcode)).toContain(
+    '"username"',
+  );
+  // Only Pick for me may make Dojo's folder; a sync never brings it back.
+  expect(await page.evaluate(() => (window as unknown as { dojoMadeFolder: boolean }).dojoMadeFolder)).toBe(true);
   await page.screenshot({ path: `${dir}/code-leetcode-account.png` });
 
   // The account line is still open from before.

@@ -318,7 +318,7 @@ export function ago(seconds: number, now = Date.now()): string {
 export function pickPrompt(dojoFolder: string): string {
   return [
     "Pick my next LeetCode problems.",
-    `My LeetCode account is synced to ${dojoFolder}/leetcode.json (solved, attempted, recent submissions, solved count by topic). Read it with progress.md and plan.md.`,
+    `My LeetCode account is synced to ${dojoFolder}/leetcode.json (solved, attempted, recent submissions, solved count by topic). Read it with progress.md and plan.md if they are there.`,
     `Write ${dojoFolder}/leetcode-picks.json: a JSON array of 3 to 6 {"slug","why"}, best first. slug is the problem's LeetCode slug (two-sum). why is one short line on the skill it trains.`,
     "Prefer: problems I tried and never solved, weak topics, a solved one that is due for review, a step up in difficulty when a topic is solid. Skip Premium problems and anything I solved recently.",
     "The Code tab runs JavaScript and Python against the examples, but not linked lists, trees, class-design or in-place problems; I can still open those on LeetCode, so pick them only when they matter.",
