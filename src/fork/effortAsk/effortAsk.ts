@@ -575,7 +575,18 @@ export function useEffortAsks(
       void pending.then(
         () => {
           const now = latest.current.find((item) => item.id === session.id);
-          if (now && !now.busy && !userStopped.delete(session.id)) {
+          // The user may have changed the effort or model meanwhile.
+          const model = now && findModel(now.model);
+          const setting = model && modelEffortSetting(model);
+          const current =
+            setting && (now.modelSettings[setting.id] ?? setting.value);
+          if (
+            now &&
+            !now.busy &&
+            !userStopped.delete(session.id) &&
+            eligible(now) &&
+            current === level
+          ) {
             sendOn(submit.current, now, level);
           }
         },
