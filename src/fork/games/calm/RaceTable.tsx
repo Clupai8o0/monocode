@@ -100,7 +100,11 @@ function Word({ word, typed, current, passed }: { word: string; typed: string | 
         );
       })}
       {extra ? <span className="text-red-400/70">{extra}</span> : null}
-      {current && (typed?.length ?? 0) >= word.length ? <Caret /> : null}
+      {current && (typed?.length ?? 0) >= word.length ? (
+        <span className="relative">
+          <Caret />
+        </span>
+      ) : null}
     </span>
   );
 }
