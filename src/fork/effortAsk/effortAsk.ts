@@ -544,7 +544,7 @@ export function useEffortAsks(
   sessions: Session[],
   setSessions: Dispatch<SetStateAction<Session[]>>,
   submit: { current: Submit },
-  stop?: { current: (sessionId: string) => Promise<unknown> },
+  stop?: { current: (sessionId: string) => Promise<unknown> | null },
 ) {
   const wasBusy = useRef(new Set<string>());
   const seen = useRef(new Map<string, string>());
@@ -610,7 +610,12 @@ export function useEffortAsks(
         }
         overrunTurns.current.set(session.id, turnId);
         noteEffortOverrunStop(session.id, change);
-        stopping.current.set(session.id, stop.current(session.id));
+        const stopped = stop.current(session.id);
+        if (!stopped) {
+          overrunStops.delete(session.id);
+          continue;
+        }
+        stopping.current.set(session.id, stopped);
         // The app's Stop marks a user stop; this one is MonoCode's, so the
         // turn is still sent on. A later Stop by the user cancels that.
         userStopped.delete(session.id);
