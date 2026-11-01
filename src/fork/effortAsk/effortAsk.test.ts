@@ -9,6 +9,7 @@ import {
   effortAutoFor,
   effortChangeFor,
   effortChangesOfEndedTurns,
+  endedForEffortRaise,
   parseEffortNeeded,
   resumeText,
   resumeLevelFor,
@@ -444,6 +445,83 @@ describe("resumeLevelFor", () => {
     ]);
     expect(resumeLevelFor(s, effortChangeFor(s))).toBe("xhigh");
     expect(resumeIntentFor(s)).toBe("plan");
+  });
+});
+
+describe("endedForEffortRaise", () => {
+  const stopped = [block("user", "build it"), block("assistant", LINE)];
+
+  it("is true for a turn that only stopped on its line for a raise", () => {
+    expect(endedForEffortRaise(session(stopped))).toBe(true);
+  });
+
+  it("stays true once the change note is in and the effort already raised", () => {
+    const s = session(stopped);
+    const change = effortChangeFor(s)!;
+    expect(endedForEffortRaise(withEffortChange(s, change))).toBe(true);
+  });
+
+  it("is true for a stale level that still gets its one send", () => {
+    expect(
+      endedForEffortRaise(
+        session([block("user", "x"), block("assistant", "Effort: low now, high needed (x).")]),
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a finished reply, a lower ask or a worked turn", () => {
+    expect(
+      endedForEffortRaise(session([block("user", "x"), block("assistant", `${LINE} No findings.`)])),
+    ).toBe(false);
+    expect(
+      endedForEffortRaise(
+        session([block("user", "x"), block("assistant", "Effort: max now, low needed (x).")], {
+          modelSettings: { effort: "max" },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      endedForEffortRaise(session([...stopped, block("tool", "ls"), block("assistant", "Done.")])),
+    ).toBe(false);
+  });
+
+  it("is false when nothing will be sent on: its own send asked again unchanged", () => {
+    expect(
+      endedForEffortRaise(
+        session([
+          block("user", resumeText("high")),
+          block("assistant", "Effort: low now, high needed (x)."),
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  it("is true when the send-on already landed before the banner check", () => {
+    expect(endedForEffortRaise(session([...stopped, block("user", resumeText("xhigh"))]))).toBe(true);
+  });
+
+  it("is false once the send-on turn has a reply", () => {
+    expect(
+      endedForEffortRaise(
+        session([...stopped, block("user", resumeText("xhigh")), block("assistant", "Done.")]),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false when queued messages hold the send-on back", () => {
+    expect(
+      endedForEffortRaise(
+        session(stopped, { queuedMessages: [{ blockId: "other" }] } as Partial<Session>),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for a model without an effort setting, which is never sent on", () => {
+    expect(endedForEffortRaise(session(stopped, { model: "claude:unknown" }))).toBe(false);
+  });
+
+  it("is false for Monos and ephemeral sessions", () => {
+    expect(endedForEffortRaise(session(stopped, { ephemeral: true }))).toBe(false);
   });
 });
 

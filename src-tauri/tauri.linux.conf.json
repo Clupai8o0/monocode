@@ -7,7 +7,7 @@
         "title": "MonoCode",
         "width": 1280,
         "height": 800,
-        "minWidth": 800,
+        "minWidth": 500,
         "minHeight": 520,
         "decorations": false,
         "transparent": true,

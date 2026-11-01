@@ -621,7 +621,13 @@ import {
 } from "../features/notifications/model/notifications";
 import { useInputNotifications } from "../features/notifications/hooks/useInputNotifications";
 import { useNeedsAgain } from "../fork/alerts/needsAgain";
-import { noteEffortStop, useEffortAsks } from "../fork/effortAsk/effortAsk";
+import { useNarrowWindowSidebar } from "../fork/narrowWindow/narrowWindow";
+import {
+  effortAutoFor,
+  endedForEffortRaise,
+  noteEffortStop,
+  useEffortAsks,
+} from "../fork/effortAsk/effortAsk";
 import {
   focusSessionElsewhere,
   OPEN_SESSION_EVENT,
@@ -1354,6 +1360,8 @@ function Workspace({
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(
     loadSessionSidebarOpen,
   );
+  // Fork: a half-screen window hides the sidebar so the chat keeps its room.
+  useNarrowWindowSidebar(sessionSidebarOpen, setSessionSidebarOpen);
   const tabCloseScope = "project" as const;
   const currentProjectDock = findProjectTerminal(projectTerminals, projectCwd);
   const dockVisible = !!currentProjectDock?.open;
@@ -8900,7 +8908,16 @@ function Workspace({
             );
             const visible = sessionId === activeSessionIdRef.current;
             // A habit's hidden run speaks through its Mono's chat instead.
-            if (finished && !isHabitRun(sessionId))
+            // Fork: a turn that only stopped for an effort raise is sent on
+            // at once, so it has not finished.
+            if (
+              finished &&
+              !isHabitRun(sessionId) &&
+              !(
+                effortAutoFor(finished.id, finished.ephemeral) &&
+                endedForEffortRaise(finished)
+              )
+            )
               void announceSessionFinished(finished, visible);
           }, 0);
           notifyReviewChanged(sessionId);

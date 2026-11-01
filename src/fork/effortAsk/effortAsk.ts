@@ -248,6 +248,75 @@ export function resumeLevelFor(
   return change?.value ?? session.modelSettings[setting.id] ?? setting.value;
 }
 
+const EFFORT_NOTE = /^Effort (raised|lowered) to [\w-]+ \(model asked\)$/;
+
+/**
+ * The send-on may land before the banner is decided: the last message is then
+ * MonoCode's "Continue at <level> effort." with no reply to it yet.
+ */
+function justSentOn(session: Pick<Session, "blocks">): boolean {
+  for (let i = session.blocks.length - 1; i >= 0; i--) {
+    const block = session.blocks[i];
+    if (block.role === "user" && !block.draft) {
+      return RESUME_TEXT.test(block.text.trim());
+    }
+    if (block.role !== "system" && block.role !== "reasoning") {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when a turn that just ended is only the model stopping on its effort
+ * line for MonoCode to raise the effort and send the turn on. Nothing finished,
+ * so it should not announce "Finished". Robust to the change note already being
+ * in the transcript. False when nothing will be sent on: a send that was
+ * itself a send-on and asked again without a change is a real stop.
+ */
+export function endedForEffortRaise(session: Session): boolean {
+  const model = findModel(session.model);
+  if (!eligible(session) || !model || !modelEffortSetting(model)) {
+    return false;
+  }
+  if (justSentOn(session)) {
+    return true;
+  }
+  // Queued messages hold the send-on back, so this is a real stop.
+  if (session.queuedMessages?.length) {
+    return false;
+  }
+  const start = turnStartIndex(session);
+  if (start < 0) {
+    return false;
+  }
+  const turn = session.blocks.slice(start + 1);
+  let end = turn.length;
+  while (
+    end > 0 &&
+    turn[end - 1].role === "system" &&
+    EFFORT_NOTE.test(turn[end - 1].text)
+  ) {
+    end--;
+  }
+  const noted = end < turn.length;
+  const work = turn.slice(0, end);
+  const lineBlock = [...work].reverse().find(isEffortLineBlock);
+  const line = lineBlock && parseEffortLine(lineBlock.text);
+  if (!line || !stoppedAtEffortLine(work)) {
+    return false;
+  }
+  const now = EFFORT_RANK.indexOf(line.now);
+  if (now < 0 || EFFORT_RANK.indexOf(line.needed) <= now) {
+    return false;
+  }
+  return (
+    noted ||
+    effortChangeFor(session) != null ||
+    !RESUME_TEXT.test(session.blocks[start].text.trim())
+  );
+}
+
 /** Plan and Orchestrator turns carry on in their mode. */
 export function resumeIntentFor(
   session: Session,
