@@ -75,3 +75,26 @@ test("token rain plays with the arrows and space", async ({ page }, testInfo) =>
   await shot(page, "rain", testInfo.outputDir);
   expect(errors).toEqual([]);
 });
+
+test("type race runs the agents and places you at the end", async ({ page }, testInfo) => {
+  const errors = await open(page, "race");
+  const race = page.locator("[data-race-word-index]");
+  await expect(race).toHaveAttribute("data-race-word-index", "0");
+  await page.locator("[data-table-board='Type race']").focus();
+  await shot(page, "race-start", testInfo.outputDir);
+  // Read the words off the page and type them all, one slip fixed on the way.
+  const words = await page.locator("[data-race-w]").allInnerTexts();
+  expect(words.length).toBeGreaterThan(10);
+  await page.keyboard.type(words[0]!.slice(0, 1) + "#");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(words[0]!.slice(1) + " ");
+  await expect(race).toHaveAttribute("data-race-word-index", "1");
+  await page.keyboard.type(words.slice(1, 6).join(" ") + " ", { delay: 30 });
+  await shot(page, "race-mid", testInfo.outputDir);
+  await page.keyboard.type(words.slice(6).join(" "));
+  await expect(page.locator("[data-race-result]")).toBeVisible();
+  await expect(race).toHaveAttribute("data-race-place", /[1-4]/);
+  await page.waitForTimeout(300);
+  await shot(page, "race-done", testInfo.outputDir);
+  expect(errors).toEqual([]);
+});

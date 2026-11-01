@@ -13,6 +13,7 @@ import { GardenScore, GardenTable } from "../calm/GardenTable";
 import { SolitaireTable } from "../calm/SolitaireTable";
 import { SortTable } from "../calm/SortTable";
 import { MergeTable } from "../calm/MergeTable";
+import { RaceTable } from "../calm/RaceTable";
 import { PipelineTable } from "../calm/PipelineTable";
 import { TurnBetTable } from "../calm/TurnBetTable";
 import { useTurnBet } from "../calm/turnBet";
@@ -42,6 +43,7 @@ export const TABLE_GAMES = FORK_TABLE_GAMES
       // Fork: games about the work itself.
       { id: "pipeline", label: "pipeline", hint: "click a tile to turn it · U undo · R restart · N next" },
       { id: "merge", label: "merge conflict", hint: "type the resolution · backspace fixes" },
+      { id: "race", label: "type race", hint: "type the words · space moves on · backspace fixes" },
       { id: "turnbet", label: "turn bet", hint: "guess how long the agent takes · - + B bets" },
     ] as const)
   : [];
@@ -141,6 +143,11 @@ export function TableGames({
           <MergeTable {...tableProps("merge")} />
         </div>
       ) : null}
+      {visited.has("race") ? (
+        <div className="absolute inset-0" {...shown("race")}>
+          <RaceTable {...tableProps("race")} />
+        </div>
+      ) : null}
       {visited.has("turnbet") ? (
         <div className="absolute inset-0" {...shown("turnbet")}>
           <TurnBetTable {...tableProps("turnbet")} />
@@ -180,7 +187,7 @@ export function TableScore({ gameId }: { gameId: string }) {
   if (gameId === "turnbet") {
     return <TurnBetScore />;
   }
-  if (gameId === "solitaire" || gameId === "sort" || gameId === "pipeline" || gameId === "merge") {
+  if (gameId === "solitaire" || gameId === "sort" || gameId === "pipeline" || gameId === "merge" || gameId === "race") {
     return null;
   }
   if (gameId === "chess") {
