@@ -544,18 +544,44 @@ export function useEffortAsks(
   sessions: Session[],
   setSessions: Dispatch<SetStateAction<Session[]>>,
   submit: { current: Submit },
-  stop?: { current: (sessionId: string) => void },
+  stop?: { current: (sessionId: string) => Promise<unknown> },
 ) {
   const wasBusy = useRef(new Set<string>());
   const seen = useRef(new Map<string, string>());
   const resumes = useRef(new Map<string, EffortChange>());
   /** The turn MonoCode last stopped per session, so it stops it only once. */
   const overrunTurns = useRef(new Map<string, string>());
+  /** MonoCode's stops still cancelling the harness turn. */
+  const stopping = useRef(new Map<string, Promise<unknown>>());
+  const latest = useRef(sessions);
+  latest.current = sessions;
 
   useEffect(() => {
     if (!FORK_EFFORT_ASK) {
       return;
     }
+    /**
+     * The session goes idle before its harness turn is cancelled, so a send
+     * after MonoCode's own stop waits for that, or it could land in the turn
+     * being torn down. A failed stop sends nothing.
+     */
+    const send = (session: Session, level: string) => {
+      const pending = stopping.current.get(session.id);
+      if (!pending) {
+        sendOn(submit.current, session, level);
+        return;
+      }
+      stopping.current.delete(session.id);
+      void pending.then(
+        () => {
+          const now = latest.current.find((item) => item.id === session.id);
+          if (now && !now.busy && !userStopped.delete(session.id)) {
+            sendOn(submit.current, now, level);
+          }
+        },
+        () => undefined,
+      );
+    };
     if (stop) {
       for (const session of sessions) {
         const change = effortOverrunFor(session);
@@ -573,7 +599,7 @@ export function useEffortAsks(
         }
         overrunTurns.current.set(session.id, turnId);
         noteEffortOverrunStop(session.id, change);
-        stop.current(session.id);
+        stopping.current.set(session.id, stop.current(session.id));
         // The app's Stop marks a user stop; this one is MonoCode's, so the
         // turn is still sent on. A later Stop by the user cancels that.
         userStopped.delete(session.id);
@@ -593,7 +619,7 @@ export function useEffortAsks(
         continue;
       }
       resumes.current.delete(sessionId);
-      sendOn(submit.current, session, change.value);
+      send(session, change.value);
     }
     const stale = new Map<string, string>();
     const changes = effortChangesOfEndedTurns(
@@ -605,7 +631,7 @@ export function useEffortAsks(
     for (const [sessionId, level] of stale) {
       const session = sessions.find((item) => item.id === sessionId);
       if (session) {
-        sendOn(submit.current, session, level);
+        send(session, level);
       }
     }
     if (changes.size === 0) {

@@ -1935,7 +1935,9 @@ function Workspace({
   );
   const submitAfterProjectSyncRef = useRef<Submit>(() => false);
   // Fork: stops a turn that ran past its effort raise (set after onStop).
-  const effortStopRef = useRef<(sessionId: string) => void>(() => undefined);
+  const effortStopRef = useRef<(sessionId: string) => Promise<unknown>>(
+    () => Promise.resolve(),
+  );
 
   useEffect(() => {
     for (const project of recents) {
@@ -11213,7 +11215,9 @@ function Workspace({
     [flushHarnessEvents],
   );
   effortStopRef.current = (sessionId) => {
-    void Promise.resolve(onStop(sessionId, true)).catch(console.error);
+    const stopping = Promise.resolve(onStop(sessionId, true));
+    stopping.catch(console.error);
+    return stopping;
   }; // Fork
 
   useEffect(() => {
