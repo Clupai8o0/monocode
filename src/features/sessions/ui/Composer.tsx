@@ -128,6 +128,7 @@ import { HandoffMiniCard } from "./HandoffMiniCard";
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { EffortMeter } from "../../../fork/effortAsk/EffortMeter"; // Fork
 import { UltrareviewButton } from "../../../fork/ultrareview/UltrareviewButton"; // Fork
+import { MoveToHostButton } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
 import { QuestionForm } from "./QuestionForm";
 import { MessageQueue } from "./MessageQueue";
 import { SkillPicker } from "../../skills/ui/SkillPicker";
@@ -2523,6 +2524,7 @@ export function Composer({
                 ) : null}
                 {/* Fork */}
                 {!compact ? <UltrareviewButton /> : null}
+                {!compact && sessionId ? <MoveToHostButton sessionId={sessionId} /> : null}
                 {!compact && harness !== "fx" ? (
                   <AccessPicker
                     value={runtimeMode}

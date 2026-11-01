@@ -1,9 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRemoteMachines } from "../../features/connections/model/connections";
+import { textControlClass } from "../../features/sessions/ui/ModelPicker";
 import { ExternalSessionViewer } from "../externalSessions/ExternalSessionViewer";
 import type { ExternalSession } from "../externalSessions/externalSessionsModel";
-import { ChevronRight, X } from "../../shared/ui/icons";
-import { leftBehindText, movedTitle, type MovedRecord } from "./sessionMoveModel";
-import { labKey, labMoveAvailability, moveHost, moveLabToMac, useMovedRecord, useMoveView } from "./sessionMoveStore";
+import { ChevronRight, Laptop, X } from "../../shared/ui/icons";
+import { FORK_SESSION_MOVE, leftBehindText, moveAvailability, movedTitle, type MovedRecord } from "./sessionMoveModel";
+import {
+  labKey,
+  labMoveAvailability,
+  moveHost,
+  moveLabToMac,
+  moveTabToHost,
+  refreshMoveTarget,
+  tabMoveFacts,
+  useMovedRecord,
+  useMoveView,
+} from "./sessionMoveStore";
 
 const PRESS =
   "transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
@@ -202,6 +214,71 @@ export function MoveToMacButton({
           Move to this Mac
         </button>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * In the composer's toolbar: one click moves this session and its work to a
+ * lab machine, the same as the sidebar menu's item. Shown only for a Claude
+ * session with a conversation, while a machine that could take it is set up.
+ */
+export function MoveToHostButton({ sessionId }: { sessionId: string })
+{
+  return FORK_SESSION_MOVE ? <MoveToHost sessionId={sessionId} /> : null;
+}
+
+function MoveToHost({ sessionId }: { sessionId: string })
+{
+  const { machines } = useRemoteMachines(true);
+  const { view } = useMoveView(sessionId);
+  const machineIds = machines.map((machine) => machine.id).join(",");
+  // Re-read each machine while shown, so "offline" or "update" clears by itself.
+  useEffect(() => {
+    const ids = machineIds ? machineIds.split(",") : [];
+    const probe = () => {
+      for (const id of ids) {
+        refreshMoveTarget(id);
+      }
+    };
+    probe();
+    const timer = window.setInterval(probe, 30_000);
+    return () => window.clearInterval(timer);
+  }, [machineIds]);
+  const session = moveHost()?.session(sessionId);
+  if (!session || session.harness !== "claude" || !session.providerSessionId || view) {
+    return null;
+  }
+  return (
+    <>
+      {machines.map((machine) => {
+        const availability = moveAvailability(tabMoveFacts(session, machine.id, machine.name));
+        if (!availability.show) {
+          return null;
+        }
+        const label = `Move to ${machine.name}`;
+        const title = availability.disabled
+          ? `${label}: ${availability.disabled}`
+          : session.busy
+            ? `${label}. It waits for this turn to end, and you can cancel until then`
+            : `${label}: the conversation and its work carry on there`;
+        return (
+          <button
+            key={machine.id}
+            type="button"
+            data-fork-move-to-host={machine.id}
+            className={textControlClass(false, "shrink-0 gap-1.5 whitespace-nowrap disabled:opacity-40")}
+            disabled={Boolean(availability.disabled)}
+            aria-label={label}
+            title={title}
+            onPointerEnter={() => refreshMoveTarget(machine.id)}
+            onClick={() => moveTabToHost(sessionId, machine.id, machine.name)}
+          >
+            <Laptop className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+            <span className="hidden @min-[420px]/composer-toolbar:inline">{label}</span>
+          </button>
+        );
+      })}
     </>
   );
 }
