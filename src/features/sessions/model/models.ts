@@ -6,6 +6,7 @@ import {
   isHarnessAvailable,
 } from "../../../integrations/harness/core/availabilityState";
 import { HIDDEN_PROVIDERS } from "../../../fork/hiddenFeatures";
+import { cappedStartSettings } from "../../../fork/effortAsk/effortCap";
 
 export type ModelSettingChoice = {
   value: string;
@@ -762,7 +763,12 @@ export function preferredModelSettings(
   if (modelsFor(model.harness).length === 0) return { ...current };
   return mergeModelSettings(model, {
     ...current,
-    ...loadLastModelSettings(),
+    // Fork: a new session starts on High at most; the model raises it.
+    ...cappedStartSettings(
+      loadLastModelSettings(),
+      modelEffortSetting(model)?.id,
+      current,
+    ),
   });
 }
 

@@ -130,6 +130,17 @@ describe("effortChangeFor", () => {
     ).toMatchObject({ value: "xhigh", direction: "lowered" });
   });
 
+  it("raises to Extra High at most, and leaves a manual Max alone", () => {
+    const max = [
+      block("user", "go"),
+      block("assistant", "Effort: high now, max needed (x)"),
+    ];
+    expect(effortChangeFor(session(max))?.value).toBe("xhigh");
+    expect(
+      effortChangeFor(session(max, { modelSettings: { effort: "max" } })),
+    ).toBeNull();
+  });
+
   it("does nothing when the session is already there", () => {
     expect(
       effortChangeFor(session(ask, { modelSettings: { effort: "xhigh" } })),
@@ -163,7 +174,8 @@ describe("effortChangeFor", () => {
       effortChangeFor(
         session(blocks, { ...deepseek, modelSettings: { effort: "low" } }),
       )?.value,
-    ).toBe("max");
+      // Max is held to the highest option under Extra High.
+    ).toBe("high");
     expect(
       effortChangeFor(
         session(blocks, { ...deepseek, modelSettings: { effort: "off" } }),

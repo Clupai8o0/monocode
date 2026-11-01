@@ -5,6 +5,7 @@ import {
   modelEffortSetting,
 } from "../../features/sessions/model/models";
 import type { Block, Session } from "../../features/sessions/model/session";
+import { cappedAutoOption } from "./effortCap";
 
 /**
  * Fork feature: sessions on this Mac start a reply with
@@ -257,8 +258,10 @@ export function effortChangeFor(session: Session): EffortChange | null {
   if (!needed || !setting) {
     return null;
   }
-  const value = optionFor(setting.options, needed);
   const current = session.modelSettings[setting.id] ?? setting.value;
+  const chosen = optionFor(setting.options, needed);
+  // Max stays a manual pick: the model's line switches to Extra High at most.
+  const value = chosen && cappedAutoOption(setting.options, chosen, current);
   const from = EFFORT_RANK.indexOf(current.toLowerCase());
   const to = value ? EFFORT_RANK.indexOf(value.toLowerCase()) : -1;
   if (!value || from < 0 || to < 0 || to === from) {
