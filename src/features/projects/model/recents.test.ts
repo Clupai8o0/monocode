@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { setHomeDir } from "../../../shared/lib/paths";
 import {
   archiveProject,
+  collectRailProjects,
   forgetProject,
   loadArchivedProjects,
   loadPinnedProjects,
@@ -224,5 +226,41 @@ describe("archiveProject", () => {
     forgetProject("/tmp/gone");
     expect(loadArchivedProjects()).toEqual([]);
     expect(loadRecents()).toEqual([]);
+  });
+});
+
+describe("Dojo's folder", () => {
+  it("stays out of project lists, even while it is the current folder", () => {
+    const recents = [
+      { path: "/Users/sam/Documents/projects/dojo", openedAt: 2 },
+      { path: "/Users/sam/Documents/projects/coin-jar", openedAt: 1 },
+      { path: "/Users/sam/Documents/projects/dojo-notes", openedAt: 0 },
+    ];
+    const paths = (cwd: string) =>
+      [...collectRailProjects(recents, cwd).values()].map((item) => item.path);
+    expect(paths("/Users/sam/Documents/projects/dojo")).toEqual([
+      "/Users/sam/Documents/projects/coin-jar",
+      "/Users/sam/Documents/projects/dojo-notes",
+    ]);
+    expect(
+      projectRailItems(recents, "/Users/sam/Documents/projects/dojo").map(
+        (item) => item.path,
+      ),
+    ).not.toContain("/Users/sam/Documents/projects/dojo");
+  });
+
+  it("only hides the folder in this user's home once it is known", () => {
+    setHomeDir("/Users/sam");
+    try {
+      const recents = [
+        { path: "/Users/sam/Documents/projects/dojo", openedAt: 1 },
+        { path: "/Users/kim/Documents/projects/dojo", openedAt: 0 },
+        { path: "~/Documents/projects/dojo", openedAt: 0 },
+      ];
+      expect([...collectRailProjects(recents, "").values()].map((item) => item.path))
+        .toEqual(["/Users/kim/Documents/projects/dojo"]);
+    } finally {
+      setHomeDir(undefined);
+    }
   });
 });

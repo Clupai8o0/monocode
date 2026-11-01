@@ -9,7 +9,8 @@ import { projectName } from "../../shared/lib/paths";
  * project: a new, empty folder that joins MonoCode's projects and the Mono's
  * own. It never adopts a folder that already exists.
  */
-export const DEFAULT_PROJECTS_PARENT = "~/Documents/projects";
+export { DEFAULT_PROJECTS_PARENT } from "./projectFolders";
+import { DEFAULT_PROJECTS_PARENT } from "./projectFolders";
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 

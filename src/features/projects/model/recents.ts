@@ -1,5 +1,11 @@
-import { pathKey, prettyCwd, slash } from "../../../shared/lib/paths";
+import {
+  knownHomeDir,
+  pathKey,
+  prettyCwd,
+  slash,
+} from "../../../shared/lib/paths";
 import { REMOTE_PATH_PREFIX } from "../../../shared/lib/remotePaths";
+import { DOJO_FOLDER } from "../../../fork/starterMonos/projectFolders";
 
 const KEY = "monocode.recentProjects";
 const RAIL_ORDER_KEY = "monocode.projectRailOrder";
@@ -311,17 +317,35 @@ export function knownProjectPaths(): string[] {
 }
 
 /** All projects for the rail, keyed by normalized path. */
+/**
+ * Fork: folders that stay registered but never show in project lists. Dojo's
+ * folder is reached through the Dojo Mono and the Games panel's Code tab.
+ */
+export function hiddenFromProjectLists(path: string): boolean {
+  const home = knownHomeDir();
+  // Before the app knows the home folder, any /Users/<name>/ counts as home.
+  const absolute = (value: string) =>
+    home && /^~(\/|$)/.test(value) ? `${home}${value.slice(1)}` : value;
+  return home
+    ? pathKey(absolute(normalize(path))) === pathKey(absolute(DOJO_FOLDER))
+    : prettyCwd(normalize(path)) === DOJO_FOLDER;
+}
+
 export function collectRailProjects(
   recents: RecentProject[],
   currentCwd: string,
 ): Map<string, RecentProject> {
   const map = new Map<string, RecentProject>();
   for (const item of recents) {
-    if (!looksLikeProject(item.path)) continue;
+    if (!looksLikeProject(item.path) || hiddenFromProjectLists(item.path)) continue;
     const path = normalize(item.path);
     map.set(pathKey(path), { path, openedAt: item.openedAt });
   }
-  if (currentCwd && looksLikeProject(currentCwd)) {
+  if (
+    currentCwd &&
+    looksLikeProject(currentCwd) &&
+    !hiddenFromProjectLists(currentCwd)
+  ) {
     const path = normalize(currentCwd);
     const key = pathKey(path);
     if (!map.has(key)) {

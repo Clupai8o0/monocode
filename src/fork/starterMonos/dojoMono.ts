@@ -1,9 +1,8 @@
 import { MONO_COLORS } from "../../features/monos/model/mono";
-import { DEFAULT_PROJECTS_PARENT } from "./agentProjectCreate";
+import { DEFAULT_PROJECTS_PARENT, DOJO_FOLDER } from "./projectFolders";
 import type { StarterMono } from "./starterMono";
 
-/** Everything Dojo and the Games panel's Code tab share lives here. */
-export const DOJO_FOLDER = `${DEFAULT_PROJECTS_PARENT}/dojo`;
+export { DOJO_FOLDER };
 
 /**
  * Fork: Dojo, a Mono that makes the user a better programmer while agents do
