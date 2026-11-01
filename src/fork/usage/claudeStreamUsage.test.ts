@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearCachedRateLimits,
   getCachedRateLimits,
@@ -25,7 +25,14 @@ const EVENT = {
   },
 };
 
+// Before EVENT's 5-hour window resets, so both windows are still running.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(1793090000 * 1000);
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   clearCachedRateLimits();
 });
 
@@ -55,6 +62,35 @@ describe("Claude stream usage", () => {
     );
     publishClaudeStreamUsage("work", EVENT);
     expect(getCachedRateLimits("claude", "work").weekly).not.toBeNull();
+  });
+
+  it("drops a saved window that has run out when the plan stops reporting it", () => {
+    // A 5-hour window from before moving to a weekly-only plan (Ultra).
+    publishClaudeStreamUsage(undefined, EVENT);
+    publishClaudeStreamUsage(undefined, {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        rateLimitType: "seven_day",
+        unifiedWindows: {
+          seven_day: { utilization: 0.94, resetsAt: 1793682000 },
+        },
+      },
+    });
+    // Still running: kept, as for an event that carries only one window.
+    expect(getCachedRateLimits("claude", "default").session?.usedPercent).toBe(25);
+    // Past its reset with no fresh reading: gone.
+    vi.setSystemTime(1793100001 * 1000);
+    publishClaudeStreamUsage(undefined, {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        unifiedWindows: {
+          seven_day: { utilization: 0.95, resetsAt: 1793682000 },
+        },
+      },
+    });
+    const usage = getCachedRateLimits("claude", "default");
+    expect(usage.session).toBeNull();
+    expect(usage.weekly?.usedPercent).toBeCloseTo(95);
   });
 
   it("keeps the other window when an event carries only one", () => {

@@ -3,6 +3,7 @@ import {
   SESSION_WINDOW_MINUTES,
   WEEKLY_WINDOW_MINUTES,
   type ProviderRateLimits,
+  type RateLimitWindow,
 } from "../../features/providers/model/rateLimits";
 import {
   getCachedRateLimits,
@@ -62,11 +63,20 @@ export function publishClaudeStreamUsage(
   const usage = claudeUsageFromRateLimitEvent(rec);
   if (!usage) return;
   const account = accountId ?? "default";
-  // An event with one window must not blank the other.
+  // An event with one window must not blank the other, but only while that
+  // window is still running. A weekly-only plan (Ultra) never reports a
+  // 5-hour window, so one saved from before would otherwise stay forever.
   const current = getCachedRateLimits("claude", account);
   setCachedRateLimits("claude", account, {
     ...usage,
-    session: usage.session ?? current.session,
-    weekly: usage.weekly ?? current.weekly,
+    session: usage.session ?? stillRunning(current.session, usage.updatedAt),
+    weekly: usage.weekly ?? stillRunning(current.weekly, usage.updatedAt),
   });
+}
+
+function stillRunning(
+  window: RateLimitWindow | null,
+  now: number,
+): RateLimitWindow | null {
+  return window?.resetsAt != null && window.resetsAt > now ? window : null;
 }
