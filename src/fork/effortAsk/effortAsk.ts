@@ -186,7 +186,9 @@ export function workedPastEffortLine(
  * runs at the level the model said it needs.
  */
 export function effortOverrunFor(session: Session): EffortChange | null {
-  if (!session.busy) {
+  // Queued messages would be paused by the stop: let them run, the raise
+  // still lands when the turn ends.
+  if (!session.busy || session.queuedMessages?.length) {
     return null;
   }
   const change = effortChangeFor(session);
@@ -494,10 +496,11 @@ export function effortChangesOfEndedTurns(
       // MonoCode stopped this turn for its raise: raise (unless already
       // there) and send it on.
       const current = currentEffort(session, overrun.settingId);
-      if (current === overrun.value) {
+      const queued = Boolean(session.queuedMessages?.length);
+      if (current !== overrun.value) {
+        changes.set(session.id, { ...overrun, resume: !queued });
+      } else if (!queued) {
         stale?.set(session.id, overrun.value);
-      } else {
-        changes.set(session.id, { ...overrun, resume: true });
       }
       continue;
     }
@@ -560,7 +563,12 @@ export function useEffortAsks(
           continue;
         }
         const turnId = session.blocks[turnStartIndex(session)]?.id ?? "";
-        if (overrunTurns.current.get(session.id) === turnId) {
+        // A turn already read when it ended is not running again: busy also
+        // flips for compaction, which must not be stopped.
+        if (
+          overrunTurns.current.get(session.id) === turnId ||
+          seen.current.get(session.id) === turnId
+        ) {
           continue;
         }
         overrunTurns.current.set(session.id, turnId);

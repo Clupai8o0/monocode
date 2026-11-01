@@ -574,6 +574,9 @@ describe("a turn that runs past its raise", () => {
     expect(effortOverrunFor(session(turn.slice(0, 2), { busy: true, ...low }))).toBeNull();
     expect(effortOverrunFor(session(turn, low))).toBeNull();
     expect(effortOverrunFor(session(turn, { busy: true, modelSettings: { effort: "max" } }))).toBeNull();
+    // Queued messages would be paused by a stop.
+    const queued = { queuedMessages: [{ blockId: "q" }] } as Partial<Session>;
+    expect(effortOverrunFor(session(turn, { busy: true, ...low, ...queued }))).toBeNull();
     // Already at the level: nothing to stop for.
     expect(effortOverrunFor(session(turn, { busy: true }))).toBeNull();
   });
