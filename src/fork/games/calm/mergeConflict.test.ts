@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accuracy, applyKey, currentTarget, isDone, makeRound, newState, score, targetText, wpm, type Conflict } from "./mergeConflict";
+import { accuracy, applyKey, currentTarget, isDone, makeRound, newState, score, setPaused, targetText, wpm, type Conflict } from "./mergeConflict";
 
 const type = (state: ReturnType<typeof newState>, text: string, now = 0) => {
   let s = state;
@@ -70,5 +70,16 @@ describe("merge conflict", () => {
     expect(makeRound(1, "low")).not.toEqual(makeRound(2, "low"));
     const all = Array.from({ length: 50 }, (_, i) => makeRound(i, "hard")).flat();
     expect(all.some((c) => c.rule === "both")).toBe(true);
+  });
+  it("leaves paused time off the clock", () => {
+    let s = applyKey(newState([one("ours")]), "l", 0);
+    s = type(s, "et a = ", 0);
+    s = setPaused(s, true, 6_000);
+    // Paused for a minute: WPM is read as if only six seconds had gone.
+    expect(wpm(s, 66_000)).toBe(wpm(setPaused(s, false, 6_000), 6_000));
+    s = setPaused(s, false, 66_000);
+    s = type(s, "1;", 66_000);
+    expect(isDone(s)).toBe(true);
+    expect(wpm(s, 999_999)).toBe(Math.round(10 / 5 / (6_000 / 60_000)));
   });
 });

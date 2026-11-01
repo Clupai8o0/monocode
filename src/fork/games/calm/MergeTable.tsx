@@ -11,6 +11,7 @@ import {
   makeRound,
   newState,
   score,
+  setPaused,
   wpm,
   type MergeState,
 } from "./mergeConflict";
@@ -30,14 +31,26 @@ function readBest(): Best {
   }
 }
 
-function fresh(mode: TableProps["mode"], runId: number) {
-  return newState(makeRound(runId * 7919 + (Date.now() % 1_000_003), mode));
+/** A round remembers its own mode, so its score is filed under it even after the chip changes. */
+type Round = MergeState & { mode: TableProps["mode"] };
+
+function fresh(mode: TableProps["mode"], runId: number): Round {
+  return { ...newState(makeRound(runId * 7919 + (Date.now() % 1_000_003), mode)), mode };
 }
 
-type Action = { type: "key"; key: string; now: number } | { type: "reset"; state: MergeState };
+type Action =
+  | { type: "key"; key: string; now: number }
+  | { type: "pause"; paused: boolean; now: number }
+  | { type: "reset"; state: Round };
 
-function reduce(state: MergeState, action: Action): MergeState {
-  return action.type === "reset" ? action.state : applyKey(state, action.key, action.now);
+function reduce(state: Round, action: Action): Round {
+  if (action.type === "reset") {
+    return action.state;
+  }
+  if (action.type === "pause") {
+    return { ...setPaused(state, action.paused, action.now), mode: state.mode };
+  }
+  return { ...applyKey(state, action.key, action.now), mode: state.mode };
 }
 
 /** The target faintly, with what was typed laid over it. */
@@ -112,6 +125,13 @@ export function MergeTable({ mode, runId, active, onExit, onInput }: TableProps)
     return () => window.clearInterval(timer);
   }, [running]);
 
+  // Hidden, paused or switched away: the clock stops with the input.
+  useEffect(() => {
+    const at = Date.now();
+    dispatch({ type: "pause", paused: !active, now: at });
+    setNow(at);
+  }, [active]);
+
   const finalWpm = wpm(state, now);
   const acc = accuracy(state);
   const total = score(finalWpm, acc);
@@ -121,16 +141,18 @@ export function MergeTable({ mode, runId, active, onExit, onInput }: TableProps)
       return;
     }
     saved.current = true;
-    const previous = readBest()[mode] ?? 0;
+    const previous = readBest()[state.mode] ?? 0;
     if (total > previous) {
       try {
-        localStorage.setItem(BEST_KEY, JSON.stringify({ ...readBest(), [mode]: total }));
+        localStorage.setItem(BEST_KEY, JSON.stringify({ ...readBest(), [state.mode]: total }));
       } catch {
         // A full or blocked store only forgets the best.
       }
-      setBest(total);
+      if (state.mode === mode) {
+        setBest(total);
+      }
     }
-  }, [done, mode, total]);
+  }, [done, mode, state.mode, total]);
 
   // Each new conflict slides in.
   useEffect(() => {

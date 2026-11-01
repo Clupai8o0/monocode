@@ -88,20 +88,21 @@ describe("turn bet store", () => {
     expect(turnBetSnapshot().record.points).toBe(MAX_POINTS);
   });
 
-  it("refuses a guess shorter than the turn has already run", () => {
+  it("raises a guess shorter than the turn has already run", () => {
     publishTurns([], 0);
     publishTurns([session("a", true)], 0);
-    expect(placeBet("a", 20_000, "mid", 30_000)).toBe(false);
-    expect(placeBet("a", 40_000, "mid", 30_000)).toBe(true);
+    expect(placeBet("a", 20_000, "mid", 30_000)).toBe(true);
+    expect(turnBetSnapshot().bets[0]?.guessMs).toBe(30_000 + MIN_AHEAD_MS);
   });
 
-  it("drops a bet whose session disappears without settling it", () => {
+  it("drops a bet unpaid when its session disappears or is hidden mid-turn", () => {
     publishTurns([], 0);
-    publishTurns([session("a", true)], 0);
+    publishTurns([session("a", true), session("b", true)], 0);
     placeBet("a", 60_000, "mid", 0);
-    publishTurns([], 10_000);
+    placeBet("b", 60_000, "mid", 0);
+    publishTurns([{ ...session("b", true), sidebarHidden: true }], 60_000);
     expect(turnBetSnapshot().bets).toHaveLength(0);
-    expect(turnBetSnapshot().record.bets).toBe(1);
+    expect(turnBetSnapshot().record.bets).toBe(0);
   });
 
   it("leaves out hidden and throwaway sessions", () => {

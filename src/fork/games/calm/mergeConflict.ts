@@ -14,6 +14,10 @@ export type MergeState = {
   /** Set by the first key, so thinking time before it is free. */
   startedAt: number | null;
   endedAt: number | null;
+  /** Time spent paused, which the clock leaves out. */
+  pausedMs: number;
+  /** When the current pause began, if the round is paused. */
+  pausedAt: number | null;
   /** Characters that landed on the right spot, kept across conflicts. */
   correctChars: number;
   strokes: number;
@@ -118,6 +122,8 @@ export function newState(conflicts: readonly Conflict[]): MergeState {
     typed: "",
     startedAt: null,
     endedAt: null,
+    pausedMs: 0,
+    pausedAt: null,
     correctChars: 0,
     strokes: 0,
     correctStrokes: 0,
@@ -134,10 +140,26 @@ export function currentTarget(state: MergeState) {
 }
 
 /** One key: a character, "Enter" for a newline, or "Backspace". */
-export function applyKey(state: MergeState, key: string, now: number): MergeState {
-  if (isDone(state)) {
+/** Stops or restarts the clock; only a started, unfinished round has one. */
+export function setPaused(state: MergeState, paused: boolean, now: number): MergeState {
+  if (state.startedAt === null || isDone(state)) {
     return state;
   }
+  if (paused) {
+    return state.pausedAt === null ? { ...state, pausedAt: now } : state;
+  }
+  if (state.pausedAt === null) {
+    return state;
+  }
+  return { ...state, pausedMs: state.pausedMs + Math.max(0, now - state.pausedAt), pausedAt: null };
+}
+
+export function applyKey(input: MergeState, key: string, now: number): MergeState {
+  if (isDone(input)) {
+    return input;
+  }
+  // A key means play is back on, whatever the pause said.
+  const state = setPaused(input, false, now);
   const target = currentTarget(state);
   if (key === "Backspace") {
     // Deleting a right char takes it off the score so retyping isn't free.
@@ -175,7 +197,8 @@ export function wpm(state: MergeState, now: number) {
     return 0;
   }
   const end = state.endedAt ?? now;
-  const minutes = Math.max(end - state.startedAt, 1000) / 60_000;
+  const paused = state.pausedMs + (state.pausedAt === null ? 0 : Math.max(0, end - state.pausedAt));
+  const minutes = Math.max(end - state.startedAt - paused, 1000) / 60_000;
   return Math.round(Math.max(state.correctChars, 0) / 5 / minutes);
 }
 

@@ -200,12 +200,22 @@ export function publishTurns(
   seen = true;
 
   const still = new Set(live.map((turn) => turn.sessionId));
+  // Only a session that is still here, still shown and now idle has finished
+  // its turn; one that vanished or was hidden mid-turn never did.
+  const finished = new Set(
+    sessions
+      .filter((session) => !session.busy && !session.ephemeral && !session.inboxAsk && !session.sidebarHidden)
+      .map((session) => session.id),
+  );
   let record = was.record;
   const bets: Bet[] = [];
   for (const bet of was.bets) {
     const turn = before.get(bet.sessionId);
     if (still.has(bet.sessionId) || !turn || turn.startedAt !== bet.startedAt) {
       bets.push(bet);
+      continue;
+    }
+    if (!finished.has(bet.sessionId)) {
       continue;
     }
     const actualMs = now - bet.startedAt;
@@ -217,7 +227,7 @@ export function publishTurns(
       settledAt: now,
     });
   }
-  // A bet whose turn is gone without settling (the session vanished) is dropped.
+  // A bet whose turn is gone without finishing is dropped, unpaid.
   const kept = bets.filter((bet) => still.has(bet.sessionId));
 
   const changed =
@@ -237,7 +247,7 @@ export function publishTurns(
   emit({ live, bets: kept, record });
 }
 
-/** One bet per turn; false when the turn can't take it. */
+/** One bet per turn, never shorter than the turn has run; false when the turn can't take it. */
 export function placeBet(
   sessionId: string,
   guessMs: number,
@@ -250,12 +260,12 @@ export function placeBet(
     return false;
   }
   const placedAfterMs = now - turn.startedAt;
-  if (guessMs < minGuess(placedAfterMs)) {
-    return false;
-  }
+  // The guess on screen was floored a moment ago; floor it again at the click,
+  // so a second's drift raises it rather than refusing the bet.
+  const guess = Math.max(guessMs, minGuess(placedAfterMs));
   emit({
     ...was,
-    bets: [...was.bets, { sessionId, startedAt: turn.startedAt, guessMs, placedAfterMs, mode }],
+    bets: [...was.bets, { sessionId, startedAt: turn.startedAt, guessMs: guess, placedAfterMs, mode }],
   });
   return true;
 }
