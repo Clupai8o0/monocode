@@ -148,6 +148,25 @@ describe("agent app commands", () => {
     },
   );
 
+  it("passes a session title through and rejects a long one", async () => {
+    const { source, host } = fixture();
+    await handleAgentApp(source, "titled", "sessions.start", {
+      prompt: "You are working in the project.\n\nStep 0.1 only",
+      title: " 0.1 Repo setup ",
+      draft: true,
+    }, host);
+    expect(vi.mocked(host.start).mock.calls.at(-1)![0].title).toBe(
+      "0.1 Repo setup",
+    );
+    await expect(
+      handleAgentApp(source, "too-long", "sessions.start", {
+        prompt: "Review",
+        title: "x".repeat(81),
+        draft: true,
+      }, host),
+    ).rejects.toThrow(/title/);
+  });
+
   it("keeps sessions a regular /operator thread starts in the sidebar", async () => {
     const { source, host } = fixture();
     await handleAgentApp(source, "operator-launch", "sessions.start", {

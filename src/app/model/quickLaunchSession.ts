@@ -10,6 +10,7 @@ import {
   resolveModel,
 } from "../../features/sessions/model/models";
 import {
+  formatSessionTitle,
   newSession,
   type Session,
   type Attachment,
@@ -80,6 +81,10 @@ export async function acceptQuickLaunch(
     );
   session.id = deliveryId;
   if (!existing && launch.sidebarHidden) session.sidebarHidden = true;
+  // A given title is kept: saving a draft or sending the first turn only
+  // replaces a placeholder title.
+  if (!existing && launch.title?.trim())
+    session.title = formatSessionTitle(session.harness, launch.title);
   if (launch.modelSettings) {
     session.modelSettings = mergeModelSettings(
       resolveModel(session.harness, session.model),
@@ -125,9 +130,24 @@ export async function acceptQuickLaunch(
   ) {
     throw new Error("The workspace could not accept the queued session yet.");
   }
+  const keepTitle = !!launch.draft && !!launch.title?.trim();
   workspace.updateSessions((sessions) =>
     sessions.map((item) =>
-      item.id === deliveryId ? { ...item, quickLaunchAccepted: true } : item,
+      item.id === deliveryId
+        ? {
+            ...item,
+            quickLaunchAccepted: true,
+            ...(keepTitle
+              ? {
+                  blocks: item.blocks.map((block) =>
+                    block.appRequestId === deliveryId && block.draft
+                      ? { ...block, keepTitle: true }
+                      : block,
+                  ),
+                }
+              : {}),
+          }
+        : item,
     ),
   );
 }

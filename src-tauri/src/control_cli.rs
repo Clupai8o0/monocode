@@ -222,7 +222,8 @@ Actions:
                   Save an unsent draft in an idle project session. Existing
                   drafts are preserved; send or remove one in MonoCode first.
                   Reuse --request-id on retries.
-  sessions.start {"prompt":"...","harness":"codex","model":"codex:...",
+  sessions.start {"prompt":"...","title":"0.1 Repo setup",
+                  "harness":"codex","model":"codex:...",
                   "effort":"high","reveal":false,
                   "workspaceMode":"current","worktreeCwd":"<path>","draft":false,
                   "placement":"right",
@@ -235,7 +236,10 @@ Actions:
                   calling session; besideSessionId chooses another visible
                   session in this project, including one just created. Set
                   draft:true to save the prompt unsent; no agent turn runs.
-                  Otherwise the turn is submitted.
+                  Otherwise the turn is submitted. title (80 characters at
+                  most) names the session in the list; without it the name
+                  comes from the prompt's first line. Give one whenever
+                  several sessions share an opening.
                   Submitted sessions notify the calling Mono by default when
                   this turn completes, fails or is cancelled. The Mono reviews
                   it and reports back once idle. Set notifyOnComplete:false

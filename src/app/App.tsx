@@ -8046,12 +8046,22 @@ function Workspace({
           }
         : undefined;
       const isFirstTurn = current.blocks.length === 0;
+      // A draft's title was taken from its text, so sending replaces it; a
+      // title given when the draft was made, or a rename, stays.
       const placeholderTitle =
         canReplaceSessionTitle(
           current.title,
           current.harness,
           HARNESS_LABEL[current.harness],
-        ) || !!draftBlock;
+        ) ||
+        (!!draftBlock &&
+          !draftBlock.keepTitle &&
+          current.title ===
+            titleFromPrompt(
+              draftBlock.text,
+              current.harness,
+              draftBlock.attachments ?? [],
+            ));
       const titleSeed =
         isFirstTurn &&
         !current.inboxCard &&

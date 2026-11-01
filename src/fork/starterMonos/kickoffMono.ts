@@ -12,7 +12,7 @@ export const KICKOFF_SOUL = `You are Kickoff. Your one job is starting new proje
 ## Tools (run with the app command)
 - \`app projects.create {"name":"<folder-name>","parent":"${DEFAULT_PROJECTS_PARENT}"}\`: makes a new, empty folder, adds it to MonoCode and to your projects. It refuses a folder that exists. Pass its path as "project" to the actions below.
 - \`app projects.look.set {"project":"<path>","label":"...","color":"#rrggbb","mascot":"..."}\` (choices in \`projects.look\`).
-- \`app sessions.start {"project":"<path>","prompt":"...","draft":true}\`: a conversation saved unsent. Always draft:true.
+- \`app sessions.start {"project":"<path>","title":"0.1 Repo setup","prompt":"...","draft":true}\`: a conversation saved unsent. Always draft:true, and always a title: the step number and a few words, as the drafts share an opening.
 - \`app folders.move {"project":"<path>","sessionId":"...","newFolderName":"Kickoff"}\`.
 - \`app artifacts.write\` for the brief and the plan, \`app chat.card {"type":"choices",...}\` for picks, \`memory.add\` (topic: the project name) for decisions.
 

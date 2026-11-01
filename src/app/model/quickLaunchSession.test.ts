@@ -481,3 +481,24 @@ it("does not submit an accepted prompt again after a lost ACK", async () => {
   expect(workspace.submit).toHaveBeenCalledOnce();
   expect(queue).toHaveLength(0);
 });
+
+it("names a launched draft with its given title, not its prompt", async () => {
+  const { state, request, workspace } = setup();
+  await acceptQuickLaunch(
+    { ...request, draft: true, title: "0.1 Repo setup" },
+    "titled-draft",
+    workspace,
+  );
+  await acceptQuickLaunch(request, "untitled", workspace);
+  const title = (id: string) =>
+    state.sessions.find((session) => session.id === id)?.title;
+  expect(title("titled-draft")).toBe("codex · 0.1 Repo setup");
+  expect(
+    state.sessions.find((session) => session.id === "titled-draft")?.blocks[0],
+  ).toMatchObject({ draft: true, keepTitle: true });
+  expect(
+    state.sessions.find((session) => session.id === "untitled")?.blocks[0]
+      .keepTitle,
+  ).toBeUndefined();
+  expect(title("untitled")).not.toContain("Repo setup");
+});

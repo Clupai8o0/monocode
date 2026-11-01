@@ -57,6 +57,8 @@ export type QuickLaunch = {
   prompt: string;
   /** Create an unsent user draft instead of starting an agent turn. */
   draft?: boolean;
+  /** Session title to use instead of one taken from the prompt. */
+  title?: string;
   /** Turn mode picked with a leading composer command. */
   intent?: "plan" | "orchestrate";
   cwd: string;

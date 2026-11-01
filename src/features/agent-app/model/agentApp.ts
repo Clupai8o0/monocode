@@ -205,6 +205,7 @@ const FIELDS = new Map<string, readonly string[]>([
     "sessions.start",
     [
       "prompt",
+      "title",
       "draft",
       "harness",
       "model",
@@ -452,6 +453,8 @@ function startLaunch(
 ): QuickLaunch {
   const cwd = requireProject(source, input, host);
   const prompt = agentPrompt(input.prompt);
+  // A short name for the session list; without one it comes from the prompt.
+  const title = optionalString(input.title, "title", 80);
   const draft = input.draft ?? false;
   if (typeof draft !== "boolean") throw new Error("draft must be a boolean");
   const harness = input.harness ?? source.harness;
@@ -529,6 +532,7 @@ function startLaunch(
       ? { sidebarHidden: true }
       : {}),
     ...(draft ? { draft: true } : {}),
+    ...(title ? { title } : {}),
     harness: chosenHarness,
     model: model.id,
     modelSettings: mergeModelSettings(model, {

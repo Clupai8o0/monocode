@@ -339,6 +339,8 @@ export type Block = {
   checkpointTurnId?: string;
   /** User turn saved to the session but not submitted to the harness yet. */
   draft?: boolean;
+  /** The draft was made with its own session title; sending keeps it. */
+  keepTitle?: boolean;
   /** This user turn activated MonoCode app access for its thread. */
   monocode?: boolean;
   /** The Plan or Orchestrator mode this user turn was sent in. */
