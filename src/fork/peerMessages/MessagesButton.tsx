@@ -110,7 +110,7 @@ function Messages({ inset }: { inset: boolean }) {
         ref={anchor}
         type="button"
         data-fork-messages=""
-        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap hover:bg-content/10 ${
+        className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.97] hover:bg-content/10 ${
           inset ? "rounded-full px-2" : "rounded px-1.5"
         } ${
           open || barOpen

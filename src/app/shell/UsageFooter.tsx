@@ -192,7 +192,7 @@ export function UsageFooter({
           ) : showTerminalButton ? (
             <button
               type="button"
-              className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap hover:bg-content/10 ${
+              className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.97] hover:bg-content/10 ${
                 inset ? "rounded-full px-2" : "rounded-md px-1.5"
               } ${
                 projectTerminalOpen
@@ -751,7 +751,7 @@ function RunningTerminalChip({
       <button
         ref={root}
         type="button"
-        className={`inline-flex min-w-0 max-w-[16rem] items-center gap-1.5 whitespace-nowrap hover:bg-content/10 hover:text-content ${
+        className={`inline-flex min-w-0 max-w-[16rem] items-center gap-1.5 whitespace-nowrap transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.97] hover:bg-content/10 hover:text-content ${
           inset ? "h-5 rounded-full px-2" : "-mx-1 rounded-md px-1"
         }`}
         aria-label={ariaLabel}
