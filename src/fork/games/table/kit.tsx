@@ -553,6 +553,7 @@ export function TableFrame({
   onExit,
   onInput,
   label,
+  typing = false,
   children,
 }: {
   active: boolean;
@@ -560,11 +561,16 @@ export function TableFrame({
   onExit: () => void;
   onInput: () => void;
   label: string;
+  /**
+   * Fork: a typing game wants every key as typed: case kept, repeats let
+   * through, and Backspace and Enter passed on by name.
+   */
+  typing?: boolean;
   children: ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const handlers = useRef({ onKey, onExit, onInput });
-  handlers.current = { onKey, onExit, onInput };
+  const handlers = useRef({ onKey, onExit, onInput, typing });
+  handlers.current = { onKey, onExit, onInput, typing };
 
   useEffect(() => {
     if (active) {
@@ -586,6 +592,16 @@ export function TableFrame({
         event.preventDefault();
         event.stopPropagation();
         handlers.current.onExit();
+        return;
+      }
+      if (handlers.current.typing) {
+        if (event.key.length !== 1 && event.key !== "Backspace" && event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.current.onInput();
+        handlers.current.onKey(event.key);
         return;
       }
       if (event.key.length !== 1) {

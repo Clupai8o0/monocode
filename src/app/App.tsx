@@ -635,6 +635,7 @@ import {
 } from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
+import { publishTurns } from "../fork/games/calm/turnBet"; // Fork: Turn Bet times real turns.
 import { publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
 import { isMoveLocked, isSessionMoved, registerMoveHost } from "../fork/sessionMove/sessionMoveStore"; // Fork
 import { publishMonoSessions } from "../fork/messageLog/messageLogStore"; // Fork
@@ -2320,6 +2321,7 @@ function Workspace({
   // Fork: running subagents per session, for the sidebar's badge.
   useEffect(() => {
     publishRunningWork(sessions);
+    publishTurns(sessions);
     // Fork: hide them from "Elsewhere". A moved tab's conversation runs elsewhere
     // now, and that live session is the one to show.
     publishOwnSessions(sessions.filter((session) => !isSessionMoved(session.id)));

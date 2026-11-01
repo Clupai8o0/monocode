@@ -6,6 +6,7 @@ import { createPlatformerArcade } from "../../../fork/games/platformerArcade"; /
 import { createRunnerArcade } from "../../../fork/games/runnerArcade"; // Fork
 import { createSandArcade } from "../../../fork/games/sandArcade"; // Fork
 import { createStackArcade } from "../../../fork/games/stackArcade"; // Fork
+import { createRainArcade } from "../../../fork/games/rainArcade"; // Fork
 
 /** How long an idle board stays up before the slider moves on. */
 export const SLIDE_HOLD_MS = 16_000;
@@ -107,6 +108,18 @@ export const GRID_GAMES: readonly GridGame[] = [
     hint: "arrows steer · space pours · up shade",
     hasAction: true,
     create: createSandArcade,
+  },
+  // Fork: catch tokens, compact before the context window overflows.
+  {
+    id: "rain",
+    label: "token rain",
+    playLabel:
+      "Token rain. Left and right move the bucket, Space compacts the context window before it overflows. Escape to release.",
+    idleDim: 0.55,
+    lives: true,
+    hint: "arrows move · space compacts",
+    hasAction: true,
+    create: createRainArcade,
   },
 ];
 
