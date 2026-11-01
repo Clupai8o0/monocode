@@ -572,6 +572,7 @@ export function useEffortAsks(
         return;
       }
       stopping.current.delete(session.id);
+      const turnId = session.blocks[turnStartIndex(session)]?.id;
       void pending.then(
         () => {
           const now = latest.current.find((item) => item.id === session.id);
@@ -585,7 +586,9 @@ export function useEffortAsks(
             !now.busy &&
             !userStopped.delete(session.id) &&
             eligible(now) &&
-            current === level
+            current === level &&
+            // Not if the user started another turn meanwhile.
+            now.blocks[turnStartIndex(now)]?.id === turnId
           ) {
             sendOn(submit.current, now, level);
           }
