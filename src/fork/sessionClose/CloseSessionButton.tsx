@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CheckCheck } from "../../shared/ui/icons";
 
 /**
- * Under a reply that ends "Safe to close: nothing left to do": archives the
+ * Under a reply that ends "Safe to close" (nothing left, or a handover ready): archives the
  * session in one click. It stays restorable from Archived, so it does not ask.
  */
 export function CloseSessionButton({

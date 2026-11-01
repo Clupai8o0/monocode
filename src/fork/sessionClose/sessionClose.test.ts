@@ -72,10 +72,20 @@ describe("offersSafeClose", () => {
     ).toBe(true);
   });
 
-  it("does not for a handover, a not-safe line or no line", () => {
+  it("offers it for a handover, whose follow-ups are in its file", () => {
     expect(
       offers(replied("Safe to close, handover ready: /a/handoff.md")),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      offers(
+        replied(
+          "`Safe to close, handover ready: handovers/PRESS-BACKTEST-2026-10-31.md`",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not for a not-safe line or no line", () => {
     expect(offers(replied("Not safe to close: tests running"))).toBe(
       false,
     );

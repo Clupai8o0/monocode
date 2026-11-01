@@ -45,8 +45,9 @@ export function canCloseForMemory(
 }
 
 /**
- * True when the last reply says "Safe to close: nothing left to do" and nothing
- * has happened since. A handover still has follow-ups, so it does not count.
+ * True when the last reply says "Safe to close" (nothing left to do, or a
+ * handover ready) and nothing has happened since. A handover's follow-ups are
+ * written down in its file, so the session itself is done.
  */
 export function offersSafeClose(
   session: Session,
@@ -59,8 +60,12 @@ export function offersSafeClose(
       block.btwThreads?.some((thread) => thread.status === "running"),
     ) &&
     canCloseForMemory(session, busyIds) &&
-    closeStateOfBlocks(session.blocks)?.kind === "safe"
+    isSafeKind(closeStateOfBlocks(session.blocks)?.kind)
   );
+}
+
+function isSafeKind(kind: string | undefined): boolean {
+  return kind === "safe" || kind === "handover";
 }
 
 /** Sessions an open plan, agent transcript or changes tab still reads. */
