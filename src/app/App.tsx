@@ -645,10 +645,8 @@ import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
 import { seedStarterMonos, starterMonoId } from "../fork/starterMonos/starterMono"; // Fork
 import { monoShowsIn } from "../fork/starterMonos/monoShowsIn"; // Fork
-import { KICKOFF_MONO } from "../fork/starterMonos/kickoffMono";
-import { MONO_MAKER } from "../fork/starterMonos/makerMono";
+import { STARTER_MONOS } from "../fork/starterMonos/allStarterMonos"; // Fork
 import { DOJO_MONO } from "../fork/starterMonos/dojoMono"; // Fork
-import { SWEEP_MONO } from "../fork/starterMonos/sweepMono";
 import { OPEN_DOJO_EVENT } from "../fork/games/code/codeModel"; // Fork
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
@@ -2494,7 +2492,7 @@ function Workspace({
   // Fork: the Kickoff, Mono Maker, Sweep and Dojo are made once (src/fork/starterMonos).
   useEffect(() => {
     if (import.meta.env.MODE !== "test" && monosEnabled) {
-      void seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]); // Fork
+      void seedStarterMonos(STARTER_MONOS); // Fork
     }
   }, [monosEnabled]);
   const unseenFinishedIds = useUnseenFinishedSessions(
