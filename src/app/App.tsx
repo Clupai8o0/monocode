@@ -1935,6 +1935,10 @@ function Workspace({
     new Map<string, ReturnType<typeof synchronizeProjectLocation>>(),
   );
   const submitAfterProjectSyncRef = useRef<Submit>(() => false);
+  // Fork: stops a turn that ran past its effort raise (set after onStop).
+  const effortStopRef = useRef<
+    (sessionId: string) => Promise<unknown> | null
+  >(() => null);
 
   useEffect(() => {
     for (const project of recents) {
@@ -2460,7 +2464,12 @@ function Workspace({
   );
   useInputNotifications(promptableSessions, activeSessionId);
   useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
-  useEffortAsks(promptableSessions, setSessions, submitAfterProjectSyncRef); // Fork: the model sets its effort
+  useEffortAsks(
+    promptableSessions,
+    setSessions,
+    submitAfterProjectSyncRef,
+    effortStopRef,
+  ); // Fork: the model sets its effort
   // Fork: report this window's sessions so no other window opens them twice.
   const forkSessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
   useWindowSessions(forkSessionIds);
@@ -11207,6 +11216,18 @@ function Workspace({
     },
     [flushHarnessEvents],
   );
+  effortStopRef.current = (sessionId) => {
+    // Orchestrator runs own their turns: a send-on would be refused there.
+    if (
+      orchestrator.run(sessionId)?.status === "active" ||
+      orchestrator.submissionError(sessionId, false)
+    ) {
+      return null;
+    }
+    const stopping = Promise.resolve(onStop(sessionId, true));
+    stopping.catch(console.error);
+    return stopping;
+  }; // Fork
 
   useEffect(() => {
     const onEscape = (event: KeyboardEvent) => {

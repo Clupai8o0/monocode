@@ -150,6 +150,55 @@ export function stoppedAtEffortLine(
   return BARE_LINE.test(blocks[line].text.replace(/[*`_]/g, "").trim());
 }
 
+/**
+ * True when the model went on after its line: more text below it, or any
+ * work (text, tools) in a later block. The gate tells it to end on the line
+ * when it asks for more, but it does not always listen.
+ */
+export function workedPastEffortLine(
+  blocks: readonly Pick<Block, "role" | "text">[],
+): boolean {
+  let line = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (isEffortLineBlock(blocks[i])) {
+      line = i;
+      break;
+    }
+  }
+  if (line < 0) {
+    return false;
+  }
+  const lines = blocks[line].text
+    .split("\n")
+    .map((text) => text.replace(/[*`_]/g, "").trim());
+  const first = lines.findIndex(Boolean);
+  if (lines.slice(first + 1).some(Boolean)) {
+    return true;
+  }
+  return blocks
+    .slice(line + 1)
+    .some((block) => block.role !== "reasoning" && block.role !== "system");
+}
+
+/**
+ * The raise a running turn asked for while it carried on working at the lower
+ * level anyway. MonoCode stops that turn, raises, and sends it on, so the work
+ * runs at the level the model said it needs.
+ */
+export function effortOverrunFor(session: Session): EffortChange | null {
+  // Queued messages would be paused by the stop: let them run, the raise
+  // still lands when the turn ends.
+  if (!session.busy || session.queuedMessages?.length) {
+    return null;
+  }
+  const change = effortChangeFor(session);
+  if (change?.direction !== "raised") {
+    return null;
+  }
+  const start = turnStartIndex(session);
+  return workedPastEffortLine(session.blocks.slice(start + 1)) ? change : null;
+}
+
 /** What MonoCode sends to carry on a turn the model stopped for a raise. */
 export function resumeText(value: string): string {
   return `Continue at ${value} effort.`;
@@ -177,6 +226,16 @@ function optionFor(
     return null;
   }
   return (ranked.find((option) => option.rank >= want) ?? ranked[ranked.length - 1]!).value;
+}
+
+/** The session's effort for a setting, falling back to the model's default. */
+function currentEffort(session: Session, settingId: string): string | undefined {
+  const model = findModel(session.model);
+  const setting = model && modelEffortSetting(model);
+  return (
+    session.modelSettings[settingId] ??
+    (setting?.id === settingId ? setting.value : undefined)
+  );
 }
 
 function eligible(session: Session): boolean {
@@ -328,6 +387,14 @@ export function resumeIntentFor(
 /** Sessions the user stopped; their turn is not sent on. */
 const userStopped = new Set<string>();
 
+/** Turns MonoCode stopped because they ran past a raise, with that raise. */
+const overrunStops = new Map<string, EffortChange>();
+
+/** Called when MonoCode stops a turn that ran past its raise. */
+export function noteEffortOverrunStop(sessionId: string, change: EffortChange) {
+  overrunStops.set(sessionId, change);
+}
+
 /** Called by the app's Stop, before the session goes idle. */
 export function noteEffortStop(sessionId: string) {
   userStopped.add(sessionId);
@@ -417,8 +484,24 @@ export function effortChangesOfEndedTurns(
     const ended = idle.has(session.id) && seen.get(session.id) !== turnId;
     // A Stop is for the turn that just went idle, whether it asked or not.
     const stopped = idle.has(session.id) && userStopped.delete(session.id);
+    const overrun = idle.has(session.id) ? overrunStops.get(session.id) : undefined;
+    if (overrun) {
+      overrunStops.delete(session.id);
+    }
     seen.set(session.id, turnId);
     if (!ended) {
+      continue;
+    }
+    if (overrun && !stopped) {
+      // MonoCode stopped this turn for its raise: raise (unless already
+      // there) and send it on.
+      const current = currentEffort(session, overrun.settingId);
+      const queued = Boolean(session.queuedMessages?.length);
+      if (current !== overrun.value) {
+        changes.set(session.id, { ...overrun, resume: !queued });
+      } else if (!queued) {
+        stale?.set(session.id, overrun.value);
+      }
       continue;
     }
     const change = effortChangeFor(session);
@@ -461,14 +544,85 @@ export function useEffortAsks(
   sessions: Session[],
   setSessions: Dispatch<SetStateAction<Session[]>>,
   submit: { current: Submit },
+  stop?: { current: (sessionId: string) => Promise<unknown> | null },
 ) {
   const wasBusy = useRef(new Set<string>());
   const seen = useRef(new Map<string, string>());
   const resumes = useRef(new Map<string, EffortChange>());
+  /** The turn MonoCode last stopped per session, so it stops it only once. */
+  const overrunTurns = useRef(new Map<string, string>());
+  /** MonoCode's stops still cancelling the harness turn. */
+  const stopping = useRef(new Map<string, Promise<unknown>>());
+  const latest = useRef(sessions);
+  latest.current = sessions;
 
   useEffect(() => {
     if (!FORK_EFFORT_ASK) {
       return;
+    }
+    /**
+     * The session goes idle before its harness turn is cancelled, so a send
+     * after MonoCode's own stop waits for that, or it could land in the turn
+     * being torn down. A failed stop sends nothing.
+     */
+    const send = (session: Session, level: string) => {
+      const pending = stopping.current.get(session.id);
+      if (!pending) {
+        sendOn(submit.current, session, level);
+        return;
+      }
+      stopping.current.delete(session.id);
+      const turnId = session.blocks[turnStartIndex(session)]?.id;
+      void pending.then(
+        () => {
+          const now = latest.current.find((item) => item.id === session.id);
+          // The user may have changed the effort or model meanwhile.
+          const model = now && findModel(now.model);
+          const setting = model && modelEffortSetting(model);
+          const current =
+            setting && (now.modelSettings[setting.id] ?? setting.value);
+          if (
+            now &&
+            !now.busy &&
+            !userStopped.delete(session.id) &&
+            eligible(now) &&
+            current === level &&
+            // Not if the user started another turn meanwhile.
+            now.blocks[turnStartIndex(now)]?.id === turnId
+          ) {
+            sendOn(submit.current, now, level);
+          }
+        },
+        () => undefined,
+      );
+    };
+    if (stop) {
+      for (const session of sessions) {
+        const change = effortOverrunFor(session);
+        if (!change) {
+          continue;
+        }
+        const turnId = session.blocks[turnStartIndex(session)]?.id ?? "";
+        // A turn already read when it ended is not running again: busy also
+        // flips for compaction, which must not be stopped.
+        if (
+          overrunTurns.current.get(session.id) === turnId ||
+          seen.current.get(session.id) === turnId
+        ) {
+          continue;
+        }
+        overrunTurns.current.set(session.id, turnId);
+        noteEffortOverrunStop(session.id, change);
+        const stopped = stop.current(session.id);
+        if (!stopped) {
+          overrunStops.delete(session.id);
+          continue;
+        }
+        stopping.current.set(session.id, stopped);
+        // The app's Stop marks a user stop; this one is MonoCode's, so the
+        // turn is still sent on. A later Stop by the user cancels that.
+        userStopped.delete(session.id);
+      }
     }
     for (const [sessionId, change] of resumes.current) {
       const session = sessions.find((item) => item.id === sessionId);
@@ -484,7 +638,7 @@ export function useEffortAsks(
         continue;
       }
       resumes.current.delete(sessionId);
-      sendOn(submit.current, session, change.value);
+      send(session, change.value);
     }
     const stale = new Map<string, string>();
     const changes = effortChangesOfEndedTurns(
@@ -496,7 +650,7 @@ export function useEffortAsks(
     for (const [sessionId, level] of stale) {
       const session = sessions.find((item) => item.id === sessionId);
       if (session) {
-        sendOn(submit.current, session, level);
+        send(session, level);
       }
     }
     if (changes.size === 0) {
@@ -516,5 +670,5 @@ export function useEffortAsks(
         listener(sessionId, change);
       }
     }
-  }, [sessions, setSessions, submit]);
+  }, [sessions, setSessions, submit, stop]);
 }

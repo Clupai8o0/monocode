@@ -9,7 +9,10 @@ import {
   effortAutoFor,
   effortChangeFor,
   effortChangesOfEndedTurns,
+  effortOverrunFor,
   endedForEffortRaise,
+  noteEffortOverrunStop,
+  workedPastEffortLine,
   parseEffortNeeded,
   resumeText,
   resumeLevelFor,
@@ -549,5 +552,58 @@ describe("Stop", () => {
     const s = session([block("user", "build it"), block("assistant", "Effort: high now, xhigh needed (x).")]);
     const changes = effortChangesOfEndedTurns([s], new Set(["s1"]), new Map([["s1", "old"]]), new Map());
     expect(changes.get("s1")?.resume).toBe(true);
+  });
+});
+
+describe("a turn that runs past its raise", () => {
+  const RAISE = "Effort: low now, high needed (prod data removal).";
+  const low = { modelSettings: { effort: "low" } };
+
+  it("sees work after the line: a tool, or text below it", () => {
+    expect(workedPastEffortLine([block("assistant", RAISE), block("tool", "Edit")])).toBe(true);
+    expect(workedPastEffortLine([block("assistant", `${RAISE}\n\nFixing it now.`)])).toBe(true);
+    expect(workedPastEffortLine([block("assistant", RAISE), block("reasoning", "hm")])).toBe(false);
+    expect(workedPastEffortLine([block("assistant", RAISE)])).toBe(false);
+    expect(workedPastEffortLine([block("assistant", "Done."), block("tool", "Edit")])).toBe(false);
+  });
+
+  it("asks to stop a busy turn that kept working at the lower level", () => {
+    const turn = [block("user", "go"), block("assistant", RAISE), block("tool", "Edit")];
+    expect(effortOverrunFor(session(turn, { busy: true, ...low }))?.value).toBe("high");
+    // Not while it only wrote the line, not once idle, not for a lowering.
+    expect(effortOverrunFor(session(turn.slice(0, 2), { busy: true, ...low }))).toBeNull();
+    expect(effortOverrunFor(session(turn, low))).toBeNull();
+    expect(effortOverrunFor(session(turn, { busy: true, modelSettings: { effort: "max" } }))).toBeNull();
+    // Queued messages would be paused by a stop.
+    const queued = { queuedMessages: [{ blockId: "q" }] } as Partial<Session>;
+    expect(effortOverrunFor(session(turn, { busy: true, ...low, ...queued }))).toBeNull();
+    // Already at the level: nothing to stop for.
+    expect(effortOverrunFor(session(turn, { busy: true }))).toBeNull();
+  });
+
+  it("raises and sends on the turn MonoCode stopped, even with the work after the line", () => {
+    const turn = [
+      block("user", "go"),
+      block("assistant", RAISE),
+      block("tool", "Edit"),
+      block("system", "Interrupted"),
+    ];
+    const wasBusy = new Set<string>();
+    const seen = new Map<string, string>();
+    effortChangesOfEndedTurns([session(turn, { busy: true, ...low })], wasBusy, seen);
+    noteEffortOverrunStop("s1", { settingId: "effort", value: "high", direction: "raised" });
+    const change = effortChangesOfEndedTurns([session(turn, low)], wasBusy, seen).get("s1");
+    expect(change).toMatchObject({ value: "high", resume: true });
+  });
+
+  it("does not send on when the user also pressed Stop", () => {
+    const turn = [block("user", "go"), block("assistant", RAISE), block("tool", "Edit")];
+    const wasBusy = new Set<string>();
+    const seen = new Map<string, string>();
+    effortChangesOfEndedTurns([session(turn, { busy: true, ...low })], wasBusy, seen);
+    noteEffortOverrunStop("s1", { settingId: "effort", value: "high", direction: "raised" });
+    noteEffortStop("s1");
+    const change = effortChangesOfEndedTurns([session(turn, low)], wasBusy, seen).get("s1");
+    expect(change?.resume).toBe(false);
   });
 });
