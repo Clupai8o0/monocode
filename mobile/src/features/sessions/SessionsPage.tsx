@@ -14,6 +14,7 @@ import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanim
 import { FileSearchBar, SEARCH_BAR } from "@/features/files/FileSearchBar";
 import type { Harness, SessionSummary, Worktree } from "@/features/workspace/types";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
+import { AnimationsPaused } from "@/ui/AnimationsPaused";
 import { GradualBlur } from "@/ui/GradualBlur";
 import { themedStyles, useColors } from "@/ui/theme";
 
@@ -26,7 +27,6 @@ import {
   type SessionFilter,
 } from "./SessionFilterMenu";
 import { useSessionLayout } from "./SessionScreen";
-import { SpinnersPaused } from "./TerminalSpinner";
 import { ARRIVE_MS, useArrivals } from "./useArrivals";
 import { REMOVE_MS, useSessionActions } from "./useSessionActions";
 import { useSessionPages, visibleSessions } from "./useSessionPages";
@@ -114,7 +114,7 @@ export function SessionsPage({
   );
 
   return (
-    <SpinnersPaused value={!active}>
+    <AnimationsPaused value={!active}>
       <View style={styles.page}>
         <Animated.FlatList
           itemLayoutAnimation={
@@ -165,7 +165,7 @@ export function SessionsPage({
           }
         />
       </View>
-    </SpinnersPaused>
+    </AnimationsPaused>
   );
 }
 
@@ -198,7 +198,23 @@ type RowHandlers = {
   swipeOpened: (row: SwipeableMethods) => void;
 };
 
-/** A session in the list, re-rendered only when it changes. */
+/** What a row shows of its session: a fresh list read hands over new objects
+ *  for unchanged sessions, which shouldn't re-render their rows. */
+function sameRow(a: SessionSummary, b: SessionSummary) {
+  return (
+    a === b ||
+    (a.id === b.id &&
+      a.title === b.title &&
+      a.busy === b.busy &&
+      a.updatedAt === b.updatedAt &&
+      a.branch === b.branch &&
+      a.model === b.model &&
+      a.modelName === b.modelName &&
+      a.harness === b.harness)
+  );
+}
+
+/** A session in the list, re-rendered only when what it shows changes. */
 const SessionRow = memo(function SessionRow({
   session,
   removing,
@@ -223,7 +239,12 @@ const SessionRow = memo(function SessionRow({
       exiting={removing ? FadeOut.duration(REMOVE_MS * 0.6) : undefined}
     />
   );
-});
+},
+(before, after) =>
+  before.removing === after.removing &&
+  before.arriving === after.arriving &&
+  before.handlers === after.handlers &&
+  sameRow(before.session, after.session));
 
 const useStyles = themedStyles((colors) => ({
   page: {

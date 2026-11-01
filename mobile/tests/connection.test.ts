@@ -17,13 +17,14 @@ const catalog = {
   ],
 };
 describe("mobile workspace choices", () => {
-  it("shows the picked monos and the sessions they started", () => {
+  it("shows the picked projects and monos, with their sessions", () => {
     const selected = selectedWorkspace(catalog, {
       projectIds: ["a"],
       monoIds: ["m"],
     });
     expect(selected.projects).toEqual([{ id: "a" }]);
     expect(selected.monos).toEqual([{ id: "m" }]);
+    // A mono's session counts even in a project left out.
     expect(selected.sessions.map((session) => session.id)).toEqual(["s1", "s3"]);
   });
   it("preserves an explicit empty choice on restore", () => {
