@@ -190,12 +190,13 @@ export function SudokuTable({ mode, runId, active, onExit, onInput }: TableProps
     setLanded(null);
   };
 
-  // A new mode brings back its own board; the panel's new game clears this one.
+  // A new mode brings back its own board. The panel's new game clears this one
+  // only while it's showing: the run number is shared by every table.
   const seen = useRef({ mode, runId });
   useEffect(() => {
     if (seen.current.mode !== mode) {
       open(loadGame(mode));
-    } else if (seen.current.runId !== runId) {
+    } else if (seen.current.runId !== runId && active) {
       if (solved) {
         open(freshGame(mode, level));
       } else {

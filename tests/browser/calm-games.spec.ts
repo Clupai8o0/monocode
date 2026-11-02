@@ -120,6 +120,31 @@ test("sudoku fills, notes, undoes, keeps the board and solves", async ({ page },
   expect(errors).toEqual([]);
 });
 
+test("a new game at another table leaves the sudoku board alone", async ({ page }) => {
+  const errors = await open(page, "sudoku");
+  const blank = page.locator("[data-sudoku-cell]:not([data-sudoku-given])").first();
+  const index = await blank.getAttribute("data-sudoku-cell");
+  const cell = page.locator(`[data-sudoku-cell='${index}']`);
+  await blank.click();
+  await page.keyboard.press("5");
+  await expect(cell).toHaveAttribute("data-sudoku-value", "5");
+
+  await page.locator("[data-fork-chip-select='Game']").click();
+  await page.getByRole("option", { name: "colour sort" }).click();
+  await expect(page.locator("[data-tube='0']")).toBeVisible();
+  await page.getByRole("button", { name: "New game" }).click();
+
+  await page.reload();
+  await page.locator("[data-fork-chip-select='Game']").click();
+  await page.getByRole("option", { name: "sudoku" }).click();
+  await expect(cell).toHaveAttribute("data-sudoku-value", "5");
+
+  // At its own table, new game does clear it.
+  await page.getByRole("button", { name: "New game" }).click();
+  await expect(cell).toHaveAttribute("data-sudoku-value", "0");
+  expect(errors).toEqual([]);
+});
+
 test("sudoku solved board offers the next level", async ({ page }, testInfo) => {
   const errors = await open(page, "sudoku");
   await page.locator("[data-table-board='Sudoku']").focus();
