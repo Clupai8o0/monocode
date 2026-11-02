@@ -29,8 +29,10 @@ pub struct Worktrees {
     pub default_root: String,
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("git");
+pub(crate) fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+    // `status` runs git-lfs on LFS files; see `fs::git_cmd`.
+    let path = crate::harness::cached_gui_search_path();
+    let mut command = Command::new(crate::harness::git_program(&path));
     crate::hide_window_console(&mut command);
     let output = command
         .arg("-C")
@@ -38,8 +40,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
-        // `status` runs git-lfs on LFS files; see `fs::git_cmd`.
-        .env("PATH", crate::harness::cached_gui_search_path())
+        .env("PATH", path)
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {

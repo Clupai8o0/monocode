@@ -463,16 +463,50 @@ export function isCheckoutBlockedByChanges(message: string): boolean {
 }
 
 const GIT_CHANGED = "monocode-git-changed";
+/** Every reload starts several git processes per open project. */
+const AGENT_GIT_GAP_MS = 3_000;
+
+let lastGitDispatch = Number.NEGATIVE_INFINITY;
+let agentGitTimer: ReturnType<typeof setTimeout> | undefined;
+
+function invalidatePendingGitReads() {
+  gitReadEpoch++;
+  pendingGitReads.clear();
+}
+
+function dispatchGitChanged() {
+  // This reload covers whatever the waiting agent notice was going to report.
+  clearTimeout(agentGitTimer);
+  agentGitTimer = undefined;
+  lastGitDispatch = Date.now();
+  window.dispatchEvent(new Event(GIT_CHANGED));
+}
 
 /** Tell git UIs (diff pane, branch picker) to reload after a local git mutation. */
 export function notifyGitChanged({ invalidatePending = true } = {}) {
   // Publishing an already-read index is not a mutation. All actual mutations
   // invalidate both new readers and original callers still awaiting old data.
   if (invalidatePending) {
-    gitReadEpoch++;
-    pendingGitReads.clear();
+    invalidatePendingGitReads();
   }
-  window.dispatchEvent(new Event(GIT_CHANGED));
+  dispatchGitChanged();
+}
+
+/**
+ * An agent's tool or turn finished and may have changed git state. Across
+ * sessions these arrive far faster than anyone can read a branch list, so the
+ * reload goes out at once and then at most every AGENT_GIT_GAP_MS, always with
+ * a last one after the final notice. Direct reads still never see old data.
+ */
+export function notifyAgentGitActivity() {
+  invalidatePendingGitReads();
+  if (agentGitTimer !== undefined) return;
+  const wait = lastGitDispatch + AGENT_GIT_GAP_MS - Date.now();
+  if (wait <= 0) {
+    dispatchGitChanged();
+    return;
+  }
+  agentGitTimer = setTimeout(dispatchGitChanged, wait);
 }
 
 export function subscribeGitChanged(listener: () => void): () => void {

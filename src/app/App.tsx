@@ -248,6 +248,7 @@ import {
 import {
   basename,
   homeDir,
+  notifyAgentGitActivity,
   notifyGitChanged,
   pickFolders,
   type GitFileDiffKind,
@@ -8942,7 +8943,7 @@ function Workspace({
               void announceSessionFinished(finished, visible);
           }, 0);
           notifyReviewChanged(sessionId);
-          notifyGitChanged();
+          notifyAgentGitActivity();
           nudgeWorkspace(workCwd);
           nudgeWatchedFiles();
           window.setTimeout(() => nudgeWatchedFiles(), 150);
@@ -15755,7 +15756,7 @@ function nudgeOpenEditors(event: HarnessEvent, cwd: string) {
     if (!completed) return;
     nudgeWatchedFiles();
     window.setTimeout(() => nudgeWatchedFiles(), 150);
-    notifyGitChanged();
+    notifyAgentGitActivity();
     nudgeWorkspace(cwd);
     window.setTimeout(() => nudgeWorkspace(cwd), 150);
     return;
@@ -15780,7 +15781,7 @@ function nudgeOpenEditors(event: HarnessEvent, cwd: string) {
       () => nudgeWatchedFiles(resolved.length > 0 ? resolved : undefined),
       150,
     );
-    notifyGitChanged();
+    notifyAgentGitActivity();
     nudgeWorkspace(cwd);
   }
 }

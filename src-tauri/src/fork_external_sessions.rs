@@ -309,11 +309,12 @@ fn git_common_dir(path: &Path) -> Option<PathBuf> {
     if !path.is_dir() {
         return None;
     }
-    let mut child = Command::new("git")
+    let search_path = crate::harness::gui_search_path();
+    let mut child = Command::new(crate::harness::git_program(&search_path))
         .arg("-C")
         .arg(path)
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .env("PATH", crate::harness::gui_search_path())
+        .env("PATH", search_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

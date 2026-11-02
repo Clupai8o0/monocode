@@ -2899,6 +2899,19 @@ fn which_in_path(path: &str, name: &str) -> Option<PathBuf> {
     })
 }
 
+/// The `git` a child with this PATH would run, named in full. Std can't use
+/// `posix_spawn` for a bare program name with a PATH override: it forks, which
+/// on macOS stalls every other thread's malloc (see `background_git`). Not
+/// cached, so a reinstalled git is found; the lookup is far cheaper than the
+/// git it starts. A git not on this PATH stays bare and fails the usual way.
+pub(crate) fn git_program(search_path: &str) -> PathBuf {
+    if cfg!(windows) {
+        // No fork there, and the lookup could pick a `git.cmd` shim.
+        return PathBuf::from("git");
+    }
+    which_in_path(search_path, "git").unwrap_or_else(|| PathBuf::from("git"))
+}
+
 fn first_binary(candidates: Vec<PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find_map(existing_binary)
 }
@@ -3795,6 +3808,33 @@ mod tests {
         );
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn git_program_names_the_first_git_on_the_path_or_stays_bare() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("monocode-git-prog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (empty, first, second) = (dir.join("a"), dir.join("b"), dir.join("c"));
+        for (sub, has_git) in [(&empty, false), (&first, true), (&second, true)] {
+            std::fs::create_dir_all(sub).unwrap();
+            if has_git {
+                let git = sub.join("git");
+                std::fs::write(&git, b"#!/bin/sh\n").unwrap();
+                std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+
+        let path = format!(
+            "{}:{}:{}",
+            empty.display(),
+            first.display(),
+            second.display()
+        );
+        assert_eq!(git_program(&path), first.join("git"));
+        assert_eq!(git_program(empty.to_str().unwrap()), PathBuf::from("git"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

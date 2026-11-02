@@ -47,7 +47,13 @@ function load(entry: Entry, invalidated = false): Promise<boolean> {
     let loaded = false;
     try {
       const data = await listWorktrees(entry.cwd);
-      publish(entry, { data });
+      // Most reloads find nothing new; don't re-render every picker for those.
+      if (
+        entry.snapshot.error !== undefined ||
+        JSON.stringify(entry.snapshot.data) !== JSON.stringify(data)
+      ) {
+        publish(entry, { data });
+      }
       loaded = true;
     } catch (error) {
       // A background failure must not replace a usable list with a loading or

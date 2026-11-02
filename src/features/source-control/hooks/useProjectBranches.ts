@@ -14,6 +14,8 @@ type Entry = {
   state: ProjectBranchesState;
   listeners: Set<() => void>;
   inFlight: boolean;
+  /** Asked again during a read, which may predate the change it was told of. */
+  reloadAfter: boolean;
   unsubscribeGit: (() => void) | null;
   onResume: (() => void) | null;
 };
@@ -49,6 +51,7 @@ function entryFor(cwd: string): Entry {
     state: PENDING,
     listeners: new Set(),
     inFlight: false,
+    reloadAfter: false,
     unsubscribeGit: null,
     onResume: null,
   };
@@ -73,7 +76,11 @@ export function seedProjectBranches(cwd: string, branches: GitBranches) {
 }
 
 async function load(entry: Entry, force = false) {
-  if (entry.inFlight || (!force && document.hidden)) return;
+  if (!force && document.hidden) return;
+  if (entry.inFlight) {
+    entry.reloadAfter = true;
+    return;
+  }
   entry.inFlight = true;
   try {
     publish(entry, await gitBranches(entry.cwd));
@@ -81,6 +88,11 @@ async function load(entry: Entry, force = false) {
     publish(entry, null);
   } finally {
     entry.inFlight = false;
+  }
+  if (entry.reloadAfter) {
+    entry.reloadAfter = false;
+    // Change notices are spaced out, so this may be the last one for a while.
+    if (entry.onResume) void load(entry, true);
   }
 }
 

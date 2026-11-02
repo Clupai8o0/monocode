@@ -91,7 +91,8 @@ pub struct RestorePreview {
 }
 
 fn run(root: &Path, args: &[&str]) -> Result<Output, String> {
-    let mut command = Command::new("git");
+    let path = crate::harness::cached_gui_search_path();
+    let mut command = Command::new(crate::harness::git_program(&path));
     crate::hide_window_console(&mut command);
     command
         .arg("-C")
@@ -99,7 +100,7 @@ fn run(root: &Path, args: &[&str]) -> Result<Output, String> {
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")
-        .env("PATH", crate::harness::cached_gui_search_path())
+        .env("PATH", path)
         .output()
         .map_err(|e| e.to_string())
 }
@@ -497,7 +498,8 @@ fn save_current_state(
     ));
     let result = (|| {
         let run_private = |args: &[&str]| -> Result<String, String> {
-            let mut command = Command::new("git");
+            let path = crate::harness::cached_gui_search_path();
+            let mut command = Command::new(crate::harness::git_program(&path));
             crate::hide_window_console(&mut command);
             let output = command
                 .arg("-C")
@@ -508,7 +510,7 @@ fn save_current_state(
                 .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
                 .env("GIT_COMMITTER_NAME", "MonoCode")
                 .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local")
-                .env("PATH", crate::harness::cached_gui_search_path())
+                .env("PATH", path)
                 .output()
                 .map_err(|e| e.to_string())?;
             if !output.status.success() {
