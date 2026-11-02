@@ -180,6 +180,7 @@ const fixtureInvoke = async (
     if (command === "session_get") { return sessions.find(session => session.id === args.sessionId) ?? null; }
     if (command === "session_list_in_flight") { return []; }
     if (command === "session_set_archived") { return; }
+    if (params.has("safeClose") && command === "resolve_project_location") { return { path: args.path, identity: "fixture" }; }
     if (params.has("sessionRefs") && command === "fork_external_sessions_list") {
       return { sessions: [{ id: "provider-own", name: "monocode-own", projectId: "/fixture/projects/monocode", source: "claude", cwd: "/fixture/projects/monocode", state: "idle", hasTranscript: true }] };
     }

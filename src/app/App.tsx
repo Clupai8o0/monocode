@@ -1595,6 +1595,8 @@ function Workspace({
     () => new Map(),
   );
   const [history, setHistory] = useState<SessionSummary[]>(() => bootHistory);
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const [, refreshRemoteTabTitles] = useState(0);
   useEffect(() => {
     const updated = () => refreshRemoteTabTitles((value) => value + 1);
@@ -9006,12 +9008,24 @@ function Workspace({
       // Reject before async preparation can make the composer clear its draft.
       if (workspaceNavigation.isSwitching(args[0])) return false;
       const result = submitSession(...args);
-      if (typeof result === "boolean") return result;
+      // Fork: a session used again leaves the archive.
+      const leaveArchive = (accepted: boolean) => {
+        if (
+          accepted &&
+          historyRef.current.some((row) => row.id === args[0] && row.archived)
+        ) {
+          void onArchiveHistorySession(args[0], false);
+        }
+      };
+      if (typeof result === "boolean") {
+        leaveArchive(result);
+        return result;
+      }
       // Deferred errors have already been displayed by submitAfterProjectSync.
-      void result.catch(() => undefined);
+      void result.then(leaveArchive).catch(() => undefined);
       return true;
     },
-    [submitSession],
+    [onArchiveHistorySession, submitSession],
   );
 
   // Fork: the footer's Send to all sends as a session's composer does.

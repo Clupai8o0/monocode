@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CheckCheck } from "../../shared/ui/icons";
+import { autoArchiveCandidates } from "../sessionArchive/archivedSessions";
 import {
   cachedCloseState,
   closeStatesVersion,
@@ -99,8 +100,8 @@ const autoArchived = new Set<string>();
 
 /**
  * Archives Safe and Handover sessions left for 12 hours, checked when the
- * list or a badge changes and every 10 minutes. Archived sessions stay in the
- * archive, so nothing is lost.
+ * list or a badge changes and every 10 minutes. This only tidies the list:
+ * they stay stored and listed under Archived.
  */
 function useAutoArchiveClosed(
   candidates: readonly CloseCandidate[],
@@ -138,13 +139,20 @@ function useAutoArchiveClosed(
  */
 export function CloseAllSafeButton({
   candidates,
+  openSessionIds = [],
   onArchive,
 }: {
   candidates: readonly CloseCandidate[];
+  /** Open in a tab: the 12-hour cleanup leaves these alone. */
+  openSessionIds?: readonly string[];
   onArchive: (sessionIds: string[]) => void;
 }) {
   const version = useCloseStatesVersion();
-  useAutoArchiveClosed(candidates, onArchive, version);
+  useAutoArchiveClosed(
+    autoArchiveCandidates(candidates, openSessionIds),
+    onArchive,
+    version,
+  );
   const [asking, setAsking] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {

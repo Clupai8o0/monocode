@@ -106,7 +106,6 @@ import { OPERATOR_COMMAND } from "../../features/sessions/model/operatorCommand"
 import { ORCHESTRATOR_COMMAND } from "../../features/sessions/model/orchestratorCommand";
 import {
   compareSessionSummaries,
-  filterSessionsByArchive,
   filterSessionsByQuery,
 } from "../../features/sessions/data/sessionHistory";
 import {
@@ -220,6 +219,11 @@ import { Popover } from "../../shared/ui/Popover";
 import { SearchableProjectPicker } from "../../features/projects/ui/SearchableProjectPicker";
 import { useRailTooltip } from "./RailTooltip";
 import { useProjectMenu } from "./useProjectMenu";
+import { ArchivedGroup } from "../../fork/sessionArchive/ArchivedGroup";
+import {
+  archivedGroupSessions,
+  mainListSessions,
+} from "../../fork/sessionArchive/archivedSessions";
 import { SessionFiltersMenu } from "../../features/sessions/ui/SessionFiltersMenu";
 import { LinkSessionWorkItemDialog } from "../../features/sessions/ui/LinkSessionWorkItemDialog";
 import { sessionReminderPresets } from "../../features/sessions/ui/sessionReminderPresets";
@@ -871,13 +875,16 @@ function SidebarComponent({
       filterSessionsByStatus(
         filterSessionsByTime(
           filterSessionsByHarness(
-            filterSessionsByArchive(
+            // Fork: a search also reaches archived sessions.
+            mainListSessions(
               listedSessions,
               sessionFilters.showArchived,
+              searchQuery,
             ),
             sessionFilters.hiddenHarnesses,
           ),
-          sessionFilters.time,
+          // Fork: a search looks through everything stored, however old.
+          searchQuery.trim() ? "all" : sessionFilters.time,
           now,
         ),
         sessionFilters.status,
@@ -906,6 +913,12 @@ function SidebarComponent({
   useEffect(() => {
     for (const id of freshStarted) knownStarted.current?.ids.add(id);
   });
+  // Fork: archived sessions stay one click away under the list.
+  const archivedSessions = archivedGroupSessions(listedSessions, {
+    showArchived: sessionFilters.showArchived,
+    query: searchQuery,
+    hiddenHarnesses: sessionFilters.hiddenHarnesses,
+  }).sort(compareSessionSummaries);
   const listedVisibleSessions = startedSessions.childIds.size
     ? visibleSessions.filter(
         (session) => !startedSessions.childIds.has(session.id),
@@ -2483,6 +2496,7 @@ function SidebarComponent({
   const closeAllSafeButton =
     !remoteProject && (onArchiveSession || onArchiveSessions) ? (
       <CloseAllSafeButton
+        openSessionIds={openSessions.map((session) => session.id)}
         candidates={listedSessions.filter(
           (session) =>
             !session.archived &&
@@ -2882,7 +2896,7 @@ function SidebarComponent({
                       >
                         This project’s machine isn’t connected on this computer.
                       </p>
-                    ) : (
+                    ) : archivedSessions.length > 0 ? null : (
                       <SessionsEmpty message="Sessions you start will show up here" />
                     )}
                   </div>
@@ -3234,6 +3248,24 @@ function SidebarComponent({
                   </ul>
                 )}
               </div>
+            )}
+            {/* Fork: archived sessions, always reachable. */}
+            {pendingFirstLoad ? null : (
+              <ArchivedGroup
+                projectKey={cwd ?? ""}
+                sessions={archivedSessions}
+                activeId={highlightedSessionId}
+                renderRow={(session) => (
+                  <SessionListItem
+                    key={session.id}
+                    session={session}
+                    cwd={cwd}
+                    motion={sessionInsertMotion}
+                  >
+                    {renderSessionCard(session, true)}
+                  </SessionListItem>
+                )}
+              />
             )}
             {/* Fork: sessions MonoCode did not start. */}
             <ElsewhereGroup
