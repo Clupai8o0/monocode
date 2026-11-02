@@ -133,6 +133,9 @@ test("a new game at another table leaves the sudoku board alone", async ({ page 
   await page.getByRole("option", { name: "colour sort" }).click();
   await expect(page.locator("[data-tube='0']")).toBeVisible();
   await page.getByRole("button", { name: "New game" }).click();
+  // Give a wrongful restart time to reach the hidden board and its save.
+  await page.waitForTimeout(300);
+  await expect(cell).toHaveAttribute("data-sudoku-value", "5");
 
   await page.reload();
   await page.locator("[data-fork-chip-select='Game']").click();
