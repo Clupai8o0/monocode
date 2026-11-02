@@ -73,7 +73,7 @@ function timingOf(block: Block, now: number): RunTiming {
  * background commands running, like Claude Code's task tray. It opens onto a
  * board with one lane per agent on a shared clock, so overlap and an agent that
  * has gone quiet can be seen at a glance. It opens by itself only when runs
- * overlap, and stays up once they finish, so a report being read does not go.
+ * overlap, and clears when all work finishes. Reports stay in the transcript.
  */
 export function BackgroundAgentsBar({
   session,

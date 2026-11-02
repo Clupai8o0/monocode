@@ -69,10 +69,9 @@ export function boardTurn(session: BoardSession): BoardTurn {
   return agents.length || commands.length ? { agents, commands } : NO_TURN;
 }
 
-/** Two or more agents stay up once done, so a report being read does not go. */
+/** The live tray clears when work finishes; reports remain in the transcript. */
 export function boardVisible(turn: BoardTurn): boolean {
   return (
-    turn.agents.length >= 2 ||
     turn.commands.length > 0 ||
     turn.agents.some((block) => toolCallState(block) === "pending")
   );
