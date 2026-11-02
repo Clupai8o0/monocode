@@ -1,3 +1,4 @@
+import { PROJECT_MASCOTS } from "../../src/features/projects/model/projectMascots";
 import { Profiler } from "react";
 import { captureReaderAnchor, readerAnchorTop } from "./readerAnchor";
 import { createRoot } from "react-dom/client";
@@ -161,7 +162,7 @@ const fixtureInvoke = async (
         const row = { projectId: "monocode", source: "claude", cwd: "/home/sam/monocode", hasTranscript: true };
         return { sessions: [
           { ...row, id: "lab-idle", name: "clupai-32", state: "idle" },
-          { ...row, id: "lab-run", name: "monocode-effort", state: "running" },
+          { ...row, id: "lab-run", name: "monocode-effort", state: params.has("machinesIdle") ? "handed-over" : "running" },
           { ...row, id: "lab-gone", name: "old-one", state: "handed-over" },
         ], unfiled: [{ id: "lab-home", name: "home-session", source: "claude", cwd: "/home/sam", state: "idle", hasTranscript: true }] };
       }
@@ -176,6 +177,10 @@ const fixtureInvoke = async (
     }
     if (command === "session_list_by_project") {
       return sessions.filter(session => session.cwd === args.cwd).map(session => ({ ...session, providerSessionId: session.id === "workspace-session-1" ? "provider-own" : undefined, createdAt: Date.now() - 3_600_000, updatedAt: Date.now() }));
+    }
+    if (params.has("monoView")) {
+      if (command === "mono_session_get") { return sessions.find(session => session.id === args.sessionId) ?? null; }
+      if (command === "mono_session_upsert") { return { ...(args.session as object), createdAt: Date.now(), updatedAt: Date.now() }; }
     }
     if (command === "session_get") { return sessions.find(session => session.id === args.sessionId) ?? null; }
     if (command === "session_list_in_flight") { return []; }
@@ -372,6 +377,18 @@ if (projectsFixture) {
   for (const provider of ["claude", "codex"] as const) {
     setCachedRateLimits(provider, "default", { provider, status: "ok", error: null, updatedAt: Date.now(), monthly: null, resetCredits: null, session: { usedPercent: provider === "codex" ? 14 : 32, windowMinutes: 300, resetsAt: Date.now() + 7_860_000 }, weekly: { usedPercent: provider === "codex" ? 27 : 59, windowMinutes: 10_080, resetsAt: Date.now() + 473_000_000 } });
   }
+}
+if (params.has("monoView")) {
+  // Kickoff owns the first session, which has a checklist beside its chat.
+  localStorage.setItem("monocode.insetLayout", "1");
+  localStorage.setItem("monocode.fork.checklistCollapsed", "1");
+  localStorage.setItem("monocode:mono-roster", JSON.stringify([
+    { id: "harness-mono", name: "Kickoff", mascot: PROJECT_MASCOTS[0]!.id, color: "hsl(245 75% 65%)", projects: [projectRoot], sessionId: sessions[0]!.id },
+  ]));
+  sessions[0]!.busy = false;
+  sessions[0]!.blocks.push({ id: "harness-option", role: "assistant", text: "- [ ] Fits the chat" } as Block);
+  sessions.find((session) => session.title.startsWith("Prepare the handoff"))!.blocks.push({ id: "harness-pooled-option", role: "assistant", text: "- [ ] Pooled option" } as Block);
+  sessions[0]!.blocks.push({ id: "harness-checklist", role: "assistant", text: "", checklist: { action: "set", title: "Steps", items: ["Open it", "Check it"] } } as Block);
 }
 const commits: { duration: number; at: number }[] = [];
 Object.assign(window, {

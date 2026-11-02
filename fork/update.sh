@@ -30,6 +30,14 @@ export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 export NODE_OPTIONS="--no-experimental-webstorage${NODE_OPTIONS:+ $NODE_OPTIONS}"
 # Share the Rust build cache with the main checkout so builds stay incremental.
 export CARGO_TARGET_DIR="$REPO/target"
+# macOS ties privacy permissions and Keychain approvals to the app's signature. An
+# ad-hoc signature changes with every build, so each update asked for all of them
+# again. A real certificate keeps one identity across builds. Tauri reads this variable
+# over tauri.conf.json's ad-hoc setting, which stays as upstream has it.
+SIGNING_IDENTITY="Apple Development: limbusamaka@icloud.com (UT6KQN223V)"
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGNING_IDENTITY"; then
+    export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+fi
 
 log()
 {

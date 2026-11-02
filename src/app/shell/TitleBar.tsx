@@ -14,6 +14,7 @@ import {
   Terminal,
   X,
   Zap,
+  MessageSquarePlus,
 } from "../../shared/ui/icons";
 import {
   memo,
@@ -132,6 +133,7 @@ type Props = {
   onToggleMonoOverview?: () => void;
   monoOverviewOpen?: boolean;
   onOpenMonoSettings?: () => void;
+  onNewMonoConversation?: () => void; // Fork
   /** The full-height Mono panel owns these while it is open. */
   hideWindowControls?: boolean;
   projectRailOpen?: boolean;
@@ -681,12 +683,15 @@ export function MonoViewActions({
   overviewOpen,
   onToggleOverview,
   onOpenSettings,
+  onNewConversation,
   className = "",
 }: {
   name: string;
   overviewOpen: boolean;
   onToggleOverview?: () => void;
   onOpenSettings?: () => void;
+  /** Fork: a clean chat with this Mono; the old one stays under Archived. */
+  onNewConversation?: () => void;
   className?: string;
 }) {
   return (
@@ -707,6 +712,14 @@ export function MonoViewActions({
           <DashboardSquare className="size-3.5" strokeWidth={1.75} />
           Overview
         </button>
+      ) : null}
+      {onNewConversation ? (
+        <IconButton
+          label={`New conversation with ${name}`}
+          onClick={onNewConversation}
+        >
+          <MessageSquarePlus className="size-3.5" strokeWidth={1.75} />
+        </IconButton>
       ) : null}
       {onOpenSettings ? (
         <IconButton label={`${name} settings`} onClick={onOpenSettings}>
@@ -754,6 +767,7 @@ function TitleBarComponent({
   onToggleMonoOverview,
   monoOverviewOpen = false,
   onOpenMonoSettings,
+  onNewMonoConversation, // Fork
   hideWindowControls = false,
   projectRailOpen = true,
   sessionSidebarOpen = true,
@@ -1100,6 +1114,7 @@ function TitleBarComponent({
             overviewOpen={monoOverviewOpen}
             onToggleOverview={onToggleMonoOverview}
             onOpenSettings={onOpenMonoSettings}
+            onNewConversation={onNewMonoConversation}
             className="px-3"
           />
         ) : null}

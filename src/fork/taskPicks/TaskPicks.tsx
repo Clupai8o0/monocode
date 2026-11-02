@@ -23,6 +23,9 @@ export const TaskPicksContext = createContext<{
   streaming: boolean;
 } | null>(null);
 
+/** The conversation these replies belong to; a picked option goes to its composer. */
+export const TaskPicksSession = createContext<string | undefined>(undefined);
+
 /** Which of the reply's Markdown blocks is rendering, as part of a box's key. */
 export const TaskMarkdownBlock = createContext(0);
 
@@ -42,6 +45,7 @@ type MarkdownInputProps = ComponentProps<"input"> & {
 
 export function MarkdownTaskInput({ node: _node, ...props }: MarkdownInputProps) {
   const reply = useContext(TaskPicksContext);
+  const sessionId = useContext(TaskPicksSession);
   const markdownBlock = useContext(TaskMarkdownBlock);
   const picks = useBlockPicks(reply?.blockId);
   const label = props["data-task-label"];
@@ -63,7 +67,7 @@ export function MarkdownTaskInput({ node: _node, ...props }: MarkdownInputProps)
       onChange={(event) => {
         const ticked = event.target.checked;
         setTaskPick(reply.blockId, key, ticked);
-        requestAddToChat(label, ticked ? "line" : "removeLine");
+        requestAddToChat(label, ticked ? "line" : "removeLine", sessionId);
       }}
     />
   );

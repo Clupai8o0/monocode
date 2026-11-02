@@ -2903,9 +2903,10 @@ function SidebarComponent({
                 ) : (
                   <ul
                     data-session-list
-                    className={`flex flex-col pb-10 ${
-                      inset ? "gap-px px-1 pt-1" : "gap-0.5 p-1.5"
-                    }`}
+                    className={`flex flex-col ${
+                      // Fork: the Archived group follows straight on, in view.
+                      archivedSessions.length > 0 ? "" : "pb-10"
+                    } ${inset ? "gap-px px-1 pt-1" : "gap-0.5 p-1.5"}`}
                   >
                     {sessionListEntries.map((entry, index) => {
                       if (entry.kind === "pinned" || entry.kind === "reminders") {

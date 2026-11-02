@@ -745,6 +745,10 @@ import {
   warmNativeSkills,
   isNativeCommandPrompt,
 } from "../features/skills/model/skills";
+import {
+  pastConversations,
+  rememberPastConversation,
+} from "../fork/monoPast/pastConversations"; // Fork
 import { nativeSkillContextForSession } from "../features/sessions/model/sessionSkills";
 import {
   loadSessionFolders,
@@ -2150,7 +2154,8 @@ function Workspace({
   useEffect(() => {
     const openSessionForAddToChat = (event: Event) => {
       const detail = (event as CustomEvent<AddToChatRequest>).detail;
-      if (!detail?.text) return;
+      // Fork: one that names its conversation is taken by that session's pane.
+      if (!detail?.text || detail.sessionId) return;
 
       const result = applyAddToChatRequest({
         sessions: sessionsRef.current,
@@ -5321,8 +5326,11 @@ function Workspace({
     void onOpenMono(monoId);
   }, [onOpenMono]);
 
+  // Fork: `keepOld` starts the fresh chat without deleting this one; it goes
+  // to Archived like any other closed conversation.
   const onResetMono = useCallback(
-    async (sessionId: string): Promise<void> => {
+    async (sessionId: string, keepOld = false): Promise<void> => {
+      let kept: SessionSummary | undefined;
       const current = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
@@ -5349,6 +5357,25 @@ function Workspace({
             return stopped;
           },
           remove: async (stopped) => {
+            if (keepOld) {
+              await flushSessionCheckpoint(sessionId);
+              const saved = await upsertSession(stopped);
+              if (!saved)
+                throw new Error("The conversation could not be saved.");
+              await setSessionArchived(sessionId, true);
+              kept = { ...saved, archived: true };
+              const owner = monoForSession(sessionId);
+              if (owner) {
+                rememberPastConversation(owner.id, {
+                  id: sessionId,
+                  title:
+                    sessionDisplayTitle(stopped.title, stopped.harness) ||
+                    "Conversation",
+                  at: Date.now(),
+                });
+              }
+              return;
+            }
             await Promise.all(
               sessionChildHarnesses(stopped).map((harness) =>
                 forgetHarnessSession(harness, sessionId),
@@ -5373,7 +5400,9 @@ function Workspace({
             );
             setSessions(sessionsRef.current);
             setHistory((history) =>
-              history.filter((entry) => entry.id !== sessionId),
+              kept
+                ? mergeHistorySummary(history, kept)
+                : history.filter((entry) => entry.id !== sessionId),
             );
             setStoredLinkedSessions((history) =>
               history.filter((entry) => entry.id !== sessionId),
@@ -8619,7 +8648,7 @@ function Workspace({
                 providerAccountId,
                 runtimeMode: current.runtimeMode,
                 ephemeral: current.ephemeral === true,
-                codexStore: mono ? "mono" : undefined,
+                codexStore: mono || current.monoTranscript ? "mono" : undefined,
                 controlsAgents:
                   operatorAccess ||
                   orchestrator.run(sessionId)?.status === "active",
@@ -8673,7 +8702,7 @@ function Workspace({
               providerAccountId,
               runtimeMode: current.runtimeMode,
               ephemeral: current.ephemeral === true,
-              codexStore: mono ? "mono" : undefined,
+              codexStore: mono || current.monoTranscript ? "mono" : undefined,
               intent: intent === "orchestrate" ? "plan" : intent,
               // A /operator user turn enables app access for this thread;
               // orchestration leads retain their separate control access.
@@ -10117,7 +10146,7 @@ function Workspace({
       if (
         session.providerSessionId &&
         (session.harness === "claude" ||
-          (session.harness === "codex" && !mono))
+          (session.harness === "codex" && !mono && !session.monoTranscript))
       ) {
         accountSwitching.current.add(sessionId);
         try {
@@ -10517,7 +10546,10 @@ function Workspace({
         model: model || undefined,
         modelSettings: input.thread.modelSettings ?? input.source.modelSettings,
         ephemeral: false,
-        codexStore: isMonoSession(input.source.id) ? "mono" : undefined,
+        codexStore:
+          isMonoSession(input.source.id) || input.source.monoTranscript
+            ? "mono"
+            : undefined,
         threadId: input.thread.providerThreadId,
         onThreadId: (providerThreadId) => {
           if (controller.signal.aborted) return;
@@ -11139,7 +11171,10 @@ function Workspace({
               : undefined,
             runtimeMode: current.runtimeMode,
             ephemeral: current.ephemeral === true,
-            codexStore: isMonoSession(sessionId) ? "mono" : undefined,
+            codexStore:
+              isMonoSession(sessionId) || current.monoTranscript
+                ? "mono"
+                : undefined,
             controlsAgents:
               isMonoSession(sessionId) ||
               operatorEnabledInThread(current.blocks) ||
@@ -14409,6 +14444,12 @@ function Workspace({
           onRuntimeModeChange(monoViewSession.id, mode)
         }
         onReset={() => onResetMono(monoViewSession.id)}
+        pastConversations={pastConversations(monoViewMono.id)}
+        onOpenPastConversation={(sessionId) => {
+          setMonoSettingsFor(null);
+          closeMonoView();
+          void onSelectHistorySession(sessionId);
+        }}
         onClose={() => setMonoSettingsFor(null)}
       />
     ) : null;
@@ -14571,6 +14612,32 @@ function Workspace({
   const onOpenMonoViewSettings = monoViewMono
     ? () => setMonoSettingsFor(monoViewMono.id)
     : undefined;
+  // Fork: one click to a clean chat with the Mono in view.
+  const onNewMonoConversation = monoViewSession
+    ? () => {
+        setMonoOverviewOpen(false);
+        if (
+          monoViewSession.blocks.length === 0 &&
+          !monoViewSession.monoTranscript
+        ) {
+          setComposerFocused(true);
+          setComposerFocusToken((token) => token + 1);
+          return;
+        }
+        if (monoViewSession.busy) {
+          void message("Stop the current reply first, then start a new conversation.", {
+            kind: "info",
+          });
+          return;
+        }
+        void onResetMono(monoViewSession.id, true).catch((error) => {
+          void message(
+            `Could not start a new conversation.\n\n${String(error)}`,
+            { kind: "error" },
+          );
+        });
+      }
+    : undefined;
   // A new session takes over from a Mono in view.
   const onNewFromTitleBar = () => {
     if (monoViewIdRef.current) closeMonoView();
@@ -14602,6 +14669,9 @@ function Workspace({
       monoOverviewOpen={monoOverviewOpen}
       onOpenMonoSettings={
         monoCovers && !insetLayout ? onOpenMonoViewSettings : undefined
+      }
+      onNewMonoConversation={
+        monoCovers && !insetLayout ? onNewMonoConversation : undefined
       }
       hideWindowControls={monoCovers && monoOverviewOpen && !!monoOverviewPanel}
       activeId={
@@ -15054,7 +15124,8 @@ function Workspace({
                                             : ""
                                         }
                                         addToChatSessionId={
-                                          tab.id === activeTabId
+                                          // Fork: a Mono in front takes it, not the pane under it.
+                                          tab.id === activeTabId && !monoViewId
                                             ? active?.id
                                             : undefined
                                         }
@@ -15098,6 +15169,9 @@ function Workspace({
                                       <div
                                         key={session.id}
                                         data-mono-view={session.id}
+                                        data-mono-actions-over={
+                                          insetLayout || undefined
+                                        }
                                         aria-hidden={!visible}
                                         inert={!visible || undefined}
                                         className={
@@ -15117,6 +15191,9 @@ function Workspace({
                                             }
                                             onOpenSettings={
                                               onOpenMonoViewSettings
+                                            }
+                                            onNewConversation={
+                                              onNewMonoConversation
                                             }
                                             // The overview header's row, so both share a centre line.
                                             className="absolute right-2.5 top-0 z-10 h-10"

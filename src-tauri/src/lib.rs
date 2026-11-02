@@ -586,6 +586,7 @@ pub fn run() {
             session_store::session_get,
             session_store::session_tool_detail,
             mono_transcript::mono_session_get,
+            mono_transcript::mono_session_indexed,
             mono_transcript::mono_session_page,
             mono_transcript::mono_session_upsert,
             mono_transcript::mono_session_find,

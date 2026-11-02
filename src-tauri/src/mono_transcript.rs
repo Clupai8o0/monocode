@@ -244,6 +244,18 @@ fn page(
     })
 }
 
+/// Fork: whether this session's blocks live in the Mono store, so a chat its
+/// Mono set aside can still be read after it stops being that Mono's.
+#[tauri::command(async)]
+pub fn mono_session_indexed(
+    store: State<'_, SessionStore>,
+    session_id: String,
+) -> Result<bool, String> {
+    session_store::validate_id(&session_id, "session")?;
+    let conn = store.lock_conn()?;
+    is_indexed(&conn, &session_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 pub fn mono_session_get(
     store: State<'_, SessionStore>,

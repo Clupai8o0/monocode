@@ -7,6 +7,7 @@ import {
   type ReactElement,
 } from "react";
 import { createPortal } from "react-dom";
+import { TaskPicksSession } from "../../../fork/taskPicks/TaskPicks";
 import { estimateRetainedBytes } from "../data/sessionCache";
 import { detachedHistoryNodes } from "./useMeasuredHistory";
 
@@ -232,7 +233,10 @@ const PooledEntry = memo(function PooledEntry({
   // one the pane listens for so clicking the transcript still focuses it.
   return createPortal(
     <div className="contents" onMouseDown={entry.onMouseDown}>
-      {entry.element}
+      {/* Fork: a portal here leaves the pane's context behind, so name the chat again. */}
+      <TaskPicksSession.Provider value={entry.id}>
+        {entry.element}
+      </TaskPicksSession.Provider>
     </div>,
     entry.container,
   );

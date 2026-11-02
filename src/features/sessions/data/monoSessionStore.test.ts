@@ -53,6 +53,24 @@ function saved(session: Session) {
 }
 
 describe("Mono database pagination and writes", () => {
+  it("reads a chat its Mono set aside from the Mono store, and leaves plain empty sessions alone", async () => {
+    const stored = record(false);
+    call.mockResolvedValueOnce({ ...stored, blocks: [] });
+    call.mockResolvedValueOnce(true);
+    call.mockResolvedValueOnce({ ...stored, monoTranscript: { before: 1, firstBlockId: "u" } });
+    const setAside = (await peekSession(stored.id))!;
+    expect(setAside.blocks).toHaveLength(2);
+    expect(setAside.monoTranscript).toMatchObject({ firstBlockId: "u" });
+    expect(call).toHaveBeenLastCalledWith("mono_session_get", { sessionId: stored.id });
+
+    call.mockReset();
+    call.mockResolvedValueOnce({ ...stored, blocks: [] });
+    call.mockResolvedValueOnce(false);
+    expect((await peekSession(stored.id))!.blocks).toEqual([]);
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(call).toHaveBeenLastCalledWith("mono_session_indexed", { sessionId: stored.id });
+  });
+
   it("explicitly saves an empty configured Mono and restores its provider and permissions", async () => {
     const session = { ...newSession("codex", "/home", "codex:test", "supervised", { effort: "high" }), id: `mono-quiet-${++id}` };
     expect(await upsertSession(session)).toBeNull();

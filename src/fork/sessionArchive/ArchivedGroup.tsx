@@ -7,30 +7,27 @@ const OPEN_KEY = "monocode.fork.archivedOpen";
 function readOpen(key: string): boolean {
   try {
     const map = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}");
-    return map?.[key] === true;
+    return map?.[key] !== false;
   } catch {
-    return false;
+    return true;
   }
 }
 
 function writeOpen(key: string, open: boolean) {
   try {
     const map = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}") ?? {};
-    if (open) {
-      map[key] = true;
-    } else {
-      delete map[key];
-    }
+    map[key] = open;
     localStorage.setItem(OPEN_KEY, JSON.stringify(map));
   } catch {
-    // Storage blocked: the group just starts collapsed next time.
+    // Storage blocked: the group just starts open next time.
   }
 }
 
 /**
  * Fork: under a project's sessions, the ones archived by hand or by cleanup.
- * Archiving tidies the main list and nothing else: they stay stored, one click
- * away. Opens by itself while the session on screen is one of them.
+ * Archiving tidies the main list and nothing else: they stay stored and listed.
+ * Open until the user collapses it, and always open while the session on screen
+ * is one of them.
  */
 export function ArchivedGroup<T extends { id: string }>({
   projectKey,
@@ -72,7 +69,7 @@ export function ArchivedGroup<T extends { id: string }>({
     }
   };
   return (
-    <div ref={root} data-fork-archived="" className="mt-3 px-1 pb-2">
+    <div ref={root} data-fork-archived="" className="mt-1 px-1 pb-10">
       <button
         type="button"
         aria-expanded={open}

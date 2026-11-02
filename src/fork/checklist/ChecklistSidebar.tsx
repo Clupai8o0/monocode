@@ -42,7 +42,7 @@ export function ChecklistSidebar({ blocks }: { blocks: readonly Block[] }) {
         aria-label={`Show checklist, ${done} of ${list.items.length} done`}
         title={list.title}
         onClick={toggle}
-        className="flex w-8 shrink-0 flex-col items-center gap-2 border-l border-stroke py-3 text-content/50 hover:text-content/80"
+        className="flex w-8 shrink-0 flex-col items-center gap-2 border-l border-stroke py-3 text-content/50 hover:text-content/80 in-data-[mono-actions-over]:mt-10"
       >
         <ListEnd className="size-4" strokeWidth={1.75} />
         <span className="font-mono text-[10px]">
@@ -55,7 +55,7 @@ export function ChecklistSidebar({ blocks }: { blocks: readonly Block[] }) {
     <aside
       data-fork-checklist="open"
       aria-label={list.title}
-      className="flex w-64 shrink-0 flex-col border-l border-stroke"
+      className="flex w-64 shrink-0 flex-col border-l border-stroke in-data-[mono-actions-over]:mt-10"
     >
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke px-3">
         <ListEnd

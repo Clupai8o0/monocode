@@ -10,6 +10,7 @@
 //! private sign-in window (`fork_leetcode_connect`) or is pasted in.
 
 use std::io::Read;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -64,6 +65,9 @@ struct Account {
     csrf: String,
     username: String,
 }
+
+/// The keychain's answer for this launch. Outer `None`: not read yet.
+static ACCOUNT_MEMORY: Mutex<Option<Option<Account>>> = Mutex::new(None);
 
 /// A slug as LeetCode writes them: lowercase letters, digits and dashes.
 fn valid_slug(value: &str) -> bool {
@@ -155,22 +159,52 @@ fn request(
     }
 }
 
-fn read_account() -> Option<Account> {
+fn read_keychain() -> Option<Account> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).ok()?;
     let text = entry.get_password().ok()?;
     serde_json::from_str(&text).ok()
 }
 
+/// Asks `load` only when nothing is remembered yet. The lock is held while it
+/// runs, so lookups arriving together share one answer.
+fn remembered_account(
+    memory: &Mutex<Option<Option<Account>>>,
+    load: impl FnOnce() -> Option<Account>,
+) -> Option<Account> {
+    let mut remembered = memory.lock().unwrap_or_else(|error| error.into_inner());
+    remembered.get_or_insert_with(load).clone()
+}
+
+/// Every LeetCode lookup needs the account, and macOS can ask for the password
+/// on each keychain read. So it reads once per launch, even when the answer was
+/// "no account" or the user declined; connecting again replaces the answer.
+fn read_account() -> Option<Account> {
+    remembered_account(&ACCOUNT_MEMORY, read_keychain)
+}
+
+/// Writers hold the lock across the keychain change, so a connect and a
+/// disconnect racing each other cannot leave memory disagreeing with it.
+fn account_memory() -> std::sync::MutexGuard<'static, Option<Option<Account>>> {
+    ACCOUNT_MEMORY.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 fn write_account(account: &Account) -> Result<(), String> {
     let text = serde_json::to_string(account).map_err(|e| e.to_string())?;
+    let mut memory = account_memory();
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
         .and_then(|entry| entry.set_password(&text))
-        .map_err(|_| "Could not save the LeetCode sign-in to the keychain.".to_string())
+        .map_err(|_| "Could not save the LeetCode sign-in to the keychain.".to_string())?;
+    *memory = Some(Some(account.clone()));
+    Ok(())
 }
 
 fn clear_account() -> Result<(), String> {
+    let mut memory = account_memory();
     match keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).and_then(|e| e.delete_credential()) {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(()) | Err(keyring::Error::NoEntry) => {
+            *memory = Some(None);
+            Ok(())
+        }
         Err(_) => Err("Could not remove the LeetCode sign-in from the keychain.".into()),
     }
 }
@@ -465,6 +499,27 @@ pub async fn fork_leetcode_fetch(kind: String, value: String) -> Result<serde_js
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keychain_is_asked_once_whatever_it_answered() {
+        let account = Account {
+            session: "s".into(),
+            csrf: "c".into(),
+            username: "sam".into(),
+        };
+        for answer in [Some(account), None] {
+            let memory = Mutex::new(None);
+            let mut asked = 0;
+            for _ in 0..3 {
+                let found = remembered_account(&memory, || {
+                    asked += 1;
+                    answer.clone()
+                });
+                assert_eq!(found.is_some(), answer.is_some());
+            }
+            assert_eq!(asked, 1);
+        }
+    }
 
     #[test]
     fn slugs_are_checked() {

@@ -613,12 +613,24 @@ export async function getSession(sessionId: string): Promise<Session | null> {
 
 /** Inspect persistence without changing an open Mono's incremental-save baseline. */
 export async function peekSession(sessionId: string): Promise<Session | null> {
-  const record = await invoke<SessionRecord | null>(
-    isMonoSession(sessionId) ? "mono_session_get" : "session_get",
+  const mono = isMonoSession(sessionId);
+  let record = await invoke<SessionRecord | null>(
+    mono ? "mono_session_get" : "session_get",
     {
       sessionId,
     },
   );
+  // Fork: a chat its Mono set aside is a plain session now, with its blocks
+  // still in the Mono store.
+  if (
+    !mono &&
+    record?.blocks.length === 0 &&
+    (await invoke<boolean>("mono_session_indexed", { sessionId }))
+  ) {
+    record = await invoke<SessionRecord | null>("mono_session_get", {
+      sessionId,
+    });
+  }
   return record ? recordToSession(record) : null;
 }
 

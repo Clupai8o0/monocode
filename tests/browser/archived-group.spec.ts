@@ -9,15 +9,24 @@ test("an archived session stays listed, opens again and comes back when used", a
   const group = page.locator("[data-fork-archived]");
   await expect(group).toHaveCount(0);
 
-  // Close it: gone from the main list, still one click away.
+  // Close it: gone from the main list, still listed under Archived.
   await page.locator("[data-fork-safe-close]:visible").click();
   const header = group.getByRole("button", { name: /^Archived/ });
   await expect(header).toContainText("1");
   const stored = group.getByRole("button", { name: /^Prepare the handoff/ });
+  await expect(stored).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath("archived-group.png") });
+
+  // Collapsing it holds until the user opens it again, across a reload.
+  await header.click();
+  await expect(stored).toHaveCount(0);
+  await page.reload();
+  await cards.first().click();
+  await page.locator("[data-fork-safe-close]:visible").click();
+  await expect(header).toContainText("1");
   await expect(stored).toHaveCount(0);
   await header.click();
   await expect(stored).toHaveCount(1);
-  await page.screenshot({ path: testInfo.outputPath("archived-group.png") });
 
   // Reading it leaves it archived.
   await stored.click();

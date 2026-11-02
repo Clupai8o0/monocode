@@ -125,7 +125,7 @@ function fixture() {
 
 describe("agent app commands", () => {
   it.each([undefined, true, false])(
-    "uses the Mono's sidebar preference for both submitted and draft sessions: %s",
+    "uses the Mono's sidebar preference for submitted sessions and always lists drafts: %s",
     async (showStartedSessionsInSidebar) => {
       const { source, host } = fixture();
       host.isMono = () => true;
@@ -142,7 +142,7 @@ describe("agent app commands", () => {
         }, host);
         const launch = vi.mocked(host.start).mock.calls.at(-1)![0];
         expect(launch.sidebarHidden).toBe(
-          showStartedSessionsInSidebar === true ? undefined : true,
+          showStartedSessionsInSidebar === true || draft ? undefined : true,
         );
       }
     },

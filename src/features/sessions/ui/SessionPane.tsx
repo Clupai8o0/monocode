@@ -11,6 +11,7 @@ import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
+import { TaskPicksSession } from "../../../fork/taskPicks/TaskPicks"; // Fork
 import { MovedCard, MoveLine } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
 import { isMoveLocked, useMovedRecord, useMoveView } from "../../../fork/sessionMove/sessionMoveStore"; // Fork
 import {
@@ -562,7 +563,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
   }, []);
   const monoTranscript = useMonoTranscript(
     session,
-    !!monoForSession(session.id),
+    // Fork: a chat its Mono set aside still pages through the Mono store.
+    !!monoForSession(session.id) || !!session.monoTranscript,
   );
   const revealBlockRef = useRef<((blockId: string) => boolean) | null>(null);
   const onRevealReady = useCallback((reveal: (blockId: string) => boolean) => {
@@ -659,15 +661,17 @@ const LocalSessionPane = memo(function LocalSessionPane({
   );
 
   useEffect(() => {
-    if (!addToChatTarget) return;
     const onAdd = (event: Event) => {
       const detail = (event as CustomEvent<AddToChatRequest>).detail;
       if (!detail?.text) return;
+      // Fork: a request that names its conversation goes there and nowhere else.
+      if (detail.sessionId ? detail.sessionId !== session.id : !addToChatTarget)
+        return;
       addSelectionToChat(detail.text, detail.mode);
     };
     window.addEventListener(ADD_TO_CHAT_EVENT, onAdd);
     return () => window.removeEventListener(ADD_TO_CHAT_EVENT, onAdd);
-  }, [addSelectionToChat, addToChatTarget]);
+  }, [addSelectionToChat, addToChatTarget, session.id]);
   const workCwd = sessionWorkCwd(session);
   const reviewHidden =
     remote ||
@@ -1056,6 +1060,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
               )
             ) : (
               <>
+                {/* Fork: for panes without a pool; the pool's outlet sets its own. */}
+                <TaskPicksSession.Provider value={session.id}>
                 <PooledTranscript
                   pool={transcriptPool}
                   sessionId={session.id}
@@ -1077,7 +1083,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     hasEarlier={monoTranscript.hasEarlier}
                     loadEarlierOnScroll={!!agent}
                     onLoadEarlier={
-                      agent ? monoTranscript.loadEarlier : undefined
+                      agent || session.monoTranscript
+                        ? monoTranscript.loadEarlier
+                        : undefined
                     }
                     onReturnToLatest={
                       monoTranscript.viewingOlderPage
@@ -1225,6 +1233,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     }
                   />
                 </PooledTranscript>
+                </TaskPicksSession.Provider>
                 {!session.inboxAsk ? (
                   <TranscriptFind
                     blocks={session.blocks}

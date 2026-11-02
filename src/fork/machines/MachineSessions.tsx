@@ -17,25 +17,23 @@ import { FORK_MACHINE_LABELS } from "./machineLabel";
 
 const CLOSED_KEY = "monocode.fork.machineSessionsClosed";
 
-function readClosed(id: string): boolean {
+/** The user's choice for this machine, if they have made one. */
+function readClosed(id: string): boolean | undefined {
   try {
-    return JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "{}")?.[id] === true;
+    const closed = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "{}")?.[id];
+    return typeof closed === "boolean" ? closed : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
 function writeClosed(id: string, closed: boolean) {
   try {
     const map = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "{}") ?? {};
-    if (closed) {
-      map[id] = true;
-    } else {
-      delete map[id];
-    }
+    map[id] = closed;
     localStorage.setItem(CLOSED_KEY, JSON.stringify(map));
   } catch {
-    // Storage blocked: the group just starts open next time.
+    // Storage blocked: the group just follows its default next time.
   }
 }
 
@@ -47,7 +45,7 @@ function MachineGroup({ machine }: { machine: RemoteMachine })
     projectId: ALL_PROJECTS,
   };
   const { sessions, supported } = useExternalSessions(target);
-  const [closed, setClosed] = useState(() => readClosed(machine.id));
+  const [closedChoice, setClosedChoice] = useState(() => readClosed(machine.id));
   const [opened, setOpened] = useState<ExternalSession | null>(null);
   // The list's newer copy, so an idle session that starts working goes live.
   const viewing =
@@ -57,6 +55,8 @@ function MachineGroup({ machine }: { machine: RemoteMachine })
     return null;
   }
   const running = live.filter((session) => session.state === "running").length;
+  // Idle machines stay folded: their rows would squeeze the project's sessions.
+  const closed = closedChoice ?? running === 0;
   const now = Date.now();
   return (
     <div data-fork-machine-sessions="">
@@ -67,7 +67,7 @@ function MachineGroup({ machine }: { machine: RemoteMachine })
             aria-expanded={!closed}
             onClick={() => {
               writeClosed(machine.id, !closed);
-              setClosed(!closed);
+              setClosedChoice(!closed);
             }}
             className="flex h-7 w-full items-center gap-1 rounded-md px-2 text-[12px] font-medium text-content/50 hover:text-content/80"
           >

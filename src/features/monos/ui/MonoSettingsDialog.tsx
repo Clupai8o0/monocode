@@ -9,6 +9,7 @@ import {
 import { isImeComposition } from "../../../shared/lib/keyboard";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { Modal } from "../../../shared/ui/Modal";
+import type { PastConversation } from "../../../fork/monoPast/pastConversations";
 import { Popover } from "../../../shared/ui/Popover";
 import { Settings, Sparkles, StickyNote } from "../../../shared/ui/icons";
 import type { HarnessId, RuntimeMode } from "../../sessions/model/session";
@@ -59,6 +60,9 @@ type Props = {
   onModelSettingsChange: (settings: Record<string, string>) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onReset?: () => Promise<void>;
+  /** Fork: chats set aside for a fresh one, newest first. */
+  pastConversations?: readonly PastConversation[];
+  onOpenPastConversation?: (sessionId: string) => void;
   onClose: () => void;
 };
 
@@ -143,6 +147,8 @@ function GeneralSection({
   onModelSettingsChange,
   onRuntimeModeChange,
   onReset,
+  pastConversations = [],
+  onOpenPastConversation,
 }: Omit<Props, "status" | "initialSection" | "onClose">) {
   const lock = useLockOverscroll<HTMLDivElement>();
   const shown = useSyncExternalStore(
@@ -241,6 +247,30 @@ function GeneralSection({
           }
         />
       </SettingGroup>
+
+      {pastConversations.length > 0 && onOpenPastConversation ? (
+        <>
+          <GroupHeading title="Past conversations" />
+          <SettingGroup>
+            {pastConversations.map((past) => (
+              <button
+                key={past.id}
+                type="button"
+                data-fork-mono-past=""
+                onClick={() => onOpenPastConversation(past.id)}
+                className="flex min-h-10 w-full items-center gap-4 px-3 py-2 text-left hover:bg-content/5"
+              >
+                <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-content/90">
+                  {past.title}
+                </span>
+                <span className="shrink-0 text-[12px] text-content/40">
+                  {new Date(past.at).toLocaleDateString()}
+                </span>
+              </button>
+            ))}
+          </SettingGroup>
+        </>
+      ) : null}
 
       {onReset ? (
         <>

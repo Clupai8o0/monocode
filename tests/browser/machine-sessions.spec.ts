@@ -23,6 +23,20 @@ test("opening a session from another project moves the tab strip with it", async
   await expect(page.locator('[aria-current="page"]').first()).toContainText("morgue");
 });
 
+test("a machine with only idle sessions stays folded until opened", async ({ page }) => {
+  await page.goto("/tests/browser/workspace-performance.html?projects&machines&machinesIdle");
+  const group = page.locator("[data-fork-machine-sessions]");
+  await expect(group).toContainText("2 idle");
+  const rows = group.locator("[data-fork-elsewhere-row]");
+  await expect(rows).toHaveCount(0);
+
+  await group.getByRole("button", { name: /Vivobook/ }).click();
+  await expect(rows).toHaveCount(2);
+  await page.reload();
+  await expect(group).toContainText("2 idle");
+  await expect(rows).toHaveCount(2);
+});
+
 test("shows a connected machine's live sessions and the device on the composer", async ({ page }, testInfo) => {
   await page.goto("/tests/browser/workspace-performance.html?projects&machines");
   const group = page.locator("[data-fork-machine-sessions]");
