@@ -6,6 +6,7 @@ Codex uses MonoCode's composer and app controls; Claude-only terminal commands a
 |---|---|
 | Effort | Select it in the composer model picker; each interactive turn now also receives the value MonoCode submits. |
 | Automatic handoffs | Picking another provider resumes once the current turn finishes; the recap carries conversation context forward. “Continue in Codex” also starts automatically. Drafts, queued messages, questions and Stop take priority. |
+| Original handoff instructions | Handoffs include a local conversation archive with unabridged user messages and plans. Existing continued threads recover it on their next message; no `/operator` command or resend is needed. Archives live in app data under `handoffs/`; tools, private reasoning and drafts are excluded. |
 | Full access | New desktop Codex conversations and transitions into Codex start with Full access. The permissions picker can still restrict a conversation; internal workers and Plan turns retain their restrictions. |
 | Mentions and skills | Use `@` for file references and `/` for skills; both were already supported. |
 | Session communication | Enable `/operator` for project-scoped session listing, reading and follow-ups; recipients must be idle and cannot have broader permissions than the sender. Agent launches also stay within the sender's permissions. |

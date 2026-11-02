@@ -5,11 +5,13 @@
 import { resolveMcpCall, type McpCaller } from "../fork/mcpAccess/mcpAccess";
 import {
   continueTarget,
+  continuedOrigin,
   registerContinueHost,
   saveContinuedOrigin,
   withTranscriptPointer,
 } from "../fork/continueElsewhere/continueElsewhere";
 import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
+import { needsHandoffRecovery, prepareHandoffContext, recordHandoffContext, finishHandoffContext } from "../fork/continueElsewhere/handoffContext";
 import {
   recordFeatureUse,
   registerCoachHost,
@@ -396,7 +398,6 @@ import {
   buildHandoffComposerCard,
   chooseHandoffBrief,
   completeHandoff,
-  consumeHandoff,
   HANDOFF_TITLE,
   handoffTurnCard,
   isPreparingHandoff,
@@ -8645,6 +8646,19 @@ function Workspace({
           const earlier = queuedHandoff
             ? userMessagesAfterHandoff(current)
             : [];
+          if (!rawCommand && (wrap || needsHandoffRecovery(current))) {
+            const from = wrap?.from ?? continuedOrigin(current.id)?.from ?? current.harness;
+            const brief = await prepareHandoffContext(
+              current,
+              wrap?.text ?? buildDeterministicHandoff(current),
+              async (id) => sessionsRef.current.find((entry) => entry.id === id) ?? await peekSession(id),
+            );
+            if (turnGen.current.get(sessionId) !== gen) return;
+            wrap = { from, to: current.harness, text: brief };
+            updateSessionState(sessionsRef, setSessions, (sessions) => sessions.map((entry) =>
+              entry.id === sessionId ? recordHandoffContext(entry, from, brief) : entry,
+            ));
+          }
           if (editedResend && canRewindHarnessLastTurn(current.harness)) {
             try {
               await rewindHarnessLastTurn({
@@ -8846,16 +8860,14 @@ function Workspace({
           }
           if (turnGen.current.get(sessionId) !== gen) return;
           if (wrap) {
+            const handoffText = wrap.text;
             // Settle the ref too: the flush in `finally` rebuilds sessions from
             // it, and a stale ref would drop the consumed flag and resend the
             // recap with every later turn.
             sessionsRef.current = sessionsRef.current.map((s) => {
               if (s.id !== sessionId) return s;
-              const ready = isPreparingHandoff(s)
-                ? completeHandoff(s, wrap.text)
-                : s;
               // A command owns its arguments; deliver the recap with the next chat prompt.
-              return rawCommand ? ready : consumeHandoff(ready);
+              return finishHandoffContext(s, handoffText, { failed: providerFailureSeen, rawCommand });
             });
             setSessions(sessionsRef.current);
           }
@@ -11012,6 +11024,7 @@ function Workspace({
       // Fork: the new session shows where it came from.
       saveContinuedOrigin(session.id, {
         sessionId: sourceId,
+        throughBlockId: sliced.blocks[sliced.blocks.length - 1]?.id,
         from,
         to: harness,
         title: display,

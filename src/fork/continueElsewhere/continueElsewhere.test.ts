@@ -38,7 +38,8 @@ describe("withTranscriptPointer", () => {
     const text = withTranscriptPointer("## Session so far\nUser: hi", "abc");
     expect(text.startsWith("## Session so far\nUser: hi\n\n## Full transcript")).toBe(true);
     expect(text).toContain("MonoCode session abc");
-    expect(text).toContain('sessions.read {"sessionId":"abc"}');
+    expect(text).not.toContain("ask the user");
+    expect(text).not.toContain("send /operator");
   });
 
   it("still points at the transcript with an empty brief", () => {

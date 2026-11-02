@@ -26,12 +26,13 @@ export function continueLabel(harness: HarnessId): string | null {
 /** The brief is trimmed on purpose, so it says where the rest lives. */
 export function withTranscriptPointer(brief: string, sessionId: string): string {
   const pointer = `## Full transcript
-This brief is trimmed. The whole conversation is MonoCode session ${sessionId}. If you need detail that isn't here, ask the user to send /operator, then read it with the app CLI: sessions.read {"sessionId":"${sessionId}"}.`;
+This brief is trimmed. The whole conversation is MonoCode session ${sessionId}. MonoCode supplies a local conversation archive when continuing; read that archive for the original instructions.`;
   return brief.trim() ? `${brief.trim()}\n\n${pointer}` : pointer;
 }
 
 export type ContinuedOrigin = {
   sessionId: string;
+  throughBlockId?: string;
   from: HarnessId;
   to: HarnessId;
   title: string;
