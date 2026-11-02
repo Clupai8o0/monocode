@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -6,6 +6,7 @@ import {
   gitDiffIndex,
   gitDiffStats,
   gitDiffFiles,
+  notifyAgentGitActivity,
   notifyGitChanged,
   type GitDiffIndex,
   gitHeadMessage,
@@ -187,6 +188,81 @@ describe("concurrent Git index reads", () => {
     expect(a).not.toBe(b);
     await Promise.all([a, b]);
     expect(invoke).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("notifyAgentGitActivity", () => {
+  const dispatched = vi.fn();
+  let now = 1_000_000_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Far enough past every earlier test's reload that the gap has passed.
+    now += 1_000_000;
+    vi.setSystemTime(now);
+    dispatched.mockReset();
+    vi.stubGlobal("window", { dispatchEvent: dispatched });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reloads at once, then at most once per gap, with a last one at the end", () => {
+    notifyAgentGitActivity();
+    expect(dispatched).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 40; i += 1) {
+      vi.advanceTimersByTime(50);
+      notifyAgentGitActivity();
+    }
+    expect(dispatched).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1_000);
+    expect(dispatched).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(60_000);
+    expect(dispatched).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a person's own git action through at once, and absorbs the wait", () => {
+    notifyAgentGitActivity();
+    vi.advanceTimersByTime(100);
+    notifyAgentGitActivity();
+    expect(dispatched).toHaveBeenCalledTimes(1);
+
+    notifyGitChanged();
+    expect(dispatched).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(60_000);
+    expect(dispatched).toHaveBeenCalledTimes(2);
+  });
+
+  it("still keeps direct reads from returning data older than the notice", async () => {
+    notifyAgentGitActivity();
+    vi.mocked(invoke).mockReset();
+    let finish!: (index: unknown) => void;
+    vi.mocked(invoke).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const fresh = { files: [{ path: "fresh" }] };
+    vi.mocked(invoke).mockResolvedValue(fresh);
+    const old = gitDiffIndex("/agent-read");
+
+    // Inside the gap, so no reload goes out, but the read must not be reused.
+    notifyAgentGitActivity();
+    expect(dispatched).toHaveBeenCalledTimes(1);
+    const next = gitDiffIndex("/agent-read");
+    expect(next).not.toBe(old);
+
+    finish({ files: [{ path: "stale" }] });
+    await expect(old).resolves.toBe(fresh);
+    await expect(next).resolves.toBe(fresh);
   });
 });
 

@@ -41,8 +41,9 @@ pub struct MergeOutcome {
     pub conflicts: Vec<String>,
 }
 
-fn run(root: &Path, args: &[&str]) -> Result<Output, String> {
-    let mut command = Command::new("git");
+pub(crate) fn run(root: &Path, args: &[&str]) -> Result<Output, String> {
+    let path = crate::harness::cached_gui_search_path();
+    let mut command = Command::new(crate::harness::git_program(&path));
     crate::hide_window_console(&mut command);
     command
         .arg("-C")
@@ -51,7 +52,7 @@ fn run(root: &Path, args: &[&str]) -> Result<Output, String> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_MERGE_AUTOEDIT", "no")
-        .env("PATH", crate::harness::cached_gui_search_path())
+        .env("PATH", path)
         .output()
         .map_err(|e| e.to_string())
 }
