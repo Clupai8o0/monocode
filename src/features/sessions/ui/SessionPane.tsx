@@ -59,6 +59,7 @@ import {
   type RecentProject,
 } from "../../projects/model/recents";
 import {
+  HARNESS_TITLE,
   sessionDisplayTitle,
   sessionDraftBlock,
   sessionWorkCwd,
@@ -720,6 +721,15 @@ const LocalSessionPane = memo(function LocalSessionPane({
   // Fork: the status strip sits under the composer, docked or centred.
   const composer = movedHere ? <MovedCard sessionId={session.id} /> : (
     <>
+    {session.pendingSwitch ? (
+      <p role="status" className="px-3 pb-2 text-[12px] text-content/60">
+        {session.pendingSwitch.autoContinue && !draftTyped && !draftBlock
+          ? session.busy
+            ? `${HARNESS_TITLE[session.pendingSwitch.from]} is finishing this turn. ${HARNESS_TITLE[session.harness]} will continue automatically.`
+            : `Continuing with ${HARNESS_TITLE[session.harness]}. Conversation context carries over.`
+          : `Your next message continues with ${HARNESS_TITLE[session.harness]}, with the conversation context.`}
+      </p>
+    ) : null}
     {/* Fork: subagents and background commands still running */}
     <BackgroundAgentsBar
       key={session.id}

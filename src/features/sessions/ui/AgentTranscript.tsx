@@ -5156,7 +5156,7 @@ function HandoffDivider({ block }: { block: Block }) {
   if (!meta) return null;
 
   const preparing = meta.status === "preparing";
-  const label = preparing ? "Preparing a handoff" : HARNESS_TITLE[meta.to];
+  const label = preparing ? `Switching to ${HARNESS_TITLE[meta.to]}` : HARNESS_TITLE[meta.to];
 
   return (
     <div className="px-4 py-5">
@@ -5179,6 +5179,7 @@ function HandoffDivider({ block }: { block: Block }) {
           ) : (
             <>
               <HarnessIcon harness={meta.to} className="size-3.5 shrink-0" />
+              <span className="truncate">Continued with {label}</span>
             </>
           )}
         </div>

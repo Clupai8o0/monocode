@@ -20,10 +20,7 @@ import {
 } from "./handoff";
 import { newSession, type Block, type Session } from "./session";
 
-function sessionWith(
-  blocks: Block[],
-  extra?: Partial<Session>,
-): Session {
+function sessionWith(blocks: Block[], extra?: Partial<Session>): Session {
   return {
     ...newSession("cursor", "/tmp/project"),
     blocks,
@@ -40,10 +37,9 @@ describe("planComposerSwitch", () => {
   });
 
   it("arms a handoff for later instead of running it on picker change", () => {
-    const session = sessionWith(
-      [{ id: "u1", role: "user", text: "hey" }],
-      { providerSessionId: "acp-1" },
-    );
+    const session = sessionWith([{ id: "u1", role: "user", text: "hey" }], {
+      providerSessionId: "acp-1",
+    });
     expect(planComposerSwitch(session, "fx")).toEqual({
       kind: "arm",
       pending: {
@@ -90,6 +86,44 @@ describe("planComposerSwitch", () => {
 });
 
 describe("deterministic handoff", () => {
+  it("keeps original context and recent progress across three long handoffs", () => {
+    let inherited = `Original task: build an offline calendar.\n${"Earlier context. ".repeat(150)}`;
+    for (let step = 1; step <= 3; step++) {
+      const next = buildDeterministicHandoff(sessionWith([
+        { id: `h${step}`, role: "handoff", text: inherited, handoff: { from: "claude", to: "cursor", status: "ready" } },
+        { id: `u${step}`, role: "user", text: `Request for step ${step}` },
+        { id: `a${step}`, role: "assistant", text: `Completed step ${step}.` },
+        { id: `p${step}`, role: "plan", text: `Next plan after step ${step}.` },
+      ]));
+      expect(next).toContain("Original task: build an offline calendar.");
+      expect(next).toContain(`Completed step ${step}.`);
+      if (step > 1) {
+        expect(next).toContain(`Completed step ${step - 1}.`);
+        expect(next).toContain(`Next plan after step ${step - 1}.`);
+      }
+      expect(next.length).toBeLessThanOrEqual(6_000);
+      inherited = next;
+    }
+  });
+
+  it("retains inherited context when the next provider switches again", () => {
+    const brief = buildDeterministicHandoff(
+      sessionWith([
+        {
+          id: "h1",
+          role: "handoff",
+          text: "Decided to use SQLite. Left: verify migration.",
+          handoff: { from: "claude", to: "cursor", status: "ready" },
+        },
+        { id: "u1", role: "user", text: "carry on" },
+        { id: "a1", role: "assistant", text: "Migration implemented." },
+      ]),
+    );
+    expect(brief).toContain("Decided to use SQLite");
+    expect(brief).toContain("verify migration");
+    expect(brief).toContain("Migration implemented");
+  });
+
   it("recaps the chat and files edited, without a Goal heading", () => {
     const brief = buildDeterministicHandoff(
       sessionWith(
@@ -161,9 +195,34 @@ describe("deterministic handoff", () => {
     expect(brief).not.toMatch(/##\s*Goal/i);
     expect(brief).not.toContain("fourth");
     expect(brief).toContain("third");
-    expect(brief).toContain("earlier messages omitted");
-    expect(brief).not.toContain("first");
+    expect(brief).toContain("first");
     expect(brief.length).toBeLessThan(2_100);
+  });
+
+  it("retains the original task in a bounded recap of a long conversation", () => {
+    const blocks: Block[] = [
+      {
+        id: "original",
+        role: "user",
+        text: "Build an offline calendar with local storage.",
+      },
+    ];
+    for (let i = 0; i < 25; i++) {
+      blocks.push({
+        id: `u${i}`,
+        role: "user",
+        text: `Follow-up ${i} ${"details ".repeat(100)}`,
+      });
+      blocks.push({
+        id: `a${i}`,
+        role: "assistant",
+        text: `Completed step ${i}. ${"evidence ".repeat(100)}`,
+      });
+    }
+    const brief = buildDeterministicHandoff(sessionWith(blocks));
+    expect(brief).toContain("Build an offline calendar with local storage.");
+    expect(brief).toContain("Completed step 24");
+    expect(brief.length).toBeLessThanOrEqual(6_000);
   });
 
   it("does not treat a greeting-only chat as having session edits", () => {

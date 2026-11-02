@@ -392,6 +392,7 @@ import { supportsHarnessLogin } from "../integrations/harness/core/authSupport";
 import {
   appendPreparingHandoff,
   buildDeterministicHandoff,
+  appendReadyHandoff,
   buildHandoffComposerCard,
   chooseHandoffBrief,
   completeHandoff,
@@ -410,6 +411,7 @@ import {
   wrapHandoffPrompt,
 } from "../features/sessions/model/handoff";
 import { requestOutgoingHandoff } from "../features/sessions/model/handoffTurn";
+import { useAutoHandoff } from "../fork/autoHandoff/useAutoHandoff";
 import {
   applyBtwHarnessEvent,
   btwTurnHarness,
@@ -1065,6 +1067,8 @@ function withHarnessChoice(
     harness,
     model,
     modelSettings,
+    ...(harness === "codex" && !isMonoSession(session.id) && !session.ephemeral && !session.orchestrationLeadId
+      ? { runtimeMode: "full-access" as const } : {}),
     title:
       session.blocks.length === 0
         ? HARNESS_LABEL[harness]
@@ -2470,6 +2474,9 @@ function Workspace({
   );
   useInputNotifications(promptableSessions, activeSessionId);
   useNeedsAgain(promptableSessions, activeSessionId); // Fork: re-alert after 5 min
+  useAutoHandoff(promptableSessions, submitAfterProjectSyncRef, (session) =>
+    !remoteProjectFor(session.cwd) && isLiveHarness(session.harness),
+  );
   useEffortAsks(
     promptableSessions,
     setSessions,
@@ -7390,7 +7397,7 @@ function Workspace({
           if (s.id !== sessionId) return s;
           let next = withHarnessChoice(s, harness, resolved.id, modelSettings);
           if (plan.kind === "arm") {
-            next = { ...next, pendingSwitch: plan.pending };
+            next = { ...next, pendingSwitch: { ...plan.pending, autoContinue: crypto.randomUUID(), skipOutgoingRecap: true } };
           } else if (plan.kind === "revert") {
             next = {
               ...next,
@@ -10198,7 +10205,7 @@ function Workspace({
       updateSessionState(sessionsRef, setSessions, (sessions) =>
         sessions.map((entry) =>
           entry.id === sessionId
-            ? withUsageLimitAccount(entry, accountId, carried)
+            ? withUsageLimitAccount({ ...entry, runtimeMode: entry.harness === "codex" ? "full-access" : entry.runtimeMode }, accountId, carried)
             : entry,
         ),
       );
@@ -10358,7 +10365,7 @@ function Workspace({
         cwd,
       });
       const session = {
-        ...newSession(harness, source.cwd, model, source.runtimeMode),
+        ...newSession(harness, source.cwd, model, harness === "codex" ? "full-access" : source.runtimeMode),
         worktreeCwd: source.worktreeCwd,
         branch: source.branch,
         modelSettings: mergeModelSettings(
@@ -10980,7 +10987,7 @@ function Workspace({
       const files = turnEditedFiles(sliced.blocks, cwd);
       const display = sessionDisplayTitle(source.title, source.harness);
       const session = {
-        ...newSession(harness, source.cwd, model, source.runtimeMode),
+        ...newSession(harness, source.cwd, model, harness === "codex" ? "full-access" : source.runtimeMode),
         worktreeCwd: source.worktreeCwd,
         branch: source.branch,
         modelSettings: mergeModelSettings(
@@ -10998,8 +11005,10 @@ function Workspace({
           brief: withTranscriptPointer(buildDeterministicHandoff(sliced), sourceId),
           userRequest,
           files,
+          intent: turn.find((block) => block.role === "user")?.intent,
         }),
       };
+      session.handoffCard = { ...session.handoffCard, autoContinue: crypto.randomUUID() };
       // Fork: the new session shows where it came from.
       saveContinuedOrigin(session.id, {
         sessionId: sourceId,
@@ -11008,7 +11017,7 @@ function Workspace({
         title: display,
         files: files.length,
       });
-      openSessionBeside(sourceId, session, source.cwd, true);
+      openSessionBeside(sourceId, appendReadyHandoff(session, from, harness, session.handoffCard.brief), source.cwd, true);
     },
     [openSessionBeside],
   );
@@ -11255,7 +11264,12 @@ function Workspace({
           const completed = isPreparingHandoff(stopped)
             ? completeHandoff(stopped, buildDeterministicHandoff(stopped))
             : stopped;
-          const ready = { ...completed, worktreePreparing: undefined };
+          const ready = {
+            ...completed,
+            worktreePreparing: undefined,
+            ...(completed.pendingSwitch ? { pendingSwitch: { ...completed.pendingSwitch, autoContinue: undefined } } : {}),
+            ...(completed.handoffCard ? { handoffCard: { ...completed.handoffCard, autoContinue: undefined } } : {}),
+          };
           return ready.queuedMessages?.length
             ? { ...ready, queueStatus: "paused" }
             : ready;
@@ -11840,6 +11854,7 @@ function Workspace({
         const source = mcpCall
           ? {
               ...newDefaultSession(mcpCall.cwd, mcpCall.runtimeMode),
+              runtimeMode: mcpCall.runtimeMode,
               id: `mcp-${payload.sessionId}`,
             }
           : sessionsRef.current.find(

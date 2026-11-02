@@ -349,6 +349,20 @@ describe("effortAutoFor", () => {
 });
 
 describe("stoppedAtEffortLine", () => {
+  it("continues when commentary and final repeat the bare effort raise", () => {
+    const blocks = [block("assistant", LINE), block("reasoning", "stop here"), block("assistant", LINE)];
+    const stopped = session([block("user", "fix handoffs"), ...blocks]);
+    expect(stoppedAtEffortLine(blocks)).toBe(true);
+    expect(resumeLevelFor(stopped, effortChangeFor(stopped))).toBe("xhigh");
+    expect(workedPastEffortLine(blocks)).toBe(false);
+  });
+
+  it("allows duplicate bare lines within one message, but rejects completed work", () => {
+    expect(stoppedAtEffortLine([block("assistant", `${LINE}\n\n${LINE}`)])).toBe(true);
+    expect(workedPastEffortLine([block("assistant", `${LINE}\n\n${LINE}`)])).toBe(false);
+    expect(stoppedAtEffortLine([block("assistant", "Work done."), block("assistant", LINE)])).toBe(false);
+  });
+
   it("is true when the reply is the line alone", () => {
     expect(stoppedAtEffortLine([block("reasoning", "hm"), block("assistant", LINE)])).toBe(true);
   });

@@ -11,6 +11,7 @@ import {
   type PendingHarnessSwitch,
   type SecondOpinionMeta,
   type Session,
+  type TurnIntent,
 } from "./session";
 
 export const HANDOFF_TITLE = "Handoff";
@@ -22,6 +23,8 @@ export type HandoffComposerCard = {
   brief: string;
   request?: string;
   files?: number;
+  autoContinue?: string;
+  intent?: "plan" | "orchestrate";
 };
 
 export function buildHandoffComposerCard(input: {
@@ -30,6 +33,7 @@ export function buildHandoffComposerCard(input: {
   brief: string;
   userRequest: string;
   files: string[];
+  intent?: TurnIntent;
 }): HandoffComposerCard {
   const request = input.userRequest.replace(/\s+/g, " ").trim();
   return {
@@ -38,6 +42,9 @@ export function buildHandoffComposerCard(input: {
     brief: input.brief,
     ...(request ? { request: request.slice(0, 240) } : {}),
     ...(input.files.length > 0 ? { files: input.files.length } : {}),
+    ...(input.intent === "plan" || input.intent === "orchestrate"
+      ? { intent: input.intent }
+      : {}),
   };
 }
 
@@ -54,9 +61,9 @@ export function handoffTurnCard(card: HandoffComposerCard): SecondOpinionMeta {
 const USER_LINE_LIMIT = 240;
 const ASSISTANT_LIMIT = 500;
 const PLAN_LIMIT = 400;
-const BRIEF_LIMIT = 1_800;
+const BRIEF_LIMIT = 6_000;
 const REQUEST_LIMIT = 1_500;
-const MAX_PRIOR_USERS = 2;
+const MAX_PRIOR_USERS = 4;
 const MIN_AGENT_BRIEF = 40;
 
 export type ComposerSwitchPlan =
@@ -294,6 +301,19 @@ export function buildDeterministicHandoff(
   return formatHandoffBrief(brief, ciContext);
 }
 
+/** Keep the original context and the newest progress, without nesting recaps. */
+function compactInheritedHandoff(text: string): string {
+  const flat = text.replace(/^#{2,6}\s+Previous handoff\s*\n/gm, "").trim();
+  const budget = 1_800;
+  if (flat.length <= budget) {
+    return flat;
+  }
+  const originalBudget = 600;
+  const gap = "\n\n[Earlier progress omitted]\n\n";
+  const recentBudget = budget - originalBudget - gap.length;
+  return `${flat.slice(0, originalBudget)}${gap}${flat.slice(-recentBudget)}`;
+}
+
 function handoffParts(
   session: Session,
   request: string | undefined,
@@ -304,10 +324,15 @@ function handoffParts(
   let lastAssistant = "";
   let lastTasks = "";
   let lastPlan = "";
+  let inherited = "";
   const files = new Map<string, string>();
 
   for (const block of session.blocks) {
-    if (block.role === "handoff" || block.role === "reasoning") continue;
+    if (block.role === "handoff") {
+      if (block.text.trim()) inherited = block.text.trim();
+      continue;
+    }
+    if (block.role === "reasoning" || block.draft || block.internal) continue;
     if (block.role === "user") {
       users.push(block);
       continue;
@@ -353,11 +378,19 @@ function handoffParts(
   const prior = priorTexts.slice(-MAX_PRIOR_USERS);
 
   const sections: string[] = [];
+  if (inherited) {
+    sections.push(`## Previous handoff\n${compactInheritedHandoff(inherited)}`);
+  }
+  if (omitted > 0) {
+    sections.push(
+      `## Original request\n${limitSection(priorTexts[0], REQUEST_LIMIT)}`,
+    );
+  }
   if (omitted > 0 || prior.length > 0 || lastAssistant) {
     const lines = [
       omitted > 0 ? `(${omitted} earlier messages omitted)` : "",
-      ...prior.map((text) =>
-        `User: ${oneLine(limitSection(text, USER_LINE_LIMIT))}`,
+      ...prior.map(
+        (text) => `User: ${oneLine(limitSection(text, USER_LINE_LIMIT))}`,
       ),
       lastAssistant
         ? `Assistant: ${oneLine(limitSection(lastAssistant, ASSISTANT_LIMIT))}`

@@ -547,6 +547,8 @@ export type PendingHarnessSwitch = {
   fromProviderAccountId?: string;
   /** The outgoing provider is exhausted; build the recap from the transcript. */
   skipOutgoingRecap?: boolean;
+  /** User requested an automatic continuation; stable across session updates. */
+  autoContinue?: string;
 };
 
 export const HARNESS_LABEL: Record<HarnessId, string> = {
@@ -590,7 +592,9 @@ export function newSession(
   harness: HarnessId = "claude",
   cwd = "~",
   model?: string,
-  runtimeMode: RuntimeMode = DEFAULT_RUNTIME_MODE,
+  runtimeMode: RuntimeMode = harness === "codex"
+    ? "full-access"
+    : DEFAULT_RUNTIME_MODE,
   modelSettings?: Record<string, string>,
 ): Session {
   const resolved = resolveModel(harness, model ?? preferredModelId(harness));
@@ -612,7 +616,12 @@ export function newDefaultSession(
   runtimeMode: RuntimeMode = DEFAULT_RUNTIME_MODE,
 ): Session {
   const choice = defaultSessionChoice(cwd);
-  return newSession(choice.harness, cwd, choice.model, runtimeMode);
+  return newSession(
+    choice.harness,
+    cwd,
+    choice.model,
+    choice.harness === "codex" ? "full-access" : runtimeMode,
+  );
 }
 
 /**

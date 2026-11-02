@@ -20,7 +20,7 @@ it("creates the first session in the visible project despite defaults from anoth
 
   expect(session.cwd).toBe("/current");
   expect(session.harness).toBe("codex");
-  expect(session.runtimeMode).toBe("auto");
+  expect(session.runtimeMode).toBe("full-access");
   expect(session.worktreeCwd).toBeUndefined();
   expect(session.blocks).toEqual([]);
 });
@@ -43,4 +43,12 @@ it("starts in the project root without session defaults or a separate worktree",
   expect(session.cwd).toBe("/current");
   expect(session.runtimeMode).toBe("supervised");
   expect(session.worktreeCwd).toBeUndefined();
+});
+
+it("defaults Codex to full access while preserving explicit restrictions for internal sessions", () => {
+  expect(newSession("codex", "/repo").runtimeMode).toBe("full-access");
+  expect(
+    newSession("codex", "/repo", undefined, "supervised").runtimeMode,
+  ).toBe("supervised");
+  expect(newSession("claude", "/repo").runtimeMode).toBe("supervised");
 });

@@ -104,10 +104,29 @@ export type EffortChange = {
   resume?: boolean;
 };
 
-
 /** The line and nothing else, not even an answer on the same line. */
 const BARE_LINE =
   /^effort\s*:\s*[\w-]+\s+now\s*,\s*[\w-]+\s+needed\s*(\([^)\n]*\))?\s*\.?$/i;
+
+function onlyEffortLines(text: string): boolean {
+  const lines = text
+    .replace(/[*`_]/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const first = parseEffortLine(text);
+  return (
+    !!first &&
+    lines.every((line) => {
+      const parsed = parseEffortLine(line);
+      return (
+        BARE_LINE.test(line) &&
+        parsed?.now === first.now &&
+        parsed.needed === first.needed
+      );
+    })
+  );
+}
 
 /** A plan-mode reply has been moved to a plan block by the time a turn ends. */
 function isEffortLineBlock(block: Pick<Block, "role" | "text">): boolean {
@@ -144,11 +163,21 @@ export function stoppedAtEffortLine(
   if (
     blocks
       .slice(0, line)
-      .some((block) => block.role !== "reasoning" && block.role !== "system")
+      .some(
+        (block) =>
+          block.role !== "reasoning" &&
+          block.role !== "system" &&
+          !(
+            isEffortLineBlock(block) &&
+            onlyEffortLines(block.text) &&
+            parseEffortNeeded(block.text) ===
+              parseEffortNeeded(blocks[line].text)
+          ),
+      )
   ) {
     return false;
   }
-  return BARE_LINE.test(blocks[line].text.replace(/[*`_]/g, "").trim());
+  return onlyEffortLines(blocks[line].text);
 }
 
 /**
@@ -173,7 +202,10 @@ export function workedPastEffortLine(
     .split("\n")
     .map((text) => text.replace(/[*`_]/g, "").trim());
   const first = lines.findIndex(Boolean);
-  if (lines.slice(first + 1).some(Boolean)) {
+  if (
+    !onlyEffortLines(blocks[line].text) &&
+    lines.slice(first + 1).some(Boolean)
+  ) {
     return true;
   }
   return blocks
@@ -226,11 +258,16 @@ function optionFor(
   if (want < 0 || ranked.length === 0) {
     return null;
   }
-  return (ranked.find((option) => option.rank >= want) ?? ranked[ranked.length - 1]!).value;
+  return (
+    ranked.find((option) => option.rank >= want) ?? ranked[ranked.length - 1]!
+  ).value;
 }
 
 /** The session's effort for a setting, falling back to the model's default. */
-function currentEffort(session: Session, settingId: string): string | undefined {
+function currentEffort(
+  session: Session,
+  settingId: string,
+): string | undefined {
   const model = findModel(session.model);
   const setting = model && modelEffortSetting(model);
   return (
@@ -240,7 +277,9 @@ function currentEffort(session: Session, settingId: string): string | undefined 
 }
 
 function eligible(session: Session): boolean {
-  return !isMonoSession(session.id) && !session.ephemeral && !session.pendingSwitch;
+  return (
+    !isMonoSession(session.id) && !session.ephemeral && !session.pendingSwitch
+  );
 }
 
 /** What this session's finished turn asks to be switched to, if anything. */
@@ -487,7 +526,9 @@ export function effortChangesOfEndedTurns(
     const ended = idle.has(session.id) && seen.get(session.id) !== turnId;
     // A Stop is for the turn that just went idle, whether it asked or not.
     const stopped = idle.has(session.id) && userStopped.delete(session.id);
-    const overrun = idle.has(session.id) ? overrunStops.get(session.id) : undefined;
+    const overrun = idle.has(session.id)
+      ? overrunStops.get(session.id)
+      : undefined;
     if (overrun) {
       overrunStops.delete(session.id);
     }
