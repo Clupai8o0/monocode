@@ -554,6 +554,7 @@ export function TableFrame({
   onInput,
   label,
   typing = false,
+  namedKeys,
   children,
 }: {
   active: boolean;
@@ -566,11 +567,13 @@ export function TableFrame({
    * through, and Backspace and Enter passed on by name.
    */
   typing?: boolean;
+  /** Fork: named keys this table wants too, such as the arrows. They repeat while held. */
+  namedKeys?: readonly string[];
   children: ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const handlers = useRef({ onKey, onExit, onInput, typing });
-  handlers.current = { onKey, onExit, onInput, typing };
+  const handlers = useRef({ onKey, onExit, onInput, typing, namedKeys });
+  handlers.current = { onKey, onExit, onInput, typing, namedKeys };
 
   useEffect(() => {
     if (active) {
@@ -605,6 +608,12 @@ export function TableFrame({
         return;
       }
       if (event.key.length !== 1) {
+        if (handlers.current.namedKeys?.includes(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          handlers.current.onInput();
+          handlers.current.onKey(event.key);
+        }
         return;
       }
       event.preventDefault();

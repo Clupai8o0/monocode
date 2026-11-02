@@ -12,6 +12,7 @@ import { CodeTable } from "../code/CodeTable";
 import { GardenScore, GardenTable } from "../calm/GardenTable";
 import { SolitaireTable } from "../calm/SolitaireTable";
 import { SortTable } from "../calm/SortTable";
+import { SudokuTable } from "../calm/SudokuTable";
 import { MergeTable } from "../calm/MergeTable";
 import { RaceTable } from "../calm/RaceTable";
 import { PipelineTable } from "../calm/PipelineTable";
@@ -40,6 +41,7 @@ export const TABLE_GAMES = FORK_TABLE_GAMES
       { id: "garden", label: "garden", hint: "click a bed to plant, water or pick · agents bring the sun" },
       { id: "solitaire", label: "solitaire", hint: "click to move · drag · space draws · U undo · N new" },
       { id: "sort", label: "colour sort", hint: "click a tube, then another to pour · U undo · R restart · N next" },
+      { id: "sudoku", label: "sudoku", hint: "click a cell or use the arrows · 1-9 fills · N notes · U undo" },
       // Fork: games about the work itself.
       { id: "pipeline", label: "pipeline", hint: "click a tile to turn it · U undo · R restart · N next" },
       { id: "merge", label: "merge conflict", hint: "type the resolution · backspace fixes" },
@@ -133,6 +135,11 @@ export function TableGames({
           <SortTable {...tableProps("sort")} />
         </div>
       ) : null}
+      {visited.has("sudoku") ? (
+        <div className="absolute inset-0" {...shown("sudoku")}>
+          <SudokuTable {...tableProps("sudoku")} />
+        </div>
+      ) : null}
       {visited.has("pipeline") ? (
         <div className="absolute inset-0" {...shown("pipeline")}>
           <PipelineTable {...tableProps("pipeline")} />
@@ -187,7 +194,7 @@ export function TableScore({ gameId }: { gameId: string }) {
   if (gameId === "turnbet") {
     return <TurnBetScore />;
   }
-  if (gameId === "solitaire" || gameId === "sort" || gameId === "pipeline" || gameId === "merge" || gameId === "race") {
+  if (gameId === "solitaire" || gameId === "sort" || gameId === "sudoku" || gameId === "pipeline" || gameId === "merge" || gameId === "race") {
     return null;
   }
   if (gameId === "chess") {
