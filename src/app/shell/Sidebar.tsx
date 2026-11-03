@@ -1,8 +1,10 @@
-// Fork: Continue in Codex.
+// Fork: Continue in another agent by remaining usage.
 import {
   continueHost,
   continueLabel,
 } from "../../fork/continueElsewhere/continueElsewhere";
+import { harnessUsedPercent } from "../../fork/continueElsewhere/continueUsage";
+import { isLiveHarness } from "../../integrations/harness/core/registry";
 import { useRemoteMachines } from "../../features/connections/model/connections"; // Fork
 import { FORK_SESSION_MOVE } from "../../fork/sessionMove/sessionMoveModel"; // Fork
 import { moveMenuItems, pickMoveItem } from "../../fork/sessionMove/moveMenu"; // Fork
@@ -1596,15 +1598,22 @@ function SidebarComponent({
           },
         ]
       : []),
-    // Fork: carry the session over to the other provider.
+    // Fork: carry the session over to the agent with the most headroom.
     ...(!multipleMenuSessions &&
     menuSessions[0] &&
-    continueLabel(menuSessions[0].harness)
+    continueLabel(menuSessions[0].harness, {
+      isLive: isLiveHarness,
+      usedPercent: (id) => harnessUsedPercent(id, menuSessions[0]?.cwd),
+    })
       ? [
           {
             kind: "item" as const,
             id: "continue-elsewhere",
-            label: continueLabel(menuSessions[0].harness)!,
+            label: continueLabel(menuSessions[0].harness, {
+              isLive: isLiveHarness,
+              usedPercent: (id) =>
+                harnessUsedPercent(id, menuSessions[0]?.cwd),
+            })!,
             disabled: !continueHost()?.canContinue(menuSessions[0].id),
             description: continueHost()?.canContinue(menuSessions[0].id)
               ? undefined

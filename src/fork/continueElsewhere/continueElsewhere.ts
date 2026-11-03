@@ -3,23 +3,74 @@ import { HARNESS_TITLE } from "../../features/sessions/model/session";
 
 /**
  * Fork feature: when one provider runs out of quota, carry the session over to
- * the other with a trimmed brief. The brief comes from upstream's handoff; this
+ * another with a trimmed brief. The brief comes from upstream's handoff; this
  * adds the way there, the way back to the full transcript, and a visible origin.
+ *
+ * Claude, Codex and Cursor can each continue in one of the others. When usage
+ * is known, the pick is the live candidate with the most headroom; otherwise
+ * Claude↔Codex stay paired and Cursor prefers Claude.
  */
 const ORIGINS_KEY = "monocode.fork.continuedFrom";
 const MAX_ORIGINS = 200;
 
-const OTHER: Partial<Record<HarnessId, HarnessId>> = {
+/** Providers that can hand a limited session to each other. */
+export const CONTINUE_POOL: readonly HarnessId[] = [
+  "claude",
+  "codex",
+  "cursor",
+];
+
+/** Preferred fallback when usage is unknown, keeping the Claude↔Codex pair. */
+const PREFERRED: Partial<Record<HarnessId, HarnessId>> = {
   claude: "codex",
   codex: "claude",
+  cursor: "claude",
 };
 
-export function continueTarget(harness: HarnessId): HarnessId | null {
-  return OTHER[harness] ?? null;
+export type ContinuePickOptions = {
+  /** Defaults to every candidate (tests and menus without live state). */
+  isLive?: (id: HarnessId) => boolean;
+  /** Used percent 0–100; lower means more headroom. Unknown entries are skipped. */
+  usedPercent?: (id: HarnessId) => number | null;
+};
+
+export function continueTarget(
+  harness: HarnessId,
+  options: ContinuePickOptions = {},
+): HarnessId | null {
+  if (!CONTINUE_POOL.includes(harness)) return null;
+  const candidates = CONTINUE_POOL.filter((id) => id !== harness);
+  const live = options.isLive
+    ? candidates.filter((id) => options.isLive!(id))
+    : candidates;
+  if (live.length === 0) return null;
+  if (live.length === 1) return live[0]!;
+
+  const usedOf = options.usedPercent;
+  if (usedOf) {
+    let best: HarnessId | null = null;
+    let bestUsed = Number.POSITIVE_INFINITY;
+    for (const id of live) {
+      const used = usedOf(id);
+      if (used == null || !Number.isFinite(used)) continue;
+      if (used < bestUsed) {
+        bestUsed = used;
+        best = id;
+      }
+    }
+    if (best) return best;
+  }
+
+  const preferred = PREFERRED[harness];
+  if (preferred && live.includes(preferred)) return preferred;
+  return live[0]!;
 }
 
-export function continueLabel(harness: HarnessId): string | null {
-  const target = continueTarget(harness);
+export function continueLabel(
+  harness: HarnessId,
+  options: ContinuePickOptions = {},
+): string | null {
+  const target = continueTarget(harness, options);
   return target ? `Continue in ${HARNESS_TITLE[target]}` : null;
 }
 

@@ -48,8 +48,17 @@ describe("provider error fallback", () => {
     "insufficient_quota",
     "Credit balance is too low",
     "Monthly limit exceeded",
+    "usage_limit_exceeded",
+    "You've used 100% of your included usage",
+    "Your on-demand usage limit was reached",
   ])("recognizes an exhausted account: %s", (message) => {
     expect(usageLimitFromError(message)).toEqual({});
+  });
+
+  it("keeps a known reset time on the limit", () => {
+    expect(usageLimitFromError("You've hit your usage limit.", 1_800)).toEqual({
+      resetsAt: 1_800,
+    });
   });
 
   it.each([

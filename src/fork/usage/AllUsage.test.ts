@@ -59,6 +59,18 @@ it("lists every Claude account and each other agent's usage", async () => {
               balance_infos: [{ currency: "USD", total_balance: "1.95" }],
             }),
           }
+        : args.provider === "cursor"
+          ? {
+              status: "ok",
+              body: JSON.stringify({
+                billingCycleEnd: "1794215782490",
+                planUsage: {
+                  autoPercentUsed: 22.6,
+                  apiPercentUsed: 4,
+                },
+                displayMessage: "You've used 23% of your included usage",
+              }),
+            }
         : args.provider === "muse"
           ? { status: "unavailable", message: "muse is not installed" }
           : { status: "error", message: "agy timed out" },
@@ -80,6 +92,12 @@ it("lists every Claude account and each other agent's usage", async () => {
   const claude = container.querySelector('[aria-label="Claude Code"]')!;
   expect(claude.textContent).toContain("main");
   expect(claude.textContent).toContain("Second");
+  const cursor = container.querySelector('[aria-label="Cursor"]')!;
+  expect(cursor.textContent).toContain("Auto");
+  expect(cursor.textContent).toContain("API");
+  expect(cursor.textContent).toContain(
+    "You've used 23% of your included usage",
+  );
   expect(container.textContent).toContain("$1.95 left");
   expect(container.textContent).toContain("muse is not installed");
   expect(container.textContent).toContain("agy timed out");

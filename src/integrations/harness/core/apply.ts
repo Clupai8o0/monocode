@@ -24,6 +24,7 @@ import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
 import { usageLimitFromError } from "../../../features/sessions/model/usageLimit";
 import { setChecklistOp } from "../../../fork/checklist/apply";
+import { cursorUsageResetsAt } from "../../../fork/usage/extraUsage";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -162,7 +163,14 @@ export function applyHarnessEvent(
       return appendBlock(
         failStreaming({
           ...session,
-          usageLimit: session.usageLimit ?? usageLimitFromError(event.message),
+          usageLimit:
+            session.usageLimit ??
+            usageLimitFromError(
+              event.message,
+              session.harness === "cursor"
+                ? cursorUsageResetsAt()
+                : undefined,
+            ),
           // Do not drain remaining messages into the same failed connection.
           queueStatus: session.queuedMessages?.length
             ? "paused"

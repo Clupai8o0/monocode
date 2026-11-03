@@ -49,6 +49,7 @@ import { MessagesButton } from "../../fork/peerMessages/MessagesButton"; // Fork
 import { WorkspacesButton } from "../../fork/workspaces/WorkspacesButton"; // Fork
 import { MoreButton } from "../../fork/more/MoreButton"; // Fork
 import { AllUsageChip } from "../../fork/usage/AllUsage"; // Fork
+import { CursorUsage } from "../../fork/usage/CursorUsage"; // Fork
 import { ExhaustedSwitch } from "../../fork/accounts/ExhaustedSwitch"; // Fork
 import { useAutoAccountUsage } from "../../fork/accounts/autoResolver"; // Fork
 import { accountStatus } from "../../features/providers/model/accountUsage"; // Fork
@@ -129,13 +130,14 @@ export function UsageFooter({
   const onTerminalClick = projectTerminalActive
     ? (onToggleProjectTerminal ?? onNewTerminal)
     : (onNewTerminal ?? onToggleProjectTerminal);
-  const ariaLabel = showUsage || session?.harness === "pi"
-    ? "Provider usage"
-    : showTerminals || showTerminalButton
-      ? "Terminals"
-      : session
-        ? "Session"
-        : undefined;
+  const ariaLabel =
+    showUsage || session?.harness === "pi" || session?.harness === "cursor"
+      ? "Provider usage"
+      : showTerminals || showTerminalButton
+        ? "Terminals"
+        : session
+          ? "Session"
+          : undefined;
 
   return (
     <footer
@@ -528,6 +530,11 @@ export function UsageChips({
         now={now}
         variant={variant}
       />
+    );
+  }
+  if (session?.harness === "cursor") {
+    return (
+      <CursorUsage now={now} className={USAGE_CHIP_CLASSES[variant]} />
     );
   }
   if (!showUsage) return <>{fallback}</>;

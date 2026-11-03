@@ -3,12 +3,16 @@ import { sameProviderAccountId } from "../../providers/model/providerAccounts";
 import type { Session, UsageLimit } from "./session";
 
 /** A fallback for adapters that report exhausted accounts as plain errors. */
-export function usageLimitFromError(message: string): UsageLimit | undefined {
-  return /(?:usage|spending|monthly|weekly|daily) limit (?:reached|exceeded)|(?:quota|credits?) (?:exceeded|exhausted|depleted)|insufficient[_ ](?:quota|credits)|hit your (?:usage )?limit|credit balance is too low/i.test(
-    message,
-  )
-    ? {}
-    : undefined;
+export function usageLimitFromError(
+  message: string,
+  resetsAt?: number,
+): UsageLimit | undefined {
+  const limited =
+    /(?:usage|spending|monthly|weekly|daily) limit (?:reached|exceeded)|(?:quota|credits?) (?:exceeded|exhausted|depleted)|insufficient[_ ](?:quota|credits)|hit your (?:usage )?limit|credit balance is too low|usage_limit_exceeded|spend.?limit (?:hit|reached|exceeded)|on-demand usage (?:limit|is required)|you've used \d+% of your included/i.test(
+      message,
+    );
+  if (!limited) return undefined;
+  return resetsAt != null ? { resetsAt } : {};
 }
 
 /** Release the stopped outbox only when the user chooses to recover. */

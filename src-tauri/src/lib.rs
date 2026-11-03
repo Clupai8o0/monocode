@@ -3,7 +3,7 @@ use tauri::Manager;
 mod account_identity;
 // Fork: runs the Claude Code status line for the composer strip.
 mod fork_statusline;
-mod fork_extra_usage; // Fork: Muse, Antigravity and DeepSeek usage for the footer.
+mod fork_extra_usage; // Fork: Muse, Antigravity, Cursor and DeepSeek usage for the footer.
 // Fork: the shared Docker stacks panel (vault stacks.py).
 mod fork_stacks;
 mod fork_lab; // Fork: home lab Remote Control scope and RDP files.

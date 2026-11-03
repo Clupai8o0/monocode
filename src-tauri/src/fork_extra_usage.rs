@@ -1,9 +1,10 @@
 //! Fork feature: plan usage for agents MonoCode has no usage API for.
 //!
 //! Muse and Antigravity print theirs without a model turn (`muse usage
-//! --json`, `agy -p /quota --output-format json`). DeepSeek reports the
-//! prepaid balance of the key `dsh` uses (Keychain item `deepseek-api`).
-//! The raw JSON goes back to the webview, which parses it.
+//! --json`, `agy -p /quota --output-format json`). Cursor reports Auto and
+//! API pools from its dashboard API with the Agent CLI's access token.
+//! DeepSeek reports the prepaid balance of the key `dsh` uses (Keychain
+//! item `deepseek-api`). The raw JSON goes back to the webview, which parses it.
 
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -30,11 +31,99 @@ pub async fn fork_extra_usage(provider: String) -> ExtraUsage {
     tauri::async_runtime::spawn_blocking(move || match provider.as_str() {
         "muse" => cli("muse", &["usage", "--json"]),
         "antigravity" => cli("agy", &["-p", "/quota", "--output-format", "json"]),
+        "cursor" => cursor_usage(),
         "deepseek" => deepseek_balance(),
         _ => unavailable("No usage source for this provider"),
     })
     .await
     .unwrap_or_else(|_| error("Could not read usage"))
+}
+
+const CURSOR_USAGE_URL: &str =
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+
+/// Cursor Agent's plan meters. The CLI stores the same Bearer token the
+/// dashboard uses; on macOS that secret usually lives only in the Keychain.
+fn cursor_usage() -> ExtraUsage {
+    let Some(token) = cursor_access_token() else {
+        return unavailable("Cursor Agent is not signed in");
+    };
+    let response = ureq::post(CURSOR_USAGE_URL)
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Content-Type", "application/json")
+        .set("Connect-Protocol-Version", "1")
+        .timeout(Duration::from_secs(15))
+        .send_string("{}");
+    match response {
+        Ok(response) => {
+            let mut body = String::new();
+            match response
+                .into_reader()
+                .take(MAX_OUTPUT)
+                .read_to_string(&mut body)
+            {
+                Ok(_) => ExtraUsage::Ok { body },
+                Err(_) => error("Cursor's usage could not be read"),
+            }
+        }
+        Err(ureq::Error::Status(401 | 403, _)) => {
+            unavailable("Cursor Agent sign-in expired; run `agent login`")
+        }
+        Err(ureq::Error::Status(code, _)) => error(&format!("Cursor answered HTTP {code}")),
+        Err(_) => error("Could not reach Cursor"),
+    }
+}
+
+fn cursor_access_token() -> Option<String> {
+    for path in cursor_auth_paths() {
+        if let Some(token) = read_cursor_auth_file(&path) {
+            return Some(token);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let token = crate::rate_limits::security_output(&[
+            "find-generic-password".into(),
+            "-s".into(),
+            "cursor-access-token".into(),
+            "-a".into(),
+            "cursor-user".into(),
+            "-w".into(),
+        ])
+        .map(|token| token.trim().to_owned())
+        .filter(|token| !token.is_empty());
+        if token.is_some() {
+            return token;
+        }
+    }
+    None
+}
+
+fn cursor_auth_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        paths.push(std::path::PathBuf::from(xdg).join("cursor/auth.json"));
+    }
+    if let Some(home) = crate::dirs_home() {
+        let home = std::path::PathBuf::from(home);
+        paths.push(home.join(".config/cursor/auth.json"));
+        paths.push(home.join(".cursor/auth.json"));
+    }
+    paths
+}
+
+fn read_cursor_auth_file(path: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
+    let token = value
+        .get("accessToken")
+        .and_then(|token| token.as_str())?
+        .trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
 }
 
 fn unavailable(message: &str) -> ExtraUsage {
@@ -141,6 +230,7 @@ fn deepseek_balance() -> ExtraUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn returns_what_the_cli_printed() {
@@ -160,5 +250,27 @@ mod tests {
             cli("sh", &["-c", "exit 3"]),
             ExtraUsage::Error { .. }
         ));
+    }
+
+    #[test]
+    fn reads_the_cursor_access_token_from_auth_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "monocode-cursor-auth-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("auth.json");
+        let mut file = std::fs::File::create(&path).unwrap();
+        write!(file, r#"{{"accessToken":" cursor-token-1 "}}"#).unwrap();
+        assert_eq!(
+            read_cursor_auth_file(&path).as_deref(),
+            Some("cursor-token-1")
+        );
+        assert_eq!(
+            read_cursor_auth_file(&dir.join("missing.json")),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

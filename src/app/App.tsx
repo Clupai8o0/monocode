@@ -10,8 +10,10 @@ import {
   saveContinuedOrigin,
   withTranscriptPointer,
 } from "../fork/continueElsewhere/continueElsewhere";
+import { harnessUsedPercent } from "../fork/continueElsewhere/continueUsage";
 import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
 import { needsHandoffRecovery, prepareHandoffContext, recordHandoffContext, finishHandoffContext } from "../fork/continueElsewhere/handoffContext";
+import { loadExtraUsage } from "../fork/usage/extraUsage";
 import {
   recordFeatureUse,
   registerCoachHost,
@@ -11035,17 +11037,24 @@ function Workspace({
     [openSessionBeside],
   );
 
-  // Fork: "Continue in Codex", from the usage-limit bar and the session menu.
-  // Not for remote sessions: their new session wouldn't receive the brief yet.
+  // Fork: "Continue in …", from the usage-limit bar and the session menu.
+  // Picks Claude, Codex or Cursor by remaining usage. Not for remote
+  // sessions: their new session wouldn't receive the brief yet.
   useEffect(() => {
+    const pickOptions = (cwd?: string) => ({
+      isLive: isLiveHarness,
+      usedPercent: (id: HarnessId) => harnessUsedPercent(id, cwd),
+    });
     const continuableTarget = (sessionId: string) => {
       const source = sessionsRef.current.find((s) => s.id === sessionId);
       if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
         return null;
       }
-      const target = continueTarget(source.harness);
-      return target && isLiveHarness(target) ? target : null;
+      return continueTarget(source.harness, pickOptions(source.cwd));
     };
+    // Keep Cursor's meters warm so a spent Cursor session can pick Claude or
+    // Codex by headroom without waiting on the All usage panel.
+    void loadExtraUsage("cursor");
     registerContinueHost({
       canContinue: (sessionId) => continuableTarget(sessionId) !== null,
       continueSession: (sessionId) => {

@@ -5,6 +5,7 @@ import {
   type HarnessId,
 } from "../../features/sessions/model/session";
 import { ChevronRight, Replace, X } from "../../shared/ui/icons";
+import { isLiveHarness } from "../../integrations/harness/core/registry";
 import {
   continuedOrigin,
   continueHost,
@@ -12,9 +13,17 @@ import {
   continueTarget,
   type ContinuedOrigin,
 } from "./continueElsewhere";
+import { harnessUsedPercent } from "./continueUsage";
 
 const PRESS =
   "transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
+
+function continuePick() {
+  return {
+    isLive: isLiveHarness,
+    usedPercent: (id: HarnessId) => harnessUsedPercent(id),
+  };
+}
 
 /** Fork: on the usage-limit bar, the way out when this provider is spent. */
 export function ContinueElsewhereButton({
@@ -24,8 +33,9 @@ export function ContinueElsewhereButton({
   sessionId: string;
   harness: HarnessId;
 }) {
-  const label = continueLabel(harness);
-  const target = continueTarget(harness);
+  const options = continuePick();
+  const label = continueLabel(harness, options);
+  const target = continueTarget(harness, options);
   if (!label || !target) return null;
   return (
     <button

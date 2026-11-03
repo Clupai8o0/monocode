@@ -41,6 +41,7 @@ const EXTRA: {
   name: string;
   harness?: HarnessId;
 }[] = [
+  { provider: "cursor", name: "Cursor", harness: "cursor" },
   { provider: "antigravity", name: "Antigravity", harness: "antigravity" },
   { provider: "muse", name: "Muse" },
   { provider: "deepseek", name: "DeepSeek", harness: "deepseek" },
@@ -48,8 +49,8 @@ const EXTRA: {
 
 /**
  * Fork feature: one footer button that lists every account's usage at once:
- * each Claude and Codex account, Antigravity and Muse windows, DeepSeek's
- * balance, and a note for Grok, which reports no plan usage.
+ * each Claude and Codex account, Cursor Auto/API pools, Antigravity and Muse
+ * windows, DeepSeek's balance, and a note for Grok, which reports no plan usage.
  */
 export function AllUsageChip({ className }: { className: string }) {
   const [open, setOpen] = useState(false);
