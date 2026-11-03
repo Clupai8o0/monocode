@@ -1,3 +1,4 @@
+import { Host as UniversalHost, Slider as UniversalSlider } from "@expo/ui";
 import { Host, Slider } from "@expo/ui/swift-ui";
 import { accessibilityLabel, tint } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -18,7 +19,6 @@ import { SettingsPage } from "@/features/settings/SettingsUI";
 import { useDefaultModel } from "@/features/settings/defaultModel";
 import { projectForRoute } from "@/features/workspace/routing";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
-import { ChoiceMenu } from "@/ui/ChoiceMenu";
 import { Icon, type IconName } from "@/ui/Icon";
 import { withAlpha, themedStyles, useColors } from "@/ui/theme";
 
@@ -600,24 +600,12 @@ export function EffortControl({
     options.findIndex((option) => option.value === value),
   );
   const hot = HOT_EFFORT.test(options[index]?.value ?? "");
-  // SwiftUI's slider is iOS only; Android picks the level from a list.
-  if (Platform.OS === "android") return (
-    <ChoiceMenu
-      label={label}
-      actions={options.map((option) => ({
-        label: option.label,
-        selected: option.value === value,
-        onPress: () => onChange(option.value),
-      }))}
-    >
-      <View style={[styles.effort, styles.effortHeader]}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text style={[styles.effortValue, hot && { color: colors.caution }]}>
-          {options[index]?.label}
-        </Text>
-      </View>
-    </ChoiceMenu>
-  );
+  const pick = (next: number) => {
+    const option = options[Math.round(next)];
+    if (!option || option.value === value) return;
+    void Haptics.selectionAsync();
+    onChange(option.value);
+  };
   return (
     <View style={styles.effort}>
       <View style={styles.effortHeader}>
@@ -626,25 +614,31 @@ export function EffortControl({
           {options[index]?.label}
         </Text>
       </View>
-      {/* The native slider, so a drag along it is not taken by the scroll. */}
-      <Host style={styles.effortSlider}>
+      {/* The native slider, so a drag along it is not taken by the scroll.
+          SwiftUI's has no Android view, so Android takes the universal one. */}
+      {Platform.OS === "android" ? (
+        <UniversalHost style={styles.effortSlider}>
+          <UniversalSlider
+            value={index}
+            min={0}
+            max={options.length - 1}
+            step={1}
+            onValueChange={pick}
+          />
+        </UniversalHost>
+      ) : <Host style={styles.effortSlider}>
         <Slider
           value={index}
           min={0}
           max={options.length - 1}
           step={1}
-          onValueChange={(next) => {
-            const option = options[Math.round(next)];
-            if (!option || option.value === value) return;
-            void Haptics.selectionAsync();
-            onChange(option.value);
-          }}
+          onValueChange={pick}
           modifiers={[
             tint(hot ? colors.caution : colors.accent),
             accessibilityLabel(label),
           ]}
         />
-      </Host>
+      </Host>}
     </View>
   );
 }

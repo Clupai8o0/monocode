@@ -12,6 +12,7 @@ import Animated, {
 
 import { useConnection } from "@/features/connection/ConnectionProvider";
 import type { ExternalSession } from "@/features/workspace/types";
+import { AnimationsPaused } from "@/ui/AnimationsPaused";
 import { Icon } from "@/ui/Icon";
 import { themedStyles, useColors } from "@/ui/theme";
 
@@ -23,7 +24,6 @@ import {
   sessionTitle,
   stateLabel,
 } from "./externalSessions";
-import { SpinnersPaused } from "./TerminalSpinner";
 
 const POLL_MS = 20_000;
 const PULSE_MS = 1600;
@@ -153,7 +153,7 @@ export function StateMark({ state }: { state: ExternalSession["state"] }) {
 function PulsingDot() {
   const styles = useStyles();
   const colors = useColors();
-  const paused = use(SpinnersPaused);
+  const paused = use(AnimationsPaused);
   const pulse = useSharedValue(0);
   useEffect(() => {
     if (paused) {

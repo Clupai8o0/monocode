@@ -107,6 +107,15 @@ export type Mono = {
   lastActiveAt: number;
   harness?: Harness;
   model?: string;
+  /** What sessions it starts run on when it names no model; unset parts
+   *  are its own. Missing on desktops that predate it. */
+  subsessions?: MonoSubsessions | null;
+};
+
+export type MonoSubsessions = {
+  harness?: Harness;
+  model?: string;
+  effort?: string;
 };
 
 // The desktop's RuntimeMode (src/features/sessions/model/session.ts).
@@ -287,4 +296,15 @@ export type ExternalTranscriptPage = {
   before?: number;
   handoff?: { path: string; text: string };
   truncated?: boolean;
+};
+
+/** Desktop-owned usage recovery state; mobile only renders these capabilities. */
+export type UsageLimitState = {
+  token: string;
+  resetsAt?: number | null;
+  resumeAtReset: boolean;
+  canResume: boolean;
+  canAutoResume: boolean;
+  resetLabel: string;
+  limitation: string;
 };
