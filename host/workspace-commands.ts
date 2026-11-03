@@ -338,11 +338,22 @@ export class WorkspaceCommands {
   private async readText(input: unknown): Promise<string> {
     const bytes = await this.file(input, MAX_REMOTE_TEXT_BYTES);
     if (bytes.includes(0)) throw new Error("Binary files cannot be edited.");
+    let text: string;
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
       throw new Error("File is not valid UTF-8.");
     }
+    // JSON escaping and the response envelope count toward the client's cap.
+    let encodedBytes = Buffer.byteLength('{"ok":true,"result":""}') + bytes.length;
+    for (const byte of bytes) {
+      if (byte === 34 || byte === 92) encodedBytes++;
+      else if (byte < 32) encodedBytes += [8, 9, 10, 12, 13].includes(byte) ? 1 : 5;
+      if (encodedBytes > MAX_REMOTE_TEXT_BYTES) {
+        throw new Error("File exceeds the 16 MB remote transport limit after JSON encoding. Open it on the host machine.");
+      }
+    }
+    return text;
   }
 
   /** Base64, since host responses are JSON; the client decodes it. */

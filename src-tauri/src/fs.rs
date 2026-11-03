@@ -5983,7 +5983,18 @@ const MOBILE_FILE_CHARS: usize = 1024 * 1024;
 
 fn read_mobile_text_file_sync(path: &str) -> Result<String, String> {
     let path = expand_home(path);
-    let file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+    if !std::fs::metadata(&path).map_err(|error| error.to_string())?.is_file() {
+        return Err("Not a file".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // A path swapped for a pipe after metadata must not block a worker.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(|error| error.to_string())?;
     if !file.metadata().map_err(|error| error.to_string())?.is_file() {
         return Err("Not a file".into());
     }
@@ -6779,6 +6790,15 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("example.rs")]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mobile_text_rejects_named_pipes_without_opening_them() {
+        let dir = tmp("mobile-text-pipe");
+        let path = dir.0.join("pipe");
+        assert!(Command::new("mkfifo").arg(&path).status().unwrap().success());
+        assert_eq!(read_mobile_text_file_sync(&path_to_js(&path)).unwrap_err(), "Not a file");
     }
 
     #[test]
