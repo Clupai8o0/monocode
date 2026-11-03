@@ -789,7 +789,10 @@ export function TerminalGridBackground({
         else releaseControl();
         return;
       }
-      const arcade = boardsRef.current?.[indexRef.current]?.arcade;
+      // Fork: a board made but not yet started ignores keys, so it waits like one
+      // still loading.
+      const board = boardsRef.current?.[indexRef.current];
+      const arcade = board?.started ? board.arcade : undefined;
       const heading = HEADING[event.key] ?? HEADING[event.key.toLowerCase()];
       const isSpace = event.key === " ";
       // Fork: P pauses or resumes without playing a move.
