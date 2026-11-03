@@ -1,7 +1,9 @@
-import { useRef, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { LAYER } from "../../shared/lib/layers";
 import { Check, ChevronDown, type IconProps } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
+import { gamePopups } from "./gamesPanelStore";
+import "./games.css";
 
 /**
  * Fork: a small dropdown for the games panel's toolbars (game, difficulty,
@@ -11,8 +13,20 @@ import { Popover } from "../../shared/ui/Popover";
 export type ChipOption<T extends string> = { id: T; label: string };
 
 export const ICON_BUTTON =
-  "grid size-6 shrink-0 cursor-pointer place-items-center rounded text-content/55 hover:bg-content/10 hover:text-content disabled:cursor-default disabled:opacity-40";
+  "grid size-6 shrink-0 cursor-pointer place-items-center rounded text-content/55 transition-[background-color,color,transform] duration-100 ease-out hover:bg-content/10 hover:text-content active:scale-[0.94] disabled:cursor-default disabled:opacity-40";
 export const ICON_BUTTON_ON = "bg-content/10 text-content";
+
+/** While a dropdown is up, Esc is the dropdown's and leaves the panel alone. */
+export function useGamePopup(open: boolean)
+{
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    gamePopups.opened();
+    return () => gamePopups.closed();
+  }, [open]);
+}
 
 export function ChipSelect<T extends string>({
   label,
@@ -31,6 +45,7 @@ export function ChipSelect<T extends string>({
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const current = options.find((option) => option.id === value);
+  useGamePopup(open);
 
   return (
     <>
@@ -57,21 +72,21 @@ export function ChipSelect<T extends string>({
       </button>
       {open ? (
         <Popover
+          bare
           anchor={anchor}
           side="bottom"
           align="start"
           gap={4}
           width={width}
           layer={LAYER.submenu}
-          rounded="rounded-lg"
-          constrainHeight={false}
+          className="games-popup flex flex-col overflow-hidden"
           ignore={`[data-fork-chip-select="${label}"]`}
           onDismiss={() => setOpen(false)}
         >
           <div
             role="listbox"
             aria-label={label}
-            className="flex flex-col p-1"
+            className="flex min-h-0 flex-col overflow-y-auto p-1"
             // Keeps the keyboard where it was, as the toolbar does: the game
             // board, or the drill's editor.
             onMouseDown={(event) => event.preventDefault()}

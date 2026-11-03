@@ -6,6 +6,9 @@ if (process.env.GAME_BROWSER) {
   test.use({ launchOptions: { executablePath: process.env.GAME_BROWSER } });
 }
 
+// The panel's open animation would otherwise be caught in every measurement.
+test.use({ contextOptions: { reducedMotion: "reduce" } });
+
 const GAMES = ["blocks", "agent run", "mono bros", "pac-man", "snake"];
 
 async function pickGame(page: Page, name: string) {
@@ -445,4 +448,182 @@ test("Side by side puts the app on the left and the games on the right", async (
   await page.getByRole("button", { name: "Hide" }).click();
   await expect(panel(page)).toBeHidden();
   expect((await appRoot.boundingBox())!.width).toBe(before.width);
+});
+
+test("the game picker fits a short window and finds a game by typing", async ({ page }) => {
+  await open(page);
+  await page.setViewportSize({ width: 900, height: 420 });
+  await gameSelect(page).click();
+  const search = page.getByRole("combobox", { name: "Find a game" });
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("option")).toHaveCount(20);
+  const list = (await page.getByRole("listbox", { name: "Game" }).boundingBox())!;
+  expect(list.y + list.height).toBeLessThanOrEqual(420);
+  expect(list.y).toBeGreaterThanOrEqual(0);
+  // The last row is one scroll away, not off the window.
+  await page.getByRole("option", { name: "pipeline", exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("option", { name: "pipeline", exact: true })).toBeInViewport();
+
+  await search.fill("sud");
+  await expect(page.getByRole("option")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("listbox", { name: "Game" })).toHaveCount(0);
+  await expect(gameSelect(page)).toHaveText("sudoku");
+  await expect(page.locator("[data-table-active] [data-table-board]")).toBeFocused();
+
+  // Nothing found says so, and Enter there does nothing.
+  await gameSelect(page).click();
+  await search.fill("zzz");
+  await expect(page.getByText("No game matches that.")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(gameSelect(page)).toHaveText("sudoku");
+});
+
+test("arrow keys walk the picker, and a group name finds its games", async ({ page }) => {
+  await open(page);
+  await gameSelect(page).click();
+  const search = page.getByRole("combobox", { name: "Find a game" });
+  await search.fill("puzzles");
+  await expect(page.getByRole("option")).toHaveCount(4);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  // garden, colour sort, garden: then Enter takes the row that's lit.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(gameSelect(page)).toHaveText("sudoku");
+});
+
+test("Esc on a dropdown closes the dropdown and leaves the game open", async ({ page }) => {
+  await open(page);
+  await expect(board(page)).toBeFocused();
+
+  // The picker has the keyboard while it's up, and gives it back.
+  await gameSelect(page).click();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox", { name: "Game" })).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  await expect(board(page)).toBeFocused();
+
+  // Difficulty leaves the keyboard on the board, and Esc still isn't the board's.
+  await page.getByRole("button", { name: "Difficulty", exact: true }).click();
+  await expect(page.getByRole("listbox", { name: "Difficulty" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox", { name: "Difficulty" })).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+
+  // With no dropdown up, Esc hides the panel as ever.
+  await page.waitForTimeout(50);
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toBeHidden();
+});
+
+test("a short Difficulty list stays inside a short window", async ({ page }) => {
+  await open(page);
+  await page.setViewportSize({ width: 900, height: 380 });
+  await page.getByRole("button", { name: "Difficulty", exact: true }).click();
+  const list = (await page.getByRole("listbox", { name: "Difficulty" }).boundingBox())!;
+  expect(list.y + list.height).toBeLessThanOrEqual(380);
+});
+
+test("games with no difficulty don't offer one", async ({ page }) => {
+  await open(page);
+  const difficulty = page.locator("[data-fork-chip-select='Difficulty']");
+  await expect(difficulty).toBeVisible();
+  await pickGame(page, "garden");
+  await expect(difficulty).toHaveCount(0);
+  await pickGame(page, "chess");
+  await expect(difficulty).toBeVisible();
+});
+
+test("controls and agent activity share the foot, both in view", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() =>
+    (window as unknown as { __setAgents(a: number, b: number): void }).__setAgents(3, 0),
+  );
+  const foot = page.locator("[data-fork-games-foot]");
+  await expect(foot).toContainText("up rotates · space drops");
+  await expect(foot).toContainText("3 agents working");
+  // One row of chrome above the game: the picker and the score sit level.
+  const chip = (await gameSelect(page).boundingBox())!;
+  const readout = (await page.locator("[data-fork-games-score]").boundingBox())!;
+  expect(Math.abs(chip.y + chip.height / 2 - (readout.y + readout.height / 2))).toBeLessThan(2);
+});
+
+test("Play again starts a finished game over from the card", async ({ page }) => {
+  await open(page);
+  const status = page.getByRole("status");
+  for (let i = 0; i < 40 && !(await status.count()); i++) {
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(50);
+  }
+  await expect(status).toHaveText(/game over/);
+  await page.locator("[data-fork-games-again]").click();
+  await expect(status).toHaveCount(0);
+  await expect(board(page)).toBeFocused();
+  await expect(pauseChip(page)).toBeVisible();
+});
+
+test("an agent needing you offers its session, and keep playing resumes", async ({ page }) => {
+  await open(page);
+  const set = (working: number, waiting: number) =>
+    page.evaluate(
+      ([a, b]) =>
+        (window as unknown as { __setAgents(a: number, b: number): void }).__setAgents(a!, b!),
+      [working, waiting],
+    );
+
+  await set(0, 1);
+  await expect(page.getByRole("status")).toHaveText("An agent needs you");
+  await page.getByRole("button", { name: "Keep playing" }).click();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(board(page)).toBeFocused();
+
+  await set(1, 0);
+  await set(0, 0);
+  await expect(page.getByRole("status")).toHaveText("Agents finished");
+  await expect(page.locator("[data-fork-games-open-session]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Keep playing" }).click();
+
+  // Floating, it gets out of the way of the session it just opened.
+  await set(0, 1);
+  await page.locator("[data-fork-games-open-session]").click();
+  await expect(panel(page)).toBeHidden();
+
+  // Side by side, the app is already there, so the game stays.
+  await set(0, 0);
+  await page.locator("[data-fork-games]").click();
+  await page.locator("[data-fork-games-dock]").click();
+  await set(0, 1);
+  await page.locator("[data-fork-games-open-session]").click();
+  await expect(panel(page)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0);
+});
+
+test("the foot's waiting line opens the session too", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() =>
+    (window as unknown as { __setAgents(a: number, b: number): void }).__setAgents(1, 1),
+  );
+  await page.getByRole("button", { name: "Keep playing" }).click();
+  await page.getByRole("button", { name: "1 agent working · 1 needs you" }).click();
+  await expect(panel(page)).toBeHidden();
+});
+
+test("dragging moves only the panel until the drag ends, side by side", async ({ page }) => {
+  await open(page);
+  await page.locator("[data-fork-games-dock]").click();
+  const appRoot = page.locator("#root");
+  const app = (await appRoot.boundingBox())!;
+  const edge = (await page.locator('[data-fork-games-resize-edge="left"]').boundingBox())!;
+  await page.mouse.move(edge.x + 2, edge.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(edge.x - 98, edge.y + 100, { steps: 4 });
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  // The panel follows the pointer; the app reflows once, on release.
+  expect((await panel(page).boundingBox())!.x).toBeLessThan(edge.x - 50);
+  expect((await appRoot.boundingBox())!.width).toBe(app.width);
+  await page.mouse.up();
+  expect((await appRoot.boundingBox())!.width).toBe(app.width - 100);
 });

@@ -143,7 +143,14 @@ export type AgentActivity = {
 };
 
 let activity: AgentActivity = { working: 0, waiting: 0 };
+let waitingId: string | null = null;
 const activityListeners = new Set<() => void>();
+
+function isWaiting(
+  session: Pick<Session, "blocks" | "pendingQuestion">,
+): boolean {
+  return hasPendingApproval(session.blocks) || session.pendingQuestion != null;
+}
 
 export function agentActivity(
   sessions: readonly Pick<
@@ -157,7 +164,7 @@ export function agentActivity(
     if (session.worktreeRemoved) {
       continue;
     }
-    if (hasPendingApproval(session.blocks) || session.pendingQuestion != null) {
+    if (isWaiting(session)) {
       waiting += 1;
     } else if (session.busy) {
       working += 1;
@@ -167,8 +174,14 @@ export function agentActivity(
 }
 
 function publishAgentActivity(
-  sessions: Parameters<typeof agentActivity>[0],
+  sessions: readonly Pick<
+    Session,
+    "id" | "busy" | "blocks" | "pendingQuestion" | "worktreeRemoved"
+  >[],
 ): void {
+  waitingId =
+    sessions.find((session) => !session.worktreeRemoved && isWaiting(session))
+      ?.id ?? null;
   const next = agentActivity(sessions);
   if (next.working === activity.working && next.waiting === activity.waiting) {
     return;
@@ -177,6 +190,11 @@ function publishAgentActivity(
   for (const listener of activityListeners) {
     listener();
   }
+}
+
+/** A session stopped on an approval or a question, to take someone straight to it. */
+export function waitingSessionId(): string | null {
+  return waitingId;
 }
 
 function subscribeActivity(listener: () => void): () => void {
