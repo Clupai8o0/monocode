@@ -87,8 +87,11 @@ export function continuedOrigin(sessionId: string): ContinuedOrigin | null {
 
 export type ContinueHost = {
   canContinue: (sessionId: string) => boolean;
-  continueSession: (sessionId: string) => void;
+  /** `target` required when multiple peers exist; omit only for primary default. */
+  continueSession: (sessionId: string, target?: HarnessId) => void;
   openSession: (sessionId: string) => void;
+  /** Live handoff peers for a session (installed/live filtered by the host). */
+  targetsFor?: (sessionId: string) => HarnessId[];
 };
 
 let host: ContinueHost | null = null;

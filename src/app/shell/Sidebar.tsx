@@ -1,7 +1,8 @@
 // Fork: Continue in Codex.
 import {
   continueHost,
-  continueLabel,
+  continueLabelFor,
+  handoffTargets,
 } from "../../fork/continueElsewhere/continueElsewhere";
 import { useRemoteMachines } from "../../features/connections/model/connections"; // Fork
 import { FORK_SESSION_MOVE } from "../../fork/sessionMove/sessionMoveModel"; // Fork
@@ -1596,21 +1597,20 @@ function SidebarComponent({
           },
         ]
       : []),
-    // Fork: carry the session over to the other provider.
-    ...(!multipleMenuSessions &&
-    menuSessions[0] &&
-    continueLabel(menuSessions[0].harness)
-      ? [
-          {
-            kind: "item" as const,
-            id: "continue-elsewhere",
-            label: continueLabel(menuSessions[0].harness)!,
-            disabled: !continueHost()?.canContinue(menuSessions[0].id),
-            description: continueHost()?.canContinue(menuSessions[0].id)
-              ? undefined
-              : "Open the session first",
-          },
-        ]
+    // Fork: carry the session over to another first-class provider.
+    ...(!multipleMenuSessions && menuSessions[0]
+      ? (
+          continueHost()?.targetsFor?.(menuSessions[0].id) ??
+          handoffTargets(menuSessions[0].harness)
+        ).map((target) => ({
+          kind: "item" as const,
+          id: `continue-elsewhere:${target}`,
+          label: continueLabelFor(menuSessions[0].harness, target),
+          disabled: !continueHost()?.canContinue(menuSessions[0].id),
+          description: continueHost()?.canContinue(menuSessions[0].id)
+            ? undefined
+            : "Open the session first",
+        }))
       : []),
     // Fork: move the session and its work to another machine.
     ...(!multipleMenuSessions && menuSessions[0]
@@ -1777,8 +1777,9 @@ function SidebarComponent({
       }
       return;
     }
-    if (id === "continue-elsewhere") {
-      continueHost()?.continueSession(sessionIds[0]);
+    if (id.startsWith("continue-elsewhere:")) {
+      const target = id.slice("continue-elsewhere:".length) as HarnessId;
+      continueHost()?.continueSession(sessionIds[0], target);
       return;
     }
     if (pickMoveItem(id, sessionIds[0], moveMachines)) return; // Fork

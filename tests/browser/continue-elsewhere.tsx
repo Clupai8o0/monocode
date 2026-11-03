@@ -3,12 +3,22 @@ import {
   ContinuedFromView,
   ContinueElsewhereButton,
 } from "../../src/fork/continueElsewhere/ContinueElsewhereUi";
+import { registerContinueHost } from "../../src/fork/continueElsewhere/continueElsewhere";
 import { UsageLimitNotice } from "../../src/features/sessions/ui/UsageLimitNotice";
 import "../../src/styles/index.css";
 
 if (new URLSearchParams(location.search).get("theme") === "light") {
   document.documentElement.classList.add("theme-light");
 }
+
+// Fixture host: Claude can continue to Codex and Grok so the picker shows.
+registerContinueHost({
+  canContinue: () => true,
+  targetsFor: () => ["codex", "grok"],
+  continueSession: () => {},
+  openSession: () => {},
+});
+
 const noop = () => {};
 createRoot(document.getElementById("root")!).render(
   <div className="flex w-[760px] flex-col gap-6 p-6 text-content">

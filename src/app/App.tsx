@@ -6,6 +6,7 @@ import { resolveMcpCall, type McpCaller } from "../fork/mcpAccess/mcpAccess";
 import {
   continueTarget,
   continuedOrigin,
+  handoffTargets,
   registerContinueHost,
   saveContinuedOrigin,
   withTranscriptPointer,
@@ -11035,30 +11036,37 @@ function Workspace({
     [openSessionBeside],
   );
 
-  // Fork: "Continue in Codex", from the usage-limit bar and the session menu.
+  // Fork: "Continue in …", from the usage-limit bar and the session menu.
   // Not for remote sessions: their new session wouldn't receive the brief yet.
   useEffect(() => {
-    const continuableTarget = (sessionId: string) => {
+    const liveTargets = (sessionId: string) => {
       const source = sessionsRef.current.find((s) => s.id === sessionId);
       if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
-        return null;
+        return [] as ReturnType<typeof handoffTargets>;
       }
-      const target = continueTarget(source.harness);
-      return target && isLiveHarness(target) ? target : null;
+      return handoffTargets(source.harness).filter((id) => isLiveHarness(id));
     };
     registerContinueHost({
-      canContinue: (sessionId) => continuableTarget(sessionId) !== null,
-      continueSession: (sessionId) => {
+      canContinue: (sessionId) => liveTargets(sessionId).length > 0,
+      targetsFor: (sessionId) => liveTargets(sessionId),
+      continueSession: (sessionId, target) => {
         const source = sessionsRef.current.find((s) => s.id === sessionId);
-        const target = continuableTarget(sessionId);
-        if (!source || !target) return;
-        const model = defaultModelId(target);
+        if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
+          return;
+        }
+        const allowed = liveTargets(sessionId);
+        const resolved =
+          (target && allowed.includes(target) ? target : null) ??
+          continueTarget(source.harness);
+        if (!resolved || !allowed.includes(resolved)) return;
+        // Prefs applied in Task 4; for now still defaultModelId(resolved).
+        const model = defaultModelId(resolved);
         onHandoff(
           sessionId,
           {
-            harness: target,
+            harness: resolved,
             model,
-            modelSettings: defaultModelSettings(resolveModel(target, model)),
+            modelSettings: defaultModelSettings(resolveModel(resolved, model)),
           },
           source.blocks,
         );
