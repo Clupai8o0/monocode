@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listSkills, type DiscoveredSkill } from "../../../platform/tauri/fs";
 import { isRemoteProjectPath } from "../../projects/model/recents";
 import { SkillDocumentPreview } from "../../skills/ui/SkillDocumentPreview";
-import type { MonoFiles } from "../model/monoFiles";
+import { MonoFileConflict, type MonoFiles } from "../model/monoFiles";
 import {
   assignMonoSkill,
   createMonoSkill,
@@ -281,6 +281,15 @@ function SkillEditor({
   const [loaded, setLoaded] = useState<{ text: string; hash: string }>();
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (!skill) return;
     let live = true;
@@ -300,6 +309,7 @@ function SkillEditor({
   const editable = !skill || skill.owned;
   const ready =
     !saving &&
+    !reloading &&
     (skill
       ? !!loaded && !!instructions.trim()
       : !!name.trim() && !!description.trim() && !!instructions.trim());
@@ -311,15 +321,46 @@ function SkillEditor({
       if (skill && loaded)
         await updateMonoSkill(monoId, skill.name, instructions, loaded.hash);
       else await createMonoSkill(monoId, { name, description, instructions });
-      onBack();
+      if (mounted.current) onBack();
     } catch (reason) {
+      if (!mounted.current) return;
+      // The stale hash stays until the user reloads, so Save can never overwrite.
+      if (reason instanceof MonoFileConflict) setConflict(true);
       setError(errorText(reason));
       setSaving(false);
+    }
+  };
+  const reload = async () => {
+    if (!skill || saving || reloading) return;
+    if (!window.confirm("Discard your edits and load the latest version?"))
+      return;
+    setReloading(true);
+    setError(undefined);
+    try {
+      const file = await readMonoSkill(monoId, skill.name);
+      if (!mounted.current) return;
+      setLoaded(file);
+      setInstructions(file.text);
+      setConflict(false);
+    } catch (reason) {
+      if (mounted.current) setError(errorText(reason));
+    } finally {
+      if (mounted.current) setReloading(false);
     }
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader title={skill?.name ?? "New skill"} onBack={onBack}>
+        {editable && conflict ? (
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={saving || reloading}
+            onClick={() => void reload()}
+          >
+            Reload
+          </button>
+        ) : null}
         {editable ? (
           <button
             type="button"
@@ -374,7 +415,7 @@ function SkillEditor({
                 placeholder="Describe the steps this Mono should follow."
                 className={`${fieldClass} mt-1 min-h-64 resize-y font-mono text-[12px]`}
                 value={instructions}
-                disabled={saving}
+                disabled={saving || reloading}
                 onChange={(event) => setInstructions(event.target.value)}
               />
             </label>
