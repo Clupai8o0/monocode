@@ -23,11 +23,14 @@ import {
   cleanupAge,
   cleanupCandidates,
   cleanupResult,
+  deleteCautions,
+  deleteQuestion,
   groupByProject,
   inCleanupFilter,
   isHeld,
   tickedByDefault,
   type CleanupFilter,
+  type CleanupMode,
 } from "./cleanupModel";
 
 const EMPTY: Record<CleanupFilter, string> = {
@@ -39,10 +42,17 @@ const EMPTY: Record<CleanupFilter, string> = {
 
 type Result = { archived: SessionSummary[]; text: string };
 type Progress = { verb: string; done: number; total: number };
+/** The rows asked about, held still so a late tick cannot widen the delete. */
+type PendingDelete = {
+  rows: SessionSummary[];
+  question: string;
+  cautions?: string;
+};
 
 /**
- * Fork feature: archive sessions from every project in one place. It only
- * archives, so everything it does can be undone, here or under Archived.
+ * Fork feature: archive or delete sessions from every project in one place.
+ * Archiving can be undone, here or under Archived. Deleting cannot, so it asks
+ * first, naming how many sessions go and which of them looked unfinished.
  */
 export function SessionCleanup({
   projectPaths,
@@ -51,6 +61,7 @@ export function SessionCleanup({
   approvalSessionIds,
   openSessionIds,
   onArchive,
+  onDelete,
   onClose,
 }: {
   projectPaths: readonly string[];
@@ -63,6 +74,8 @@ export function SessionCleanup({
     sessionId: string,
     archived: boolean,
   ) => void | Promise<boolean>;
+  /** Removes the session for good, with no prompt of its own. */
+  onDelete?: (row: SessionSummary) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<SessionSummary[]>([]);
@@ -72,11 +85,14 @@ export function SessionCleanup({
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
-  const [archivedIds, setArchivedIds] = useState<ReadonlySet<string>>(
+  const [removedIds, setRemovedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
+    null,
+  );
   const [now] = useState(Date.now);
   useSyncExternalStore(
     subscribeCloseStates,
@@ -119,12 +135,12 @@ export function SessionCleanup({
     approval: approvalSessionIds,
   };
   const candidates = cleanupCandidates(
-    rows.filter((row) => !archivedIds.has(row.id)),
+    rows.filter((row) => !removedIds.has(row.id)),
     held,
   );
   const checkKey = candidates.map((c) => `${c.id}@${c.updatedAt}`).join(",");
-  const latest = useRef({ candidates, held, onArchive });
-  latest.current = { candidates, held, onArchive };
+  const latest = useRef({ candidates, held, onArchive, onDelete });
+  latest.current = { candidates, held, onArchive, onDelete };
   useEffect(() => {
     for (const candidate of latest.current.candidates) {
       requestCloseState(candidate.id, candidate.updatedAt);
@@ -147,6 +163,17 @@ export function SessionCleanup({
     ? candidates.filter((row) => !isChecked(row)).length
     : 0;
   const working = progress !== null;
+  const locked = working || pendingDelete !== null;
+
+  // Backing out of the question hands focus back to the button that asked it.
+  const deleteButton = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !pendingDelete && !working) {
+      deleteButton.current?.focus();
+    }
+    wasAsking.current = pendingDelete !== null;
+  }, [pendingDelete, working]);
 
   const setTicks = (targets: readonly SessionSummary[], ticked: boolean) => {
     setResult(null);
@@ -159,10 +186,27 @@ export function SessionCleanup({
     });
   };
 
-  const archiveSelected = async () => {
-    const targets = selected;
+  const askToDelete = () => {
     setResult(null);
-    setProgress({ verb: "Archiving", done: 0, total: targets.length });
+    setPendingDelete({
+      rows: selected,
+      question: deleteQuestion(selected.length, selectedProjects),
+      cautions: deleteCautions(
+        selected.filter((row) => kindOf(row) === "unsafe").length,
+        selected.filter((row) => !isChecked(row)).length,
+        selected.filter((row) => open.has(row.id)).length,
+      ),
+    });
+  };
+
+  const removeRows = async (
+    mode: CleanupMode,
+    targets: readonly SessionSummary[],
+  ) => {
+    const verb = mode === "delete" ? "Deleting" : "Archiving";
+    setResult(null);
+    setPendingDelete(null);
+    setProgress({ verb, done: 0, total: targets.length });
     // The list was read when the panel opened: a session that moved on since
     // may no longer be finished, whatever its old close line said.
     const fresh = new Map<string, SessionSummary>();
@@ -172,13 +216,13 @@ export function SessionCleanup({
           fresh.set(row.id, row);
         }
       } catch {
-        // Not re-read means not archived; those rows are reported as kept.
+        // Not re-read means not removed; those rows are reported as kept.
       }
     }
-    const archived: SessionSummary[] = [];
+    const removed: SessionSummary[] = [];
     let kept = 0;
     for (const [index, row] of targets.entries()) {
-      setProgress({ verb: "Archiving", done: index, total: targets.length });
+      setProgress({ verb, done: index, total: targets.length });
       const current = fresh.get(row.id);
       const unchanged =
         current &&
@@ -189,25 +233,30 @@ export function SessionCleanup({
       let done = false;
       if (unchanged) {
         try {
-          // Archiving stops its agent, which another window may be running.
+          // Removing stops its agent, which another window may be running.
           done =
             !(await sessionHeldElsewhere(row.id)) &&
-            (await latest.current.onArchive(row.id, true)) !== false;
+            (mode === "delete"
+              ? (await latest.current.onDelete?.(row)) === true
+              : (await latest.current.onArchive(row.id, true)) !== false);
         } catch {
           done = false;
         }
       }
       if (done) {
-        archived.push(row);
+        removed.push(row);
       } else {
         kept += 1;
       }
     }
     setRows((all) => all.map((row) => fresh.get(row.id) ?? row));
-    setArchivedIds((ids) => new Set([...ids, ...archived.map((r) => r.id)]));
+    setRemovedIds((ids) => new Set([...ids, ...removed.map((r) => r.id)]));
     setOverrides(new Map());
     setProgress(null);
-    setResult({ archived, text: cleanupResult(archived.length, kept) });
+    setResult({
+      archived: mode === "archive" ? removed : [],
+      text: cleanupResult(mode, removed.length, kept),
+    });
   };
 
   const undo = async (archived: readonly SessionSummary[]) => {
@@ -226,7 +275,7 @@ export function SessionCleanup({
         restored.push(row.id);
       }
     }
-    setArchivedIds((ids) => {
+    setRemovedIds((ids) => {
       const next = new Set(ids);
       for (const id of restored) {
         next.delete(id);
@@ -251,12 +300,21 @@ export function SessionCleanup({
   return (
     <Modal
       title="Clean up sessions"
-      description="Archiving only tidies lists. Sessions stay under Archived in each project."
+      description={
+        onDelete
+          ? "Archive keeps sessions under Archived in each project. Delete removes them for good."
+          : "Archiving only tidies lists. Sessions stay under Archived in each project."
+      }
       size="md"
       fitViewport
       onClose={() => {
         // A close mid-run would hide a run that keeps going.
-        if (!working) {
+        if (working) {
+          return;
+        }
+        if (pendingDelete) {
+          setPendingDelete(null);
+        } else {
           onClose();
         }
       }}
@@ -271,7 +329,7 @@ export function SessionCleanup({
               key={choice.id}
               type="button"
               aria-pressed={filter === choice.id}
-              disabled={working}
+              disabled={locked}
               onClick={() => {
                 setFilter(choice.id);
                 setOverrides(new Map());
@@ -297,7 +355,7 @@ export function SessionCleanup({
               label={`All ${visible.length}`}
               total={visible.length}
               ticked={selected.length}
-              disabled={working}
+              disabled={locked}
               onChange={(ticked) => setTicks(visible, ticked)}
             />
           ) : (
@@ -330,7 +388,7 @@ export function SessionCleanup({
                   label={projectName(group.cwd)}
                   total={group.rows.length}
                   ticked={group.rows.filter(isTicked).length}
-                  disabled={working}
+                  disabled={locked}
                   onChange={(ticked) => setTicks(group.rows, ticked)}
                 />
               </div>
@@ -342,7 +400,7 @@ export function SessionCleanup({
                   <input
                     type="checkbox"
                     checked={isTicked(row)}
-                    disabled={working}
+                    disabled={locked}
                     onChange={(event) => setTicks([row], event.target.checked)}
                     className="shrink-0 accent-accent"
                   />
@@ -356,7 +414,7 @@ export function SessionCleanup({
                   {open.has(row.id) ? (
                     <span
                       className="shrink-0 text-[10px] text-content/45"
-                      title="Open in a tab. Archiving closes the tab."
+                      title="Open in a tab. Archiving or deleting closes the tab."
                     >
                       Open
                     </span>
@@ -376,28 +434,59 @@ export function SessionCleanup({
         </div>
 
         {failedProjects > 0 ? (
-          <p className="shrink-0 px-4 pb-1 text-[11px] text-amber-300">
+          <p className="shrink-0 px-4 pb-1 text-[11px] text-amber-600 dark:text-amber-400">
             Could not read {failedProjects}{" "}
             {failedProjects === 1 ? "project" : "projects"}.
           </p>
         ) : null}
 
         <footer className="flex min-h-12 shrink-0 items-center justify-between gap-3 px-4 py-2.5">
-          <p
-            role="status"
-            className="min-w-0 text-[11px] leading-snug tabular-nums text-content/55"
-          >
-            {progress
-              ? `${progress.verb} ${progress.done + 1} of ${progress.total}…`
-              : (result?.text ??
-                (selected.length === 0
-                  ? "Nothing selected"
-                  : `${selected.length} selected in ${selectedProjects} ${
-                      selectedProjects === 1 ? "project" : "projects"
-                    }`))}
-          </p>
+          {pendingDelete ? (
+            <div
+              role="alert"
+              className="min-w-0 text-[11px] leading-snug tabular-nums text-content/80"
+            >
+              <p>{pendingDelete.question}</p>
+              {pendingDelete.cautions ? (
+                <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                  {pendingDelete.cautions}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p
+              role="status"
+              className="min-w-0 text-[11px] leading-snug tabular-nums text-content/55"
+            >
+              {progress
+                ? `${progress.verb} ${progress.done + 1} of ${progress.total}…`
+                : (result?.text ??
+                  (selected.length === 0
+                    ? "Nothing selected"
+                    : `${selected.length} selected in ${selectedProjects} ${
+                        selectedProjects === 1 ? "project" : "projects"
+                      }`))}
+            </p>
+          )}
           <div className="flex shrink-0 items-center gap-2">
-            {result ? (
+            {pendingDelete ? (
+              <>
+                {/* Keyed: it must mount, not take over the button clicked. */}
+                <SecondaryButton
+                  key="keep"
+                  autoFocus
+                  onClick={() => setPendingDelete(null)}
+                >
+                  Keep them
+                </SecondaryButton>
+                <SecondaryButton
+                  danger
+                  onClick={() => void removeRows("delete", pendingDelete.rows)}
+                >
+                  {`Delete ${pendingDelete.rows.length} for good`}
+                </SecondaryButton>
+              </>
+            ) : result ? (
               <>
                 {result.archived.length > 0 ? (
                   <SecondaryButton onClick={() => void undo(result.archived)}>
@@ -408,12 +497,25 @@ export function SessionCleanup({
               </>
             ) : (
               <>
+                {onDelete ? (
+                  <SecondaryButton
+                    key="delete"
+                    ref={deleteButton}
+                    danger
+                    disabled={working || selected.length === 0}
+                    onClick={askToDelete}
+                  >
+                    {selected.length > 0
+                      ? `Delete ${selected.length}…`
+                      : "Delete…"}
+                  </SecondaryButton>
+                ) : null}
                 <SecondaryButton disabled={working} onClick={onClose}>
                   Cancel
                 </SecondaryButton>
                 <PrimaryButton
                   disabled={working || selected.length === 0}
-                  onClick={() => void archiveSelected()}
+                  onClick={() => void removeRows("archive", selected)}
                 >
                   {selected.length > 0
                     ? `Archive ${selected.length}`

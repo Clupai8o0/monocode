@@ -37,6 +37,7 @@ let projects: Record<string, Row[]>;
 let container: HTMLDivElement;
 let root: Root;
 let onArchive: ReturnType<typeof vi.fn>;
+let onDelete: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -59,6 +60,7 @@ beforeEach(() => {
   setCloseState("a2", SAVED, { kind: "unsafe", detail: "still running" });
   setCloseState("b1", SAVED, { kind: "safe", detail: "" });
   onArchive = vi.fn(async () => true);
+  onDelete = vi.fn(async () => true);
   onClose = vi.fn();
   container = document.createElement("div");
   document.body.append(container);
@@ -87,6 +89,7 @@ async function mount(
         approvalSessionIds: new Set<string>(),
         openSessionIds: extra.openSessionIds ?? [],
         onArchive: onArchive as never,
+        onDelete: onDelete as never,
         onClose: onClose as never,
       }),
     );
@@ -211,6 +214,105 @@ it("says so when a project cannot be read", async () => {
   await mount();
   expect(rowBox("a1")).toBeDefined();
   expect(document.body.textContent).toContain("Could not read 1 project.");
+});
+
+const deletedIds = () => onDelete.mock.calls.map(([row]) => row.id);
+
+it("deletes nothing until the second click, and offers no undo", async () => {
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  expect(onDelete).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain(
+    "Delete 2 sessions from 2 projects for good? Worktrees and branches stay.",
+  );
+  await click(buttonNamed(/^Delete 2 for good$/));
+  expect(deletedIds()).toEqual(["a1", "b1"]);
+  expect(onArchive).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain("Deleted 2.");
+  expect(rowBox("a1")).toBeUndefined();
+  expect(document.body.textContent).not.toContain("Undo");
+});
+
+it("Keep them backs out of a delete with the ticks intact", async () => {
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  await click(buttonNamed(/^Keep them$/));
+  expect(onDelete).not.toHaveBeenCalled();
+  expect(rowBox("a1")?.checked).toBe(true);
+  expect(buttonNamed(/^Delete 2…$/).disabled).toBe(false);
+});
+
+it("locks the ticks while asking, so the count asked about holds", async () => {
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  expect(rowBox("a1")?.disabled).toBe(true);
+  expect(buttonNamed(/^Everything/).disabled).toBe(true);
+});
+
+it("warns about not-safe and open sessions before deleting them", async () => {
+  await mount({ openSessionIds: ["a1"] });
+  await click(buttonNamed(/^Everything/));
+  await click(rowBox("a1")!);
+  await click(rowBox("a2")!);
+  await click(buttonNamed(/^Delete 2…$/));
+  expect(document.body.textContent).toContain(
+    "Includes 1 marked not safe, 1 open in a tab.",
+  );
+});
+
+it("keeps what moved on, what another window holds and what failed", async () => {
+  projects["/p/gamma"] = [session("c1", "/p/gamma")];
+  setCloseState("c1", SAVED, { kind: "safe", detail: "" });
+  sessionHeldElsewhere.mockImplementation(async (id: string) => id === "b1");
+  onDelete.mockImplementationOnce(async () => false);
+  await act(async () => {
+    root.render(
+      createElement(SessionCleanup, {
+        projectPaths: ["/p/alpha", "/p/beta", "/p/gamma"],
+        busySessionIds: new Set<string>(),
+        approvalSessionIds: new Set<string>(),
+        openSessionIds: [],
+        onArchive: onArchive as never,
+        onDelete: onDelete as never,
+        onClose: onClose as never,
+      }),
+    );
+  });
+  await click(buttonNamed(/^Delete 3…$/));
+  projects["/p/gamma"] = [session("c1", "/p/gamma", { updatedAt: SAVED + 1 })];
+  await click(buttonNamed(/^Delete 3 for good$/));
+  expect(deletedIds()).toEqual(["a1"]);
+  expect(document.body.textContent).toContain(
+    "Deleted 0. Kept 3: changed, in use or could not be deleted.",
+  );
+});
+
+it("a failed delete throwing still keeps the row", async () => {
+  onDelete.mockImplementation(async () => {
+    throw new Error("locked");
+  });
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  await click(buttonNamed(/^Delete 2 for good$/));
+  expect(document.body.textContent).toContain("Deleted 0. Kept 2");
+  expect(rowBox("a1")).toBeDefined();
+});
+
+it("has no Delete button when the app gives no way to delete", async () => {
+  await act(async () => {
+    root.render(
+      createElement(SessionCleanup, {
+        projectPaths: ["/p/alpha"],
+        busySessionIds: new Set<string>(),
+        approvalSessionIds: new Set<string>(),
+        openSessionIds: [],
+        onArchive: onArchive as never,
+        onClose: onClose as never,
+      }),
+    );
+  });
+  expect(document.body.textContent).toContain("Archive");
+  expect(document.body.textContent).not.toContain("Delete");
 });
 
 it("closes on Cancel", async () => {

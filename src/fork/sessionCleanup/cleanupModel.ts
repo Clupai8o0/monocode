@@ -124,10 +124,38 @@ export function cleanupAge(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function cleanupResult(archived: number, kept: number): string {
-  const done = `Archived ${archived}.`;
+export type CleanupMode = "archive" | "delete";
+
+export function cleanupResult(
+  mode: CleanupMode,
+  removed: number,
+  kept: number,
+): string {
+  const verb = mode === "delete" ? "deleted" : "archived";
+  const done = `${verb === "deleted" ? "Deleted" : "Archived"} ${removed}.`;
   if (kept === 0) {
     return done;
   }
-  return `${done} Kept ${kept}: changed, in use or could not be archived.`;
+  return `${done} Kept ${kept}: changed, in use or could not be ${verb}.`;
+}
+
+/** Deleting has no undo, so the question says how much and what stays. */
+export function deleteQuestion(sessions: number, projects: number): string {
+  const what = sessions === 1 ? "1 session" : `${sessions} sessions`;
+  const where = projects === 1 ? "1 project" : `${projects} projects`;
+  return `Delete ${what} from ${where} for good? Worktrees and branches stay.`;
+}
+
+/** What the ticked rows would lose that a safe, closed session would not. */
+export function deleteCautions(
+  notSafe: number,
+  unread: number,
+  open: number,
+): string | undefined {
+  const parts = [
+    notSafe > 0 ? `${notSafe} marked not safe` : "",
+    unread > 0 ? `${unread} not read yet` : "",
+    open > 0 ? `${open} open in a tab` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? `Includes ${parts.join(", ")}.` : undefined;
 }

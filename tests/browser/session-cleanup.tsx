@@ -59,6 +59,9 @@ for (const cwd of Object.keys(PROJECTS)) {
   }
 }
 
+const deletedCalls: string[] = [];
+(window as unknown as { __deleteCalls: string[] }).__deleteCalls = deletedCalls;
+
 function Fixture() {
   const [open, setOpen] = useState(true);
   return open ? (
@@ -69,6 +72,10 @@ function Fixture() {
       openSessionIds={["/Users/me/projects/monocode#1"]}
       onArchive={async (id, archived) => {
         archivedCalls.push([id, archived]);
+        return true;
+      }}
+      onDelete={async (row) => {
+        deletedCalls.push(row.id);
         return true;
       }}
       onClose={() => setOpen(false)}

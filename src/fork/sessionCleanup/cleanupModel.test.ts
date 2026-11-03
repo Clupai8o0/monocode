@@ -4,6 +4,8 @@ import {
   cleanupAge,
   cleanupCandidates,
   cleanupResult,
+  deleteCautions,
+  deleteQuestion,
   groupByProject,
   IDLE_AFTER_MS,
   inCleanupFilter,
@@ -117,7 +119,24 @@ describe("labels", () => {
   });
 
   it("mentions kept sessions only when there are some", () => {
-    expect(cleanupResult(3, 0)).toBe("Archived 3.");
-    expect(cleanupResult(3, 1)).toContain("Kept 1");
+    expect(cleanupResult("archive", 3, 0)).toBe("Archived 3.");
+    expect(cleanupResult("archive", 3, 1)).toContain("Kept 1");
+    expect(cleanupResult("delete", 3, 0)).toBe("Deleted 3.");
+    expect(cleanupResult("delete", 3, 1)).toContain("could not be deleted");
+  });
+
+  it("asks how much to delete and says what stays", () => {
+    expect(deleteQuestion(1, 1)).toBe(
+      "Delete 1 session from 1 project for good? Worktrees and branches stay.",
+    );
+    expect(deleteQuestion(4, 2)).toContain("4 sessions from 2 projects");
+  });
+
+  it("names only the risks a delete really has", () => {
+    expect(deleteCautions(0, 0, 0)).toBeUndefined();
+    expect(deleteCautions(2, 0, 1)).toBe(
+      "Includes 2 marked not safe, 1 open in a tab.",
+    );
+    expect(deleteCautions(0, 3, 0)).toBe("Includes 3 not read yet.");
   });
 });

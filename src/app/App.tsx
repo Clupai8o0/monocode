@@ -5888,6 +5888,8 @@ function Workspace({
       mode: "archive" | "delete",
       skipDeleteConfirm = false,
       origin: "ui" | "cli" = "ui",
+      // Fork: a session from another project is not in this project's history.
+      knownSummary?: SessionSummary,
     ): Promise<boolean> => {
       if (
         removingSessionIds.current.has(sessionId) ||
@@ -5898,7 +5900,8 @@ function Workspace({
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
-      const summary = history.find((entry) => entry.id === sessionId);
+      const summary =
+        history.find((entry) => entry.id === sessionId) ?? knownSummary;
       const seed = open ?? summary;
       const label = seed
         ? sessionDisplayTitle(seed.title, seed.harness)
@@ -6300,6 +6303,14 @@ function Workspace({
 
   const onDeleteHistorySession = useCallback(
     (sessionId: string) => onRemoveHistorySession(sessionId, "delete"),
+    [onRemoveHistorySession],
+  );
+
+  // Fork: the cleanup panel has asked already. Worktrees are left alone: one
+  // prompt per worktree would be no way to clear many sessions at once.
+  const onDeleteCleanupSession = useCallback(
+    (row: SessionSummary) =>
+      onRemoveHistorySession(row.id, "delete", true, "ui", row),
     [onRemoveHistorySession],
   );
 
@@ -14912,6 +14923,7 @@ function Workspace({
       onCancelReminders={sessionReminders.cancel}
       onDeleteSession={onDeleteHistorySession}
       onDeleteSessions={onDeleteHistorySessions}
+      onDeleteCleanupSession={onDeleteCleanupSession}
       onOpenFile={onOpenFile}
       onOpenTerminal={onOpenTerminal}
       onFileMoved={onFileMoved}

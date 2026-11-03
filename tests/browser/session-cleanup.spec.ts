@@ -37,6 +37,35 @@ for (const theme of ["dark", "light"] as const) {
     );
     expect(calls).toHaveLength(8);
 
+    await dialog.getByRole("button", { name: /^Everything/ }).click();
+    await dialog.getByRole("button", { name: /^Safe to close/ }).click();
+    await dialog.getByRole("button", { name: "Delete 4…" }).click();
+    await expect(dialog.getByText("Delete 4 sessions from 3 projects for good?")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Keep them" })).toBeFocused();
+    await page.screenshot({ path: `${dir}/delete-ask-${theme}.png` });
+    await dialog.getByRole("button", { name: "Keep them" }).click();
+    await expect(dialog.getByRole("button", { name: "Delete 4…" })).toBeFocused();
+
+    // A double click must not get past the question.
+    await dialog.getByRole("button", { name: "Delete 4…" }).dblclick();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __deleteCalls: unknown[] }).__deleteCalls,
+      ),
+    ).toHaveLength(0);
+    if (await dialog.getByRole("button", { name: "Keep them" }).count()) {
+      await dialog.getByRole("button", { name: "Keep them" }).click();
+    }
+
+    await dialog.getByRole("button", { name: "Delete 4…" }).click();
+    await dialog.getByRole("button", { name: "Delete 4 for good" }).click();
+    await expect(dialog.getByText("Deleted 4.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Undo" })).toHaveCount(0);
+    const deleted = await page.evaluate(
+      () => (window as unknown as { __deleteCalls: unknown[] }).__deleteCalls,
+    );
+    expect(deleted).toHaveLength(4);
+
     await dialog.getByRole("button", { name: "Done" }).click();
     await expect(page.locator("[data-closed]")).toBeVisible();
     expect(errors).toEqual([]);
