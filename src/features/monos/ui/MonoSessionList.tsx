@@ -239,11 +239,12 @@ export function MonoSessionList({
   );
   // Fork, from the native app: running and waiting sub-agents first, then the
   // latest saved update, then newest launch (the order they arrive in). A live
-  // row's `updatedAt` may be the clock, so it is not used to compare.
+  // row's `updatedAt` may be the clock, so it is not used to compare. One not
+  // saved yet has only just started, so it counts as the latest.
   const isActive = (id: string) => busyIds.has(id) || approvalIds.has(id);
   const savedAt = (id: string) =>
     (history.find((entry) => entry.id === id) ?? stored.byId.get(id))
-      ?.updatedAt ?? 0;
+      ?.updatedAt ?? Number.MAX_SAFE_INTEGER;
   const matching = launches
     .filter((launch) => matched.has(launch.sessionId))
     .sort(

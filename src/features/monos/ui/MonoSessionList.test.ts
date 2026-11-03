@@ -322,9 +322,11 @@ it("puts running and waiting sub-agents first, then the latest update", async ()
     "recent",
     "waiting",
     "running",
+    "unsaved",
   ].map((sessionId) => ({ ...launch, sessionId }));
   await render(
     [
+      { ...newSession("codex", "/repo"), id: "unsaved" },
       { ...newSession("codex", "/repo"), id: "running", busy: true },
       {
         ...newSession("codex", "/repo"),
@@ -348,6 +350,7 @@ it("puts running and waiting sub-agents first, then the latest update", async ()
   ).toEqual([
     "waiting",
     "running",
+    "unsaved",
     "recent",
     "tied-first",
     "tied-second",

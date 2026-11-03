@@ -56,15 +56,17 @@ export function useMonoContributions(
       const now = Date.now();
       const checkLanded =
         now - (landedCheckedAt.get(monoId) ?? 0) > LANDED_EVERY_MS;
-      if (checkLanded) landedCheckedAt.set(monoId, now);
       void invoke<MonoContributions>("fork_mono_contributions", {
         sessionIds: JSON.parse(idsKey) as string[],
         sinceMs: Math.max(0, firstDay(now).getTime() - MARGIN_MS),
         checkLanded,
       })
         .then((next) => {
-          loaded.set(monoId, next);
+          // A newer read has taken over, or will on the next visit: this one
+          // may be for an older list of sessions, so it must not be kept.
           if (!live) return;
+          if (checkLanded) landedCheckedAt.set(monoId, now);
+          loaded.set(monoId, next);
           setData(next);
           setFailed(false);
         })
