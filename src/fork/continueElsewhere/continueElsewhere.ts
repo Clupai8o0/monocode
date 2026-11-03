@@ -1,3 +1,4 @@
+import { handoffTargets as profileHandoffTargets } from "../../integrations/harness/core/firstClassProviders";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { HARNESS_TITLE } from "../../features/sessions/model/session";
 
@@ -9,18 +10,34 @@ import { HARNESS_TITLE } from "../../features/sessions/model/session";
 const ORIGINS_KEY = "monocode.fork.continuedFrom";
 const MAX_ORIGINS = 200;
 
-const OTHER: Partial<Record<HarnessId, HarnessId>> = {
+export function handoffTargets(harness: HarnessId): HarnessId[] {
+  return profileHandoffTargets(harness);
+}
+
+/** Preferred single target when the UI has not picked one yet. */
+const PRIMARY: Partial<Record<HarnessId, HarnessId>> = {
   claude: "codex",
   codex: "claude",
+  grok: "claude",
 };
 
 export function continueTarget(harness: HarnessId): HarnessId | null {
-  return OTHER[harness] ?? null;
+  const targets = handoffTargets(harness);
+  if (targets.length === 0) return null;
+  const preferred = PRIMARY[harness];
+  return preferred && targets.includes(preferred) ? preferred : targets[0];
 }
 
 export function continueLabel(harness: HarnessId): string | null {
   const target = continueTarget(harness);
   return target ? `Continue in ${HARNESS_TITLE[target]}` : null;
+}
+
+export function continueLabelFor(
+  harness: HarnessId,
+  target: HarnessId,
+): string {
+  return `Continue in ${HARNESS_TITLE[target]}`;
 }
 
 /** The brief is trimmed on purpose, so it says where the rest lives. */

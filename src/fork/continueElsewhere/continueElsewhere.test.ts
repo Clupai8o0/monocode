@@ -4,6 +4,7 @@ import {
   continuedOrigin,
   continueLabel,
   continueTarget,
+  handoffTargets,
   saveContinuedOrigin,
   withTranscriptPointer,
   type ContinuedOrigin,
@@ -19,17 +20,20 @@ const origin = (sessionId = "src"): ContinuedOrigin => ({
 
 beforeEach(() => localStorage.clear());
 
-describe("continueTarget", () => {
-  it("goes both ways between Claude and Codex", () => {
-    expect(continueTarget("claude")).toBe("codex");
-    expect(continueTarget("codex")).toBe("claude");
-    expect(continueLabel("claude")).toBe("Continue in Codex");
-    expect(continueLabel("codex")).toBe("Continue in Claude Code");
+describe("handoffTargets", () => {
+  it("offers the other first-class peers", () => {
+    expect(handoffTargets("claude").sort()).toEqual(["codex", "grok"]);
+    expect(handoffTargets("codex").sort()).toEqual(["claude", "grok"]);
+    expect(handoffTargets("grok").sort()).toEqual(["claude", "codex"]);
   });
 
-  it("offers nothing for other providers", () => {
-    expect(continueTarget("grok")).toBeNull();
-    expect(continueLabel("grok")).toBeNull();
+  it("keeps continueTarget as the primary peer for single-button callers", () => {
+    // Prefer Codex for Claude and Claude for Codex (historical default);
+    // Grok's primary peer is Claude.
+    expect(continueTarget("claude")).toBe("codex");
+    expect(continueTarget("codex")).toBe("claude");
+    expect(continueTarget("grok")).toBe("claude");
+    expect(continueLabel("grok")).toBe("Continue in Claude Code");
   });
 });
 
