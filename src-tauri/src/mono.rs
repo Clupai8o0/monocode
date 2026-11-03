@@ -309,7 +309,8 @@ fn save(
         std::fs::create_dir_all(path.parent().ok_or("Invalid skill path")?)
             .map_err(|e| e.to_string())?;
     } else if relative == "skills.json" {
-        crate::mono_skills::validate_assignments(text)?;
+        let previous = read_optional(&path)?;
+        crate::mono_skills::validate_assignments(text, previous.as_deref())?;
     }
     if let Some(expected) = expected_hash {
         let current = read_optional(&path)?.unwrap_or_default();
@@ -648,6 +649,55 @@ mod tests {
         assert_eq!(loaded.soul, None);
         assert_eq!(loaded.memory, "");
         assert!(save(&root, "a", None, "skills.json", "{not-json", None).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn assignment_edits_preserve_only_unchanged_missing_references() {
+        let root = temp_root();
+        let catalog = root.join("app/.agents/skills");
+        let entry = |name: &str| {
+            serde_json::json!({
+                "name": name, "description": "Workflow",
+                "path": crate::fs::path_to_js(&catalog.join(name).join("SKILL.md"))
+            })
+        };
+        for name in ["first", "second", "new"] {
+            let path = catalog.join(name).join("SKILL.md");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!("---\nname: {name}\ndescription: Workflow\n---\n"),
+            )
+            .unwrap();
+        }
+        let original = serde_json::json!([entry("first"), entry("second")]).to_string();
+        save(&root, "a", None, "skills.json", &original, None).unwrap();
+        for name in ["first", "second"] {
+            std::fs::remove_file(catalog.join(name).join("SKILL.md")).unwrap();
+        }
+        let with_new =
+            serde_json::json!([entry("first"), entry("second"), entry("new")]).to_string();
+        assert!(save(&root, "a", None, "skills.json", &with_new, None).is_ok());
+        let remaining = serde_json::json!([entry("second"), entry("new")]).to_string();
+        assert!(save(&root, "a", None, "skills.json", &remaining, None).is_ok());
+        // A removed missing reference cannot be added back until discovered.
+        assert!(save(&root, "a", None, "skills.json", &with_new, None).is_err());
+        let mut changed = entry("second");
+        changed["path"] = serde_json::json!(crate::fs::path_to_js(&catalog.join("other/SKILL.md")));
+        assert!(save(
+            &root,
+            "a",
+            None,
+            "skills.json",
+            &serde_json::json!([changed]).to_string(),
+            None
+        )
+        .is_err());
+        assert!(save(&root, "b", None, "skills.json", &remaining, None).is_err());
+        let dir = agent_dir(&root, "a", None).unwrap();
+        let invalid = serde_json::json!([{"name":"outside","description":"Workflow","path":crate::fs::path_to_js(&root.join("outside/SKILL.md"))}]).to_string();
+        std::fs::write(dir.join("skills.json"), &invalid).unwrap();
+        assert!(save(&root, "a", None, "skills.json", &invalid, None).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

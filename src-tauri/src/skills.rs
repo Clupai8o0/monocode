@@ -409,6 +409,16 @@ pub(crate) fn is_discovered_skill_path(path: &str) -> bool {
         .any(|skill| normalize_path_for_compare(&skill.path) == assigned)
 }
 
+/// A formerly discovered reference may be retained after its definition is gone.
+/// This does not authorize reading it or assigning a new missing source.
+pub(crate) fn is_missing_discovered_skill_path(path: &str) -> bool {
+    let Some(root) = skill_md_discovery_root(Path::new(path)) else {
+        return false;
+    };
+    is_skill_discovery_root(&root)
+        && matches!(std::fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+}
+
 fn skill_md_discovery_root(path: &Path) -> Option<PathBuf> {
     let name = path.file_name()?.to_str()?;
     if name != "SKILL.md" && name != "skill.md" {
