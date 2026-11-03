@@ -1,4 +1,4 @@
-import { subscribeGitChanged } from "../../../platform/tauri/fs";
+import { listDir, subscribeGitChanged } from "../../../platform/tauri/fs";
 import {
   sessionCheckpointStatus,
   subscribeReviewChanged,
@@ -19,6 +19,8 @@ type Entry = {
 };
 
 export const EMPTY_SESSION_REVIEW: Snapshot = { files: [], error: null };
+/** The system's own word that a path isn't a folder: missing, or now a file. */
+const FOLDER_GONE = /\(os error (?:2|3|20)\)$/;
 const entries = new Map<string, Entry>();
 let unsubscribe: (() => void) | undefined;
 
@@ -69,12 +71,23 @@ function load(entry: Entry): Promise<void> {
     .then(({ files }) => {
       if (revision === entry.revision) publish(entry, { files, error: null });
     })
-    .catch((caught: unknown) => {
+    .catch(async (caught: unknown) => {
+      // A worktree merged and removed leaves nothing to record or to undo.
+      const folderGone = await listDir(entry.cwd).then(
+        () => false,
+        (failure: unknown) => FOLDER_GONE.test(String(failure)),
+      );
       if (revision === entry.revision)
-        publish(entry, {
-          files: [],
-          error: caught instanceof Error ? caught.message : String(caught),
-        });
+        publish(
+          entry,
+          folderGone
+            ? EMPTY_SESSION_REVIEW
+            : {
+                files: [],
+                error:
+                  caught instanceof Error ? caught.message : String(caught),
+              },
+        );
     })
     .finally(() => {
       if (entry.inFlight?.revision === revision) entry.inFlight = undefined;

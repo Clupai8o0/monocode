@@ -14,6 +14,7 @@ const probes = vi.hoisted(() => ({
   status: vi.fn(),
   keep: vi.fn(),
   undo: vi.fn(),
+  listDir: vi.fn(),
 }));
 vi.mock("../model/checkpoint", () => ({
   sessionCheckpointStatus: probes.status,
@@ -28,6 +29,7 @@ vi.mock("../model/checkpoint", () => ({
 }));
 vi.mock("../../../platform/tauri/fs", () => ({
   basename: (path: string) => path.split("/").at(-1),
+  listDir: probes.listDir,
   subscribeGitChanged: (listener: () => void) => {
     window.addEventListener("test-git-changed", listener);
     return () => window.removeEventListener("test-git-changed", listener);
@@ -52,6 +54,8 @@ beforeEach(() => {
   probes.status.mockReset();
   probes.keep.mockReset();
   probes.undo.mockReset();
+  probes.listDir.mockReset();
+  probes.listDir.mockResolvedValue([]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -126,6 +130,23 @@ it("shows recording failures instead of implying there were no changes", async (
     "Final checkpoint could not be captured",
   );
   expect(container.querySelector("[data-session-review]")).toBeNull();
+});
+
+it("says nothing once the session's folder has been removed", async () => {
+  probes.status.mockRejectedValue(new Error("/repo: Not a directory"));
+  probes.listDir.mockRejectedValue(
+    "/repo: No such file or directory (os error 2)",
+  );
+  await render();
+  expect(probes.listDir).toHaveBeenCalledWith("/repo");
+  expect(container.textContent).toBe("");
+});
+
+it("still reports a failure when the folder is there but can't be read", async () => {
+  probes.status.mockRejectedValue(new Error("Final checkpoint failed"));
+  probes.listDir.mockRejectedValue("/repo: Permission denied (os error 13)");
+  await render();
+  expect(container.textContent).toContain("Couldn’t record changes");
 });
 
 it("ignores a late load from a different session", async () => {
