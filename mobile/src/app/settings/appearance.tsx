@@ -1,3 +1,4 @@
+import { Host as UniversalHost, Slider as UniversalSlider } from "@expo/ui";
 import { Host, Picker, Slider, Text as NativeText } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel,
@@ -31,7 +32,6 @@ import { SettingsPage, SettingsRow } from "@/features/settings/SettingsUI";
 import { useCollapsedToolCalls } from "@/features/settings/toolCalls";
 import { projectForRoute } from "@/features/workspace/routing";
 import { useWorkspace } from "@/features/workspace/WorkspaceProvider";
-import { ChoiceMenu } from "@/ui/ChoiceMenu";
 import { Icon } from "@/ui/Icon";
 import {
   ACCENTS,
@@ -87,30 +87,32 @@ const SCHEMES = [
 /** Light, dark or the phone's own, as iOS's own segmented control. */
 function SchemeControl() {
   const [preference, setPreference] = useAppearancePreference();
-  const styles = useStyles();
   const colors = useColors();
-  // SwiftUI's segmented picker is iOS only; Android picks from a list.
-  if (Platform.OS === "android") {
-    const chosen = SCHEMES.find((option) => option.value === preference);
-    return (
-      <ChoiceMenu
-        label="Color scheme"
-        actions={SCHEMES.map((option) => ({
-          label: option.label,
-          selected: option.value === preference,
-          onPress: () => {
-            void Haptics.selectionAsync();
-            setPreference(option.value);
-          },
-        }))}
-      >
-        <View style={[styles.card, styles.pickerRow]}>
-          <Text style={styles.pickerValue}>{chosen?.label ?? "System"}</Text>
-          <Icon name="chevronDown" size={16} color={colors.muted} />
-        </View>
-      </ChoiceMenu>
-    );
-  }
+  const styles = useStyles();
+  // SwiftUI's segmented picker has no Android view; a row of buttons stands in.
+  if (Platform.OS === "android") return (
+    <View style={styles.segments}>
+      {SCHEMES.map((option) => {
+        const selected = preference === option.value;
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setPreference(option.value);
+            }}
+            style={[styles.segment, selected && { backgroundColor: colors.surfaceRaised }]}
+          >
+            <Text style={styles.segmentLabel}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
   return (
     <Host matchContents={{ vertical: true }}>
       <Picker
@@ -132,9 +134,6 @@ function SchemeControl() {
 }
 
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
-
-/** The strengths Android offers in place of the iOS slider, across its range. */
-const VISIBILITY_STEPS = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65] as const;
 
 function ThemeList() {
   const colors = useColors();
@@ -326,40 +325,30 @@ function BackgroundSection({ projectId }: { projectId: string }) {
       <View style={styles.backgroundRows}>
         {settings.image ? (
           <>
-            {Platform.OS === "android" ? (
-              // SwiftUI's slider is iOS only; Android picks a strength instead.
-              <ChoiceMenu
-                label="Background visibility"
-                actions={VISIBILITY_STEPS.map((step) => ({
-                  label: `${Math.round(step * 100)}%`,
-                  selected: Math.abs(step - settings.opacity) < 0.03,
-                  onPress: () => controls.setOpacity(step),
-                }))}
-              >
-                <View style={styles.pickerRow}>
-                  <Text style={styles.pickerValue}>Visibility</Text>
-                  <Text style={styles.previewHint}>
-                    {Math.round(settings.opacity * 100)}%
-                  </Text>
-                </View>
-              </ChoiceMenu>
-            ) : (
-              <View style={styles.visibility}>
-                <Host style={styles.slider}>
-                  <Slider
+            <View style={styles.visibility}>
+              {Platform.OS === "android" ? (
+                <UniversalHost style={styles.slider}>
+                  <UniversalSlider
                     value={settings.opacity}
                     min={OPACITY_RANGE.min}
                     max={OPACITY_RANGE.max}
-                    step={0.01}
                     onValueChange={controls.setOpacity}
-                    modifiers={[
-                      tint(colors.accent),
-                      accessibilityLabel("Background visibility"),
-                    ]}
                   />
-                </Host>
-              </View>
-            )}
+                </UniversalHost>
+              ) : <Host style={styles.slider}>
+                <Slider
+                  value={settings.opacity}
+                  min={OPACITY_RANGE.min}
+                  max={OPACITY_RANGE.max}
+                  step={0.01}
+                  onValueChange={controls.setOpacity}
+                  modifiers={[
+                    tint(colors.accent),
+                    accessibilityLabel("Background visibility"),
+                  ]}
+                />
+              </Host>}
+            </View>
             <View style={styles.divider} />
           </>
         ) : null}
@@ -507,16 +496,21 @@ const useStyles = themedStyles((colors) => ({
   slider: {
     height: 44,
   },
-  // Android's stand-in for the segmented picker: the chosen scheme and a chevron.
-  pickerRow: {
+  segments: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    padding: 3,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
   },
-  pickerValue: {
+  segment: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  segmentLabel: {
     color: colors.content,
-    fontSize: 16,
+    fontSize: 14,
+    fontWeight: "500",
   },
 }));

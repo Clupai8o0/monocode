@@ -56,6 +56,7 @@ vi.mock("react-native-safe-area-context", () => ({
 }));
 vi.mock("expo-haptics", () => ({ selectionAsync: vi.fn() }));
 vi.mock("expo-router", () => ({ router: { dismissTo: desktop.dismissTo } }));
+vi.mock("@expo/ui", () => ({ Host: () => null, Slider: () => null }));
 vi.mock("@expo/ui/swift-ui", () => ({ Host: () => null, Slider: () => null }));
 vi.mock("@expo/ui/swift-ui/modifiers", () => ({
   accessibilityLabel: vi.fn(),

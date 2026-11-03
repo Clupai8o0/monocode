@@ -33,6 +33,7 @@ import {
   renamedWorktreeBranch,
   sessionWorktreeBranchName,
 } from "../fork/autoWorktree/autoWorktree";
+import { recoverMobileUsage } from "../features/mobile/model/mobileUsageLimit";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { useMobileWorkspace } from "../features/mobile/hooks/useMobileWorkspace";
 import { hasMobileAttachments, mobileAttachments } from "../features/mobile/model/mobileAttachments";
@@ -1652,6 +1653,8 @@ function Workspace({
   const linkedWorkItemActivityFetches = useRef(new Map<string, number>());
   const queueDispatchingRef = useRef(new Set<string>());
   const [queueDispatchVersion, setQueueDispatchVersion] = useState(0);
+  const mobileUsageActions = useRef<{ resume: (id: string) => Promise<boolean>; automatic: (id: string, enabled: boolean) => void } | null>(null);
+  const mobileUsagePending = useRef(new Set<string>());
   const usageResumingRef = useRef(new Set<string>());
   const usageResetLookups = useRef(new WeakSet<UsageLimit>());
   const tabsRef = useRef(tabs);
@@ -9080,29 +9083,32 @@ function Workspace({
   submitAfterProjectSyncRef.current = submitSession;
   // Interactive callers use the immediate result to clear their composer. The
   // queued-launch receiver uses submitSession to await the actual acceptance.
+  // Fork: a session used again leaves the archive.
+  const leaveArchive = useCallback(
+    (sessionId: string) => {
+      if (historyRef.current.some((row) => row.id === sessionId && row.archived)) {
+        void onArchiveHistorySession(sessionId, false);
+      }
+    },
+    [onArchiveHistorySession],
+  );
   const onSubmit = useCallback(
     (...args: Parameters<Submit>): boolean => {
       // Reject before async preparation can make the composer clear its draft.
       if (workspaceNavigation.isSwitching(args[0])) return false;
       const result = submitSession(...args);
-      // Fork: a session used again leaves the archive.
-      const leaveArchive = (accepted: boolean) => {
-        if (
-          accepted &&
-          historyRef.current.some((row) => row.id === args[0] && row.archived)
-        ) {
-          void onArchiveHistorySession(args[0], false);
-        }
+      const onAnswer = (accepted: boolean) => {
+        if (accepted) leaveArchive(args[0]);
       };
       if (typeof result === "boolean") {
-        leaveArchive(result);
+        onAnswer(result);
         return result;
       }
       // Deferred errors have already been displayed by submitAfterProjectSync.
-      void result.then(leaveArchive).catch(() => undefined);
+      void result.then(onAnswer).catch(() => undefined);
       return true;
     },
-    [onArchiveHistorySession, submitSession],
+    [leaveArchive, submitSession],
   );
 
   // Fork: the footer's Send to all sends as a session's composer does.
@@ -9629,6 +9635,18 @@ function Workspace({
       const sessionId = monoSession?.id ?? conversationId;
       const session = monoSession ?? await ensureOpenSessionRef.current(sessionId);
       if (!session) throw new Error("Session is no longer available");
+      if (method === "session.resumeUsage" || method === "session.resumeUsageAtReset") {
+        await recoverMobileUsage({
+          session: sessionsRef.current.find((current) => current.id === session.id),
+          token: params.token,
+          automatic: method === "session.resumeUsageAtReset",
+          enabled: params.enabled,
+          pending: mobileUsagePending.current,
+          resume: mobileUsageActions.current!.resume,
+          setAutomatic: mobileUsageActions.current!.automatic,
+        });
+        return { sessionId: session.id };
+      }
       if (method === "session.cancel") {
         await onStop(session.id);
         return { sessionId: session.id };
@@ -10120,7 +10138,7 @@ function Workspace({
   );
 
   const onUsageLimitDismiss = useCallback((sessionId: string) => {
-    setSessions((prev) =>
+    updateSessionState(sessionsRef, setSessions, (prev) =>
       prev.map((session) =>
         session.id === sessionId && session.usageLimit
           ? { ...session, usageLimit: undefined }
@@ -10131,7 +10149,7 @@ function Workspace({
 
   const onUsageLimitResumeAtReset = useCallback(
     (sessionId: string, enabled: boolean) => {
-      setSessions((prev) =>
+      updateSessionState(sessionsRef, setSessions, (prev) =>
         prev.map((session) =>
           session.id === sessionId && session.usageLimit
             ? {
@@ -10146,24 +10164,33 @@ function Workspace({
   );
 
   const onUsageLimitResume = useCallback(
-    (sessionId: string) => {
-      const session = sessionsRef.current.find(
-        (entry) => entry.id === sessionId,
-      );
-      if (!session?.usageLimit || session.busy) return;
+    async (sessionId: string): Promise<boolean> => {
+      const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+      if (!session?.usageLimit || session.busy) return false;
       if (isMonoSession(sessionId)) {
-        setSessions((prev) =>
-          prev.map((entry) =>
-            entry.id === sessionId ? resumeMonoUsageLimit(entry) : entry,
-          ),
+        updateSessionState(sessionsRef, setSessions, (prev) =>
+          prev.map((entry) => entry.id === sessionId ? resumeMonoUsageLimit(entry) : entry),
         );
-        return;
+        return true;
       }
       onUsageLimitDismiss(sessionId);
-      onSubmit(sessionId, CONTINUE_PROMPT);
+      try {
+        if (await submitSession(sessionId, CONTINUE_PROMPT)) {
+          leaveArchive(sessionId); // Fork
+          return true;
+        }
+      } catch { /* The submission path reports its desktop error. */ }
+      // A rejected continuation previously cleared the limit entirely. Keep
+      // that one-attempt scheduler behavior, but retain a manual retry notice.
+      updateSessionState(sessionsRef, setSessions, (prev) => prev.map((entry) =>
+        entry.id === sessionId && !entry.busy && !entry.usageLimit
+          ? { ...entry, usageLimit: { ...session.usageLimit!, resumeAtReset: false } } : entry));
+      return false;
     },
-    [onSubmit, onUsageLimitDismiss],
+    [leaveArchive, submitSession, onUsageLimitDismiss],
   );
+
+  mobileUsageActions.current = { resume: onUsageLimitResume, automatic: onUsageLimitResumeAtReset };
 
   const accountSwitching = useRef(new Set<string>());
   /**
