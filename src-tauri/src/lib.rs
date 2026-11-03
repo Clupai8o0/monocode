@@ -535,6 +535,7 @@ pub fn run() {
             harness::harness_runtime_binary_paths,
             harness::harness_resolve_claude,
             harness::claude_mcp_list,
+            harness::cursor_mcp_list,
             mcp::mcp_discover,
             mcp::mcp_add,
             harness::claude_mcp_add,
