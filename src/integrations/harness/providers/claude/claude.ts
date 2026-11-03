@@ -1,4 +1,5 @@
 import { TurnNotReadyError } from "../../core/types";
+import { claudeFileDelivery } from "./claudeDelivery";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
 import type {
@@ -150,6 +151,7 @@ type Live = {
   nextControlId: number;
   toolsByIndex: Map<number, InFlightTool>;
   toolsById: Map<string, InFlightTool>;
+  deliveredToolIds: Set<string>;
   outputPathsByToolId: Map<string, string>;
   agentTasks: Map<string, LiveAgentTask>;
   /**
@@ -521,6 +523,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     nextControlId: 1,
     toolsByIndex: new Map(),
     toolsById: new Map(),
+    deliveredToolIds: new Set(),
     outputPathsByToolId: new Map(),
     agentTasks: new Map(),
     backgroundTasks: new Map(),
@@ -666,6 +669,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.pendingAssistantBoundary = false;
   live.toolsByIndex.clear();
   live.toolsById.clear();
+  live.deliveredToolIds.clear();
   live.outputPathsByToolId.clear();
   live.agentTasks.clear();
   live.backgroundTasks.clear();
@@ -1033,6 +1037,14 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
       detail: result.text || undefined,
       preview: previewFromTool(tool.name, tool.input, result.text),
     });
+    if (!result.isError && !live.deliveredToolIds.has(tool.id)) {
+      const delivery = claudeFileDelivery(tool.name, tool.input, live.cwd, rec.tool_use_result, result.text);
+      if (delivery) {
+        live.deliveredToolIds.add(tool.id);
+        closePendingAssistantMessage(live);
+        live.onEvent({ type: "file.delivered", text: delivery });
+      }
+    }
     if (
       !result.isError &&
       applyClaudeTaskTool(live.claudeTasks, tool.name, tool.input, result.text)

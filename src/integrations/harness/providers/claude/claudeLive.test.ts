@@ -7,6 +7,7 @@ import {
   foldedBlocks,
   groupTurnItems,
   workSummaryLine,
+  groupMonoTurnItems,
 } from "../../../../features/sessions/model/transcriptActivity";
 
 const sent: string[] = [];
@@ -46,6 +47,7 @@ const {
   stopClaudeSession,
   __claudeTestReset,
 } = await import("./claude");
+const { sanitizeSessionForPersist } = await import("../../../../features/sessions/data/sessionStore");
 import type { HarnessEvent } from "../../core/types";
 import type { RuntimeMode, TurnIntent } from "../../../../features/sessions/model/session";
 
@@ -56,6 +58,139 @@ function parse() {
 function emit(rec: Record<string, unknown>) {
   onLine!(JSON.stringify(rec));
 }
+
+describe("file delivery", () => {
+  it("keeps delivery links separate from prose before and after the tool", async () => {
+    const { events, turn } = await startTurn("delivery-boundaries");
+    emit({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Here is the preview." },
+          {
+            type: "tool_use",
+            id: "delivery",
+            name: "SendUserFile",
+            input: { files: ["/tmp/preview.html"] },
+          },
+        ],
+      },
+    });
+    emit({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "delivery",
+            content: "1 file delivered to user.",
+          },
+        ],
+      },
+    });
+    emit({ type: "assistant", message: { content: [{
+      type: "tool_use", id: "after-delivery", name: "Bash", input: { command: "echo checking" },
+    }] } });
+    emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "after-delivery", content: "checking" }] } });
+    emit({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Try each version." },
+      },
+    });
+    emit({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Try each version." }] },
+    });
+    emit({ type: "result", subtype: "success" });
+    await turn;
+    const session = events.reduce(
+      applyHarnessEvent,
+      newSession("claude", "/repo"),
+    );
+    expect(
+      session.blocks
+        .filter((block) => block.role === "assistant")
+        .map((block) => block.text),
+    ).toEqual([
+      "Here is the preview.\n\n[preview.html](</tmp/preview.html>)",
+      "Try each version.",
+    ]);
+    const saved = sanitizeSessionForPersist(session);
+    expect(saved.blocks.some((block) => block.fileDelivery)).toBe(true);
+    for (const items of [groupTurnItems(saved.blocks), groupMonoTurnItems(saved.blocks, { live: true })]) {
+      expect(items.some((item) => item.type === "block" && item.block.fileDelivery)).toBe(true);
+      const fold = foldableWork(items);
+      expect(fold ? foldedBlocks(items, fold).some((block) => block.fileDelivery) : false).toBe(false);
+    }
+  });
+
+  it.each([false, true])(
+    "keeps successful deliveries visible (error=%s)",
+    async (isError) => {
+      const { events, turn } = await startTurn(`delivery-${isError}`);
+      emit({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "delivery",
+              name: "SendUserFile",
+              input: {
+                files: ["/tmp/flower plan.html"],
+                caption: "Four versions",
+              },
+            },
+          ],
+        },
+      });
+      const result = {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "delivery",
+              is_error: isError,
+              content: isError
+                ? "Delivery failed"
+                : "1 file delivered to user.",
+            },
+          ],
+        },
+      };
+      emit(result);
+      emit(result);
+      emit({ type: "result", subtype: "success" });
+      await turn;
+      const replies = events.filter((event) => event.type === "file.delivered");
+      expect(replies).toEqual(
+        isError
+          ? []
+          : [
+              {
+                type: "file.delivered",
+                text: "Four versions\n\n[flower plan.html](</tmp/flower%20plan.html>)",
+              },
+            ],
+      );
+      if (!isError) {
+        let session = newSession("claude", "/repo");
+        for (const event of events) session = applyHarnessEvent(session, event);
+        expect(
+          session.blocks.some(
+            (block) =>
+              block.role === "assistant" &&
+              block.text.includes("flower%20plan.html"),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+});
 
 const waitFor = async (pred: () => boolean, label: string) => {
   for (let i = 0; i < 200; i++) {

@@ -20,6 +20,34 @@ import {
 
 let now = 0;
 
+it("keeps a delivery attached to its answer past a mid-turn follow-up", () => {
+  let session = appendUser(newSession("claude", "/tmp"), "Question");
+  session = applyHarnessEvent(session, { type: "message.delta", text: "Answer" });
+  session.blocks.push({ id: "follow-up", role: "user", text: "And?", sentAt: 10 });
+  session = applyHarnessEvent(session, { type: "file.delivered", text: "[file](</tmp/a.html>)" });
+  expect(session.blocks.filter((block) => block.role === "assistant").map((block) => block.text)).toEqual(["Answer\n\n[file](</tmp/a.html>)"]);
+});
+
+it("keeps the answer and its delivered file in the same saved reply", () => {
+  let session = appendUser(newSession("claude", "/tmp"), "Show it");
+  session = applyHarnessEvent(session, { type: "message.delta", text: "Here is the result." });
+  session = applyHarnessEvent(session, { type: "message.completed" });
+  session = applyHarnessEvent(session, { type: "tool.started", callId: "send", title: "SendUserFile", kind: "other" });
+  session = applyHarnessEvent(session, { type: "file.delivered", text: "[file](</tmp/a.html>)" });
+  const answers = sanitizeSessionForPersist(session).blocks.filter((block) => block.role === "assistant");
+  expect(answers).toHaveLength(1);
+  expect(answers[0]).toMatchObject({ text: "Here is the result.\n\n[file](</tmp/a.html>)", fileDelivery: true });
+  expect(answers[0].streaming).toBeUndefined();
+});
+
+it("keeps delivered files with the current answer without changing previous turns", () => {
+  let session = appendUser(newSession("claude", "/tmp"), "Old question");
+  session = applyHarnessEvent(session, { type: "message.delta", text: "Old answer" });
+  session = appendUser(session, "New question");
+  session = applyHarnessEvent(session, { type: "file.delivered", text: "[file](</tmp/a.html>)" });
+  expect(session.blocks.filter((block) => block.role === "assistant").map((block) => block.text)).toEqual(["Old answer", "[file](</tmp/a.html>)"]);
+});
+
 beforeEach(() => {
   now = 0;
   vi.spyOn(Date, "now").mockImplementation(() => now);

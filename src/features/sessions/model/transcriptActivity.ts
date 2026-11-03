@@ -601,6 +601,7 @@ export function groupMonoTurnItems(
     if (
       index >= start &&
       index <= end &&
+      !(item.type === "block" && item.block.fileDelivery) &&
       !(item.type === "block" && followUpReplies.has(item.block.id)) &&
       // A reply already delivered before background work resumed stays put.
       !(boundary < items.length && index === boundary - 1) &&
@@ -1176,6 +1177,7 @@ function yieldedAt(items: TurnItem[]): number {
 }
 
 function isFoldableItem(item: TurnItem): boolean {
+  if (item.type === "block" && item.block.fileDelivery) return false;
   // A stack of delegated runs is work, so the fold reaches across it and the
   // turn's status line stays at the top. The rows themselves never collapse —
   // the transcript pins them outside the fold's body.
