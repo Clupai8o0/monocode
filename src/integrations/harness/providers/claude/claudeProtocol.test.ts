@@ -7,6 +7,7 @@ import {
   applyClaudePromptEffortPrefix,
   applyClaudeTaskTool,
   askUserQuestionAllowInput,
+  backgroundOutputPath,
   buildClaudeSpawnArgs,
   buildClaudeUserMessage,
   contextFromResult,
@@ -42,6 +43,39 @@ import {
   usageLimitFromRateLimitEvent,
   isReplayedTaskNotificationResult,
 } from "./claudeProtocol";
+
+describe("backgroundOutputPath", () => {
+  it.each([
+    "Command running in background with ID: b7.",
+    "Command was manually backgrounded by user with ID: b7.",
+  ])("reads the output path from %s", (prefix) => {
+    const path = "/private/tmp/claude-501/project/session/tasks/b7.output";
+    expect(backgroundOutputPath(
+      `${prefix} Output is being written to: ${path}. You will be notified when it completes.`,
+    )).toBe(path);
+  });
+
+  it("keeps spaces and dots inside the path", () => {
+    const path = "/private/tmp/claude-501/my project.v2/session/tasks/b7.output";
+    expect(backgroundOutputPath(
+      `Command running in background with ID: b7. Output is being written to: ${path}.`,
+    )).toBe(path);
+  });
+
+  it("ignores ordinary output mentioning the phrase", () => {
+    expect(backgroundOutputPath(
+      "Log: Output is being written to: /tmp/claude-501/tasks/b7.output.",
+    )).toBeUndefined();
+  });
+
+  it("ignores successful command output without a path", () => {
+    expect(backgroundOutputPath("All tests passed")).toBeUndefined();
+    expect(backgroundOutputPath("Command running in background with ID: b7")).toBeUndefined();
+    expect(backgroundOutputPath(
+      "Command running in background with ID: b7. Output is being written to: /tmp/file.txt.",
+    )).toBeUndefined();
+  });
+});
 
 describe("runtimeModeToPermission", () => {
   it("maps runtime modes onto Claude permission flags", () => {

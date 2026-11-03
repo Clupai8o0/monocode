@@ -60,6 +60,10 @@ export type HarnessEvent =
       status?: string;
       /** Work the agent left running when it yielded. */
       background?: boolean;
+      /** Full shell script behind a background command's one-line title. */
+      command?: string;
+      /** File the background command is writing to on this machine. */
+      outputPath?: string;
       preview?: ToolPreview;
       /** Every path affected when one structured edit changes multiple files. */
       paths?: string[];

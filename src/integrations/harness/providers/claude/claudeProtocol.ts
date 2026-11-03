@@ -869,6 +869,14 @@ export function assistantToolUses(rec: Record<string, unknown>): Array<{
   });
 }
 
+/** Output file reported when Claude leaves a shell command running. */
+export function backgroundOutputPath(text: string): string | undefined {
+  if (!text.startsWith("Command ")) return undefined;
+  return /Output is being written to: ([^\r\n]+?\.output)(?=\.(?:\s|$)|\s*$)/.exec(
+    text,
+  )?.[1];
+}
+
 export function toolResultsFromUserMessage(
   rec: Record<string, unknown>,
 ): Array<{

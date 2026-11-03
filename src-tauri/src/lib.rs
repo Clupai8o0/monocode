@@ -23,6 +23,7 @@ mod fork_office;
 mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 mod fork_code_run; // Fork: sandboxed code drills for the Games panel's Code tab.
+mod fork_task_output; // Fork: bounded tails of local background-command output.
 mod fork_leetcode; // Fork: LeetCode problems as Code tab drills.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
@@ -725,6 +726,7 @@ pub fn run() {
             fork_html::fork_html_preview_create, // Fork
             fork_html::fork_html_preview_remove, // Fork
             fork_code_run::fork_code_run,        // Fork
+            fork_task_output::fork_task_output_tail, // Fork
             fork_leetcode::fork_leetcode_fetch,  // Fork
             fork_leetcode::fork_leetcode_connect,  // Fork
             fork_leetcode::fork_leetcode_connect_paste,  // Fork
