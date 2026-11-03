@@ -53,6 +53,7 @@ mod devin_config;
 mod devin_usage;
 mod external_editor;
 mod fs;
+mod git_watch;
 mod gitlab;
 mod harness;
 mod harness_updates;
@@ -320,6 +321,7 @@ pub fn run() {
         })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
+        .manage(git_watch::GitWatchHost::default())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
         .manage(fork_html::HtmlPreviews::default())
@@ -366,6 +368,8 @@ pub fn run() {
             mobile_access::mobile_publish,
             mobile_access::mobile_reply,
             mobile_access::mobile_push,
+            git_watch::watch_git_changes,
+            git_watch::unwatch_git_changes,
             remote::remote_machines,
             remote::remote_connect,
             remote::remote_disconnect,
@@ -817,6 +821,9 @@ pub fn run() {
             control::window_closed(handle, &label);
             #[cfg(target_os = "macos")]
             mono_chat::window_closed(handle, &label);
+            handle
+                .state::<git_watch::GitWatchHost>()
+                .close_window(&label);
             if !other_window {
                 reap_harness_children(handle);
             }
@@ -839,6 +846,7 @@ pub fn run() {
             fork_update::on_quit(); // Fork
             #[cfg(unix)]
             fork_relay::stop(); // Fork
+            handle.state::<git_watch::GitWatchHost>().close_all();
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
         }

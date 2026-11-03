@@ -82,9 +82,8 @@ import { MOD } from "../../../platform/tauri/platform";
 import { applyProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { isRemoteProjectPath } from "../../projects/model/recents";
+import { watchGitChanges } from "../../../platform/tauri/gitWatch";
 import { MachinePill } from "../../../fork/machines/MachinePill";
-
-const GIT_POLL_MS = 2000;
 
 function confirmNative(message: string, okLabel?: string): Promise<boolean> {
   return ask(message, {
@@ -1674,7 +1673,7 @@ function useDiffIndex(
           // index immediately after the one we just read.
           publishing = true;
           try {
-            notifyGitChanged({ invalidatePending: false });
+            notifyGitChanged({ invalidatePending: false, cwd });
           } finally {
             publishing = false;
           }
@@ -1695,13 +1694,13 @@ function useDiffIndex(
     const onResume = () => {
       if (!publishing && !document.hidden) void load();
     };
-    const timer = window.setInterval(onResume, GIT_POLL_MS);
+    const unwatch = watchGitChanges(cwd, onResume);
     window.addEventListener("focus", onResume);
     document.addEventListener("visibilitychange", onResume);
-    const unsubGit = subscribeGitChanged(onResume);
+    const unsubGit = subscribeGitChanged(onResume, cwd);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      unwatch();
       window.removeEventListener("focus", onResume);
       document.removeEventListener("visibilitychange", onResume);
       unsubGit();

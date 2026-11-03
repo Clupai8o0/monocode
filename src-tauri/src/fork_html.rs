@@ -8,14 +8,12 @@ use std::path::{Component, Path};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{Manager, State, WebviewWindow};
 
-// Matches MAX_TEXT_FILE_BYTES in fs.rs: the editor cannot read a larger file.
-const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PREVIEWS: usize = 64;
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: u64 = 512 * 1024 * 1024;
 // Queue without creating blocking threads or allocating response buffers.
-// At most two 16 MB asset chunks can be in native read work concurrently.
+// At most two asset/media reads can be in native work concurrently.
 static READ_SLOTS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
@@ -96,11 +94,8 @@ impl HtmlPreviews {
         path: &str,
         cwd: &str,
     ) -> Result<PreviewLocation, String> {
-        if source.len() > MAX_SOURCE_BYTES {
-            return Err(format!(
-                "HTML preview supports files up to {} MB. Open Code to read this file.",
-                MAX_SOURCE_BYTES / (1024 * 1024)
-            ));
+        if source.len() > MAX_TOTAL_BYTES {
+            return Err("This HTML file is too large for the preview memory budget (32 MB). Open Code to edit it.".into());
         }
         let (document, project) =
             local_project(path, cwd).unwrap_or_else(|| ("index.html".into(), None));
@@ -642,14 +637,14 @@ mod tests {
     fn memory_limits_reject_new_pages_without_evicting_live_assets() {
         let store = HtmlPreviews::default();
         assert!(store
-            .create("main", "x".repeat(MAX_SOURCE_BYTES + 1), "", "")
+            .create("main", "x".repeat(MAX_TOTAL_BYTES + 1), "", "")
             .is_err());
         let first = store
-            .create("main", "x".repeat(MAX_SOURCE_BYTES), "", "")
+            .create("main", "x".repeat(MAX_TOTAL_BYTES / 4), "", "")
             .unwrap();
         for _ in 0..3 {
             store
-                .create("main", "x".repeat(MAX_SOURCE_BYTES), "", "")
+                .create("main", "x".repeat(MAX_TOTAL_BYTES / 4), "", "")
                 .unwrap();
         }
         assert!(store.create("main", "x".into(), "", "").is_err());
@@ -662,19 +657,23 @@ mod tests {
     }
 
     #[test]
-    fn five_mb_source_is_accepted_and_oversized_error_says_8_mb() {
+    fn single_source_above_preview_budget_points_to_code() {
         let store = HtmlPreviews::default();
-        assert!(store
-            .create("main", "x".repeat(5 * 1024 * 1024), "", "")
-            .is_ok());
-        let error = store
-            .create("main", "x".repeat(MAX_SOURCE_BYTES + 1), "", "")
-            .err()
-            .expect("oversized source must be rejected");
-        assert_eq!(
-            error,
-            "HTML preview supports files up to 8 MB. Open Code to read this file."
-        );
+        let error = store.create("main", "x".repeat(MAX_TOTAL_BYTES + 1), "", "")
+            .err().unwrap();
+        assert!(error.contains("too large"));
+        assert!(error.contains("Code"));
+        assert!(!error.contains("Close another"));
+    }
+
+    #[test]
+    fn serves_html_source_larger_than_eight_mb() {
+        let store = HtmlPreviews::default();
+        let source = format!("<!doctype html><p>{}</p>", "x".repeat(9 * 1024 * 1024));
+        let location = store.create("main", source.clone(), "", "").unwrap();
+        let response = serve_request(&store, &request(&location.url_path));
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.body(), source.as_bytes());
     }
 
     #[test]

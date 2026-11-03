@@ -2,6 +2,7 @@ import {
   cp,
   lstat,
   mkdir,
+  open,
   mkdtemp,
   readFile,
   realpath,
@@ -17,6 +18,7 @@ import { promisify } from "node:util";
 import type { FileMtime, FsEntry, GitPr, ProjectFile } from "../src/platform/tauri/fs";
 import { hostWorktrees } from "./git-worktrees";
 import { createHostBranch, hostBranches, switchHostBranch } from "./git-branches";
+import { GitWatchHost } from "./git-watch";
 import type { HostStore } from "./store";
 import {
   createHostPath,
@@ -37,6 +39,9 @@ const exec = promisify(execFile);
  * works on either machine. Paths are absolute host paths and must lie inside
  * a registered project or one of its worktrees. */
 export const WORKSPACE_COMMANDS = [
+  "watch_git_changes",
+  "wait_git_changes",
+  "unwatch_git_changes",
   "list_dir",
   "list_project_files",
   "read_text_file",
@@ -84,6 +89,8 @@ export type WorkspaceCommand = (typeof WORKSPACE_COMMANDS)[number];
 
 // Remote RPC has bounded request and response bodies. Keep file operations
 // within those bounds even after JSON escaping or base64 encoding.
+// Matches remote.rs MAX_RESPONSE_BYTES and server.ts MAX_BODY.
+const MAX_REMOTE_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_TEXT_FILE = 1024 * 1024;
 const MAX_PREVIEW_FILE = 10 * 1024 * 1024;
 const MAX_STAT_FILES = 64;
@@ -98,12 +105,17 @@ const alreadyExists = (name: string) =>
 type Located = { root: string; relative: string };
 
 export class WorkspaceCommands {
+  private watches = new GitWatchHost();
   private roots = new Map<string, { at: number; roots: string[] }>();
   private rootsGeneration = 0;
 
   invalidateRoots(): void {
     this.rootsGeneration++;
     this.roots.clear();
+  }
+
+  close(): void {
+    this.watches.close();
   }
 
   constructor(
@@ -119,6 +131,15 @@ export class WorkspaceCommands {
         ? (args as Record<string, unknown>)
         : {};
     switch (command as WorkspaceCommand) {
+      case "watch_git_changes":
+        return this.gitRoot(input.cwd).then((cwd) =>
+          this.watches.start(input.id, input.cwd, cwd),
+        );
+      case "wait_git_changes":
+        return this.watches.wait(input.id, input.cwd);
+      case "unwatch_git_changes":
+        this.watches.stop(input.id, input.cwd);
+        return Promise.resolve(null);
       case "list_dir":
         return this.listDir(input.path);
       case "list_project_files":
@@ -290,19 +311,32 @@ export class WorkspaceCommands {
     }));
   }
 
-  private async file(input: unknown, limit: number, tooLarge: string) {
+  private async file(input: unknown, limit?: number, tooLarge = "read") {
     const { path } = await this.existing(input);
     const info = await stat(path);
     if (!info.isFile()) throw new Error("Not a file");
-    if (info.size > limit)
-      throw new Error(
-        `File is too large to ${tooLarge} (maximum ${limit / 1024 / 1024} MB).`,
-      );
-    return readFile(path);
+    const tooLargeError = () => new Error(limit === MAX_REMOTE_TEXT_BYTES
+      ? "File exceeds the 16 MB remote transport limit. Open it on the host machine."
+      : `File is too large to ${tooLarge} (maximum ${limit! / 1024 / 1024} MB).`);
+    if (limit !== undefined && info.size > limit) throw tooLargeError();
+    if (limit === undefined) return readFile(path);
+    const handle = await open(path, "r");
+    try {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of handle.createReadStream({ autoClose: false })) {
+        size += chunk.length;
+        if (size > limit) throw tooLargeError();
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks, size);
+    } finally {
+      await handle.close();
+    }
   }
 
   private async readText(input: unknown): Promise<string> {
-    const bytes = await this.file(input, MAX_TEXT_FILE, "edit");
+    const bytes = await this.file(input, MAX_REMOTE_TEXT_BYTES);
     if (bytes.includes(0)) throw new Error("Binary files cannot be edited.");
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -338,10 +372,6 @@ export class WorkspaceCommands {
   private async writeText(input: unknown, content: unknown): Promise<void> {
     if (typeof content !== "string")
       throw new Error("Invalid file content");
-    if (Buffer.byteLength(content, "utf8") > MAX_TEXT_FILE)
-      throw new Error(
-        `File is too large to save (maximum ${MAX_TEXT_FILE / 1024 / 1024} MB).`,
-      );
     const { root, relative: rel } = await this.locate(input);
     const path = workspacePath(root, rel);
     if (await stat(path).then((info) => info.isDirectory(), () => false))
