@@ -633,3 +633,21 @@ test("dragging moves only the panel until the drag ends, side by side", async ({
   await page.mouse.up();
   expect((await appRoot.boundingBox())!.width).toBe(app.width - 100);
 });
+
+test("the game picker stops a table's clock, and closing it gives the keys back", async ({ page }) => {
+  await open(page);
+  await pickGame(page, "type race");
+  const board = page.locator("[data-table-active] [data-table-board]");
+  await expect(board).toBeFocused();
+  await page.keyboard.press("a");
+  const clock = async () => Number(/([\d.]+)s/.exec(await board.innerText())?.[1] ?? "NaN");
+  await expect.poll(clock).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Game", exact: true }).click();
+  await expect(page.locator("[data-fork-game-search]")).toBeFocused();
+  const stopped = await clock();
+  await page.waitForTimeout(700);
+  expect(await clock()).toBe(stopped);
+  await page.keyboard.press("Escape");
+  await expect(board).toBeFocused();
+  await expect.poll(clock).toBeGreaterThan(stopped);
+});

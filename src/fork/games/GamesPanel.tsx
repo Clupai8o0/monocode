@@ -655,7 +655,8 @@ export function GamesPanel() {
             mode={mode}
             runId={tableRun}
             open={open}
-            paused={!open || userPaused}
+            // The picker's search box has the keyboard, so a race can't run behind it.
+            paused={!open || userPaused || pickerOpen}
             waiting={activity.waiting}
             onExit={hideFromKey}
             onInput={resume}
