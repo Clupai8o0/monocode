@@ -5977,11 +5977,44 @@ pub fn mobile_list_dir(root: String, relative: String) -> Result<Vec<DirEntry>, 
         .collect())
 }
 
+// Match mobileWorkspace.ts's UTF-16 character budget, plus a sentinel so
+// its existing `truncated` flag remains accurate without reading the full file.
+const MOBILE_FILE_CHARS: usize = 1024 * 1024;
+
+fn read_mobile_text_file_sync(path: &str) -> Result<String, String> {
+    let path = expand_home(path);
+    let file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+    if !file.metadata().map_err(|error| error.to_string())?.is_file() {
+        return Err("Not a file".into());
+    }
+    let limit = 4 * (MOBILE_FILE_CHARS + 1);
+    let mut bytes = Vec::new();
+    file.take(limit as u64).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.contains(&0) {
+        return Err("Binary files cannot be edited.".into());
+    }
+    let valid = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        Err(error) if error.error_len().is_none() && bytes.len() == limit => {
+            std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap()
+        }
+        Err(_) => return Err("File is not valid UTF-8.".into()),
+    };
+    let mut units = 0;
+    for (offset, character) in valid.char_indices() {
+        units += character.len_utf16();
+        if units > MOBILE_FILE_CHARS {
+            return Ok(valid[..offset + character.len_utf8()].into());
+        }
+    }
+    Ok(valid.into())
+}
+
 /// A text file in a project's working copy, for the phone's file browser.
 #[tauri::command]
 pub async fn mobile_read_text_file(root: String, relative: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        read_text_file_sync(&path_to_js(&inside_root(&root, &relative)?))
+        read_mobile_text_file_sync(&path_to_js(&inside_root(&root, &relative)?))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -6746,6 +6779,21 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("example.rs")]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mobile_text_reads_a_bounded_utf8_prefix_with_truncation_sentinel() {
+        let dir = tmp("mobile-text-prefix");
+        let path = path_to_js(&dir.0.join("large.html"));
+        let source = "😀".repeat(3 * 1024 * 1024);
+        std::fs::write(&path, &source).unwrap();
+        let prefix = read_mobile_text_file_sync(&path).unwrap();
+        assert_eq!(prefix.encode_utf16().count(), MOBILE_FILE_CHARS + 2);
+        assert!(source.starts_with(&prefix));
+        std::fs::write(&path, [b'a', 0, b'b']).unwrap();
+        assert!(read_mobile_text_file_sync(&path).unwrap_err().contains("Binary"));
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(read_mobile_text_file_sync(&path).unwrap_err().contains("UTF-8"));
     }
 
     #[test]

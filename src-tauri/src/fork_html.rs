@@ -13,7 +13,7 @@ const MAX_PREVIEWS: usize = 64;
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: u64 = 512 * 1024 * 1024;
 // Queue without creating blocking threads or allocating response buffers.
-// At most two 16 MB asset chunks can be in native read work concurrently.
+// At most two asset/media reads can be in native work concurrently.
 static READ_SLOTS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
@@ -94,6 +94,9 @@ impl HtmlPreviews {
         path: &str,
         cwd: &str,
     ) -> Result<PreviewLocation, String> {
+        if source.len() > MAX_TOTAL_BYTES {
+            return Err("This HTML file is too large for the preview memory budget (32 MB). Open Code to edit it.".into());
+        }
         let (document, project) =
             local_project(path, cwd).unwrap_or_else(|| ("index.html".into(), None));
         let mut state = self.0.lock().map_err(|_| "HTML previews unavailable")?;
@@ -651,6 +654,16 @@ mod tests {
             store.create("main", String::new(), "", "").unwrap();
         }
         assert!(store.create("main", String::new(), "", "").is_err());
+    }
+
+    #[test]
+    fn single_source_above_preview_budget_points_to_code() {
+        let store = HtmlPreviews::default();
+        let error = store.create("main", "x".repeat(MAX_TOTAL_BYTES + 1), "", "")
+            .err().unwrap();
+        assert!(error.contains("too large"));
+        assert!(error.contains("Code"));
+        assert!(!error.contains("Close another"));
     }
 
     #[test]

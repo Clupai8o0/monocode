@@ -2,6 +2,7 @@ import {
   cp,
   lstat,
   mkdir,
+  open,
   mkdtemp,
   readFile,
   realpath,
@@ -88,6 +89,8 @@ export type WorkspaceCommand = (typeof WORKSPACE_COMMANDS)[number];
 
 // Remote RPC has bounded request and response bodies. Keep file operations
 // within those bounds even after JSON escaping or base64 encoding.
+// Matches remote.rs MAX_RESPONSE_BYTES and server.ts MAX_BODY.
+const MAX_REMOTE_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_TEXT_FILE = 1024 * 1024;
 const MAX_PREVIEW_FILE = 10 * 1024 * 1024;
 const MAX_STAT_FILES = 64;
@@ -312,15 +315,28 @@ export class WorkspaceCommands {
     const { path } = await this.existing(input);
     const info = await stat(path);
     if (!info.isFile()) throw new Error("Not a file");
-    if (limit !== undefined && info.size > limit)
-      throw new Error(
-        `File is too large to ${tooLarge} (maximum ${limit / 1024 / 1024} MB).`,
-      );
-    return readFile(path);
+    const tooLargeError = () => new Error(limit === MAX_REMOTE_TEXT_BYTES
+      ? "File exceeds the 16 MB remote transport limit. Open it on the host machine."
+      : `File is too large to ${tooLarge} (maximum ${limit! / 1024 / 1024} MB).`);
+    if (limit !== undefined && info.size > limit) throw tooLargeError();
+    if (limit === undefined) return readFile(path);
+    const handle = await open(path, "r");
+    try {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of handle.createReadStream({ autoClose: false })) {
+        size += chunk.length;
+        if (size > limit) throw tooLargeError();
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks, size);
+    } finally {
+      await handle.close();
+    }
   }
 
   private async readText(input: unknown): Promise<string> {
-    const bytes = await this.file(input);
+    const bytes = await this.file(input, MAX_REMOTE_TEXT_BYTES);
     if (bytes.includes(0)) throw new Error("Binary files cannot be edited.");
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
