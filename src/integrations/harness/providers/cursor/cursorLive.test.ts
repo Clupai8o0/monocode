@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sent: string[] = [];
+const processControl = vi.hoisted(() => ({ spawn: vi.fn(), kill: vi.fn() }));
 let onLine: ((line: string) => void) | undefined;
 let onExit: ((code: number) => void) | undefined;
 
 vi.mock("../../core/child", () => ({
   resolveCursorBinary: async () => ({ path: "/fake/cursor-agent" }),
-  spawnChild: async () => undefined,
-  killChild: async () => undefined,
+  spawnChild: processControl.spawn,
+  killChild: processControl.kill,
   unwatchChild: () => undefined,
   watchChild: (
     _id: string,
@@ -70,8 +71,13 @@ function outboundRequest(method: string) {
   return parse().find((message) => message.method === method);
 }
 
-async function startTurn(sessionId: string, intent?: "plan") {
+async function startTurn(
+  sessionId: string,
+  intent?: "plan",
+  onEvent?: (event: HarnessEvent) => void,
+) {
   const events: HarnessEvent[] = [];
+  const accepted = vi.fn();
   const turn = sendCursorTurn({
     sessionId,
     cwd: "/repo",
@@ -81,7 +87,11 @@ async function startTurn(sessionId: string, intent?: "plan") {
     text: "explore the codebase",
     attachments: [],
     intent,
-    onEvent: (event) => events.push(event),
+    onAccepted: accepted,
+    onEvent: (event) => {
+      events.push(event);
+      onEvent?.(event);
+    },
   });
 
   await waitFor(() => !!outboundRequest("initialize"), "initialize");
@@ -117,7 +127,37 @@ async function startTurn(sessionId: string, intent?: "plan") {
   }
   await waitFor(() => !!outboundRequest("session/prompt"), "session/prompt");
   const promptId = outboundRequest("session/prompt")!.id as number;
-  return { events, promptId, turn };
+  return { events, promptId, turn, accepted };
+}
+
+const transportErrorText =
+  "\n\nError: RetriableError: [unavailable] read ETIMEDOUT";
+
+function emitText(text: string) {
+  notify("session/update", {
+    sessionId: "cursor_1",
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text },
+    },
+  });
+}
+
+function emitTool(status: string | undefined, child = false) {
+  notify("session/update", {
+    sessionId: "cursor_1",
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "command",
+      kind: "execute",
+      status,
+      ...(child ? { _meta: { parentToolCallId: "call_agent" } } : {}),
+    },
+  });
+}
+
+function prompts() {
+  return parse().filter((message) => message.method === "session/prompt");
 }
 
 function emitAgentStart() {
@@ -145,6 +185,8 @@ function agentEvents(events: HarnessEvent[]) {
 }
 
 beforeEach(() => {
+  processControl.spawn.mockReset().mockResolvedValue(undefined);
+  processControl.kill.mockReset().mockResolvedValue(undefined);
   stores.tools.mockReset().mockResolvedValue([]);
   stores.subagents.mockReset().mockResolvedValue([]);
   sent.length = 0;
@@ -158,6 +200,467 @@ afterEach(async () => {
 });
 
 describe("cursor session controls", () => {
+  it("rechecks unfinished work after awaiting the final child refresh", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    let finishRefresh!: (value: unknown[]) => void;
+    stores.subagents.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    emitAgentStart();
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_agent",
+        status: "completed",
+      },
+    });
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => !!finishRefresh, "final child refresh");
+    emitTool("in_progress");
+    finishRefresh([]);
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(prompts()).toHaveLength(1);
+  });
+  it("refreshes completed child results before beginning the continuation", async () => {
+    const first = await startTurn("cursor-live");
+    stores.subagents.mockResolvedValue([
+      {
+        agentId: "child_1",
+        toolCallId: "call_agent",
+        revision: "final",
+        prompt: "review",
+        steps: [
+          { id: "final-step", kind: "message", text: "Final child finding." },
+        ],
+      },
+    ]);
+    emitAgentStart();
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_agent",
+        status: "completed",
+      },
+    });
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => prompts().length === 2, "continuation");
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "agent.step" && event.text === "Final child finding.",
+      ),
+    ).toBe(true);
+    emitText("Checked and finished.");
+    reply(prompts()[1].id as number, { stopReason: "end_turn" });
+    await first.turn;
+  });
+  it("keeps the diagnostic terminal across late usage updates", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    emitText(transportErrorText);
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: { sessionUpdate: "usage_update", used: 4, size: 100 },
+    });
+    reply(first.promptId, { stopReason: "end_turn" });
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(
+      first.events.some((event) => event.type === "message.completed"),
+    ).toBe(false);
+  });
+
+  it.each(["end_turn", "max_tokens", "refusal", "cancelled"])(
+    "does not accept a blank or incomplete continuation (%s)",
+    async (stopReason) => {
+      const first = await startTurn("cursor-live");
+      const outcome = first.turn.catch((error) => error);
+      emitTool("completed");
+      emitText(transportErrorText);
+      reply(first.promptId, { stopReason: "end_turn" });
+      await waitFor(() => prompts().length === 2, "continuation");
+      if (stopReason !== "end_turn") emitText("Partial response");
+      reply(prompts()[1].id as number, { stopReason });
+      expect(await outcome).toBeInstanceOf(Error);
+      expect(
+        first.events.some((event) => event.type === "message.completed"),
+      ).toBe(false);
+    },
+  );
+
+  it("rejects already queued requests after an uncertain tool outcome", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    const next = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      runtimeMode: "supervised",
+      text: "queued work",
+      attachments: [],
+      onEvent: () => undefined,
+    }).catch((error) => error);
+    emitTool("in_progress");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(await next).toMatchObject({
+      message: expect.stringContaining("queued"),
+    });
+    expect(prompts()).toHaveLength(1);
+    const manual = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      runtimeMode: "supervised",
+      text: "I checked the command; continue",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    await waitFor(() => prompts().length === 2, "new user turn");
+    reply(prompts()[1].id as number, { stopReason: "end_turn" });
+    await manual;
+  });
+
+  it("continues once in the same process after Cursor reports its terminal timeout as successful assistant text", async () => {
+    const first = await startTurn("cursor-live", "plan");
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "edited",
+        kind: "edit",
+        status: "completed",
+      },
+    });
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "\n\nError: RetriableError: [unavailable] read ETIMEDOUT",
+        },
+      },
+    });
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(
+      () =>
+        parse().filter((message) => message.method === "session/prompt")
+          .length === 2,
+      "same-session continuation",
+    );
+    const continuation = parse().filter(
+      (message) => message.method === "session/prompt",
+    )[1];
+    expect(continuation.params).toMatchObject({ sessionId: "cursor_1" });
+    expect(JSON.stringify(continuation.params)).toMatch(/inspect|check/i);
+    expect(JSON.stringify(continuation.params)).not.toContain(
+      "explore the codebase",
+    );
+    expect(processControl.spawn).toHaveBeenCalledTimes(1);
+    expect(processControl.kill).not.toHaveBeenCalled();
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "message.completed" || event.type === "session.error",
+      ),
+    ).toBe(false);
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "message.delta" &&
+          event.text.includes("RetriableError"),
+      ),
+    ).toBe(false);
+    emitText("Checked completed work and finished the remaining task.");
+    reply(continuation.id as number, { stopReason: "end_turn" });
+    await first.turn;
+    expect(
+      first.events.filter((event) => event.type === "message.completed"),
+    ).toHaveLength(1);
+    expect(
+      parse().filter((message) => message.method === "session/set_mode"),
+    ).toHaveLength(1);
+    expect(first.accepted).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "\n\nError: RetriableError: [unavailable] PING timed out",
+    "\n\nError: RetriableError: Connection stalled",
+    "\n\nError: RetriableError: Connection stalled repeatedly",
+  ])("recognizes the exact earlier transport diagnostic: %s", async (text) => {
+    const first = await startTurn("cursor-live");
+    emitTool("completed");
+    emitText(text);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => prompts().length === 2, "continuation");
+    emitText("Checked completed work and finished the remaining task.");
+    reply(prompts()[1].id as number, { stopReason: "end_turn" });
+    await first.turn;
+  });
+
+  it.each(["approval", "question", "background"])(
+    "blocks continuation with unresolved %s",
+    async (kind) => {
+      const first = await startTurn("cursor-live");
+      const outcome = first.turn.catch((error) => error);
+      emitTool("completed");
+      if (kind === "approval") {
+        request(91, "session/request_permission", {
+          sessionId: "cursor_1",
+          toolCall: {
+            toolCallId: "permission",
+            kind: "execute",
+            title: "command",
+          },
+          options: [{ optionId: "allow", kind: "allow_once" }],
+        });
+      } else if (kind === "question") {
+        request(91, "cursor/ask_question", {
+          questions: [{ id: "choice", question: "Which?", options: [] }],
+        });
+      } else {
+        emitAgentStart();
+        notify("session/update", {
+          sessionId: "cursor_1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call_agent",
+            status: "completed",
+            rawOutput: { isBackground: true },
+          },
+        });
+      }
+      emitText(transportErrorText);
+      reply(first.promptId, { stopReason: "end_turn" });
+      expect(await outcome).toBeInstanceOf(Error);
+      expect(prompts()).toHaveLength(1);
+      if (kind === "background") {
+        expect(agentEvents(first.events).at(-1)).toMatchObject({
+          status: "in_progress",
+        });
+      }
+    },
+  );
+
+  it("honors cancellation before submitting the continuation", async () => {
+    const first = await startTurn("cursor-live", undefined, (event) => {
+      if (event.type === "status" && event.key === "cursor-recovery")
+        void cancelCursorTurn("cursor-live");
+    });
+    emitTool("completed");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await first.turn;
+    expect(prompts()).toHaveLength(1);
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "session.error" || event.type === "message.completed",
+      ),
+    ).toBe(false);
+  });
+
+  it("honors cancellation while the continuation is running", async () => {
+    const first = await startTurn("cursor-live");
+    emitTool("completed");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => prompts().length === 2, "continuation");
+    await cancelCursorTurn("cursor-live");
+    await first.turn;
+    expect(prompts()).toHaveLength(2);
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "session.error" || event.type === "message.completed",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not mark a cancelled terminal response complete", async () => {
+    const first = await startTurn("cursor-live");
+    emitTool("completed");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "cancelled" });
+    await first.turn;
+    expect(prompts()).toHaveLength(1);
+    expect(
+      first.events.some(
+        (event) =>
+          event.type === "session.error" || event.type === "message.completed",
+      ),
+    ).toBe(false);
+  });
+  it.each(["in_progress", "pending", undefined])(
+    "requires manual continuation for an unfinished command (%s)",
+    async (status) => {
+      const first = await startTurn("cursor-live");
+      const outcome = first.turn.catch((error) => error);
+      emitTool(status);
+      emitText(transportErrorText);
+      reply(first.promptId, { stopReason: "end_turn" });
+      expect(await outcome).toMatchObject({
+        message: expect.stringContaining("Check unfinished tool results"),
+      });
+      expect(prompts()).toHaveLength(1);
+      expect(
+        first.events.some((event) => event.type === "message.completed"),
+      ).toBe(false);
+      expect(first.events.some((event) => event.type === "session.error")).toBe(
+        true,
+      );
+    },
+  );
+
+  it("blocks continuation for an unresolved child command", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    emitAgentStart();
+    emitTool("in_progress", true);
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_agent",
+        status: "completed",
+      },
+    });
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(prompts()).toHaveLength(1);
+  });
+
+  it("blocks continuation without observable progress", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(prompts()).toHaveLength(1);
+  });
+
+  it("stops after a second terminal timeout", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    emitTool("completed");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => prompts().length === 2, "continuation");
+    emitText(transportErrorText);
+    reply(prompts()[1].id as number, { stopReason: "end_turn" });
+    expect(await outcome).toMatchObject({
+      message: expect.stringContaining("ETIMEDOUT"),
+    });
+    expect(prompts()).toHaveLength(2);
+    expect(
+      first.events.filter((event) => event.type === "session.error"),
+    ).toHaveLength(1);
+    expect(
+      first.events.some((event) => event.type === "message.completed"),
+    ).toBe(false);
+  });
+
+  it.each([
+    `The error was ${transportErrorText} but the task succeeded.`,
+    "Error: RetriableError: [unavailable] read ETIMEDOUT",
+    "\n\nerror: retriableerror: [unavailable] read ETIMEDOUT",
+    "\n\nError: NonRetriableError: [unavailable] read ETIMEDOUT",
+    "\n\nError: RetriableError: [unauthenticated] read ETIMEDOUT",
+    "\n\nError: RetriableError: [resource_exhausted] quota exceeded",
+    "\n\nError: RetriableError: [unavailable] billing required",
+  ])("preserves ordinary text: %s", async (text) => {
+    const first = await startTurn("cursor-live");
+    emitText(text);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await first.turn;
+    expect(prompts()).toHaveLength(1);
+    expect(first.events).toContainEqual({ type: "message.delta", text });
+    expect(first.events.some((event) => event.type === "session.error")).toBe(
+      false,
+    );
+  });
+
+  it("flushes an error-looking chunk if a later update arrives", async () => {
+    const first = await startTurn("cursor-live");
+    emitText(transportErrorText);
+    expect(first.events).not.toContainEqual({
+      type: "message.delta",
+      text: transportErrorText,
+    });
+    emitText("The retry succeeded.");
+    reply(first.promptId, { stopReason: "end_turn" });
+    await first.turn;
+    expect(prompts()).toHaveLength(1);
+    expect(
+      first.events.filter((event) => event.type === "message.delta"),
+    ).toEqual([
+      { type: "message.delta", text: transportErrorText },
+      { type: "message.delta", text: "The retry succeeded." },
+    ]);
+  });
+
+  it("requires end_turn before interpreting a diagnostic chunk as failure", async () => {
+    const first = await startTurn("cursor-live");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "max_tokens" });
+    await first.turn;
+    expect(prompts()).toHaveLength(1);
+    expect(first.events).toContainEqual({
+      type: "message.delta",
+      text: transportErrorText,
+    });
+  });
+
+  it("does not restart or replay a rejected prompt RPC", async () => {
+    const first = await startTurn("cursor-live");
+    const outcome = first.turn.catch((error) => error);
+    onLine!(
+      JSON.stringify({
+        id: first.promptId,
+        error: { code: -32603, message: "read ETIMEDOUT" },
+      }),
+    );
+    expect(await outcome).toMatchObject({ message: "read ETIMEDOUT" });
+    expect(prompts()).toHaveLength(1);
+    expect(processControl.spawn).toHaveBeenCalledTimes(1);
+    expect(processControl.kill).not.toHaveBeenCalled();
+  });
+
+  it("keeps queued turns behind the same-session continuation", async () => {
+    const first = await startTurn("cursor-live");
+    const next = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      runtimeMode: "supervised",
+      text: "next request",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    emitTool("completed");
+    emitText(transportErrorText);
+    reply(first.promptId, { stopReason: "end_turn" });
+    await waitFor(() => prompts().length === 2, "continuation");
+    expect(JSON.stringify(prompts()[1].params)).not.toContain("next request");
+    emitText("Checked completed work and finished the remaining task.");
+    reply(prompts()[1].id as number, { stopReason: "end_turn" });
+    await first.turn;
+    await waitFor(() => prompts().length === 3, "queued turn");
+    expect(JSON.stringify(prompts()[2].params)).toContain("next request");
+    reply(prompts()[2].id as number, {});
+    await next;
+  });
+
   it("keeps a queued Plan turn from changing the running turn mode", async () => {
     const first = await startTurn("cursor-live");
     reply(first.promptId, {});

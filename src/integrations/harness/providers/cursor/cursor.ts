@@ -92,6 +92,10 @@ type Live = {
   toolEnrichmentTimer?: ReturnType<typeof setTimeout>;
   toolEnrichmentRunning: boolean;
   toolStatuses: Map<string, string>;
+  unresolvedTools: Set<string>;
+  pendingTransportError?: string;
+  promptProgress: boolean;
+  recoveryEpoch: number;
   taskListTools: Set<string>;
   agentTools: Map<string, string>;
   backgroundAgentTools: Set<string>;
@@ -114,6 +118,10 @@ type Resume = {
 const liveByThread = new Map<string, Live>();
 const resumeByThread = new Map<string, Resume>();
 const cancelledThreads = new Set<string>();
+const RECOVERY_PROMPT =
+  "The connection dropped. Check this conversation's last request, the current workspace, git status, the diff, and results of tools already run before continuing. Do not rerun a command until you have checked its effect. Continue only remaining work. If this conversation does not show the last request or a tool outcome is uncertain, stop and explain what needs checking.";
+
+class CursorTransportInterruptedError extends Error {}
 
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -131,10 +139,17 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
     throw error;
   }
   if (cancelledThreads.delete(input.sessionId)) return;
+  const recoveryEpoch = live.recoveryEpoch;
 
   live.turns = live.turns
     .catch(() => undefined)
     .then(async () => {
+      if (recoveryEpoch !== live.recoveryEpoch) {
+        const message =
+          "Cursor paused this queued request after an interrupted turn. Check unfinished tool results, then submit it again.";
+        input.onEvent({ type: "session.error", message });
+        throw new Error(message);
+      }
       live.onEvent = input.onEvent;
       live.runtimeMode = input.runtimeMode;
       live.planning = input.intent === "plan";
@@ -145,9 +160,57 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
         await applyModelSelection(live, input);
         await applySessionMode(live);
         if (live.cancelled) return;
-        await prompt(live, input);
+        try {
+          await prompt(live, input);
+        } catch (error) {
+          if (
+            !(error instanceof CursorTransportInterruptedError) ||
+            live.cancelled
+          )
+            throw error;
+          requireSafeCursorContinuation(live, error);
+          await refreshCursorSubagents(live);
+          if (live.cancelled) return;
+          requireSafeCursorContinuation(live, error);
+          live.onEvent({
+            type: "status",
+            key: "cursor-recovery",
+            text: "Cursor connection dropped. Checking completed work before continuing…",
+          });
+          if (live.cancelled) return;
+          // ACP remains alive after this terminal assistant-text error. Keep
+          // its in-memory history and the existing turn queue; never reload or
+          // replay the user's original prompt.
+          try {
+            await prompt(
+              live,
+              {
+                ...input,
+                text: RECOVERY_PROMPT,
+                attachments: [],
+                onAccepted: undefined,
+              },
+              true,
+            );
+          } catch (recoveryError) {
+            throw new CursorTransportInterruptedError(
+              recoveryError instanceof Error
+                ? recoveryError.message
+                : String(recoveryError),
+            );
+          }
+        }
       } catch (error) {
         if (live.cancelled) return;
+        if (!(error instanceof CursorTransportInterruptedError)) {
+          settleCursorBackgroundAgents(live, "failed");
+        } else {
+          live.recoveryEpoch += 1;
+        }
+        live.onEvent({
+          type: "session.error",
+          message: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     });
@@ -394,6 +457,9 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
       pendingToolEnrichments: new Map(),
       toolEnrichmentRunning: false,
       toolStatuses: new Map(),
+      unresolvedTools: new Set(),
+      promptProgress: false,
+      recoveryEpoch: 0,
       taskListTools: new Set(),
       agentTools: new Map(),
       backgroundAgentTools: new Set(),
@@ -489,7 +555,11 @@ async function setConfigOption(
   }
 }
 
-async function prompt(live: Live, input: SendTurnInput): Promise<void> {
+async function prompt(
+  live: Live,
+  input: SendTurnInput,
+  recovering = false,
+): Promise<void> {
   try {
     const blocks = promptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
@@ -501,18 +571,40 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     live.backgroundKey = "";
     syncCursorBackgroundWait(live);
     live.taskListTools.clear();
+    live.pendingTransportError = undefined;
+    live.promptProgress = false;
     live.promptActive = true;
-    const pending = live.acp.request("session/prompt", {
-      sessionId: live.acpSessionId,
-      prompt: blocks,
-    });
+    const pending = live.acp.request<{ stopReason?: string }>(
+      "session/prompt",
+      {
+        sessionId: live.acpSessionId,
+        prompt: blocks,
+      },
+    );
     input.onAccepted?.();
-    await pending;
+    const result = await pending;
     live.promptActive = false;
-    if (live.cancelled) {
+    if (live.cancelled || (!recovering && result?.stopReason === "cancelled")) {
+      live.pendingTransportError = undefined;
       live.backgroundAgentTools.clear();
       syncCursorBackgroundWait(live);
       return;
+    }
+    // Notifications can populate this field while the prompt is awaited.
+    const transportError = live.pendingTransportError as string | undefined;
+    if (transportError && result?.stopReason === "end_turn") {
+      const message = transportError.trim();
+      live.pendingTransportError = undefined;
+      throw new CursorTransportInterruptedError(message);
+    }
+    flushCursorTransportError(live);
+    if (
+      recovering &&
+      (result?.stopReason !== "end_turn" || !live.promptProgress)
+    ) {
+      throw new CursorTransportInterruptedError(
+        "Cursor continuation ended without a complete response. Check the conversation and tool results before continuing.",
+      );
     }
     settleCursorBackgroundAgents(live, "completed");
     await refreshCursorSubagents(live);
@@ -525,13 +617,41 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
   } catch (error) {
     live.promptActive = false;
     if (live.cancelled) return;
-    settleCursorBackgroundAgents(live, "failed");
-    live.onEvent({
-      type: "session.error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    flushCursorTransportError(live);
     throw error;
   }
+}
+
+function flushCursorTransportError(live: Live): void {
+  const text = live.pendingTransportError;
+  live.pendingTransportError = undefined;
+  if (text && !live.cancelled && !live.muteUpdates) {
+    live.onEvent({ type: "message.delta", text });
+  }
+}
+
+function requireSafeCursorContinuation(live: Live, error: Error): void {
+  if (
+    !live.promptProgress ||
+    live.unresolvedTools.size ||
+    live.approvals.size ||
+    live.questions.size ||
+    live.backgroundAgentTools.size ||
+    [...live.toolStatuses.values()].some(
+      (status) =>
+        status !== "completed" && status !== "failed" && status !== "cancelled",
+    )
+  ) {
+    throw new CursorTransportInterruptedError(
+      `${error.message}. Check unfinished tool results and the saved conversation before continuing; automatic continuation was stopped to avoid repeating work.`,
+    );
+  }
+}
+
+function isCursorTransportErrorChunk(text: string): boolean {
+  return /^\n\nError: RetriableError: (?:\[unavailable\] (?:(?:(?:read|write|connect) )?(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EPIPE|ENETUNREACH|EHOSTUNREACH)|PING (?:timeout|timed out))|Connection stalled(?: repeatedly)?)\s*$/.test(
+    text,
+  );
 }
 
 function handleNotification(live: Live, method: string, params: unknown) {
@@ -895,7 +1015,20 @@ function handleSessionUpdate(live: Live, params: unknown) {
       update.content ?? update.text,
       kind === "agent_message" ? "\n" : "",
     );
-    if (text) emit({ type: "message.delta", text });
+    if (text) {
+      if (!live.subagents.isChild(params)) flushCursorTransportError(live);
+      if (
+        live.promptActive &&
+        !live.subagents.isChild(params) &&
+        kind === "agent_message_chunk" &&
+        isCursorTransportErrorChunk(text)
+      ) {
+        live.pendingTransportError = text;
+        return;
+      }
+      if (text.trim()) live.promptProgress = true;
+      emit({ type: "message.delta", text });
+    }
     return;
   }
   if (kind === "agent_thought_chunk" || kind === "agent_thought") {
@@ -921,10 +1054,23 @@ function handleSessionUpdate(live: Live, params: unknown) {
         "",
     );
     if (!callId) return;
+    if (kind === "tool_call" && !live.subagents.isChild(params)) {
+      flushCursorTransportError(live);
+    }
+    live.promptProgress = true;
     const reportedKind =
       coerceMaybeString(update, "kind") ?? coerceMaybeString(tool, "kind");
     const status =
       coerceMaybeString(update, "status") ?? coerceMaybeString(tool, "status");
+    if (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled"
+    ) {
+      live.unresolvedTools.delete(callId);
+    } else if (kind === "tool_call" || status) {
+      live.unresolvedTools.add(callId);
+    }
     const rawTitle = toolLabel(update, tool);
     const rawInput =
       update.rawInput ??
