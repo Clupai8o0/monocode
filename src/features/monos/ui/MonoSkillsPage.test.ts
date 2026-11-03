@@ -25,6 +25,7 @@ vi.mock("../../skills/ui/SkillDocumentPreview", () => ({
   SkillDocumentPreview: ({ text }: { text: string }) =>
     createElement("p", null, text),
 }));
+import { MonoFileConflict } from "../model/monoFiles";
 import { MonoSkillsPage } from "./MonoSkillsPage";
 
 let root: Root;
@@ -174,9 +175,7 @@ it("asks before deleting an owned skill and leaves it when cancelled", async () 
 });
 
 it("preserves an owned skill's draft if its save conflicts", async () => {
-  mocks.update.mockRejectedValueOnce(
-    new Error("The file changed while you were editing"),
-  );
+  mocks.update.mockRejectedValueOnce(new MonoFileConflict());
   await render([{ ...shared, owned: true }]);
   await click("review-prReview PRsCreated for this Mono");
   await fill("Skill instructions", "My revised Markdown");
@@ -197,6 +196,127 @@ it("preserves an owned skill's draft if its save conflicts", async () => {
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "changed",
   );
+});
+
+const draft = () =>
+  (container.querySelector('[aria-label="Skill instructions"]') as
+    HTMLTextAreaElement).value;
+const alertText = () => container.querySelector('[role="alert"]')?.textContent;
+async function conflictOnSave() {
+  mocks.update.mockRejectedValueOnce(new MonoFileConflict());
+  await render([{ ...shared, owned: true }]);
+  await click("review-prReview PRsCreated for this Mono");
+  await fill("Skill instructions", "My revised Markdown");
+  await click("Save");
+  mocks.read.mockClear();
+}
+
+it("reloads a conflicted skill only after confirmation, then saves on the fresh hash", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  await conflictOnSave();
+  await click("Reload");
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(mocks.read).not.toHaveBeenCalled();
+  expect(draft()).toBe("My revised Markdown");
+  expect(alertText()).toContain("changed");
+  mocks.update.mockRejectedValueOnce(new MonoFileConflict());
+  await click("Save");
+  expect(mocks.update).toHaveBeenLastCalledWith(
+    "mono-a",
+    "review-pr",
+    "My revised Markdown",
+    "h1",
+  );
+
+  confirm.mockReturnValue(true);
+  mocks.read.mockResolvedValueOnce({
+    text: "Other agent's Markdown",
+    hash: "h2",
+    path: shared.path,
+    owned: true,
+  });
+  await click("Reload");
+  expect(draft()).toBe("Other agent's Markdown");
+  expect(alertText()).toBeUndefined();
+  expect(
+    [...container.querySelectorAll("button")].some(
+      (button) => button.textContent === "Reload",
+    ),
+  ).toBe(false);
+  await fill("Skill instructions", "Merged Markdown");
+  await click("Save");
+  expect(mocks.update).toHaveBeenLastCalledWith(
+    "mono-a",
+    "review-pr",
+    "Merged Markdown",
+    "h2",
+  );
+  confirm.mockRestore();
+});
+
+it("keeps the draft and stale hash when a reload fails, and can retry", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  await conflictOnSave();
+  mocks.read.mockRejectedValueOnce(new Error("Could not read skill"));
+  await click("Reload");
+  expect(draft()).toBe("My revised Markdown");
+  expect(alertText()).toBe("Could not read skill");
+  mocks.update.mockRejectedValueOnce(new MonoFileConflict());
+  await click("Save");
+  expect(mocks.update).toHaveBeenLastCalledWith(
+    "mono-a",
+    "review-pr",
+    "My revised Markdown",
+    "h1",
+  );
+  mocks.read.mockResolvedValueOnce({
+    text: "Fresh Markdown",
+    hash: "h2",
+    path: shared.path,
+    owned: true,
+  });
+  await click("Reload");
+  expect(draft()).toBe("Fresh Markdown");
+  confirm.mockRestore();
+});
+
+it("ignores a reload or save that finishes after the editor closed", async () => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  await conflictOnSave();
+  let finishRead!: (file: unknown) => void;
+  mocks.read.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishRead = resolve;
+    }),
+  );
+  await click("Reload");
+  expect(
+    (container.querySelector(
+      '[aria-label="Skill instructions"]',
+    ) as HTMLTextAreaElement).disabled,
+  ).toBe(true);
+  const header = container.querySelector("button") as HTMLButtonElement;
+  await act(async () => header.click());
+  await act(async () =>
+    finishRead({ text: "Late", hash: "h9", path: shared.path, owned: true }),
+  );
+  expect(container.querySelector('[aria-label="Skill instructions"]')).toBeNull();
+
+  const other = { ...shared, name: "other", path: "/o/SKILL.md", owned: true };
+  await render([{ ...shared, owned: true }, other]);
+  let finishSave!: () => void;
+  mocks.update.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }),
+  );
+  await click("review-prReview PRsCreated for this Mono");
+  await click("Save");
+  await act(async () => (container.querySelector("button") as HTMLButtonElement).click());
+  await click("otherReview PRsCreated for this Mono");
+  await act(async () => finishSave());
+  expect(container.textContent).toContain("/o/SKILL.md");
+  confirm.mockRestore();
 });
 
 it("keeps a skill whose source is gone listed, unassignable and unread", async () => {
