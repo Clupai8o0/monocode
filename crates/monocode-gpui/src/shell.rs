@@ -629,6 +629,9 @@ pub(crate) struct Shell {
     sidebar_list: sidebar_list::SidebarList,
     sidebar_slide: Option<PaneSlide>,
     sidebar_fraction: f32,
+    /// Settings' own nav collapse, apart from the project sidebar's saved
+    /// state; every visit to Settings starts with it open.
+    settings_nav_visible: bool,
     /// The collapsed inset sidebar peeking out over the workspace.
     sidebar_peek: Option<sidebar_peek::SidebarPeek>,
     peek_animating: bool,
@@ -962,6 +965,19 @@ impl Shell {
             }
             cx.notify();
         });
+        // A real change, such as a discard from the Changes panel: chats in
+        // this checkout reread their recorded changes, which drops reverted
+        // files from the changes pill and its card.
+        let git_changes = cx.subscribe(&git, |this, git, _: &crate::git_status::GitChanged, cx| {
+            let cwd = git.read(cx).root.clone();
+            for view in this.sessions.values() {
+                if view.read(cx).review.read(cx).session().1 == cwd {
+                    view.update(cx, |view, cx| {
+                        view.review.update(cx, |review, cx| review.refresh(cx))
+                    });
+                }
+            }
+        });
         let resources = cx.new(ResourceMonitor::new);
         let resource_observation = cx.observe(&resources, |_, _, cx| cx.notify());
         let resource_stops = cx.subscribe(&resources, |this, _, StopSession(id), cx| {
@@ -1010,6 +1026,7 @@ impl Shell {
             sidebar_list: sidebar_list::SidebarList::new(cx),
             sidebar_slide: None,
             sidebar_fraction: if workspace.sidebar_visible { 1. } else { 0. },
+            settings_nav_visible: true,
             sidebar_peek: None,
             peek_animating: false,
             peek_close: None,
@@ -1168,6 +1185,7 @@ impl Shell {
             viewport_height: 800.,
             observations: vec![
                 git_observation,
+                git_changes,
                 resource_observation,
                 resource_stops,
                 classic_search_subscription,
@@ -4255,6 +4273,15 @@ impl Shell {
         if self.workspace.sidebar_visible && self.sidebar_focus.contains_focused(window, cx) {
             self.focus_workspace(window, cx);
         }
+        if self.settings.is_some() {
+            let visible = !self.settings_nav_visible;
+            self.slide_sidebar(visible, cx);
+            self.settings_nav_visible = visible;
+            // Search moves between the nav and the title bar.
+            self.invalidate_chrome(cx);
+            cx.notify();
+            return;
+        }
         self.sidebar_auto_hidden = false;
         self.set_sidebar_visible(!self.workspace.sidebar_visible, cx);
         self.persist(cx);
@@ -4264,6 +4291,12 @@ impl Shell {
         if visible == self.workspace.sidebar_visible {
             return;
         }
+        self.slide_sidebar(visible, cx);
+        self.workspace.sidebar_visible = visible;
+        self.sync_right_panel(cx);
+    }
+    /// Starts (or retargets) the sidebar's slide toward `visible`.
+    fn slide_sidebar(&mut self, visible: bool, cx: &mut Context<Self>) {
         let to = if visible { 1. } else { 0. };
         self.sidebar_slide = if cx.reduce_motion() {
             None
@@ -4275,8 +4308,6 @@ impl Shell {
         };
         self.resize = None;
         self.drop_peek();
-        self.workspace.sidebar_visible = visible;
-        self.sync_right_panel(cx);
     }
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_app_search(window, cx);
@@ -4647,10 +4678,10 @@ impl Shell {
                 .on_click(cx.listener(|this, _, window, cx| this.visit(1, window, cx))),
             )
     }
-    /// Settings fill the sidebar's place, so its toggle steps aside. Its
-    /// slot stays, so nothing beside it moves.
+    /// The classic layout's settings fill the project rail, so its toggle
+    /// steps aside. Its slot stays, so nothing beside it moves.
     fn sidebar_toggle(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
-        if self.settings.is_some() {
+        if self.settings.is_some() && self.workspace.classic_layout {
             return div()
                 .id("toggle-sidebar")
                 .debug_selector(|| "toggle-sidebar".into())
@@ -4861,7 +4892,8 @@ impl Shell {
             } else {
                 self.navigation_width() + 6.
             };
-            let header = settings.update(cx, |v, cx| v.header(!classic, cx));
+            let search = !self.workspace.classic_layout && !self.settings_nav_visible;
+            let header = settings.update(cx, |v, cx| v.header(!classic, search, cx));
             return div()
                 .h(px(TITLE_BAR_HEIGHT))
                 .flex_shrink_0()
@@ -6628,12 +6660,14 @@ impl Shell {
         }
     }
     fn sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(settings) = &self.settings {
+        if let Some(settings) = self.settings.clone() {
             let section = settings.read(cx).section;
+            let search = settings.update(cx, |v, cx| v.search_field(true, cx));
             let select = cx.weak_entity();
             let back = select.clone();
             return crate::settings::nav(
                 section,
+                search,
                 move |section, _, cx| {
                     let _ = select.update(cx, |this, cx| this.select_settings(section, cx));
                 },
@@ -8447,14 +8481,16 @@ impl Render for Shell {
                 fraction
             }
             None => {
-                if self.workspace.sidebar_visible {
-                    1.
+                let visible = if self.settings.is_some() {
+                    self.settings_nav_visible
                 } else {
-                    0.
-                }
+                    self.workspace.sidebar_visible
+                };
+                if visible { 1. } else { 0. }
             }
         };
-        if self.settings.is_some() {
+        // The classic layout's settings nav is the project rail, which stays.
+        if self.settings.is_some() && self.workspace.classic_layout {
             self.sidebar_fraction = 1.;
         }
         let sidebar_width = self.workspace.sidebar_width * self.sidebar_fraction;
