@@ -787,6 +787,26 @@ function handleSessionUpdate(live: Live, params: unknown) {
     update.sessionUpdate ?? update.session_update ?? update.type ?? "",
   );
 
+  if (kind === "usage_update") {
+    const used =
+      numberField(update, "used") ??
+      numberField(update, "usedTokens") ??
+      numberField(update, "used_tokens");
+    const window =
+      numberField(update, "size") ??
+      numberField(update, "window") ??
+      numberField(update, "contextWindow") ??
+      numberField(update, "context_window");
+    if (used != null || window != null) {
+      emit({
+        type: "context",
+        ...(used != null ? { used } : {}),
+        ...(window != null ? { window } : {}),
+      });
+    }
+    return;
+  }
+
   if (kind === "agent_message_chunk" || kind === "agent_message") {
     // Whole-message arrays contain distinct content blocks; chunks are exact deltas.
     const text = textFromContent(

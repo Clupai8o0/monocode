@@ -641,3 +641,36 @@ describe("cursor background subagents", () => {
     expect(agentEvents(events).at(-1)).toMatchObject({ status: "completed" });
   });
 });
+
+describe("cursor context usage", () => {
+  it("emits context from ACP usage_update", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-context");
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 53_000,
+        size: 200_000,
+      },
+    });
+    expect(events.some((e) => e.type === "context")).toBe(true);
+    expect(events.find((e) => e.type === "context")).toMatchObject({
+      type: "context",
+      used: 53_000,
+      window: 200_000,
+    });
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+  });
+
+  it("ignores usage_update without numeric used/size", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-context-empty");
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: { sessionUpdate: "usage_update" },
+    });
+    expect(events.some((e) => e.type === "context")).toBe(false);
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+  });
+});
