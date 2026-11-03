@@ -29,6 +29,7 @@ import {
 import { stopCursorTitleGeneration } from "./cursorTitle";
 import type {
   ApprovalDecision,
+  CompactContextInput,
   HarnessEvent,
   SendTurnInput,
   SteerTurnInput,
@@ -114,6 +115,7 @@ const cancelledThreads = new Set<string>();
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
   terminal: false,
+  session: { compaction: {} },
   _meta: { parameterizedModelPicker: true },
 };
 
@@ -146,6 +148,20 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
       }
     });
   await live.turns;
+}
+
+export async function compactCursorContext(
+  input: CompactContextInput,
+): Promise<void> {
+  const live = liveByThread.get(input.sessionId);
+  if (!live?.acpSessionId) {
+    throw new Error("Cursor session is not connected");
+  }
+  live.onEvent = input.onEvent;
+  await live.acp.request("session/prompt", {
+    sessionId: live.acpSessionId,
+    prompt: [{ type: "text", text: "/compact" }],
+  });
 }
 
 export async function steerCursorTurn(input: SteerTurnInput): Promise<void> {
@@ -812,6 +828,22 @@ function handleSessionUpdate(live: Live, params: unknown) {
         ...(window != null ? { window } : {}),
       });
     }
+    return;
+  }
+
+  if (kind === "compaction_update") {
+    const status = stringField(update, "status") ?? "in_progress";
+    const error = stringField(update, "error");
+    live.onEvent({
+      type: "status",
+      text:
+        status === "failed"
+          ? error || "Context compaction failed"
+          : status === "completed"
+            ? "Context compacted"
+            : "Compacting context…",
+      key: "compaction",
+    });
     return;
   }
 

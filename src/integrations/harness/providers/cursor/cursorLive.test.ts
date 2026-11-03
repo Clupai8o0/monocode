@@ -32,6 +32,7 @@ const {
   sendCursorTurn,
   cancelCursorTurn,
   stopCursorSession,
+  compactCursorContext,
   __cursorTestReset,
 } = await import("./cursor");
 import type { HarnessEvent } from "../../core/types";
@@ -698,5 +699,39 @@ describe("cursor context usage", () => {
     expect(events.some((e) => e.type === "context")).toBe(false);
     reply(promptId, { stopReason: "end_turn" });
     await turn;
+  });
+});
+
+describe("cursor context compaction", () => {
+  it("compacts by prompting /compact on the live ACP session", async () => {
+    const { events: _events, promptId, turn } = await startTurn("cursor-compact");
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+
+    const compact = compactCursorContext({
+      sessionId: "cursor-compact",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      onEvent: () => undefined,
+    });
+
+    await waitFor(
+      () =>
+        parse().some(
+          (message) =>
+            message.method === "session/prompt" &&
+            JSON.stringify(message.params).includes("/compact"),
+        ),
+      "compact prompt",
+    );
+    const compactId = parse().find(
+      (message) =>
+        message.method === "session/prompt" &&
+        JSON.stringify(message.params).includes("/compact"),
+    )!.id as number;
+    reply(compactId, { stopReason: "end_turn" });
+    await compact;
   });
 });

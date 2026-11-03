@@ -1,6 +1,7 @@
 import {
   bindCursorSession,
   cancelCursorTurn,
+  compactCursorContext,
   forgetCursorSession,
   respondCursorApproval,
   respondCursorQuestion,
@@ -28,6 +29,7 @@ export const cursorAdapter: HarnessAdapter = {
   sendTurn: sendCursorTurn,
   steerTurn: steerCursorTurn,
   cancelTurn: cancelCursorTurn,
+  compactContext: compactCursorContext,
   respondApproval: respondCursorApproval,
   respondQuestion: respondCursorQuestion,
   stopSession: stopCursorSession,
