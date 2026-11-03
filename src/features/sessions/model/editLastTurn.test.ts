@@ -14,6 +14,7 @@ import {
   truncateBeforeLastUserTurn,
 } from "./editLastTurn";
 import { newSession, type Block } from "./session";
+import { appendUser } from "../../../integrations/harness/core/apply";
 
 function chat(blocks: Block[]) {
   return { ...newSession("pi", "/tmp"), blocks };
@@ -242,6 +243,29 @@ describe("editLastTurn", () => {
   });
 
   describe("retrying a failed approved-plan build", () => {
+    it("retries an actual appended build turn using its approved plan", () => {
+      const session = appendUser(
+        chat([
+          {
+            id: "plan",
+            role: "plan",
+            text: "# Plan",
+            plan: { status: "ready" },
+          },
+        ]),
+        "Build approved plan",
+        [],
+        { buildPlanBlockId: "plan" },
+      );
+      const retry = lastTurnRetry({ ...session, busy: false });
+      expect(retry?.planBlockId).toBe("plan");
+      const buildPlan = vi.fn();
+      const submit = vi.fn();
+      if (retry) runLastTurnRetry(retry, { buildPlan, submit });
+      expect(buildPlan).toHaveBeenCalledWith("plan");
+      expect(submit).not.toHaveBeenCalled();
+    });
+
     const build = (status: "ready" | "built", extra: Partial<Block> = {}) =>
       chat([
         { id: "plan", role: "plan", text: "# Plan", plan: { status } },

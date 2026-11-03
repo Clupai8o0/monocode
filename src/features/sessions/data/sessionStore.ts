@@ -1071,6 +1071,13 @@ function sanitizeBlock(
   if (block.role === "user" && block.monocode) next.monocode = true;
   if (
     block.role === "user" &&
+    typeof block.buildPlanBlockId === "string" &&
+    isPersistableId(block.buildPlanBlockId)
+  ) {
+    next.buildPlanBlockId = block.buildPlanBlockId;
+  }
+  if (
+    block.role === "user" &&
     (block.intent === "plan" || block.intent === "orchestrate")
   )
     next.intent = block.intent;

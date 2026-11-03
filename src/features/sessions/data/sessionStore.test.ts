@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { mapCodexNotification } from "../../../integrations/harness/providers/codex/codexProtocol";
 import { toolCallLabel } from "../model/transcriptActivity";
+import { lastTurnRetry } from "../model/editLastTurn";
 import {
   newSession,
   type Block,
@@ -19,6 +20,30 @@ import {
   sanitizeSessionForPersist,
   shouldPersistSession,
 } from "./sessionStore";
+
+it("preserves an appended build's plan link when persisted", () => {
+  const session = appendUser(
+    {
+      ...newSession("codex", "/tmp"),
+      blocks: [
+        {
+          id: "plan",
+          role: "plan",
+          text: "# Approved plan",
+          plan: { status: "ready" },
+        },
+      ],
+    },
+    "Build approved plan",
+    [],
+    { buildPlanBlockId: "plan" },
+  );
+  const persisted = sanitizeSessionForPersist(session);
+  expect(persisted.blocks.at(-1)?.buildPlanBlockId).toBe("plan");
+  expect(
+    lastTurnRetry({ ...session, blocks: persisted.blocks })?.planBlockId,
+  ).toBe("plan");
+});
 
 it("persists sidebar visibility without making the session ephemeral", () => {
   const session = newSession("codex", "/tmp");

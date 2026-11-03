@@ -463,6 +463,7 @@ type UserTurnExtra = {
   internal?: boolean;
   monocode?: boolean;
   intent?: Block["intent"];
+  buildPlanBlockId?: Block["buildPlanBlockId"];
   appRequestId?: string;
   monoSessionCompletion?: Block["monoSessionCompletion"];
 };
@@ -475,6 +476,9 @@ function userTurnFields(extra?: UserTurnExtra) {
     ...(extra?.internal ? { internal: true } : {}),
     ...(extra?.monocode ? { monocode: true } : {}),
     ...(extra?.intent ? { intent: extra.intent } : {}),
+    ...(extra?.buildPlanBlockId
+      ? { buildPlanBlockId: extra.buildPlanBlockId }
+      : {}),
     ...(extra?.appRequestId ? { appRequestId: extra.appRequestId } : {}),
     ...(extra?.monoSessionCompletion
       ? { monoSessionCompletion: extra.monoSessionCompletion }
