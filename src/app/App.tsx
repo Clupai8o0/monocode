@@ -653,7 +653,7 @@ import {
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { publishTurns } from "../fork/games/liveTurns"; // Fork: Turn Bet times real turns.
-import { publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
+import { knownLocalProjectPaths, publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
 import { isMoveLocked, isSessionMoved, registerMoveHost } from "../fork/sessionMove/sessionMoveStore"; // Fork
 import { publishMonoSessions } from "../fork/messageLog/messageLogStore"; // Fork
 import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
@@ -12002,7 +12002,7 @@ function Workspace({
         // Fork: only discovery/read/send cross projects; lifecycle actions stay local.
         const communicationProjects = () => [
           source.cwd,
-          ...loadRecents().filter((project) => isLocalProject(project.path)).map((project) => project.path),
+          ...knownLocalProjectPaths().filter(isLocalProject),
           ...sessionsRef.current.map((session) => session.cwd).filter(isLocalProject),
         ];
         const canCommunicate = (cwd: string) =>

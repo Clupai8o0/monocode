@@ -6,6 +6,13 @@ Type `/operator` at the start of a composer message to enable MonoCode access in
 
 ## CLI actions
 
+Operator can discover local projects with `projects.list` and sessions across
+them with `sessions.list {"project":"*"}`. Pass `project` (a full path or unique
+name) to `sessions.read` and `sessions.send` to coordinate another project.
+Permission ceilings and busy/draft checks still apply. Sessions held by another
+desktop window cannot receive follow-ups through this transport yet. Mono and
+external MCP callers keep their assigned project scope.
+
 Sessions started by an ordinary Operator remain visible in project history.
 Monos use the same project actions, with their **Show started sessions** setting
 controlling whether their launches appear in the user's history. This is
