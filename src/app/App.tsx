@@ -646,13 +646,14 @@ import {
 } from "../fork/effortAsk/effortAsk";
 import {
   focusSessionElsewhere,
+  sessionHeldElsewhere,
   OPEN_SESSION_EVENT,
   useWindowSessions,
 } from "../fork/workspaces/workspaces"; // Fork
 import { askBannersOnce } from "../fork/alerts/bannerDefault";
 import { publishRunningWork } from "../fork/backgroundAgents/runningAgents"; // Fork
 import { publishTurns } from "../fork/games/liveTurns"; // Fork: Turn Bet times real turns.
-import { publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
+import { knownLocalProjectPaths, publishOwnSessions } from "../fork/externalSessions/externalSessionsStore"; // Fork
 import { isMoveLocked, isSessionMoved, registerMoveHost } from "../fork/sessionMove/sessionMoveStore"; // Fork
 import { publishMonoSessions } from "../fork/messageLog/messageLogStore"; // Fork
 import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
@@ -11998,6 +11999,15 @@ function Workspace({
           monoForSession(source.id) ?? findMono(habitRunMono(source.id) ?? "");
         const canAccessProject = (cwd: string) =>
           canAccessAgentAppProject(source, cwd, sourceMono?.projects);
+        // Fork: only discovery/read/send cross projects; lifecycle actions stay local.
+        const communicationProjects = () => [
+          source.cwd,
+          ...knownLocalProjectPaths().filter(isLocalProject),
+          ...sessionsRef.current.map((session) => session.cwd).filter(isLocalProject),
+        ];
+        const canCommunicate = (cwd: string) =>
+          canAccessProject(cwd) || (!sourceMono && !isHabitRun(source.id) && !mcpCall &&
+            communicationProjects().some((project) => sameProjectPath(project, cwd)));
         const sourceTurn = turnGen.current.get(source.id) ?? 0;
         const sourceTurns = isMonoSession(source.id)
           ? groupMonoTurns(source.blocks)
@@ -12146,6 +12156,7 @@ function Workspace({
                 throw error;
               }
             },
+            projects: communicationProjects,
             sessions: async (cwd): Promise<AppSessionListing[]> => {
               const stored = await listSessionsByProject(cwd);
               const byId = new Map<string, AppSessionListing>();
@@ -12164,6 +12175,7 @@ function Workspace({
               for (const session of sessionsRef.current) {
                 if (
                   session.orchestrationLeadId ||
+                  session.inboxAsk ||
                   isHabitRun(session.id) ||
                   !sameProjectPath(session.cwd, cwd)
                 )
@@ -12186,7 +12198,7 @@ function Workspace({
                 (await getSession(id));
               return target &&
                 !target.orchestrationLeadId &&
-                canAccessProject(target.cwd)
+                canCommunicate(target.cwd)
                 ? target
                 : null;
             },
@@ -12196,10 +12208,12 @@ function Workspace({
                 : sessionConversationPage(target, options),
             send: async (id, prompt, requestId, notifyMonoId) => {
               const target = await ensureOpenSessionRef.current(id, true); // Fork: quiet
+              if (!target && await sessionHeldElsewhere(id))
+                throw new Error("Session is open in another MonoCode window; cross-window messaging is unavailable");
               if (
                 !target ||
                 target.orchestrationLeadId ||
-                !canAccessProject(target.cwd) ||
+                !canCommunicate(target.cwd) ||
                 orchestrator.run(id)
               )
                 throw new Error("Session is unavailable in this project");

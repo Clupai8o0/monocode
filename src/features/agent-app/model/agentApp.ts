@@ -46,7 +46,7 @@ import type { QuickLaunch } from "../../quick-composer/model/quickComposer";
 import type { Worktree, Worktrees } from "../../source-control/model/worktrees";
 import { pathKey, projectName } from "../../../shared/lib/paths";
 import type { SplitDir } from "../../workspace/model/layout";
-import { consumeOperatorCommand } from "../../sessions/model/operatorCommand";
+import { consumeOperatorCommand, operatorEnabledInThread } from "../../sessions/model/operatorCommand";
 import { sessionConversationPage, type SessionReadOptions } from "./sessionConversation";
 import {
   CARD_FIELDS,
@@ -105,6 +105,8 @@ export type AgentAppHost = {
     notifyMonoId?: string,
   ): Promise<void>;
   sessions(cwd: string): Promise<AppSessionListing[]>;
+  /** Known local projects for cross-project Operator communication. */
+  projects?(): readonly string[];
   session(id: string): Promise<Session | null>;
   readConversation?(session: Session, options: SessionReadOptions): Promise<ReturnType<typeof sessionConversationPage>>;
   send(
@@ -182,6 +184,7 @@ export type AgentAppHost = {
 };
 
 const FIELDS = new Map<string, readonly string[]>([
+  ["projects.list", []],
   ["models.list", []],
   ["monos.list", []],
   ["monos.configure", ["id", "name", "instructions", "expectedSoulHash", "habit"]],
@@ -402,14 +405,38 @@ async function projectSession(
   id: string,
   input: Record<string, unknown>,
   host: AgentAppHost,
+  communication = false,
 ): Promise<Session> {
-  const cwd = requireProject(source, input, host);
+  const cwd = communication ? communicationProject(source, input, host) : requireProject(source, input, host);
   if (!(await host.sessions(cwd)).some((session) => session.id === id))
     throw new Error("Session was not found in this project");
   const target = await host.session(id);
   if (!target || pathKey(target.cwd) !== pathKey(cwd))
     throw new Error("Session was not found in this project");
   return target;
+}
+
+/** Communication may cross known projects; management keeps its original scope. */
+function communicationProjects(source: Session, host: AgentAppHost): readonly string[] {
+  const mono = host.monoOf?.(source.id);
+  if (mono) return mono.projects;
+  if (host.isHabitRun?.(source.id)) throw new Error("This habit's Mono is no longer available");
+  if (source.id.startsWith("mcp-")) return [source.cwd];
+  return [...new Map([source.cwd, ...(host.projects?.() ?? [])]
+    .filter(looksLikeProject).map((cwd) => [pathKey(cwd), cwd])).values()];
+}
+
+function communicationProject(source: Session, input: Record<string, unknown>, host: AgentAppHost): string {
+  if (host.monoOf?.(source.id) || source.id.startsWith("mcp-")) return requireProject(source, input, host);
+  const named = optionalString(input.project, "project", 4096);
+  if (!named) return requireProject(source, input, host);
+  const projects = communicationProjects(source, host);
+  const exact = projects.find((cwd) => pathKey(cwd) === pathKey(named));
+  if (exact) return exact;
+  const matches = projects.filter((cwd) => projectName(cwd) === named);
+  if (matches.length > 1) throw new Error("Project name is ambiguous; pass its full path from projects.list");
+  if (!matches.length) throw new Error("Unknown project; choose a path from projects.list");
+  return matches[0];
 }
 
 /** Two short body paragraphs, with a hard cap independent of Markdown length. */
@@ -1039,6 +1066,8 @@ export async function handleAgentApp(
     };
   }
   switch (action) {
+    case "projects.list":
+      return { projects: communicationProjects(source, host).map((cwd) => ({ cwd, name: projectName(cwd) })) };
     case "projects.logo":
     case "projects.logo.set":
     case "projects.logo.clear": {
@@ -1079,13 +1108,19 @@ export async function handleAgentApp(
         })),
       };
     case "sessions.list": {
-      const cwd = requireProject(source, input, host);
+      if (input.project === "*") {
+        if (source.id.startsWith("mcp-")) throw new Error("Cross-project discovery is only available to Operator sessions");
+        const groups = await Promise.all(communicationProjects(source, host).map(async (cwd) =>
+          (await host.sessions(cwd)).map((session) => ({ ...session, cwd }))));
+        return { sessions: groups.flat() };
+      }
+      const cwd = communicationProject(source, input, host);
       return { cwd, sessions: await host.sessions(cwd) };
     }
     case "sessions.read": {
       const id = requiredString(input.sessionId, "sessionId", 256);
       const target = id === source.id && host.isMono?.(id)
-        ? source : await projectSession(source, id, input, host);
+        ? source : await projectSession(source, id, input, host, true);
       const options = {
         before: optionalString(input.before, "before", 256),
         limit: input.limit as number | undefined,
@@ -1103,7 +1138,9 @@ export async function handleAgentApp(
         );
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
         throw new Error("Invalid request ID");
-      const target = await projectSession(source, id, input, host);
+      const target = await projectSession(source, id, input, host, true);
+      if ((host.monoOf?.(source.id) || host.isHabitRun?.(source.id) || source.id.startsWith("mcp-")) && operatorEnabledInThread(target.blocks))
+        throw new Error("Project-scoped callers cannot delegate to a cross-project Operator session");
       requireAgentRuntimeMode(source.runtimeMode, target.runtimeMode);
       const result = await host.send(
         id,

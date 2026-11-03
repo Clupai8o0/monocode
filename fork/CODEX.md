@@ -9,7 +9,7 @@ Codex uses MonoCode's composer and app controls; Claude-only terminal commands a
 | Original handoff instructions | Handoffs include a local conversation archive with unabridged user messages and plans. Existing continued threads recover it on their next message; no `/operator` command or resend is needed. Archives live in app data under `handoffs/`; tools, private reasoning and drafts are excluded. |
 | Full access | New desktop Codex conversations and transitions into Codex start with Full access. The permissions picker can still restrict a conversation; internal workers and Plan turns retain their restrictions. |
 | Mentions and skills | Use `@` for file references and `/` for skills; both were already supported. |
-| Session communication | Enable `/operator` for project-scoped session listing, reading and follow-ups; recipients must be idle and cannot have broader permissions than the sender. Agent launches also stay within the sender's permissions. |
+| Session communication | Enable `/operator` for session listing, reading and follow-ups across local projects. Use `projects.list`, then `sessions.list` with `{"project":"*"}`; pass the recipient's project path to `sessions.read` or `sessions.send`. Recipients must be idle and cannot have broader permissions than the sender. Mono assignments and external MCP project limits still apply. |
 | Monos | With `/operator`, `monocode app monos.list` finds this project's Monos; `monos.configure` creates or updates one and its habits when you ask, such as a daily project review. Suggestions alone do not schedule work. |
 | Project logos | With `/operator` enabled, `monocode app projects.logo.set --json '{"path":"assets/logo.svg","background":"transparent"}'` applies an image inside this project; `projects.logo.clear` restores the mascot. |
 | Message cards | Received cross-session envelopes now render in Codex; explicit Codex senders use the Codex icon. |
@@ -18,6 +18,7 @@ Codex uses MonoCode's composer and app controls; Claude-only terminal commands a
 | Phone access | Settings → Connections → Your phones; needs pairing, the MonoCode mobile app, and an awake desktop. |
 
 - Native Codex collaboration remains limited to its agent tree; this change does not add Claude's cross-session transport.
+- Cross-project Operator sends can reopen stored sessions in this window; sessions held by a different window cannot receive follow-ups through this transport yet.
 - A stale developer-level effort hook can override the new user-level host context; shared hook files were not changed.
 - The iPhone app currently requires a TestFlight invitation; no phone was paired or remote access enabled by this change.
 - Mono configuration needs Monos enabled and stays within the current local project; new Monos inherit the session's model and permissions, and habits run while MonoCode is open using normal provider allowance.
