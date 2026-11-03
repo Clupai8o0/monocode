@@ -1,4 +1,4 @@
-import { subscribeGitChanged } from "../../../platform/tauri/fs";
+import { listDir, subscribeGitChanged } from "../../../platform/tauri/fs";
 import {
   sessionCheckpointStatus,
   subscribeReviewChanged,
@@ -69,12 +69,23 @@ function load(entry: Entry): Promise<void> {
     .then(({ files }) => {
       if (revision === entry.revision) publish(entry, { files, error: null });
     })
-    .catch((caught: unknown) => {
+    .catch(async (caught: unknown) => {
+      // A worktree merged and removed leaves nothing to record or to undo.
+      const folderGone = await listDir(entry.cwd).then(
+        () => false,
+        () => true,
+      );
       if (revision === entry.revision)
-        publish(entry, {
-          files: [],
-          error: caught instanceof Error ? caught.message : String(caught),
-        });
+        publish(
+          entry,
+          folderGone
+            ? EMPTY_SESSION_REVIEW
+            : {
+                files: [],
+                error:
+                  caught instanceof Error ? caught.message : String(caught),
+              },
+        );
     })
     .finally(() => {
       if (entry.inFlight?.revision === revision) entry.inFlight = undefined;
