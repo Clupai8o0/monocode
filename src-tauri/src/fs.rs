@@ -5928,7 +5928,7 @@ fn safe_attachment_name(name: &str) -> String {
     }
 }
 
-/// Read a reasonably sized UTF-8 file for the editor.
+/// Read a UTF-8 file for the editor.
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || read_text_file_sync(&path))
@@ -5941,12 +5941,6 @@ fn read_text_file_sync(path: &str) -> Result<String, String> {
     let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !meta.is_file() {
         return Err("Not a file".into());
-    }
-    if meta.len() > MAX_TEXT_FILE_BYTES {
-        return Err(format!(
-            "File is too large to edit (maximum {} MB).",
-            MAX_TEXT_FILE_BYTES / 1024 / 1024
-        ));
     }
 
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -6002,13 +5996,6 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 }
 
 fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
-    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err(format!(
-            "File is too large to save (maximum {} MB).",
-            MAX_TEXT_FILE_BYTES / 1024 / 1024
-        ));
-    }
-
     let requested = expand_home(path);
     let destination = if requested.exists() {
         std::fs::canonicalize(&requested).map_err(|e| format!("{}: {e}", requested.display()))?
@@ -6759,6 +6746,18 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("example.rs")]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn editor_round_trips_html_larger_than_eight_mb() {
+        let dir = tmp("large-editor-html");
+        let path = path_to_js(&dir.0.join("design.html"));
+        let source = format!("<!doctype html><p>{}</p>", "x".repeat(9 * 1024 * 1024));
+        std::fs::write(&path, &source).unwrap();
+        assert_eq!(read_text_file_sync(&path).unwrap(), source);
+        let edited = format!("{source}<!-- saved -->");
+        write_text_file_sync(&path, &edited).unwrap();
+        assert_eq!(read_text_file_sync(&path).unwrap(), edited);
     }
 
     #[test]

@@ -308,11 +308,11 @@ export class WorkspaceCommands {
     }));
   }
 
-  private async file(input: unknown, limit: number, tooLarge: string) {
+  private async file(input: unknown, limit?: number, tooLarge = "read") {
     const { path } = await this.existing(input);
     const info = await stat(path);
     if (!info.isFile()) throw new Error("Not a file");
-    if (info.size > limit)
+    if (limit !== undefined && info.size > limit)
       throw new Error(
         `File is too large to ${tooLarge} (maximum ${limit / 1024 / 1024} MB).`,
       );
@@ -320,7 +320,7 @@ export class WorkspaceCommands {
   }
 
   private async readText(input: unknown): Promise<string> {
-    const bytes = await this.file(input, MAX_TEXT_FILE, "edit");
+    const bytes = await this.file(input);
     if (bytes.includes(0)) throw new Error("Binary files cannot be edited.");
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -356,10 +356,6 @@ export class WorkspaceCommands {
   private async writeText(input: unknown, content: unknown): Promise<void> {
     if (typeof content !== "string")
       throw new Error("Invalid file content");
-    if (Buffer.byteLength(content, "utf8") > MAX_TEXT_FILE)
-      throw new Error(
-        `File is too large to save (maximum ${MAX_TEXT_FILE / 1024 / 1024} MB).`,
-      );
     const { root, relative: rel } = await this.locate(input);
     const path = workspacePath(root, rel);
     if (await stat(path).then((info) => info.isDirectory(), () => false))
