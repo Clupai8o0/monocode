@@ -11,8 +11,16 @@ import {
   saveContinuedOrigin,
   withTranscriptPointer,
 } from "../fork/continueElsewhere/continueElsewhere";
+import {
+  buildHandoffTarget,
+  sourceHandoffPrefs,
+} from "../fork/continueElsewhere/handoffPrefs";
 import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
 import { needsHandoffRecovery, prepareHandoffContext, recordHandoffContext, finishHandoffContext } from "../fork/continueElsewhere/handoffContext";
+import {
+  getComposerMcpTags,
+  setComposerMcpTags,
+} from "../features/sessions/model/draftCache";
 import {
   recordFeatureUse,
   registerCoachHost,
@@ -456,7 +464,6 @@ import {
   nativeModelId,
   preferredModelSettings,
   defaultModelId,
-  defaultModelSettings,
   resolveModel,
   saveLastModelSettings,
   saveRecentModelChoice,
@@ -10987,7 +10994,12 @@ function Workspace({
   );
 
   const onHandoff = useCallback(
-    (sourceId: string, target: ModelTarget, turn: Block[]) => {
+    (
+      sourceId: string,
+      target: ModelTarget,
+      turn: Block[],
+      extras?: { runtimeMode?: RuntimeMode; mcpServerIds?: string[] },
+    ) => {
       const source = sessionsRef.current.find(
         (session) => session.id === sourceId,
       );
@@ -10999,8 +11011,11 @@ function Workspace({
       const userRequest = turnUserRequest(turn);
       const files = turnEditedFiles(sliced.blocks, cwd);
       const display = sessionDisplayTitle(source.title, source.harness);
+      const runtimeMode =
+        extras?.runtimeMode ??
+        (harness === "codex" ? "full-access" : source.runtimeMode);
       const session = {
-        ...newSession(harness, source.cwd, model, harness === "codex" ? "full-access" : source.runtimeMode),
+        ...newSession(harness, source.cwd, model, runtimeMode),
         worktreeCwd: source.worktreeCwd,
         branch: source.branch,
         modelSettings: mergeModelSettings(
@@ -11031,6 +11046,13 @@ function Workspace({
         title: display,
         files: files.length,
       });
+      if (extras?.mcpServerIds?.length) {
+        const names = new Set(extras.mcpServerIds);
+        const tags = getComposerMcpTags(sourceId).filter((tag) =>
+          names.has(tag.server.name),
+        );
+        if (tags.length > 0) setComposerMcpTags(session.id, tags);
+      }
       openSessionBeside(sourceId, appendReadyHandoff(session, from, harness, session.handoffCard.brief), source.cwd, true);
     },
     [openSessionBeside],
@@ -11059,16 +11081,37 @@ function Workspace({
           (target && allowed.includes(target) ? target : null) ??
           continueTarget(source.harness);
         if (!resolved || !allowed.includes(resolved)) return;
-        // Prefs applied in Task 4; for now still defaultModelId(resolved).
-        const model = defaultModelId(resolved);
+        const prefs = sourceHandoffPrefs({
+          harness: source.harness,
+          model: source.model,
+          modelSettings: source.modelSettings,
+          runtimeMode: source.runtimeMode,
+          providerAccountId: source.providerAccountId,
+          mcpServerIds: getComposerMcpTags(source.id).map(
+            (tag) => tag.server.name,
+          ),
+        });
+        const mapped = buildHandoffTarget(resolved, prefs, {
+          defaultModelId,
+          // resolveModel always returns a fallback; exact id match means known.
+          isKnownModel: (harness, model) =>
+            resolveModel(harness, model).id === model,
+        });
         onHandoff(
           sessionId,
           {
-            harness: resolved,
-            model,
-            modelSettings: defaultModelSettings(resolveModel(resolved, model)),
+            harness: mapped.harness,
+            model: mapped.model,
+            modelSettings: mergeModelSettings(
+              resolveModel(mapped.harness, mapped.model),
+              mapped.modelSettings,
+            ),
           },
           source.blocks,
+          {
+            runtimeMode: mapped.runtimeMode,
+            mcpServerIds: mapped.mcpServerIds,
+          },
         );
       },
       openSession: (sessionId) => {
