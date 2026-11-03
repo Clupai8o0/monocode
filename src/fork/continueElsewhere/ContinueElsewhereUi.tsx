@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
 import {
   HARNESS_TITLE,
@@ -21,7 +21,8 @@ const BUTTON =
   `inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-content/10 px-2 font-sans text-[12px] font-medium text-content hover:bg-content/15 ${PRESS}`;
 
 function resolveTargets(sessionId: string, harness: HarnessId): HarnessId[] {
-  return continueHost()?.targetsFor?.(sessionId) ?? handoffTargets(harness);
+  const live = continueHost()?.targetsFor?.(sessionId);
+  return live && live.length > 0 ? live : handoffTargets(harness);
 }
 
 /** Fork: on the usage-limit bar, the way out when this provider is spent. */
@@ -68,7 +69,6 @@ function ContinueElsewhereMenu({
 }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
-  const menuId = useId();
   const dismiss = (restoreFocus = false) => {
     setOpen(false);
     if (restoreFocus) button.current?.focus();
@@ -85,7 +85,6 @@ function ContinueElsewhereMenu({
         data-fork-continue-elsewhere
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Continue elsewhere"
         onClick={() => setOpen((was) => !was)}
         className={BUTTON}
       >
@@ -113,10 +112,8 @@ function ContinueElsewhereMenu({
           {targets.map((target) => (
             <button
               key={target}
-              id={`${menuId}-${target}`}
               type="button"
               role="menuitem"
-              tabIndex={-1}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pick(target)}
               className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[12px] text-content/80 hover:bg-content/8 hover:text-content ${PRESS}`}

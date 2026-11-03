@@ -1598,19 +1598,25 @@ function SidebarComponent({
         ]
       : []),
     // Fork: carry the session over to another first-class provider.
+    // Prefer live targetsFor when the host knows the session; fall back to
+    // handoffTargets so closed/history sessions still list peers (disabled).
     ...(!multipleMenuSessions && menuSessions[0]
-      ? (
-          continueHost()?.targetsFor?.(menuSessions[0].id) ??
-          handoffTargets(menuSessions[0].harness)
-        ).map((target) => ({
-          kind: "item" as const,
-          id: `continue-elsewhere:${target}`,
-          label: continueLabelFor(menuSessions[0].harness, target),
-          disabled: !continueHost()?.canContinue(menuSessions[0].id),
-          description: continueHost()?.canContinue(menuSessions[0].id)
-            ? undefined
-            : "Open the session first",
-        }))
+      ? (() => {
+          const session = menuSessions[0];
+          const live = continueHost()?.targetsFor?.(session.id);
+          const peers =
+            live && live.length > 0
+              ? live
+              : handoffTargets(session.harness);
+          const can = Boolean(continueHost()?.canContinue(session.id));
+          return peers.map((target) => ({
+            kind: "item" as const,
+            id: `continue-elsewhere:${target}`,
+            label: continueLabelFor(session.harness, target),
+            disabled: !can,
+            description: can ? undefined : "Open the session first",
+          }));
+        })()
       : []),
     // Fork: move the session and its work to another machine.
     ...(!multipleMenuSessions && menuSessions[0]
