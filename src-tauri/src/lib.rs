@@ -369,6 +369,7 @@ pub fn run() {
             mobile_access::mobile_publish,
             mobile_access::mobile_reply,
             mobile_access::mobile_push,
+            git_watch::reset_git_watches,
             git_watch::watch_git_changes,
             git_watch::unwatch_git_changes,
             remote::remote_machines,

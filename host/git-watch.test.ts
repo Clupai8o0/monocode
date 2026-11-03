@@ -54,7 +54,7 @@ async function changed(promise: Promise<boolean>) {
   expect(result).toBe(true);
 }
 
-it("reports external atomic edits, staging, branch changes, and deletions", async () => {
+it.skipIf(process.platform === "linux")("reports external atomic edits, staging, branch changes, and deletions", async () => {
   const { root, git, host } = setup();
   await host.start("watch", root, root);
   const edit = host.wait("watch", root);
@@ -73,7 +73,7 @@ it("reports external atomic edits, staging, branch changes, and deletions", asyn
   host.stop("watch", root);
 });
 
-it("stays quiet on Git reads and ignored builds, and releases a pending request on close", async () => {
+it.skipIf(process.platform === "linux")("stays quiet on Git reads and ignored builds, and releases a pending request on close", async () => {
   const { root, git, host } = setup();
   await host.start("watch", root, root);
   let refreshed = false;
@@ -92,7 +92,7 @@ it("stays quiet on Git reads and ignored builds, and releases a pending request 
   expect(() => host.wait("watch", root)).toThrow("not found");
 });
 
-it("keeps changes received between long requests and rejects a different repository key", async () => {
+it.skipIf(process.platform === "linux")("keeps changes received between long requests and rejects a different repository key", async () => {
   const { root, host } = setup();
   await host.start("watch", root, root);
   expect(() => host.wait("watch", "/another-project")).toThrow("not found");
@@ -101,7 +101,7 @@ it("keeps changes received between long requests and rejects a different reposit
   await changed(host.wait("watch", root));
 });
 
-it("watches the shared Git metadata of linked worktrees", async () => {
+it.skipIf(process.platform === "linux")("watches the shared Git metadata of linked worktrees", async () => {
   const { root, git, host } = setup();
   const linked = join(root, "linked");
   git("worktree", "add", "-qb", "linked", linked);
@@ -109,4 +109,10 @@ it("watches the shared Git metadata of linked worktrees", async () => {
   const refs = host.wait("watch", linked);
   git("branch", "external-branch");
   await changed(refs);
+});
+
+it("falls back on Linux before recursive watching can walk generated dependencies", async () => {
+  const host = new GitWatchHost("linux");
+  await expect(host.start("watch", "/repo", "/missing-repo")).rejects.toThrow("polling");
+  host.close();
 });

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { invokeWorkspace, REMOTE_PATH_PREFIX } from "./fs";
+import { invalidateGitReads, invokeWorkspace, REMOTE_PATH_PREFIX } from "./fs";
 
 type Change = { id: string; failed: boolean };
 type Subscription = {
@@ -9,6 +9,12 @@ type Subscription = {
   stop?: () => void;
 };
 const subscriptions = new Map<string, Subscription>();
+let nativeReset: Promise<void> | undefined;
+
+/** A page reload skips effect cleanup; release watches from its old JS runtime. */
+export function resetGitWatches(): Promise<void> {
+  return nativeReset ??= invoke<void>("reset_git_watches").catch(() => {});
+}
 
 /** Share one native watcher per displayed repository. Normal operation has no
  * timer or Git reads until a filesystem notification arrives. */
@@ -31,17 +37,19 @@ export function watchGitChanges(cwd: string, listener: () => void): () => void {
   };
 }
 
-function changed(entry: Subscription) {
-  if (!entry.disposed) for (const listener of [...entry.listeners]) listener();
+function changed(cwd: string, entry: Subscription) {
+  if (entry.disposed) return;
+  invalidateGitReads(cwd);
+  for (const listener of [...entry.listeners]) listener();
 }
 
-function fallback(entry: Subscription) {
+function fallback(cwd: string, entry: Subscription) {
   if (entry.disposed) return;
   // Network filesystems or older remote hosts may not support notifications.
   // Keep their existing updates working, without polling supported projects.
-  const timer = window.setInterval(() => changed(entry), 2000);
+  const timer = window.setInterval(() => changed(cwd, entry), 2000);
   entry.stop = () => window.clearInterval(timer);
-  changed(entry);
+  changed(cwd, entry);
 }
 
 async function start(cwd: string, entry: Subscription) {
@@ -51,6 +59,8 @@ async function start(cwd: string, entry: Subscription) {
     await startRemote(cwd, id, entry);
     return;
   }
+  await resetGitWatches();
+  if (entry.disposed) return;
   let unlisten: (() => void) | undefined;
   let starting = true;
   let failed = false;
@@ -67,9 +77,9 @@ async function start(cwd: string, entry: Subscription) {
       if (payload.failed) {
         failed = true;
         stop();
-        fallback(entry);
+        fallback(cwd, entry);
       } else {
-        changed(entry);
+        changed(cwd, entry);
       }
     });
     if (entry.disposed) {
@@ -79,11 +89,11 @@ async function start(cwd: string, entry: Subscription) {
     await invoke("watch_git_changes", { cwd, id });
     starting = false;
     if (entry.disposed || failed) stop();
-    else changed(entry); // Covers writes between the initial read and setup.
+    else changed(cwd, entry); // Covers writes between the initial read and setup.
   } catch {
     starting = false;
     stop();
-    if (!failed) fallback(entry);
+    if (!failed) fallback(cwd, entry);
   }
 }
 
@@ -101,15 +111,15 @@ async function startRemote(cwd: string, id: string, entry: Subscription) {
       stop();
       return;
     }
-    changed(entry);
+    changed(cwd, entry);
     while (!entry.disposed) {
       // The host holds this request until a filesystem event arrives. A
       // timeout only renews the connection; it does not run a Git query.
       if (await invokeWorkspace<boolean>("wait_git_changes", { cwd, id }))
-        changed(entry);
+        changed(cwd, entry);
     }
   } catch {
     stop();
-    fallback(entry);
+    fallback(cwd, entry);
   }
 }

@@ -246,6 +246,8 @@ describe("GitChangesPanel filesystem updates", () => {
     await act(async () => watchGitChanges.mock.calls[0][1]());
     expect(gitDiffIndex).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("agent.ts");
+    // A linked worktree's branch/topology changes must reach root-keyed hooks.
+    expect(notifyGitChanged).toHaveBeenLastCalledWith({ invalidatePending: false });
   });
 
   it("queues one reread when several edits arrive during a Git read", async () => {

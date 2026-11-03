@@ -1673,7 +1673,8 @@ function useDiffIndex(
           // index immediately after the one we just read.
           publishing = true;
           try {
-            notifyGitChanged({ invalidatePending: false, cwd });
+            // Branches and worktree topology are shared with root-keyed consumers.
+            notifyGitChanged({ invalidatePending: false });
           } finally {
             publishing = false;
           }

@@ -6,6 +6,7 @@ import {
   gitDiffIndex,
   gitDiffStats,
   gitDiffFiles,
+  invalidateGitReads,
   notifyAgentGitActivity,
   notifyGitChanged,
   type GitDiffIndex,
@@ -331,4 +332,27 @@ it("does not publish a stale failure after a mutation", async () => {
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it("retries a pending index read after a scoped disk change without invalidating another checkout", async () => {
+  vi.mocked(invoke).mockReset();
+  let finish!: (value: GitDiffIndex) => void;
+  let finishOther!: (value: GitDiffIndex) => void;
+  const stale = { files: [] } as unknown as GitDiffIndex;
+  const fresh = { files: [{ path: "/changed/new.txt" }] } as unknown as GitDiffIndex;
+  vi.mocked(invoke)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishOther = resolve; }))
+    .mockResolvedValue(fresh);
+  const pending = gitDiffIndex("/changed");
+  const other = gitDiffIndex("/other");
+  invalidateGitReads("/changed");
+  const reload = gitDiffIndex("/changed");
+  expect(reload).not.toBe(pending);
+  expect(gitDiffIndex("/other")).toBe(other);
+  finish(stale);
+  finishOther(stale);
+  await expect(pending).resolves.toBe(fresh);
+  await expect(reload).resolves.toBe(fresh);
+  await expect(other).resolves.toBe(stale);
 });

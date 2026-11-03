@@ -284,7 +284,15 @@ class RepositoryWatch {
 export class GitWatchHost {
   private watches = new Map<string, RepositoryWatch>();
 
+  constructor(private readonly platform: NodeJS.Platform = process.platform) {}
+
   async start(id: unknown, key: unknown, cwd: string): Promise<void> {
+    // Node's Linux recursive watcher walks generated trees synchronously and
+    // cannot prune ignored directories on the supported host Node versions.
+    // Let the client use its bounded polling fallback instead.
+    if (this.platform === "linux") {
+      throw new Error("Git filesystem notifications use polling on Linux hosts");
+    }
     if (
       typeof id !== "string" ||
       !id ||
