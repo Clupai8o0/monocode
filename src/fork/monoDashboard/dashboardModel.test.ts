@@ -17,6 +17,16 @@ import {
   type Contribution,
   type ContributionDay,
 } from "./dashboardModel";
+import { requestIds } from "./useMonoContributions";
+
+it("asks only for ids the backend accepts, keeping the newest", () => {
+  expect(requestIds(["a", "bad id", "a", "b_1", "../x"])).toEqual(["a", "b_1"]);
+  const many = Array.from({ length: 2005 }, (_, index) => `s${index}`);
+  const kept = requestIds(many);
+  expect(kept).toHaveLength(2000);
+  expect(kept).toContain("s2004");
+  expect(kept).not.toContain("s4");
+});
 
 const NOW = new Date(2026, 9, 29, 15).getTime();
 const at = (daysBack: number, hour: number) =>

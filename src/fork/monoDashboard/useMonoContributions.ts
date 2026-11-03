@@ -13,6 +13,20 @@ const MARGIN_MS = 24 * 60 * 60 * 1000;
 const loaded = new Map<string, MonoContributions>();
 const landedCheckedAt = new Map<string, number>();
 
+/** The command takes at most this many, and rejects the whole call beyond it. */
+const MAX_SESSIONS = 2000;
+
+/**
+ * One malformed or surplus id would fail the whole request and empty the
+ * dashboard, so they are dropped here. Callers list the newest sessions last.
+ */
+export function requestIds(sessionIds: readonly string[]): string[] {
+  const valid = [...new Set(sessionIds)].filter((id) =>
+    /^[A-Za-z0-9_-]+$/.test(id),
+  );
+  return valid.slice(-MAX_SESSIONS).sort();
+}
+
 export type ContributionsState = {
   data?: MonoContributions;
   /** The last read failed and there is nothing older to show. */
@@ -28,7 +42,7 @@ export function useMonoContributions(
   const [data, setData] = useState(() => loaded.get(monoId));
   const [failed, setFailed] = useState(false);
   const idsKey = useMemo(
-    () => JSON.stringify([...new Set(sessionIds)].sort()),
+    () => JSON.stringify(requestIds(sessionIds)),
     [sessionIds],
   );
 
