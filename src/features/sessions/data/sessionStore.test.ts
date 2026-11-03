@@ -2,7 +2,7 @@ import {
   appendUser,
   applyHarnessEvents,
 } from "../../../integrations/harness/core/apply";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mapCodexNotification } from "../../../integrations/harness/providers/codex/codexProtocol";
 import { toolCallLabel } from "../model/transcriptActivity";
 import { lastTurnRetry } from "../model/editLastTurn";
@@ -1009,6 +1009,21 @@ describe("persistFingerprint", () => {
       persistFingerprint({ ...original, id: `eviction-${index}` });
     }
     expect(persistFingerprint(original)).toBe(first);
+  });
+
+  it("still detects edits when the webview has no WeakRef support", () => {
+    vi.stubGlobal("WeakRef", undefined);
+    try {
+      const original = base([user, answer]);
+      const first = persistFingerprint(original);
+      expect(persistFingerprint(original)).toBe(first);
+      expect(persistFingerprint({
+        ...original,
+        blocks: [user, { ...answer, text: "updated" }],
+      })).not.toBe(first);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("ignores state that is never written", () => {

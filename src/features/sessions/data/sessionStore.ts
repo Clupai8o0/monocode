@@ -1,3 +1,4 @@
+/// <reference lib="es2021.weakref" />
 import { invoke } from "@tauri-apps/api/core";
 import { isMonoSession } from "../../monos/model/mono";
 import { sanitizeMonoSpawnedSessions } from "../../monos/model/monoSpawnedSessions";
@@ -478,7 +479,7 @@ function blockToken(block: Block): number {
 const BLOCK_STAMP_LIMIT = 64;
 const blockStamps = new Map<
   string,
-  { blocks: readonly Block[]; joined: string }
+  { blocks: WeakRef<readonly Block[]>; joined: string }
 >();
 
 /**
@@ -487,12 +488,16 @@ const blockStamps = new Map<
  * walking every block on each save check.
  */
 function joinedBlockTokens(sessionId: string, blocks: readonly Block[]): string {
+  // Closing a session must release its transcript even while its stamp is cached.
+  // Older webviews can still use the uncached fingerprint path.
+  if (typeof WeakRef === "undefined") return tokensFrom(blocks, 0);
   const previous = blockStamps.get(sessionId);
-  const joined = previous
-    ? joinBlockTokens(previous, blocks)
+  const previousBlocks = previous?.blocks.deref();
+  const joined = previous && previousBlocks
+    ? joinBlockTokens({ blocks: previousBlocks, joined: previous.joined }, blocks)
     : tokensFrom(blocks, 0);
   if (previous) blockStamps.delete(sessionId);
-  blockStamps.set(sessionId, { blocks, joined });
+  blockStamps.set(sessionId, { blocks: new WeakRef(blocks), joined });
   if (blockStamps.size > BLOCK_STAMP_LIMIT) {
     const oldest = blockStamps.keys().next().value;
     if (oldest !== undefined) blockStamps.delete(oldest);
