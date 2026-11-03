@@ -532,6 +532,32 @@ describe("cursor background subagents", () => {
     await turn;
   });
 
+  it("reports background.updated while a background agent is waiting", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-bg-wait");
+    emitAgentStart();
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_agent",
+        status: "completed",
+        rawOutput: { isBackground: true },
+      },
+    });
+    expect(
+      events.some(
+        (e) => e.type === "background.updated" && e.tasks.length > 0,
+      ),
+    ).toBe(true);
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+    expect(
+      events.some(
+        (e) => e.type === "background.updated" && e.tasks.length === 0,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps an ACP background task active until the prompt completes", async () => {
     const { events, promptId, turn } = await startTurn("cursor-live");
     let settled = false;
