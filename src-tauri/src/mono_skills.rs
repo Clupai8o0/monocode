@@ -7,10 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::mono::{agent_dir, content_hash, monos_root, CONFLICT, FILES_LOCK};
-use crate::skills::{
-    is_discovered_skill_path, is_missing_discovered_skill_path, is_valid_skill_name,
-    parse_frontmatter, scan_root,
-};
+use crate::skills::{is_discovered_skill_path, is_valid_skill_name, parse_frontmatter, scan_root};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,10 +69,10 @@ pub(crate) fn validate_assignments(text: &str, previous: Option<&str>) -> Result
         if is_discovered_skill_path(&item.path) {
             continue;
         }
-        // Unassigning another skill must remain possible after a source vanishes.
-        // Only retain identical references from this Mono's persisted catalog;
-        // a new or retargeted reference still requires actual discovery.
-        if previous.contains(&item) && is_missing_discovered_skill_path(&item.path) {
+        // Preserve identical metadata after a source or plugin leaves discovery.
+        // This does not authorize reads: read_skill still requires discovery.
+        // New or retargeted references must pass actual discovery above.
+        if previous.contains(&item) {
             continue;
         }
         return Err("Invalid skill assignment".into());
@@ -317,6 +314,7 @@ mod tests {
         ])
         .to_string();
         assert!(validate_assignments(&config, None).is_err());
+        assert!(validate_assignments(&config, Some(&config)).is_ok());
         std::fs::write(dir.join("skills.json"), config).unwrap();
         let listed = list(&dir).unwrap();
         let secret_skill = listed.iter().find(|skill| skill.name == "secret").unwrap();
