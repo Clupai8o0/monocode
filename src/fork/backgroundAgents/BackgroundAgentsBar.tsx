@@ -1,4 +1,11 @@
-import { useEffect, useId, useReducer, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Bot, ChevronRight, Terminal } from "../../shared/ui/icons";
 import type { Block, Session } from "../../features/sessions/model/session";
 import { formatLiveElapsed } from "../../features/sessions/model/liveAgents";
@@ -30,6 +37,7 @@ import {
   type Axis,
   type RunTiming,
 } from "./agentBoard";
+import { useTaskOutput, type TaskOutput } from "./useTaskOutput";
 
 /** A bar this thin (percent) still reads as a run that has started. */
 const MIN_BAR_PERCENT = 0.5;
@@ -56,14 +64,15 @@ function useSecondTick(active: boolean): void {
 /**
  * The panel is short, so a row near its edge would open out of sight. Rows open
  * without an animation: while growing they would have no height to reveal yet.
+ * `filled` is for a row whose content arrives just after it opens.
  */
-function useRevealWhenOpen(open: boolean) {
+function useRevealWhenOpen(open: boolean, filled = false) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) {
       row.current?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [open]);
+  }, [open, filled]);
   return row;
 }
 
@@ -409,7 +418,8 @@ function CommandRow({
   now: number;
 }) {
   const [open, setOpen] = useState(false);
-  const row = useRevealWhenOpen(open);
+  const output = useTaskOutput(block.tool?.outputPath, open);
+  const row = useRevealWhenOpen(open, !!output.text);
   const title = block.tool?.title || block.text || "Command";
   return (
     <div ref={row} className="flex min-w-0 flex-col">
@@ -449,16 +459,73 @@ function CommandRow({
         />
       </button>
       {open ? (
-        <div className="flex min-w-0 flex-col gap-1 py-1 pl-[22px]">
-          <pre className="max-h-32 min-w-0 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-content/70">
-            {title}
-          </pre>
-          {/* A running command's output is not sent here until it ends. */}
-          <p className="font-sans text-[12px] text-content/45">
-            Its output appears in the transcript when it finishes.
-          </p>
-        </div>
+        <CommandConsole
+          script={block.tool?.command || title}
+          output={output}
+          hasFile={!!block.tool?.outputPath && !output.unavailable}
+        />
       ) : null}
     </div>
   );
+}
+
+/**
+ * The script, then its output, in one scroller sized to fit the capped panel
+ * under its row, so the newest line is never cut off. Follows new output unless
+ * the reader has scrolled up to look at older lines.
+ */
+function CommandConsole({
+  script,
+  output,
+  hasFile,
+}: {
+  script: string;
+  output: TaskOutput;
+  hasFile: boolean;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useLayoutEffect(() => {
+    if (box.current && following.current) {
+      box.current.scrollTop = box.current.scrollHeight;
+    }
+  }, [output.text]);
+  const note = commandNote(hasFile, output);
+  return (
+    <div className="min-w-0 py-1 pl-[22px]">
+      <div
+        ref={box}
+        role="group"
+        tabIndex={0}
+        aria-label="Command and its output"
+        data-fork-command-console
+        onScroll={(event) => {
+          const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+          following.current = scrollHeight - scrollTop - clientHeight < 8;
+        }}
+        className="max-h-[calc(min(24vh,15rem)-3.25rem)] min-w-0 space-y-1.5 overflow-y-auto rounded-md bg-content/[0.05] px-2 py-1.5 text-[12px] leading-5"
+      >
+        <pre className="min-w-0 whitespace-pre-wrap break-all font-mono text-content/80">
+          {script}
+        </pre>
+        {note ? <p className="font-sans text-content/45">{note}</p> : null}
+        {hasFile && output.text ? (
+          <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-content/60">
+            {output.text}
+          </pre>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function commandNote(hasFile: boolean, output: TaskOutput): string | null {
+  if (!hasFile) {
+    // Only Claude's commands on this machine leave a file to read.
+    return "Its output appears in the transcript when it finishes.";
+  }
+  if (output.text === "" && !output.truncated) {
+    return "No output yet.";
+  }
+  return output.text && output.truncated ? "Earlier output left out." : null;
 }

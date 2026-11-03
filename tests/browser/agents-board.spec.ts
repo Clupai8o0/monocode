@@ -95,6 +95,51 @@ for (const theme of ["dark", "light"] as const) {
   });
 }
 
+for (const theme of ["dark", "light"] as const) {
+  test(`a running command's output, ${theme}`, async ({ page }, testInfo) => {
+    const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
+    const print = (lines: number) =>
+      page.evaluate((count) => {
+        (window as unknown as { __print(count: number): void }).__print(count);
+      }, lines);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.goto(`/tests/browser/agents-board.html?scene=output&theme=${theme}`);
+    await page.locator(strip).click();
+    await page.getByRole("button", { name: "Show command: cd src-tauri" }).click();
+
+    // The whole script, not only its first line.
+    const view = page.locator("[data-fork-command-console]");
+    await expect(view.locator("pre").first()).toContainText("cat target/report.txt");
+    await expect(page.getByText("No output yet.")).toBeVisible();
+
+    await print(3);
+    await expect(view).toContainText("Compiling crate-3 v1.0.0");
+    await expect(view).not.toContainText("\u001b");
+    await expect(page.getByText("No output yet.")).toHaveCount(0);
+
+    // It follows new lines. The newest one is in plain sight, and the panel
+    // stays its small size without scrolling on its own.
+    await print(40);
+    await expect(view).toContainText("crate-43");
+    const distance = () =>
+      view.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    await expect.poll(distance).toBeLessThan(8);
+    const panel = page.locator(board);
+    expect((await panel.boundingBox())!.height).toBeLessThanOrEqual(168);
+    expect(await panel.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
+    await page.screenshot({ path: `${dir}/agents-board-output-${theme}.png` });
+
+    // Scrolled up to read, the view stays put as more arrives.
+    await view.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await print(10);
+    await expect(view).toContainText("crate-53");
+    expect(await view.evaluate((el) => el.scrollTop)).toBe(0);
+  });
+}
+
 test("sequential runs stay closed", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html?scene=sequential");
   await expect(page.locator(strip)).toContainText("1 of 2 agents done");
