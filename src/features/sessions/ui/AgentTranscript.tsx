@@ -80,7 +80,6 @@ import type { MessageDelivery } from "../../monos/model/monoMessaging";
 import { monoReactionBlocks } from "../../monos/model/monoReaction";
 import type { ApprovalDecision } from "../../../integrations/harness";
 import {
-  isHarnessAuthError,
   latestTurnHarnessAuthFailure,
   supportsHarnessLogin,
 } from "../../../integrations/harness/core/authSupport";
@@ -302,6 +301,31 @@ type Props = {
   sessionId?: string;
 };
 
+/**
+ * Drop the failure a sign-in notice is replacing, and exact repeats of its text
+ * in the same latest turn. Earlier turns and different errors are left alone.
+ */
+function withoutReplacedAuthFailure(
+  blocks: readonly Block[],
+  failure: Block,
+): Block[] {
+  const text = failure.text.trim();
+  let turnStart = blocks.length;
+  while (turnStart > 0 && blocks[turnStart - 1].role !== "user") {
+    turnStart -= 1;
+  }
+  return blocks.filter(
+    (block, index) =>
+      block !== failure &&
+      !(
+        index >= turnStart &&
+        block.text.trim() === text &&
+        (block.role === "assistant" ||
+          (block.role === "system" && block.notice === "error"))
+      ),
+  );
+}
+
 function AgentTranscriptComponent({
   blocks: sourceBlocks,
   historicalBlockIds,
@@ -370,25 +394,22 @@ function AgentTranscriptComponent({
     if (!harness || !supportsHarnessLogin(harness)) {
       return { blocks: chatBlocks, authFailure: undefined };
     }
-    // The sign-in notice under the turn shows the failure's text instead.
-    const authFailure = signInOffered
-      ? latestTurnHarnessAuthFailure(chatBlocks, harness)
-      : undefined;
-    const visibleBlocks = chatBlocks.filter(
-      (block) =>
-        block !== authFailure &&
-        !(
-          block.role === "system" &&
-          block.notice === "error" &&
-          isHarnessAuthError(block.text)
-        ),
-    );
-    return {
-      blocks:
-        visibleBlocks.length === chatBlocks.length ? chatBlocks : visibleBlocks,
-      authFailure,
-    };
-  }, [harness, isMonoChat, signInOffered, sourceBlocks]);
+    // Only a block the sign-in notice really replaces leaves the transcript.
+    // Without a live notice (no sign-in action, a running turn, a parked pane)
+    // and for earlier turns, the provider's error stays readable.
+    const failure =
+      signInOffered && !busy && !parked
+        ? latestTurnHarnessAuthFailure(chatBlocks, harness)
+        : undefined;
+    const visibleBlocks = failure
+      ? withoutReplacedAuthFailure(chatBlocks, failure)
+      : chatBlocks;
+    // A transcript holding nothing else has no turn to carry the notice.
+    if (visibleBlocks.length === 0) {
+      return { blocks: chatBlocks, authFailure: undefined };
+    }
+    return { blocks: visibleBlocks, authFailure: failure };
+  }, [busy, harness, isMonoChat, parked, signInOffered, sourceBlocks]);
   const editableUserBlockId = useMemo(
     () => lastUserTurnBlock(blocks)?.id,
     [blocks],
