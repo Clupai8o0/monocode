@@ -113,7 +113,9 @@ const PROFILES: FirstClassProviderProfile[] = [
     mcpDiscovery: true,
     cliUpdates: true,
     handoff: true,
-    restoreTaskLists: false, // Task 8 may flip if Codex needs in-memory seed
+    // Codex maps turn/plan/updated to full tasks.updated snapshots (no per-id
+    // TaskUpdate map like Claude's tasksByThread), so resume needs no seed.
+    restoreTaskLists: false,
     toHandoffPrefs: identityToPrefs,
     fromHandoffPrefs: (prefs, helpers) =>
       mapIncomingPrefs("codex", prefs, helpers, "full-access"),
