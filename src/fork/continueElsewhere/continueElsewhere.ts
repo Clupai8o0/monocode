@@ -34,7 +34,7 @@ export function continueLabel(harness: HarnessId): string | null {
 }
 
 export function continueLabelFor(
-  harness: HarnessId,
+  _harness: HarnessId,
   target: HarnessId,
 ): string {
   return `Continue in ${HARNESS_TITLE[target]}`;

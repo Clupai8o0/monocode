@@ -3,7 +3,9 @@ import {
   clampUsedPercent,
   exhaustedWindowResetAt,
   formatResetDuration,
+  isRateLimitProvider,
   type ProviderRateLimits,
+  type RateLimitProvider,
 } from "./rateLimits";
 import {
   getAllRateLimits,
@@ -160,9 +162,17 @@ export function useProviderAccountUsage(
       setInflight((count) => count + 1);
       try {
         await Promise.allSettled(
-          targets.map((account) =>
-            loadRateLimits(account.provider, account.id, force),
-          ),
+          targets
+            .filter(
+              (
+                account,
+              ): account is ProviderAccount & {
+                provider: RateLimitProvider;
+              } => isRateLimitProvider(account.provider),
+            )
+            .map((account) =>
+              loadRateLimits(account.provider, account.id, force),
+            ),
         );
       } finally {
         setInflight((count) => count - 1);

@@ -164,7 +164,8 @@ describe("settings pages", () => {
     const emails = container.querySelectorAll<HTMLButtonElement>(
       '[aria-label="Reveal email"]',
     );
-    expect(emails).toHaveLength(2);
+    // Claude, Codex, and Grok default accounts; Devin has no on-disk identity.
+    expect(emails).toHaveLength(3);
     expect(
       [...emails].every((email) =>
         email.querySelector("span")?.className.includes("blur-[5px]"),
@@ -184,7 +185,7 @@ describe("settings pages", () => {
     expect(container.querySelector('[aria-label="Hide email"]')).toBeNull();
     expect(
       container.querySelectorAll('[aria-label="Reveal email"]'),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
   it("shows used usage and plain emails until the options are turned on", async () => {

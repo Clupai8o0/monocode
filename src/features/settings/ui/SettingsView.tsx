@@ -280,6 +280,7 @@ import {
   accountUsageKey,
   useProviderAccountUsage,
 } from "../../providers/model/accountUsage";
+import { isRateLimitProvider } from "../../providers/model/rateLimits";
 import { clearCachedRateLimits } from "../../providers/model/rateLimitsCache";
 import {
   AccountStatusLabel,
@@ -3717,7 +3718,9 @@ function ProviderAccountsSettings({ project }: { project?: string }) {
     try {
       await removeProviderAccountCredentials(account.provider, account.id);
       removeProviderAccount(account.provider, account.id);
-      clearCachedRateLimits(account.provider, account.id);
+      if (isRateLimitProvider(account.provider)) {
+        clearCachedRateLimits(account.provider, account.id);
+      }
       if (
         editor?.provider === account.provider &&
         editor.accountId === account.id
