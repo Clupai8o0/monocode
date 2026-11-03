@@ -131,7 +131,8 @@ fn init_cache(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS contributions_by_session ON contributions(session_id,at);
         CREATE TABLE IF NOT EXISTS scanned(session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS session_launches(
-            session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, launched_ids TEXT NOT NULL);")
+            session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, launched_ids TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pr_checks(reference TEXT PRIMARY KEY, checked_at INTEGER NOT NULL);")
         .map_err(|e| e.to_string())
 }
 
@@ -218,9 +219,14 @@ fn load_blocks(conn: &Connection, id: &str, mentions: &str) -> Result<Vec<String
         )
         .map_err(|e| e.to_string())?;
     if has_mono {
+        let user_rows = if mentions == MENTIONS {
+            " OR instr(block_json,'\"role\":\"user\"')>0"
+        } else {
+            ""
+        };
         let sql = format!(
-            "SELECT block_json FROM mono_blocks WHERE session_id=?1{} ORDER BY seq",
-            filter("block_json")
+            "SELECT block_json FROM mono_blocks WHERE session_id=?1 AND (({}){user_rows}) ORDER BY seq",
+            mentions.replace("{column}", "block_json")
         );
         let mut query = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = query
@@ -579,23 +585,28 @@ fn cached_commit(
     })
 }
 
-fn record_scan(conn: &Connection, items: Vec<(Contribution, bool)>) -> Result<(), String> {
+fn record_scan(
+    conn: &Connection,
+    items: Vec<(Contribution, bool, Option<PathBuf>)>,
+) -> Result<(), String> {
     struct Pending {
         item: Contribution,
-        amend: bool,
+        checkout: Option<PathBuf>,
         replaced: Vec<String>,
     }
     let mut pending: Vec<Pending> = Vec::new();
-    for (item, amend) in items {
+    for (item, amend, checkout) in items {
         let mut next = Pending {
             item,
-            amend,
+            checkout,
             replaced: Vec::new(),
         };
-        if amend {
-            if let Some(index) = pending.iter().rposition(|p| p.item.kind == "commit") {
+        if amend && next.checkout.is_some() {
+            if let Some(index) = pending
+                .iter()
+                .rposition(|p| p.item.kind == "commit" && p.checkout == next.checkout)
+            {
                 let previous = pending.remove(index);
-                next.amend = previous.amend;
                 next.replaced = previous.replaced;
                 next.replaced.push(previous.item.reference);
             }
@@ -603,21 +614,20 @@ fn record_scan(conn: &Connection, items: Vec<(Contribution, bool)>) -> Result<()
         pending.push(next);
     }
     for pending in pending {
-        let mut deleted = false;
         for reference in pending.replaced {
             if let Some(reference) = cached_commit(conn, &pending.item.session_id, &reference)? {
-                deleted |= conn.execute("DELETE FROM contributions WHERE session_id=?1 AND kind='commit' AND reference=?2",
-                    params![pending.item.session_id, reference]).map_err(|e| e.to_string())? > 0;
+                conn.execute("DELETE FROM contributions WHERE session_id=?1 AND kind='commit' AND reference=?2",
+                    params![pending.item.session_id, reference]).map_err(|e| e.to_string())?;
             }
         }
-        // An amend already applied to an in-scan commit must not also replace
-        // an unrelated earlier commit in the cache. Replaying is idempotent.
-        record(conn, &pending.item, pending.amend && !deleted)?;
+        // Cached commits have no checkout provenance. Only replace a commit
+        // identified in this scan; otherwise keep both.
+        record(conn, &pending.item)?;
     }
     Ok(())
 }
 
-fn record(conn: &Connection, item: &Contribution, amend: bool) -> Result<(), String> {
+fn record(conn: &Connection, item: &Contribution) -> Result<(), String> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM contributions WHERE kind=?1 AND reference=?2)",
@@ -636,14 +646,6 @@ fn record(conn: &Connection, item: &Contribution, amend: bool) -> Result<(), Str
                 conn.execute("UPDATE contributions SET reference=?2,at=?3,additions=?4,deletions=?5 WHERE kind='commit' AND reference=?1",
                     params![reference, item.reference, item.at as i64, item.additions as i64, item.deletions as i64]).map_err(|e| e.to_string())?;
             }
-            return Ok(());
-        }
-    }
-    if amend && item.kind == "commit" {
-        let replaced = conn.execute("UPDATE contributions SET reference=?2,at=?3,additions=?4,deletions=?5
-            WHERE rowid=(SELECT rowid FROM contributions WHERE session_id=?1 AND kind='commit' ORDER BY at DESC,rowid DESC LIMIT 1)",
-            params![item.session_id, item.reference, item.at as i64, item.additions as i64, item.deletions as i64]).map_err(|e| e.to_string())?;
-        if replaced > 0 {
             return Ok(());
         }
     }
@@ -679,9 +681,19 @@ fn cached(conn: &Connection, ids: &[String], since: u64) -> Result<Vec<Contribut
     Ok(items)
 }
 
-fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)> {
-    let mut items: Vec<(Contribution, bool)> = Vec::new();
+fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool, Option<PathBuf>)> {
+    let mut items: Vec<(Contribution, bool, Option<PathBuf>)> = Vec::new();
+    let mut at = session.updated_at.max(0) as u64;
     for block in blocks {
+        if block["role"] == "user" {
+            if let Some(timestamp) = ["startedAt", "sentAt"]
+                .iter()
+                .filter_map(|key| block[key].as_u64())
+                .max()
+            {
+                at = timestamp;
+            }
+        }
         if block["role"] != "tool" || block["tool"]["status"] != "completed" {
             continue;
         }
@@ -718,7 +730,7 @@ fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)>
                 } else {
                     reference
                 };
-                items.push((item(session, action, reference), false));
+                items.push((item(session, action, reference, at), false, None));
             }
         }
         let Some((checkouts, commands)) = commit_checkouts(command, session) else {
@@ -726,8 +738,8 @@ fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)>
         };
         let amends: Vec<_> = commands
             .into_iter()
-            .filter(|(_, dry_run)| !dry_run)
-            .map(|(amend, _)| amend)
+            .filter(|(_, dry_run, _)| !dry_run)
+            .map(|(amend, _, checkout)| (amend, checkout))
             .collect();
         if amends.is_empty() || output.to_ascii_lowercase().contains("nothing to commit") {
             continue;
@@ -747,10 +759,10 @@ fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)>
         };
         let count = hashes.len();
         for (index, hash) in hashes.into_iter().enumerate() {
-            let amend = if amends.len() == count {
-                amends[index]
+            let (amend, checkout) = if amends.len() == count {
+                amends[index].clone()
             } else {
-                *amends.last().unwrap()
+                (amends.last().unwrap().0, None)
             };
             let resolved = resolve(&hash, &checkouts);
             if fallback
@@ -761,7 +773,7 @@ fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)>
             {
                 continue;
             }
-            let mut contribution = item(session, "commit", hash);
+            let mut contribution = item(session, "commit", hash, at);
             if let Some((sha, at, additions, deletions)) = resolved {
                 contribution.reference = sha;
                 contribution.at = at;
@@ -770,22 +782,22 @@ fn scan_blocks(session: &Session, blocks: &[Value]) -> Vec<(Contribution, bool)>
             }
             if items
                 .iter()
-                .any(|(c, _)| c.kind == "commit" && c.reference == contribution.reference)
+                .any(|(c, _, _)| c.kind == "commit" && c.reference == contribution.reference)
             {
                 continue;
             }
-            items.push((contribution, amend));
+            items.push((contribution, amend, checkout));
         }
     }
     items
 }
 
-fn item(session: &Session, kind: &str, reference: String) -> Contribution {
+fn item(session: &Session, kind: &str, reference: String, at: u64) -> Contribution {
     Contribution {
         session_id: session.id.clone(),
         kind: kind.into(),
         reference,
-        at: session.updated_at.max(0) as u64,
+        at,
         additions: 0,
         deletions: 0,
     }
@@ -870,17 +882,37 @@ fn leading_cd(command: &str, base: &Path) -> Option<PathBuf> {
     Some(base.join(path))
 }
 
-fn commit_checkouts(command: &str, session: &Session) -> Option<(Vec<PathBuf>, Vec<(bool, bool)>)> {
+fn commit_checkouts(
+    command: &str,
+    session: &Session,
+) -> Option<(Vec<PathBuf>, Vec<(bool, bool, Option<PathBuf>)>)> {
     let base = session.worktree_cwd.as_deref().unwrap_or(&session.cwd);
     let cd = leading_cd(command, base);
     let cwd_cd = leading_cd(command, &session.cwd);
     let mut checkouts = Vec::new();
     let mut commands = Vec::new();
     let mut segment_end = 0;
+    let mut known_cwd = true;
     for candidate in GIT_COMMAND.captures_iter(command) {
         let start = candidate.name("git")?.start();
         if start < segment_end {
             continue;
+        }
+        // Infer a checkout only for plain commands or a successful literal cd.
+        // Other shell context may hide a directory change.
+        let mut prefix = &command[segment_end..start];
+        if segment_end == 0 && cd.is_some() {
+            prefix = prefix
+                .trim_start()
+                .strip_prefix(shell_head(command.trim_start()))
+                .and_then(|tail| tail.trim_start().strip_prefix("&&"))
+                .unwrap_or(prefix);
+        }
+        if prefix
+            .chars()
+            .any(|c| !c.is_whitespace() && !";&|".contains(c))
+        {
+            known_cwd = false;
         }
         let segment = shell_head(&command[start..]);
         segment_end = start + segment.len();
@@ -898,6 +930,7 @@ fn commit_checkouts(command: &str, session: &Session) -> Option<(Vec<PathBuf>, V
                     commands.push((
                         options.iter().any(|s| s == "--amend"),
                         options.iter().any(|s| s == "--dry-run"),
+                        (literal && known_cwd).then(|| path.clone()),
                     ));
                     if explicit && literal {
                         for path in [path, cwd_path] {
@@ -1000,6 +1033,14 @@ fn resolve(sha: &str, checkouts: &[PathBuf]) -> Option<(String, u64, u64, u64)> 
 }
 
 fn check_landed(cache: &Connection, ids: &[String]) -> Result<(), String> {
+    check_landed_with(cache, ids, merged_at)
+}
+
+fn check_landed_with(
+    cache: &Connection,
+    ids: &[String],
+    mut merged_at: impl FnMut(&str) -> Option<u64>,
+) -> Result<(), String> {
     let now = crate::session_store::now_millis().max(0) as u64;
     let items = cached(cache, ids, now.saturating_sub(MONTH_MS))?;
     let settled: HashSet<_> = items
@@ -1007,11 +1048,30 @@ fn check_landed(cache: &Connection, ids: &[String]) -> Result<(), String> {
         .filter(|c| matches!(c.kind.as_str(), "merged" | "landed"))
         .map(|c| c.reference.as_str())
         .collect();
-    for opened in items
+    let mut checks = cache
+        .prepare("SELECT checked_at FROM pr_checks WHERE reference=?1")
+        .map_err(|e| e.to_string())?;
+    let mut pending = items
         .iter()
         .filter(|c| c.kind == "opened" && !settled.contains(c.reference.as_str()))
-        .take(10)
-    {
+        .map(|opened| {
+            let checked = checks
+                .query_row([&opened.reference], |r| r.get::<_, i64>(0))
+                .optional()?
+                .unwrap_or(0);
+            Ok((checked, opened))
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    pending.sort_by_key(|(checked, _)| *checked);
+    for (_, opened) in pending.into_iter().take(10) {
+        cache
+            .execute(
+                "INSERT INTO pr_checks VALUES(?1,?2)
+            ON CONFLICT(reference) DO UPDATE SET checked_at=max(checked_at,excluded.checked_at)",
+                params![opened.reference, now as i64],
+            )
+            .map_err(|e| e.to_string())?;
         if let Some(at) = merged_at(&opened.reference) {
             record(
                 cache,
@@ -1020,7 +1080,6 @@ fn check_landed(cache: &Connection, ids: &[String]) -> Result<(), String> {
                     at,
                     ..opened.clone()
                 },
-                false,
             )?;
         }
     }
@@ -1167,7 +1226,11 @@ mod tests {
             "tool":{"callId":"call-1", "kind":"execute", "status":"completed", "detail":output}})
     }
 
-    fn detect(session: &Session, command: &str, output: &str) -> Vec<(Contribution, bool)> {
+    fn detect(
+        session: &Session,
+        command: &str,
+        output: &str,
+    ) -> Vec<(Contribution, bool, Option<PathBuf>)> {
         scan_blocks(session, &[block(command, output)])
     }
 
@@ -1614,6 +1677,15 @@ mod tests {
     }
 
     #[test]
+    fn an_earlier_command_hides_the_amend_checkout_but_not_where_to_look() {
+        let session = Repo::new().session();
+        let (checkouts, commands) =
+            commit_checkouts("npm test && git -C /other commit -m x", &session).unwrap();
+        assert!(checkouts.contains(&PathBuf::from("/other")));
+        assert_eq!(commands, [(false, false, None)]);
+    }
+
+    #[test]
     fn gh_pr_kinds_reviews_and_output_only_github_tools() {
         let session = Repo::new().session();
         for (cmd, out, kind) in [
@@ -1688,6 +1760,206 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn amends_keep_commits_from_other_or_unknown_checkouts() {
+        for (first, amend) in [
+            (
+                "git -C /checkout-a commit -m a",
+                "git -C /checkout-b commit --amend -m b",
+            ),
+            (
+                "cd /checkout-a && git commit -m a",
+                "cd /checkout-b && git commit --amend -m b",
+            ),
+            (
+                "git commit -m a",
+                "git -C \"$CHECKOUT\" commit --amend -m b",
+            ),
+            (
+                "git -C \"$CHECKOUT\" commit -m a",
+                "git commit --amend -m b",
+            ),
+            (
+                "git commit -m a",
+                "cd \"$CHECKOUT\" && git commit --amend -m b",
+            ),
+            (
+                "git -C \"$CHECKOUT\" commit -m a",
+                "git -C \"$CHECKOUT\" commit --amend -m b",
+            ),
+            (
+                "git commit -m a",
+                "(cd /checkout-b && git commit --amend -m b)",
+            ),
+            (
+                "git commit -m a",
+                "sh -c 'cd /checkout-b && git commit --amend -m b'",
+            ),
+            (
+                "git commit -m a",
+                "env -C /checkout-b git commit --amend -m b",
+            ),
+        ] {
+            for full_history in [false, true] {
+                let conn = db();
+                let mut cache = cache();
+                let a = block(first, "[main aaaaaaa] a");
+                let b = block(amend, "[main bbbbbbb] b");
+                save(&conn, "s1", 1, &json!([a]).to_string());
+                collect_test(&conn, &mut cache, &["s1"], 0);
+                let history = if full_history {
+                    json!([a, b])
+                } else {
+                    json!([b])
+                };
+                for at in [2, 3] {
+                    save(&conn, "s1", at, &history.to_string());
+                    let result = collect_test(&conn, &mut cache, &["s1"], 0);
+                    assert_eq!(
+                        result.contributions.len(),
+                        2,
+                        "{first}; {amend}; full={full_history}"
+                    );
+                    assert!(result
+                        .contributions
+                        .iter()
+                        .any(|c| c.reference == "aaaaaaa"));
+                    assert!(result
+                        .contributions
+                        .iter()
+                        .any(|c| c.reference == "bbbbbbb"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn contribution_dates_follow_user_blocks_in_both_block_tables() {
+        let monday = 1_767_571_200_000u64;
+        let tuesday = monday + 24 * 60 * 60 * 1000;
+        for mono in [false, true] {
+            let conn = db();
+            let mut cache = cache();
+            let blocks = vec![
+                block("gh pr create", "acme/app#1"),
+                json!({"role":"user", "text":"start", "startedAt":monday}),
+                block("gh pr create", "acme/app#2"),
+                block("git commit -m a", "[main aaaaaaa] a"),
+                json!({"role":"user", "text":"continue"}),
+                block("gh pr create", "acme/app#3"),
+                json!({"role":"user", "text":"joined", "sentAt":tuesday}),
+                block("gh pr create", "acme/app#4"),
+                json!({"role":"user", "startedAt":monday, "sentAt":tuesday + 1000}),
+                block("gh pr create", "acme/app#5"),
+                block("echo unrelated", "irrelevant tool output"),
+            ];
+            save(&conn, "s1", (tuesday + 2000) as i64, "[]");
+            if mono {
+                for (seq, block) in blocks.iter().enumerate() {
+                    conn.execute(
+                        "INSERT INTO mono_blocks VALUES('s1',?1,?2)",
+                        params![seq as i64, block.to_string()],
+                    )
+                    .unwrap();
+                }
+                let loaded = load_session(&conn, "s1", None).unwrap().unwrap();
+                assert_eq!(loaded.blocks.len(), blocks.len() - 1);
+            } else {
+                save(
+                    &conn,
+                    "s1",
+                    (tuesday + 2000) as i64,
+                    &json!(blocks).to_string(),
+                );
+            }
+            let result = collect_test(&conn, &mut cache, &["s1"], 0);
+            for (reference, expected) in [
+                ("acme/app#1", tuesday + 2000),
+                ("acme/app#2", monday),
+                ("aaaaaaa", monday),
+                ("acme/app#3", monday),
+                ("acme/app#4", tuesday),
+                ("acme/app#5", tuesday + 1000),
+            ] {
+                assert_eq!(
+                    result
+                        .contributions
+                        .iter()
+                        .find(|c| c.reference == reference)
+                        .unwrap()
+                        .at,
+                    expected,
+                    "{reference}; mono={mono}"
+                );
+            }
+        }
+        let repo = Repo::new();
+        let session = repo.session();
+        let sha = repo.git(&["rev-parse", "HEAD"]);
+        let found = scan_blocks(
+            &session,
+            &[
+                json!({"role":"user", "startedAt":monday}),
+                block(
+                    "git commit -m initial",
+                    &format!("[main {}] initial", &sha[..7]),
+                ),
+            ],
+        );
+        assert_eq!(found[0].0.at, session.updated_at as u64);
+    }
+
+    #[test]
+    fn landed_checks_rotate_past_ten_open_pull_requests() {
+        let cache = cache();
+        let now = crate::session_store::now_millis().max(0) as u64;
+        for number in 1..=13 {
+            let opened = Contribution {
+                session_id: "s1".into(),
+                kind: "opened".into(),
+                reference: format!("acme/app#{number}"),
+                at: now - 20 + number,
+                additions: 0,
+                deletions: 0,
+            };
+            record(&cache, &opened).unwrap();
+            if number >= 12 {
+                record(
+                    &cache,
+                    &Contribution {
+                        kind: if number == 12 { "merged" } else { "landed" }.into(),
+                        ..opened
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let ids = vec!["s1".into()];
+        let mut checked = Vec::new();
+        check_landed_with(&cache, &ids, |pr| {
+            checked.push(pr.to_string());
+            None
+        })
+        .unwrap();
+        assert_eq!(checked.len(), 10);
+        assert!(!checked.iter().any(|pr| pr == "acme/app#1"));
+        checked.clear();
+        check_landed_with(&cache, &ids, |pr| {
+            checked.push(pr.to_string());
+            (pr == "acme/app#1").then_some(now)
+        })
+        .unwrap();
+        assert_eq!(checked.len(), 10);
+        assert!(checked.iter().any(|pr| pr == "acme/app#1"));
+        assert!(!checked
+            .iter()
+            .any(|pr| pr == "acme/app#12" || pr == "acme/app#13"));
+        let items = cached(&cache, &ids, 0).unwrap();
+        assert!(items
+            .iter()
+            .any(|c| c.kind == "landed" && c.reference == "acme/app#1" && c.at == now));
     }
 
     #[test]
