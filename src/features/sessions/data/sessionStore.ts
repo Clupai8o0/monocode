@@ -475,6 +475,66 @@ function blockToken(block: Block): number {
   return token;
 }
 
+const BLOCK_STAMP_LIMIT = 64;
+const blockStamps = new Map<
+  string,
+  { blocks: readonly Block[]; joined: string }
+>();
+
+/**
+ * Token string for the transcript. Streaming replaces or extends the tail and
+ * leaves earlier blocks in place, so a long chat reuses the prefix instead of
+ * walking every block on each save check.
+ */
+function joinedBlockTokens(sessionId: string, blocks: readonly Block[]): string {
+  const previous = blockStamps.get(sessionId);
+  const joined = previous
+    ? joinBlockTokens(previous, blocks)
+    : tokensFrom(blocks, 0);
+  if (previous) blockStamps.delete(sessionId);
+  blockStamps.set(sessionId, { blocks, joined });
+  if (blockStamps.size > BLOCK_STAMP_LIMIT) {
+    const oldest = blockStamps.keys().next().value;
+    if (oldest !== undefined) blockStamps.delete(oldest);
+  }
+  return joined;
+}
+
+function joinBlockTokens(
+  previous: { blocks: readonly Block[]; joined: string },
+  blocks: readonly Block[],
+): string {
+  if (previous.blocks === blocks) return previous.joined;
+  let shared = 0;
+  const limit = Math.min(previous.blocks.length, blocks.length);
+  while (shared < limit && previous.blocks[shared] === blocks[shared]) shared++;
+  if (shared === previous.blocks.length) {
+    if (blocks.length === shared) return previous.joined;
+    const extra = tokensFrom(blocks, shared);
+    return previous.joined ? `${previous.joined},${extra}` : extra;
+  }
+  if (blocks.length === 0) return "";
+  if (shared === blocks.length && previous.blocks.length === blocks.length + 1) {
+    const comma = previous.joined.lastIndexOf(",");
+    return comma < 0 ? "" : previous.joined.slice(0, comma);
+  }
+  if (shared === blocks.length - 1 && blocks.length === previous.blocks.length) {
+    const token = blockToken(blocks[shared]!);
+    if (shared === 0) return String(token);
+    const comma = previous.joined.lastIndexOf(",");
+    return `${previous.joined.slice(0, comma)},${token}`;
+  }
+  return tokensFrom(blocks, 0);
+}
+
+function tokensFrom(blocks: readonly Block[], from: number): string {
+  if (from >= blocks.length) return "";
+  if (from === 0) return blocks.map(blockToken).join(",");
+  const parts = new Array<number>(blocks.length - from);
+  for (let i = from; i < blocks.length; i++) parts[i - from] = blockToken(blocks[i]!);
+  return parts.join(",");
+}
+
 export function persistFingerprint(session: Session): string {
   // Pasted image bytes can be megabytes. Like transcript blocks, queue rows
   // are immutable, so their identity detects edits without serializing bytes.
@@ -486,9 +546,7 @@ export function persistFingerprint(session: Session): string {
     }
     return token;
   });
-  return `${JSON.stringify(persistableMeta(session, false))}|${queue.length ? (session.queueStatus ?? "active") : ""}:${queue.join(",")}|${session.orchestrationLeadId ?? ""}|${session.blocks
-    .map(blockToken)
-    .join(",")}`;
+  return `${JSON.stringify(persistableMeta(session, false))}|${queue.length ? (session.queueStatus ?? "active") : ""}:${queue.join(",")}|${session.orchestrationLeadId ?? ""}|${joinedBlockTokens(session.id, session.blocks)}`;
 }
 
 export async function listSessionsByProject(

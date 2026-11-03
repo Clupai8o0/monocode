@@ -945,11 +945,45 @@ describe("persistFingerprint", () => {
     );
   });
 
+  it("changes when the latest block is replaced or removed", () => {
+    const before = base([user, answer]);
+    const original = persistFingerprint(before);
+    const replaced = persistFingerprint({
+      ...before,
+      blocks: [user, { ...answer, text: "changed" }],
+    });
+    const removed = persistFingerprint({ ...before, blocks: [user] });
+    expect(replaced).not.toBe(original);
+    expect(removed).not.toBe(original);
+    expect(removed).not.toBe(replaced);
+  });
+
   it("changes when a persisted field changes", () => {
     const before = base();
     expect(persistFingerprint({ ...before, title: "Renamed" })).not.toBe(
       persistFingerprint(before),
     );
+  });
+
+  it("keeps fingerprints stable through edits, truncation and cache eviction", () => {
+    const original = base([user, answer]);
+    const first = persistFingerprint(original);
+    const variants = [
+      [],
+      [user],
+      [answer],
+      [user, { ...answer, text: "replaced" }],
+      [user, answer, { ...answer, id: "extra" }],
+      [answer, user],
+    ];
+    for (const blocks of variants) {
+      expect(persistFingerprint({ ...original, blocks })).not.toBe(first);
+      expect(persistFingerprint(original)).toBe(first);
+    }
+    for (let index = 0; index < 70; index++) {
+      persistFingerprint({ ...original, id: `eviction-${index}` });
+    }
+    expect(persistFingerprint(original)).toBe(first);
   });
 
   it("ignores state that is never written", () => {
