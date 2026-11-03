@@ -42,13 +42,19 @@ const PROVIDERS: Provider[] = [
   "claude_desktop",
   "codex",
   "cursor",
+  "grok",
   "opencode",
 ];
+/** Providers that support adding servers from Settings (Grok is discovery-only). */
+const ADD_PROVIDERS: Provider[] = PROVIDERS.filter(
+  (provider) => provider !== "grok",
+);
 const SCOPES: Record<Provider, Scope[]> = {
   claude: ["local", "project", "user"],
   claude_desktop: ["user"],
   codex: ["user"],
   cursor: ["project", "user"],
+  grok: ["user", "project"],
   opencode: ["project", "user"],
 };
 
@@ -214,7 +220,7 @@ function AddServerModal({
           <McpPicker
             label="Provider"
             value={provider}
-            options={PROVIDERS.map((option) => ({
+            options={ADD_PROVIDERS.map((option) => ({
               value: option,
               label: MCP_PROVIDER_LABELS[option],
               icon: <ProviderIcon provider={option} />,
@@ -635,7 +641,11 @@ function McpConnections({
       {addOpen ? (
         <AddServerModal
           cwd={cwd}
-          initialProvider={filter === "all" ? "claude" : filter}
+          initialProvider={
+            filter !== "all" && ADD_PROVIDERS.includes(filter)
+              ? filter
+              : "claude"
+          }
           onClose={() => setAddOpen(false)}
           onAdded={refresh}
         />

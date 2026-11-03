@@ -11048,12 +11048,9 @@ function Workspace({
       });
       if (extras?.mcpServerIds?.length) {
         const names = new Set(extras.mcpServerIds);
-        // Grok is not in McpConnection.provider yet (Task 7); compare as string
-        // so this still type-checks and simply copies nothing for grok targets.
         const tags = getComposerMcpTags(sourceId).filter(
           (tag) =>
-            names.has(tag.server.name) &&
-            (tag.server.provider as string) === harness,
+            names.has(tag.server.name) && tag.server.provider === harness,
         );
         if (tags.length > 0) setComposerMcpTags(session.id, tags);
       }
