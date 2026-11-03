@@ -1268,7 +1268,7 @@ function Workspace({
   // A Mono opens with its overview beside the chat until it is hidden.
   const [monoOverviewOpen, setMonoOverviewOpen] = useState(true);
   const [monoOverviewTab, setMonoOverviewTab] =
-    useState<MonoOverviewTab>("sessions");
+    useState<MonoOverviewTab>("dashboard"); // Fork: opens on the dashboard
   const monoOverviewOpenRef = useRef(monoOverviewOpen);
   monoOverviewOpenRef.current = monoOverviewOpen;
   const monoOverviewTabRef = useRef(monoOverviewTab);
