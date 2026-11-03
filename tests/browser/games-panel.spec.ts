@@ -624,6 +624,12 @@ test("dragging moves only the panel until the drag ends, side by side", async ({
   // The panel follows the pointer; the app reflows once, on release.
   expect((await panel(page).boundingBox())!.x).toBeLessThan(edge.x - 50);
   expect((await appRoot.boundingBox())!.width).toBe(app.width);
+  // An agent update mid-drag re-renders the panel, and it stays with the pointer.
+  const dragged = (await panel(page).boundingBox())!;
+  await page.evaluate(() => (window as unknown as { __setAgents(a: number, b: number): void }).__setAgents(5, 0));
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  expect((await panel(page).boundingBox())!.x).toBe(dragged.x);
+  expect((await panel(page).boundingBox())!.width).toBe(dragged.width);
   await page.mouse.up();
   expect((await appRoot.boundingBox())!.width).toBe(app.width - 100);
 });

@@ -68,6 +68,8 @@ beforeEach(() => {
     width, height: 400, top: 0, left: 0, right: width, bottom: 400, x: 0, y: 0,
     toJSON() {},
   }));
+  vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(() => width);
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(() => 400);
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ({
     setTransform() {}, strokeRect() {}, clearRect() {}, fillRect() {}, drawImage() {},
   }) as never);
