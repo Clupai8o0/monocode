@@ -188,7 +188,7 @@ describe("AgentTranscript collapsed work", () => {
     );
   });
 
-  it("hides provider authentication errors handled by the sign-in modal", () => {
+  it("keeps a provider authentication error visible when no sign-in notice replaces it", () => {
     const markup = renderToStaticMarkup(
       createElement(AgentTranscript, {
         harness: "grok",
@@ -203,7 +203,8 @@ describe("AgentTranscript collapsed work", () => {
       }),
     );
 
-    expect(markup).not.toContain("Authentication required");
+    expect(markup).toContain("Authentication required");
+    expect(markup).toContain("Grok Build is not signed in.");
     expect(markup).not.toContain("Sign in to Grok Build");
     expect(markup).not.toContain("<button");
   });
