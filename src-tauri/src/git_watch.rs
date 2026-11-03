@@ -83,6 +83,12 @@ pub async fn watch_git_changes(
     .map_err(|error| error.to_string())?
 }
 
+/// Frontend startup retires watches left behind by a previous page runtime.
+#[tauri::command]
+pub fn reset_git_watches(host: tauri::State<'_, GitWatchHost>, window: tauri::WebviewWindow) {
+    host.close_window(window.label());
+}
+
 #[tauri::command]
 pub fn unwatch_git_changes(
     host: tauri::State<'_, GitWatchHost>,
@@ -391,6 +397,22 @@ mod tests {
 
     fn change(path: PathBuf) -> Event {
         Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content))).add_path(path)
+    }
+
+    #[test]
+    fn page_reset_releases_only_the_reloading_windows_native_watches() {
+        let repo = Repo::new();
+        let host = GitWatchHost::default();
+        for owner in ["reloading", "other"] {
+            host.watches.lock().unwrap().insert(
+                (owner.into(), "watch".into()),
+                ActiveWatch::start(repo.0.clone(), |_| {}).unwrap(),
+            );
+        }
+        host.close_window("reloading");
+        let watches = host.watches.lock().unwrap();
+        assert_eq!(watches.len(), 1);
+        assert!(watches.contains_key(&("other".into(), "watch".into())));
     }
 
     #[test]

@@ -1,19 +1,21 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const { invoke, listen, workspace, unlisten } = vi.hoisted(() => ({
+const { invoke, listen, workspace, unlisten, invalidateGitReads } = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
   workspace: vi.fn(),
   unlisten: vi.fn(),
+  invalidateGitReads: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
 vi.mock("./fs", () => ({
+  invalidateGitReads,
   invokeWorkspace: workspace,
   REMOTE_PATH_PREFIX: "remote://",
 }));
-import { watchGitChanges } from "./gitWatch";
+import { resetGitWatches, watchGitChanges } from "./gitWatch";
 
 let event: (event: { payload: { id: string; failed: boolean } }) => void;
 const stops: Array<() => void> = [];
@@ -50,9 +52,12 @@ it("shares a native subscription, stays idle, and scopes events to its watcher",
     invoke.mock.calls.filter(([command]) => command === "watch_git_changes"),
   ).toHaveLength(1);
   expect(a.callback).toHaveBeenCalledTimes(1);
+  expect(invoke.mock.calls.filter(([command]) => command === "reset_git_watches")).toHaveLength(1);
+  expect(invoke.mock.calls.findIndex(([command]) => command === "reset_git_watches"))
+    .toBeLessThan(invoke.mock.calls.findIndex(([command]) => command === "watch_git_changes"));
   await vi.advanceTimersByTimeAsync(120_000);
   expect(a.callback).toHaveBeenCalledTimes(1);
-  const id = invoke.mock.calls[0][1].id;
+  const id = invoke.mock.calls.find(([command]) => command === "watch_git_changes")![1].id;
   event({ payload: { id: "other", failed: false } });
   expect(a.callback).toHaveBeenCalledTimes(1);
   event({ payload: { id, failed: false } });
@@ -88,9 +93,9 @@ it("releases a watcher that finishes starting after the panel closes", async () 
 });
 
 it("falls back only when native notifications fail and clears that timer", async () => {
-  invoke.mockRejectedValueOnce(
-    new Error("Filesystem does not support notifications"),
-  );
+  invoke.mockImplementation(command => command === "watch_git_changes"
+    ? Promise.reject(new Error("Filesystem does not support notifications"))
+    : Promise.resolve());
   const subscription = subscribe("/unsupported");
   await flush();
   expect(subscription.callback).toHaveBeenCalledTimes(1);
@@ -104,7 +109,7 @@ it("falls back only when native notifications fail and clears that timer", async
 it("switches to fallback after a running native watcher reports an error", async () => {
   const subscription = subscribe("/failure");
   await flush();
-  const id = invoke.mock.calls[0][1].id;
+  const id = invoke.mock.calls.find(([command]) => command === "watch_git_changes")![1].id;
   event({ payload: { id, failed: true } });
   expect(unlisten).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(2000);
@@ -138,4 +143,14 @@ it("waits for remote filesystem events without refreshing on idle connection ren
   finishWait(false);
   await flush();
   expect(subscription.callback).toHaveBeenCalledTimes(2);
+});
+
+it("shares startup reset and invalidates a checkout before notifying its listeners", async () => {
+  await resetGitWatches();
+  const callsBefore = invoke.mock.calls.filter(([command]) => command === "reset_git_watches").length;
+  const callback = vi.fn(() => expect(invalidateGitReads).toHaveBeenLastCalledWith("/reset-repo"));
+  subscribe("/reset-repo", callback);
+  await flush();
+  expect(callback).toHaveBeenCalledTimes(1);
+  expect(invoke.mock.calls.filter(([command]) => command === "reset_git_watches")).toHaveLength(callsBefore);
 });
