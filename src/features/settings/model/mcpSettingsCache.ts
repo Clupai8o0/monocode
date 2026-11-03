@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { parseClaudeMcpList, type McpConnection } from "./mcp";
+import {
+  parseClaudeMcpList,
+  parseCursorMcpList,
+  type McpConnection,
+} from "./mcp";
 
 export type McpServerRow = McpConnection & { status: string };
 
@@ -7,11 +11,13 @@ export type McpSettingsSnapshot = {
   servers: McpServerRow[];
   error: string;
   claudeError: string;
+  cursorError: string;
 };
 
 const snapshots = new Map<string, McpSettingsSnapshot>();
 const requests = new Map<string, Promise<McpSettingsSnapshot>>();
 const healthRequests = new Map<string, Promise<void>>();
+const cursorHealthRequests = new Map<string, Promise<void>>();
 const listeners = new Map<
   string,
   Set<(snapshot: McpSettingsSnapshot) => void>
@@ -43,13 +49,14 @@ function publish(cwd: string, snapshot: McpSettingsSnapshot) {
 export function loadMcpSettings(
   cwd: string,
   force = false,
-  options: { claudeHealth?: boolean } = {},
+  options: { claudeHealth?: boolean; cursorHealth?: boolean } = {},
 ) {
   let request = requests.get(cwd);
   if (!request || force) {
     const discovery = fetchMcpSettings(cwd).then((snapshot) => {
       if (requests.get(cwd) === discovery) {
         healthRequests.delete(cwd);
+        cursorHealthRequests.delete(cwd);
         publish(cwd, snapshot);
       }
       return snapshot;
@@ -59,12 +66,13 @@ export function loadMcpSettings(
   }
   const discovery = request;
   return discovery.then((snapshot) => {
-    if (
-      options.claudeHealth !== false &&
-      !snapshot.error &&
-      requests.get(cwd) === discovery
-    ) {
-      loadClaudeHealth(cwd, discovery);
+    if (!snapshot.error && requests.get(cwd) === discovery) {
+      if (options.claudeHealth !== false) {
+        loadClaudeHealth(cwd, discovery);
+      }
+      if (options.cursorHealth) {
+        loadCursorHealth(cwd, discovery);
+      }
     }
     return snapshots.get(cwd) ?? snapshot;
   });
@@ -77,9 +85,9 @@ async function fetchMcpSettings(cwd: string): Promise<McpSettingsSnapshot> {
       ...server,
       status: server.enabled === false ? "Disabled" : "Configured",
     }));
-    return { servers, error: "", claudeError: "" };
+    return { servers, error: "", claudeError: "", cursorError: "" };
   } catch (cause) {
-    return { servers: [], error: String(cause), claudeError: "" };
+    return { servers: [], error: String(cause), claudeError: "", cursorError: "" };
   }
 }
 
@@ -133,8 +141,42 @@ function loadClaudeHealth(
   healthRequests.set(cwd, request);
 }
 
+function loadCursorHealth(
+  cwd: string,
+  discovery: Promise<McpSettingsSnapshot>,
+) {
+  if (cursorHealthRequests.has(cwd)) return;
+  const request = invoke<string>("cursor_mcp_list", { cwd })
+    .then((output) => {
+      if (requests.get(cwd) !== discovery) return;
+      const snapshot = snapshots.get(cwd)!;
+      const health = new Map(
+        parseCursorMcpList(output).map((server) => [
+          server.name,
+          server.status,
+        ]),
+      );
+      const servers: McpServerRow[] = snapshot.servers.map((server) => ({
+        ...server,
+        status:
+          server.enabled === false
+            ? "Disabled"
+            : server.provider === "cursor"
+              ? (health.get(server.name) ?? "Configured")
+              : server.status,
+      }));
+      publish(cwd, { ...snapshot, servers, cursorError: "" });
+    })
+    .catch((cause) => {
+      if (requests.get(cwd) !== discovery) return;
+      publish(cwd, { ...snapshots.get(cwd)!, cursorError: String(cause) });
+    });
+  cursorHealthRequests.set(cwd, request);
+}
+
 export function clearMcpSettingsCache() {
   snapshots.clear();
   requests.clear();
   healthRequests.clear();
+  cursorHealthRequests.clear();
 }

@@ -28,3 +28,13 @@ export function parseClaudeMcpList(output: string): McpServer[] {
     return [{ name: match[1], status }];
   });
 }
+
+/** Cursor `agent mcp list` — name/status lines; tolerate Claude-like `name: detail`. */
+export function parseCursorMcpList(output: string): McpServer[] {
+  if (/no mcp servers configured/i.test(output)) return [];
+  return output.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s+(.+)$/);
+    if (!match) return [];
+    return [{ name: match[1], status: match[2].trim() }];
+  });
+}
