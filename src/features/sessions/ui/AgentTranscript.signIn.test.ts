@@ -154,6 +154,135 @@ describe("AgentTranscript provider sign-in", () => {
     expect(container.textContent).toContain(EXPIRED);
   });
 
+  const AUTH_ERROR =
+    "Grok Build is not signed in. Run `grok login` in a terminal.";
+  const errorBlock = (id: string, text = AUTH_ERROR): Block => ({
+    id,
+    role: "system",
+    notice: "error",
+    text,
+  });
+  const occurrences = (text: string) =>
+    (container.textContent ?? "").split(text).length - 1;
+
+  it("keeps the error when no sign-in action can replace it", () => {
+    act(() =>
+      root.render(
+        createElement(AgentTranscript, {
+          blocks: [
+            { id: "prompt", role: "user", text: "Hello" },
+            errorBlock("error"),
+          ],
+          harness: "grok",
+        }),
+      ),
+    );
+    expect(notice()).toBeNull();
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+  });
+
+  it("keeps an earlier turn's error once the conversation moves on", () => {
+    act(() =>
+      root.render(
+        createElement(AgentTranscript, {
+          blocks: [
+            { id: "first", role: "user", text: "Hello" },
+            errorBlock("old-error"),
+            { id: "second", role: "user", text: "Try again" },
+            { id: "reply", role: "assistant", text: "All good now" },
+          ],
+          harness: "grok",
+          onProviderSignIn: vi.fn(async () => undefined),
+        }),
+      ),
+    );
+    expect(notice()).toBeNull();
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+    expect(container.textContent).toContain("All good now");
+  });
+
+  it("shows only the latest failure in the notice and keeps older ones", () => {
+    const older = "Grok Build login expired on the old account.";
+    act(() =>
+      root.render(
+        createElement(AgentTranscript, {
+          blocks: [
+            { id: "first", role: "user", text: "Hello" },
+            errorBlock("old-error", older),
+            { id: "second", role: "user", text: "Try again" },
+            errorBlock("repeat"),
+            errorBlock("latest"),
+          ],
+          harness: "grok",
+          onProviderSignIn: vi.fn(async () => undefined),
+        }),
+      ),
+    );
+    expect(notice()?.textContent).toContain(AUTH_ERROR);
+    expect(notice()?.textContent).not.toContain(older);
+    expect(occurrences(older)).toBe(1);
+    // The repeat in the failed turn collapses into the notice.
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+  });
+
+  it("keeps the error while the turn runs, then swaps in the notice", () => {
+    const blocks: Block[] = [
+      { id: "prompt", role: "user", text: "Hello" },
+      errorBlock("error"),
+    ];
+    const signIn = vi.fn(async () => undefined);
+    const render = (busy: boolean) =>
+      act(() =>
+        root.render(
+          createElement(AgentTranscript, {
+            blocks,
+            harness: "grok",
+            busy,
+            onProviderSignIn: signIn,
+          }),
+        ),
+      );
+    render(true);
+    expect(notice()).toBeNull();
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+
+    render(false);
+    expect(notice()?.textContent).toContain(AUTH_ERROR);
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+  });
+
+  it("keeps the error when a parked pane hides the notice", () => {
+    act(() =>
+      root.render(
+        createElement(AgentTranscript, {
+          blocks: [
+            { id: "prompt", role: "user", text: "Hello" },
+            errorBlock("error"),
+          ],
+          harness: "grok",
+          parked: true,
+          onProviderSignIn: vi.fn(async () => undefined),
+        }),
+      ),
+    );
+    expect(notice()).toBeNull();
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+  });
+
+  it("keeps a lone error that has no turn to carry the notice", () => {
+    act(() =>
+      root.render(
+        createElement(AgentTranscript, {
+          blocks: [errorBlock("error")],
+          harness: "grok",
+          onProviderSignIn: vi.fn(async () => undefined),
+        }),
+      ),
+    );
+    expect(notice()).toBeNull();
+    expect(occurrences(AUTH_ERROR)).toBe(1);
+  });
+
   it("waits for the turn to settle", () => {
     act(() =>
       root.render(
