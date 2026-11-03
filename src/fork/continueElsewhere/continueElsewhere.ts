@@ -1,3 +1,7 @@
+import {
+  firstClassProviders,
+  supportsFirstClassHandoff,
+} from "../../integrations/harness/core/firstClassProviders";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { HARNESS_TITLE } from "../../features/sessions/model/session";
 
@@ -6,26 +10,36 @@ import { HARNESS_TITLE } from "../../features/sessions/model/session";
  * another with a trimmed brief. The brief comes from upstream's handoff; this
  * adds the way there, the way back to the full transcript, and a visible origin.
  *
- * Claude, Codex and Cursor can each continue in one of the others. When usage
- * is known, the pick is the live candidate with the most headroom; otherwise
- * Claude↔Codex stay paired and Cursor prefers Claude.
+ * First-class handoff peers (Claude, Codex, Grok) plus Cursor can continue into
+ * each other. When usage is known, the default pick is the live candidate with
+ * the most headroom; otherwise preferred pairings apply.
  */
 const ORIGINS_KEY = "monocode.fork.continuedFrom";
 const MAX_ORIGINS = 200;
 
+/** Extra continue peers that aren't first-class profiles yet. */
+const EXTRA_CONTINUE_PEERS = ["cursor"] as const satisfies readonly HarnessId[];
+
 /** Providers that can hand a limited session to each other. */
 export const CONTINUE_POOL: readonly HarnessId[] = [
-  "claude",
-  "codex",
-  "cursor",
+  ...new Set<HarnessId>([
+    ...firstClassProviders().filter(supportsFirstClassHandoff),
+    ...EXTRA_CONTINUE_PEERS,
+  ]),
 ];
 
-/** Preferred fallback when usage is unknown, keeping the Claude↔Codex pair. */
+/** Preferred fallback when usage is unknown. */
 const PREFERRED: Partial<Record<HarnessId, HarnessId>> = {
   claude: "codex",
   codex: "claude",
+  grok: "claude",
   cursor: "claude",
 };
+
+export function handoffTargets(harness: HarnessId): HarnessId[] {
+  if (!CONTINUE_POOL.includes(harness)) return [];
+  return CONTINUE_POOL.filter((id) => id !== harness);
+}
 
 export type ContinuePickOptions = {
   /** Defaults to every candidate (tests and menus without live state). */
@@ -38,8 +52,8 @@ export function continueTarget(
   harness: HarnessId,
   options: ContinuePickOptions = {},
 ): HarnessId | null {
-  if (!CONTINUE_POOL.includes(harness)) return null;
-  const candidates = CONTINUE_POOL.filter((id) => id !== harness);
+  const candidates = handoffTargets(harness);
+  if (candidates.length === 0) return null;
   const live = options.isLive
     ? candidates.filter((id) => options.isLive!(id))
     : candidates;
@@ -72,6 +86,13 @@ export function continueLabel(
 ): string | null {
   const target = continueTarget(harness, options);
   return target ? `Continue in ${HARNESS_TITLE[target]}` : null;
+}
+
+export function continueLabelFor(
+  _harness: HarnessId,
+  target: HarnessId,
+): string {
+  return `Continue in ${HARNESS_TITLE[target]}`;
 }
 
 /** The brief is trimmed on purpose, so it says where the rest lives. */
@@ -121,8 +142,11 @@ export function continuedOrigin(sessionId: string): ContinuedOrigin | null {
 
 export type ContinueHost = {
   canContinue: (sessionId: string) => boolean;
-  continueSession: (sessionId: string) => void;
+  /** `target` required when multiple peers exist; omit only for primary default. */
+  continueSession: (sessionId: string, target?: HarnessId) => void;
   openSession: (sessionId: string) => void;
+  /** Live handoff peers for a session (installed/live filtered by the host). */
+  targetsFor?: (sessionId: string) => HarnessId[];
 };
 
 let host: ContinueHost | null = null;

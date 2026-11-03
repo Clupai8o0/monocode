@@ -1,14 +1,14 @@
 import { isLiveHarness } from "../../integrations/harness/core/registry";
 import { getCachedRateLimits } from "../../features/providers/model/rateLimitsCache";
-import {
-  selectedProviderAccountId,
-  type ProviderAccountProvider,
-} from "../../features/providers/model/providerAccounts";
+import { selectedProviderAccountId } from "../../features/providers/model/providerAccounts";
+import type { RateLimitProvider } from "../../features/providers/model/rateLimits";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { getExtraUsage } from "../usage/extraUsage";
 import type { ContinuePickOptions } from "./continueElsewhere";
 
 export { cursorUsageResetsAt } from "../usage/extraUsage";
+
+type RateLimitContinueProvider = Extract<RateLimitProvider, "claude" | "codex">;
 
 /** Shared continue-elsewhere pick options (usage bar, session menu, host). */
 export function continuePickOptions(cwd?: string): ContinuePickOptions {
@@ -21,7 +21,7 @@ export function continuePickOptions(cwd?: string): ContinuePickOptions {
 /**
  * How spent a continue-elsewhere candidate looks (0–100). Lower means more
  * headroom. Claude and Codex use the hottest rate-limit window; Cursor uses
- * the hotter of its Auto and API pools.
+ * the hotter of its Auto and API pools. Grok has no usage probe.
  */
 export function harnessUsedPercent(
   harness: HarnessId,
@@ -37,7 +37,7 @@ export function harnessUsedPercent(
 }
 
 function rateLimitUsedPercent(
-  provider: ProviderAccountProvider,
+  provider: RateLimitContinueProvider,
   project?: string,
 ): number | null {
   const accountId = selectedProviderAccountId(provider, project);

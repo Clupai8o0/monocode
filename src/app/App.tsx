@@ -6,14 +6,23 @@ import { resolveMcpCall, type McpCaller } from "../fork/mcpAccess/mcpAccess";
 import {
   continueTarget,
   continuedOrigin,
+  handoffTargets,
   registerContinueHost,
   saveContinuedOrigin,
   withTranscriptPointer,
 } from "../fork/continueElsewhere/continueElsewhere";
 import { harnessUsedPercent } from "../fork/continueElsewhere/continueUsage";
+import {
+  buildHandoffTarget,
+  sourceHandoffPrefs,
+} from "../fork/continueElsewhere/handoffPrefs";
 import { withCheckpointTurn } from "../fork/turnDiff/turnDiff"; // Fork
 import { needsHandoffRecovery, prepareHandoffContext, recordHandoffContext, finishHandoffContext } from "../fork/continueElsewhere/handoffContext";
 import { loadExtraUsage } from "../fork/usage/extraUsage";
+import {
+  getComposerMcpTags,
+  setComposerMcpTags,
+} from "../features/sessions/model/draftCache";
 import {
   recordFeatureUse,
   registerCoachHost,
@@ -457,7 +466,6 @@ import {
   nativeModelId,
   preferredModelSettings,
   defaultModelId,
-  defaultModelSettings,
   resolveModel,
   saveLastModelSettings,
   saveRecentModelChoice,
@@ -10988,7 +10996,12 @@ function Workspace({
   );
 
   const onHandoff = useCallback(
-    (sourceId: string, target: ModelTarget, turn: Block[]) => {
+    (
+      sourceId: string,
+      target: ModelTarget,
+      turn: Block[],
+      extras?: { runtimeMode?: RuntimeMode; mcpServerIds?: string[] },
+    ) => {
       const source = sessionsRef.current.find(
         (session) => session.id === sourceId,
       );
@@ -11000,8 +11013,11 @@ function Workspace({
       const userRequest = turnUserRequest(turn);
       const files = turnEditedFiles(sliced.blocks, cwd);
       const display = sessionDisplayTitle(source.title, source.harness);
+      const runtimeMode =
+        extras?.runtimeMode ??
+        (harness === "codex" ? "full-access" : source.runtimeMode);
       const session = {
-        ...newSession(harness, source.cwd, model, harness === "codex" ? "full-access" : source.runtimeMode),
+        ...newSession(harness, source.cwd, model, runtimeMode),
         worktreeCwd: source.worktreeCwd,
         branch: source.branch,
         modelSettings: mergeModelSettings(
@@ -11032,44 +11048,80 @@ function Workspace({
         title: display,
         files: files.length,
       });
+      if (extras?.mcpServerIds?.length) {
+        const names = new Set(extras.mcpServerIds);
+        const tags = getComposerMcpTags(sourceId).filter(
+          (tag) =>
+            names.has(tag.server.name) && tag.server.provider === harness,
+        );
+        if (tags.length > 0) setComposerMcpTags(session.id, tags);
+      }
       openSessionBeside(sourceId, appendReadyHandoff(session, from, harness, session.handoffCard.brief), source.cwd, true);
     },
     [openSessionBeside],
   );
 
   // Fork: "Continue in …", from the usage-limit bar and the session menu.
-  // Picks Claude, Codex or Cursor by remaining usage. Not for remote
-  // sessions: their new session wouldn't receive the brief yet.
+  // Lists first-class peers + Cursor; default pick uses remaining usage.
+  // Not for remote sessions: their new session wouldn't receive the brief yet.
   useEffect(() => {
-    const pickOptions = (cwd?: string) => ({
-      isLive: isLiveHarness,
-      usedPercent: (id: HarnessId) => harnessUsedPercent(id, cwd),
-    });
-    const continuableTarget = (sessionId: string) => {
+    const liveTargets = (sessionId: string) => {
       const source = sessionsRef.current.find((s) => s.id === sessionId);
       if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
-        return null;
+        return [] as ReturnType<typeof handoffTargets>;
       }
-      return continueTarget(source.harness, pickOptions(source.cwd));
+      return handoffTargets(source.harness).filter((id) => isLiveHarness(id));
     };
     // Keep Cursor's meters warm so a spent Cursor session can pick Claude or
     // Codex by headroom without waiting on the All usage panel.
     void loadExtraUsage("cursor");
     registerContinueHost({
-      canContinue: (sessionId) => continuableTarget(sessionId) !== null,
-      continueSession: (sessionId) => {
+      canContinue: (sessionId) => liveTargets(sessionId).length > 0,
+      targetsFor: (sessionId) => liveTargets(sessionId),
+      continueSession: (sessionId, target) => {
         const source = sessionsRef.current.find((s) => s.id === sessionId);
-        const target = continuableTarget(sessionId);
-        if (!source || !target) return;
-        const model = defaultModelId(target);
+        if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
+          return;
+        }
+        const allowed = liveTargets(sessionId);
+        const resolved =
+          (target && allowed.includes(target) ? target : null) ??
+          continueTarget(source.harness, {
+            isLive: isLiveHarness,
+            usedPercent: (id) => harnessUsedPercent(id, source.cwd),
+          });
+        if (!resolved || !allowed.includes(resolved)) return;
+        const prefs = sourceHandoffPrefs({
+          harness: source.harness,
+          model: source.model,
+          modelSettings: source.modelSettings,
+          runtimeMode: source.runtimeMode,
+          providerAccountId: source.providerAccountId,
+          mcpServerIds: getComposerMcpTags(source.id).map(
+            (tag) => tag.server.name,
+          ),
+        });
+        const mapped = buildHandoffTarget(resolved, prefs, {
+          defaultModelId,
+          // resolveModel always returns a fallback; exact id match means known.
+          isKnownModel: (harness, model) =>
+            resolveModel(harness, model).id === model,
+        });
         onHandoff(
           sessionId,
           {
-            harness: target,
-            model,
-            modelSettings: defaultModelSettings(resolveModel(target, model)),
+            harness: mapped.harness,
+            model: mapped.model,
+            modelSettings: mergeModelSettings(
+              resolveModel(mapped.harness, mapped.model),
+              mapped.modelSettings,
+            ),
           },
           source.blocks,
+          {
+            runtimeMode: mapped.runtimeMode,
+            mcpServerIds: mapped.mcpServerIds,
+          },
         );
       },
       openSession: (sessionId) => {

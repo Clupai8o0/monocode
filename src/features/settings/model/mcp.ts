@@ -1,7 +1,13 @@
 export type McpServer = { name: string; status: string };
 
 export type McpConnection = {
-  provider: "claude" | "claude_desktop" | "codex" | "cursor" | "opencode";
+  provider:
+    | "claude"
+    | "claude_desktop"
+    | "codex"
+    | "cursor"
+    | "grok"
+    | "opencode";
   name: string;
   scope: "local" | "project" | "user";
   configPath: string;
@@ -14,6 +20,7 @@ export const MCP_PROVIDER_LABELS: Record<McpConnection["provider"], string> = {
   claude_desktop: "Claude Desktop",
   codex: "Codex",
   cursor: "Cursor",
+  grok: "Grok Build",
   opencode: "OpenCode",
 };
 

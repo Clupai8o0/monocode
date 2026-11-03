@@ -210,3 +210,18 @@ export type {
   UserQuestionReply,
 } from "../../features/sessions/model/userQuestion";
 export type { HarnessAdapter, TextPromptInput } from "./core/registry";
+export {
+  firstClassProviders,
+  getFirstClassProfile,
+  handoffTargets,
+  supportsFirstClassAccounts,
+  supportsFirstClassAccountProfiles,
+  supportsFirstClassUsage,
+  supportsFirstClassMcpDiscovery,
+  supportsFirstClassCliUpdates,
+  supportsFirstClassHandoff,
+} from "./core/firstClassProviders";
+export type {
+  FirstClassProviderProfile,
+  HandoffPreferences,
+} from "./core/firstClassProviders";

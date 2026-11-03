@@ -1,10 +1,9 @@
 // Fork: Continue in another agent by remaining usage.
 import {
   continueHost,
-  continueLabel,
+  continueLabelFor,
+  handoffTargets,
 } from "../../fork/continueElsewhere/continueElsewhere";
-import { harnessUsedPercent } from "../../fork/continueElsewhere/continueUsage";
-import { isLiveHarness } from "../../integrations/harness/core/registry";
 import { useRemoteMachines } from "../../features/connections/model/connections"; // Fork
 import { FORK_SESSION_MOVE } from "../../fork/sessionMove/sessionMoveModel"; // Fork
 import { moveMenuItems, pickMoveItem } from "../../fork/sessionMove/moveMenu"; // Fork
@@ -1598,28 +1597,26 @@ function SidebarComponent({
           },
         ]
       : []),
-    // Fork: carry the session over to the agent with the most headroom.
-    ...(!multipleMenuSessions &&
-    menuSessions[0] &&
-    continueLabel(menuSessions[0].harness, {
-      isLive: isLiveHarness,
-      usedPercent: (id) => harnessUsedPercent(id, menuSessions[0]?.cwd),
-    })
-      ? [
-          {
+    // Fork: carry the session over to another continue peer.
+    // Prefer live targetsFor when the host knows the session; fall back to
+    // handoffTargets so closed/history sessions still list peers (disabled).
+    ...(!multipleMenuSessions && menuSessions[0]
+      ? (() => {
+          const session = menuSessions[0];
+          const live = continueHost()?.targetsFor?.(session.id);
+          const peers =
+            live && live.length > 0
+              ? live
+              : handoffTargets(session.harness);
+          const can = Boolean(continueHost()?.canContinue(session.id));
+          return peers.map((target) => ({
             kind: "item" as const,
-            id: "continue-elsewhere",
-            label: continueLabel(menuSessions[0].harness, {
-              isLive: isLiveHarness,
-              usedPercent: (id) =>
-                harnessUsedPercent(id, menuSessions[0]?.cwd),
-            })!,
-            disabled: !continueHost()?.canContinue(menuSessions[0].id),
-            description: continueHost()?.canContinue(menuSessions[0].id)
-              ? undefined
-              : "Open the session first",
-          },
-        ]
+            id: `continue-elsewhere:${target}`,
+            label: continueLabelFor(session.harness, target),
+            disabled: !can,
+            description: can ? undefined : "Open the session first",
+          }));
+        })()
       : []),
     // Fork: move the session and its work to another machine.
     ...(!multipleMenuSessions && menuSessions[0]
@@ -1786,8 +1783,9 @@ function SidebarComponent({
       }
       return;
     }
-    if (id === "continue-elsewhere") {
-      continueHost()?.continueSession(sessionIds[0]);
+    if (id.startsWith("continue-elsewhere:")) {
+      const target = id.slice("continue-elsewhere:".length) as HarnessId;
+      continueHost()?.continueSession(sessionIds[0], target);
       return;
     }
     if (pickMoveItem(id, sessionIds[0], moveMachines)) return; // Fork
