@@ -75,3 +75,42 @@ describe("project run order", () => {
     });
   });
 });
+
+describe("recently used order", () => {
+  const order = (
+    agents: readonly LiveAgent[],
+    options: Parameters<typeof projectRows>[3],
+  ) =>
+    projectRows(paths, agents, [], options).map((row) => row.path);
+  const recents = [
+    { path: "/idle", openedAt: 100 },
+    { path: "/old", openedAt: 500 },
+    { path: "/waiting", openedAt: 300 },
+  ];
+
+  it("sorts idle projects by when they were last opened", () => {
+    expect(order([], { recents })).toEqual([
+      "/old",
+      "/waiting",
+      "/idle",
+      "/new",
+      "/done",
+    ]);
+  });
+  it("counts a run in a project that was opened long ago", () => {
+    expect(order([], { recents, use: { "/idle": 900 } })[0]).toBe("/idle");
+    expect(order([], { recents, use: { "/old": 200 } })[0]).toBe("/old");
+  });
+  it("puts the open project first, even above running ones", () => {
+    expect(order(agents, { recents, current: "/idle" }).slice(0, 3)).toEqual([
+      "/idle",
+      "/new",
+      "/old",
+    ]);
+  });
+  it("puts running projects above recently used idle ones", () => {
+    expect(
+      order([agent("/new", 1)], { recents, use: { "/idle": 900 } })[0],
+    ).toBe("/new");
+  });
+});

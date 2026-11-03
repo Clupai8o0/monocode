@@ -89,9 +89,10 @@ describe("boardTurn", () => {
 });
 
 describe("boardVisible", () => {
-  it("stays up for two finished agents but not for one", () => {
+  it("clears finished agents while keeping running work visible", () => {
     const done = () => agent("completed");
-    expect(boardVisible({ agents: [done(), done()], commands: [] })).toBe(true);
+    expect(boardVisible({ agents: [done(), done()], commands: [] })).toBe(false);
+    expect(boardVisible({ agents: [done(), agent("failed")], commands: [] })).toBe(false);
     expect(boardVisible({ agents: [done()], commands: [] })).toBe(false);
     expect(boardVisible({ agents: [agent("in_progress")], commands: [] })).toBe(true);
     expect(boardVisible({ agents: [], commands: [command("in_progress")] })).toBe(true);

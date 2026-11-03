@@ -62,6 +62,35 @@ describe("follow-up readiness", () => {
 });
 
 describe("background work", () => {
+  it("keeps the full command and output path after a tool update", () => {
+    const command = "sleep 30\nprintf 'done\\n'";
+    const outputPath = "/tmp/claude-501/session/tasks/b1.output";
+    let session = appendUser(newSession("claude", "/tmp"), "hi");
+    session = applyHarnessEvent(session, {
+      type: "tool.started",
+      callId: "background:b1",
+      title: "sleep 30",
+      kind: "execute",
+      background: true,
+      command,
+      outputPath,
+    });
+    expect(session.blocks.at(-1)?.tool).toMatchObject({ command, outputPath });
+
+    session = applyHarnessEvent(session, {
+      type: "tool.updated",
+      callId: "background:b1",
+      status: "completed",
+      detail: "done",
+    });
+    expect(session.blocks.at(-1)?.tool).toMatchObject({
+      background: true,
+      status: "completed",
+      command,
+      outputPath,
+    });
+  });
+
   it("tracks what a yielded turn waits on and drops it when the turn ends", () => {
     let session = appendUser(newSession("claude", "/tmp"), "hi");
     session = applyHarnessEvent(session, {

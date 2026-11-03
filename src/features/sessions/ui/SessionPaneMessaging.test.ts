@@ -9,6 +9,7 @@ const probes = vi.hoisted(() => ({
   pick: vi.fn(),
   transcript: vi.fn(),
   runs: [],
+  mono: true,
 }));
 vi.mock("./Composer", () => ({ Composer: () => null }));
 vi.mock("../hooks/useFileDrop", () => ({ useFileDrop: () => false }));
@@ -17,6 +18,8 @@ vi.mock("../model/attachments", async (original) => ({
   pickAttachments: probes.pick,
 }));
 vi.mock("./AgentTranscript", () => ({
+  SubagentMascot: () => null,
+  SubagentTrail: () => null,
   AgentTranscript: (props: { onAddToChat: (text: string) => void }) => {
     probes.transcript(props);
     return createElement(
@@ -38,18 +41,22 @@ vi.mock("../../orchestration/model/orchestration", async (original) => ({
 }));
 vi.mock("../../monos/model/mono", async (original) => ({
   ...(await original<typeof import("../../monos/model/mono")>()),
-  monoForSession: () => ({
-    id: "mono",
-    sessionId: "chat",
-    name: "Captain",
-    mascot: "cat",
-    color: "#6ba",
-    projects: [],
-  }),
+  monoForSession: () =>
+    probes.mono
+      ? {
+          id: "mono",
+          sessionId: "chat",
+          name: "Captain",
+          mascot: "cat",
+          color: "#6ba",
+          projects: [],
+        }
+      : undefined,
 }));
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  probes.mono = true;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "ResizeObserver",
@@ -145,6 +152,67 @@ function field() {
     '[aria-label="Message Captain"]',
   )!;
 }
+
+it("keeps one agent tray when switching between busy sessions", () => {
+  probes.mono = false;
+  for (let index = 0; index < 20; index++) {
+    const pane = props();
+    pane.session = {
+      ...pane.session,
+      id: `chat-${index % 2}`,
+      busy: true,
+      blocks: [
+        ...pane.session.blocks,
+        {
+          id: `agent-${index % 2}`,
+          role: "tool",
+          text: "Review changes",
+          tool: { kind: "agent", status: "in_progress" },
+          agentRun: { name: "Reviewer", steps: [] },
+        },
+      ],
+    };
+    render(pane);
+    expect(
+      container.querySelectorAll("[data-fork-background-agents]"),
+    ).toHaveLength(1);
+  }
+  render(props());
+  expect(
+    container.querySelectorAll("[data-fork-background-agents]"),
+  ).toHaveLength(0);
+});
+
+it("leaves every agent tray openable after switching between busy sessions", () => {
+  probes.mono = false;
+  for (const id of ["chat-0", "chat-1", "chat-0", "chat-1"]) {
+    const pane = props();
+    pane.session = {
+      ...pane.session,
+      id,
+      busy: true,
+      blocks: [
+        ...pane.session.blocks,
+        {
+          id: `agent-${id}`,
+          role: "tool",
+          text: "Review changes",
+          tool: { kind: "agent", status: "in_progress" },
+          agentRun: { name: "Reviewer", steps: [] },
+        },
+      ],
+    };
+    render(pane);
+  }
+  const toggles = container.querySelectorAll<HTMLButtonElement>(
+    "[data-fork-background-agents] > button",
+  );
+  expect(toggles.length).toBeGreaterThan(0);
+  for (const toggle of toggles) {
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  }
+});
 
 it("keeps the same input, current draft and attachments when a question appears and closes", async () => {
   setComposerDraft("chat", "Initial draft");

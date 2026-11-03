@@ -1,5 +1,10 @@
 import type { LiveAgent } from "../../features/sessions/model/liveAgents";
-import { sameProjectPath } from "../../features/projects/model/recents";
+import {
+  sameProjectPath,
+  type RecentProject,
+} from "../../features/projects/model/recents";
+import { pathKey } from "../../shared/lib/paths";
+import type { ProjectUse } from "./projectUse";
 
 export type ProjectRow = {
   path: string;
@@ -11,13 +16,27 @@ export type ProjectRow = {
   activity: string;
 };
 
-/** Active runs rise once when they start, never as their output streams. */
+export type ProjectOrder = {
+  /** The open project, which always leads. */
+  current?: string;
+  recents?: readonly RecentProject[];
+  use?: ProjectUse;
+};
+
+/**
+ * The open project leads, then running projects by newest run, then the rest by
+ * last use. Runs rise once when they start, never as their output streams.
+ */
 export function projectRows(
   paths: readonly string[],
   agents: readonly LiveAgent[],
   busyPaths: Iterable<string> = [],
+  { current, recents = [], use = {} }: ProjectOrder = {},
 ): ProjectRow[] {
   const busy = [...busyPaths];
+  const openedAt = new Map(
+    recents.map((item) => [pathKey(item.path), item.openedAt]),
+  );
   return paths
     .map((path, index) => {
       const matching = agents.filter((agent) =>
@@ -41,6 +60,7 @@ export function projectRows(
       const running =
         working.length > 0 ||
         (!matching.length && busy.some((item) => sameProjectPath(item, path)));
+      const key = pathKey(path);
       return {
         path,
         working: working.length,
@@ -49,16 +69,20 @@ export function projectRows(
         running,
         startedAt: running ? (latest?.startedAt ?? 0) : 0,
         activity: latest?.activity ?? (running ? "Working" : ""),
+        isCurrent: !!current && sameProjectPath(path, current),
+        lastUsed: Math.max(openedAt.get(key) ?? 0, use[key] ?? 0),
         index,
       };
     })
     .sort(
       (a, b) =>
+        Number(b.isCurrent) - Number(a.isCurrent) ||
         Number(b.running) - Number(a.running) ||
         (a.running && b.running ? b.startedAt - a.startedAt : 0) ||
+        b.lastUsed - a.lastUsed ||
         a.index - b.index,
     )
-    .map(({ index: _index, ...row }) => row);
+    .map(({ isCurrent: _current, lastUsed: _used, index: _index, ...row }) => row);
 }
 
 export function projectStatusLabel(row: ProjectRow): string {

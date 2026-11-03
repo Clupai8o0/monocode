@@ -250,7 +250,7 @@ describe("inset Projects list", () => {
     const paths = setupProjects();
     await act(async () => render());
     const projects = container.querySelector<HTMLElement>("[data-fork-projects]")!;
-    expect(rows()).toEqual([paths[2], paths[1], paths[0]]);
+    expect(rows()).toEqual([paths[0], paths[2], paths[1]]);
     expect(projects.textContent).toContain("Projects");
     expect(projects.textContent).toContain("Running tests");
     expect(projects.querySelector("[data-fork-notifications]")).toBeNull();
@@ -293,9 +293,9 @@ describe("inset Projects list", () => {
     act(() => projects.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
     props = { ...props, liveAgents: props.liveAgents!.map((agent) => agent.id === "old-run" ? { ...agent, startedAt: 300 } : agent) };
     await act(async () => render());
-    expect(rows()).toEqual([paths[2], paths[1], paths[0]]);
+    expect(rows()).toEqual([paths[0], paths[2], paths[1]]);
     act(() => projects.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse", relatedTarget: document.body })));
-    expect(rows()).toEqual([paths[1], paths[2], paths[0]]);
+    expect(rows()).toEqual([paths[0], paths[1], paths[2]]);
     expect(projects.querySelector('[aria-current="page"]')?.textContent).toContain("project");
   });
   it("holds the sessions in a card headed by the project with a new-session button", async () => {

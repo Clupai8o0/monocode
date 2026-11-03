@@ -82,6 +82,8 @@ export function applyHarnessEvent(
         streaming: true,
         agentModel: event.agentModel,
         ...(event.background ? { background: true } : {}),
+        command: event.command,
+        outputPath: event.outputPath,
       });
     case "tool.updated":
       return upsertTool(session, {
@@ -969,6 +971,8 @@ function upsertTool(
     streaming: boolean;
     agentModel?: string;
     background?: boolean;
+    command?: string;
+    outputPath?: string;
   },
 ): Session {
   const index = findToolIndex(session, patch);
@@ -998,6 +1002,8 @@ function upsertTool(
         ...(preview ? { preview } : {}),
         ...(patch.paths ? { paths: patch.paths } : {}),
         ...(patch.background ? { background: true } : {}),
+        ...(patch.command !== undefined ? { command: patch.command } : {}),
+        ...(patch.outputPath !== undefined ? { outputPath: patch.outputPath } : {}),
       },
     });
   }
@@ -1018,6 +1024,8 @@ function upsertTool(
   const kind = patch.kind ?? prev.tool?.kind;
   const status = patch.status ?? prev.tool?.status;
   const paths = patch.paths ?? prev.tool?.paths;
+  const command = patch.command ?? prev.tool?.command;
+  const outputPath = patch.outputPath ?? prev.tool?.outputPath;
   const agentName = prev.agentRun?.steps.length ? prev.agentRun.name : label;
   if (
     prev.text === label &&
@@ -1027,6 +1035,8 @@ function upsertTool(
     prev.tool?.status === status &&
     prev.tool?.detail === detail &&
     prev.tool?.paths === paths &&
+    prev.tool?.command === command &&
+    prev.tool?.outputPath === outputPath &&
     (!patch.agentModel || prev.agentRun?.model === patch.agentModel) &&
     (!prev.agentRun || prev.agentRun.name === agentName) &&
     samePreview(prev.tool?.preview, preview)
@@ -1058,6 +1068,8 @@ function upsertTool(
       ...(preview ? { preview } : {}),
       ...(paths ? { paths } : {}),
       ...(prev.tool?.background ? { background: true } : {}),
+      ...(command !== undefined ? { command } : {}),
+      ...(outputPath !== undefined ? { outputPath } : {}),
     },
   };
   return { ...session, blocks };

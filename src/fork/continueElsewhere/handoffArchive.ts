@@ -1,5 +1,5 @@
 import { appDataDir } from "@tauri-apps/api/path";
-import { createPath, statFiles, writeTextFile } from "../../platform/tauri/fs";
+import { createPath, listDir, writeTextFile } from "../../platform/tauri/fs";
 
 /** Private app data, independent of the checkout and the agent's app-control permissions. */
 export async function writeHandoffArchive(text: string): Promise<string> {
@@ -8,8 +8,11 @@ export async function writeHandoffArchive(text: string): Promise<string> {
   try {
     await createPath(parent, "handoffs", true);
   } catch (error) {
-    const [existing] = await statFiles([directory]);
-    if (existing?.mtimeMs == null) {
+    try {
+      // statFiles intentionally excludes directories. Listing verifies that
+      // the existing path is a usable directory, including an empty one.
+      await listDir(directory);
+    } catch {
       throw error;
     }
   }
