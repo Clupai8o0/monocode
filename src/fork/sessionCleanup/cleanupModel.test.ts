@@ -1,0 +1,119 @@
+import { describe, expect, it } from "vitest";
+import type { SessionSummary } from "../../features/sessions/data/sessionStore";
+import {
+  cleanupAge,
+  cleanupCandidates,
+  cleanupResult,
+  groupByProject,
+  IDLE_AFTER_MS,
+  inCleanupFilter,
+  isHeld,
+  tickedByDefault,
+} from "./cleanupModel";
+
+function row(id: string, extra: Partial<SessionSummary> = {}): SessionSummary {
+  return {
+    id,
+    cwd: "/p/a",
+    harness: "claude",
+    model: "m",
+    runtimeMode: "default",
+    title: id,
+    createdAt: 1,
+    updatedAt: 1,
+    ...extra,
+  } as SessionSummary;
+}
+
+const nothingHeld = { busy: new Set<string>(), approval: new Set<string>() };
+
+describe("cleanupCandidates", () => {
+  it("leaves out what must not be tidied away unseen", () => {
+    const rows = [
+      row("plain"),
+      row("archived", { archived: true }),
+      row("pinned", { pinned: true }),
+      row("draft", { draft: true }),
+      row("hidden", { sidebarHidden: true }),
+      row("worker", { orchestrationLeadId: "lead" }),
+    ];
+    expect(cleanupCandidates(rows, nothingHeld).map((r) => r.id)).toEqual([
+      "plain",
+    ]);
+  });
+
+  it("leaves out sessions working, waiting or on screen", () => {
+    const rows = [row("a"), row("busy"), row("asking"), row("shown")];
+    const held = {
+      activeSessionId: "shown",
+      busy: new Set(["busy"]),
+      approval: new Set(["asking"]),
+    };
+    expect(cleanupCandidates(rows, held).map((r) => r.id)).toEqual(["a"]);
+    expect(isHeld("busy", held)).toBe(true);
+    expect(isHeld("a", held)).toBe(false);
+  });
+});
+
+describe("inCleanupFilter", () => {
+  const now = 10 * IDLE_AFTER_MS;
+
+  it("matches the close line for Safe and Handover", () => {
+    expect(inCleanupFilter(now, "safe", "safe", now)).toBe(true);
+    expect(inCleanupFilter(now, "handover", "safe", now)).toBe(false);
+    expect(inCleanupFilter(now, undefined, "safe", now)).toBe(false);
+    expect(inCleanupFilter(now, "handover", "handover", now)).toBe(true);
+  });
+
+  it("matches by age for Idle, with the edge counted in", () => {
+    expect(inCleanupFilter(now - IDLE_AFTER_MS, undefined, "idle", now)).toBe(
+      true,
+    );
+    expect(
+      inCleanupFilter(now - IDLE_AFTER_MS + 1, undefined, "idle", now),
+    ).toBe(false);
+  });
+
+  it("shows every row under Everything", () => {
+    expect(inCleanupFilter(now, "unsafe", "all", now)).toBe(true);
+  });
+});
+
+describe("tickedByDefault", () => {
+  it("ticks closed, finished sessions", () => {
+    expect(tickedByDefault("safe", "safe", false)).toBe(true);
+    expect(tickedByDefault(undefined, "idle", false)).toBe(true);
+  });
+
+  it("never starts ticked for open, unsafe or Everything", () => {
+    expect(tickedByDefault("safe", "safe", true)).toBe(false);
+    expect(tickedByDefault("unsafe", "idle", false)).toBe(false);
+    expect(tickedByDefault("safe", "all", false)).toBe(false);
+  });
+});
+
+describe("groupByProject", () => {
+  it("keeps rows together in first-seen order", () => {
+    const groups = groupByProject([
+      { cwd: "/b", id: 1 },
+      { cwd: "/a", id: 2 },
+      { cwd: "/b", id: 3 },
+    ]);
+    expect(groups.map((g) => g.cwd)).toEqual(["/b", "/a"]);
+    expect(groups[0].rows.map((r) => r.id)).toEqual([1, 3]);
+  });
+});
+
+describe("labels", () => {
+  it("shortens ages", () => {
+    expect(cleanupAge(-5)).toBe("0m");
+    expect(cleanupAge(12 * 60_000)).toBe("12m");
+    expect(cleanupAge(5 * 3_600_000)).toBe("5h");
+    expect(cleanupAge(3 * 86_400_000)).toBe("3d");
+  });
+
+  it("mentions kept sessions only when there are some", () => {
+    expect(cleanupResult(3, 0)).toBe("Archived 3.");
+    expect(cleanupResult(3, 1)).toContain("Kept 1");
+  });
+});

@@ -12808,6 +12808,10 @@ function Workspace({
     openProjectSessionRows,
     sameSessionSummaries,
   );
+  // Fork: the cleanup panel works across projects, so it needs them all.
+  const allOpenSessionIds = useStableValue(
+    useMemo(() => sessions.map((session) => session.id), [sessions]),
+  );
 
   const onToggleSessionSidebar = useCallback(() => {
     setSessionSidebarOpen((open) => {
@@ -14894,6 +14898,7 @@ function Workspace({
       onArchiveSession={onArchiveHistorySession}
       onArchiveSessions={onArchiveHistorySessions}
       closableSessionIds={closableSessionIds}
+      allOpenSessionIds={allOpenSessionIds}
       onCloseSessions={onCloseSessionsForMemory}
       idleClosableCount={idleClosableCount}
       onCloseIdleSessions={onCloseIdleSessions}

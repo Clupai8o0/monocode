@@ -98,6 +98,11 @@ export function staleClosed(
 // not repeated and one restored by hand stays put until it is used again.
 const autoArchived = new Set<string>();
 
+/** Stops the 12-hour cleanup taking back a session someone just restored. */
+export function keepFromAutoArchive(sessionId: string, updatedAt: number) {
+  autoArchived.add(`${sessionId}@${updatedAt}`);
+}
+
 /**
  * Archives Safe and Handover sessions left for 12 hours, checked when the
  * list or a badge changes and every 10 minutes. This only tidies the list:
