@@ -1,3 +1,4 @@
+import { isLiveHarness } from "../../integrations/harness/core/registry";
 import { getCachedRateLimits } from "../../features/providers/model/rateLimitsCache";
 import {
   selectedProviderAccountId,
@@ -5,8 +6,17 @@ import {
 } from "../../features/providers/model/providerAccounts";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { getExtraUsage } from "../usage/extraUsage";
+import type { ContinuePickOptions } from "./continueElsewhere";
 
 export { cursorUsageResetsAt } from "../usage/extraUsage";
+
+/** Shared continue-elsewhere pick options (usage bar, session menu, host). */
+export function continuePickOptions(cwd?: string): ContinuePickOptions {
+  return {
+    isLive: isLiveHarness,
+    usedPercent: (id: HarnessId) => harnessUsedPercent(id, cwd),
+  };
+}
 
 /**
  * How spent a continue-elsewhere candidate looks (0–100). Lower means more

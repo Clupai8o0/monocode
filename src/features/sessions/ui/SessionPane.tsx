@@ -889,7 +889,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
       usageLimit={session.usageLimit}
       usageLimitAction={
         remote || agent ? undefined : (
-          <ContinueElsewhereButton sessionId={session.id} harness={session.harness} />
+          <ContinueElsewhereButton
+            sessionId={session.id}
+            harness={session.harness}
+            cwd={session.cwd}
+          />
         )
       }
       onUsageLimitResume={() => onUsageLimitResume(session.id)}
