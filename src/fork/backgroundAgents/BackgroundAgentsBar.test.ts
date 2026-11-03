@@ -167,6 +167,7 @@ it("doesn't call a long run of blank output no output", async () => {
   invoke.mockResolvedValue({ text: "\n\n", truncated: true, size: 90000 });
   const { board } = await openCommand();
   expect(board.textContent).not.toContain("No output yet.");
+  expect(board.textContent).toContain("Earlier output left out.");
 });
 
 it("falls back to the transcript when the file can't be read, and stops trying", async () => {

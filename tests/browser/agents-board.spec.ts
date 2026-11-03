@@ -130,6 +130,13 @@ for (const theme of ["dark", "light"] as const) {
     expect(await panel.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
     await page.screenshot({ path: `${dir}/agents-board-output-${theme}.png` });
 
+    // The note about a cut pushes the output down, and it still ends in sight.
+    await page.evaluate(() => {
+      (window as unknown as { __cut(): void }).__cut();
+    });
+    await expect(view).toContainText("Earlier output left out.");
+    await expect.poll(distance).toBeLessThan(8);
+
     // Scrolled up to read, the view stays put as more arrives.
     await view.evaluate((el) => {
       el.scrollTop = 0;
@@ -139,6 +146,43 @@ for (const theme of ["dark", "light"] as const) {
     expect(await view.evaluate((el) => el.scrollTop)).toBe(0);
   });
 }
+
+test("a command's newest output stays in sight among other rows", async ({ page }) => {
+  const print = (lines: number) =>
+    page.evaluate((count) => {
+      (window as unknown as { __print(count: number): void }).__print(count);
+    }, lines);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.goto("/tests/browser/agents-board.html?scene=output-among");
+  await page.locator(strip).click();
+  await page.getByRole("button", { name: "Show command: npm test" }).click();
+  const view = page.locator("[data-fork-command-console]");
+  const panel = page.locator(board);
+  const overhang = async () => {
+    const shown = (await panel.boundingBox())!;
+    const box = (await view.boundingBox())!;
+    return box.y + box.height - (shown.y + shown.height);
+  };
+
+  // As it grows, the panel moves to keep its end showing.
+  await print(1);
+  await expect(view).toContainText("crate-1 ");
+  await print(40);
+  await expect(view).toContainText("crate-41 ");
+  await expect.poll(overhang).toBeLessThanOrEqual(1);
+  await expect
+    .poll(() => view.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+    .toBeLessThan(8);
+
+  // Once full, it leaves the panel alone for whoever is reading other rows.
+  await panel.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await print(5);
+  await expect(view).toContainText("crate-46 ");
+  expect(await panel.evaluate((el) => el.scrollTop)).toBe(0);
+});
 
 test("sequential runs stay closed", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html?scene=sequential");
