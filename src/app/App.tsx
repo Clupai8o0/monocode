@@ -709,7 +709,7 @@ import {
 } from "../features/sessions/model/operatorCommand";
 import {
   canStageInTurn,
-  consumeStageCommand,
+  parseStageSubmission,
   sessionChangedFiles,
   stageTurnPrompt,
 } from "../features/sessions/model/stageCommand";
@@ -7788,8 +7788,8 @@ function Workspace({
         : submittedText;
       // `/stage` is a MonoCode command, so expand it before native slash routing.
       const stageCommand = operatorCommand.matched
-        ? { text: promptText, matched: false }
-        : consumeStageCommand(submittedText);
+        ? { text: promptText, matched: false, mcpContext: "" }
+        : parseStageSubmission(submittedText);
       if (
         stageCommand.matched &&
         !canStageInTurn({
@@ -7820,13 +7820,14 @@ function Workspace({
           : composeNoteMessage(
               noteCard,
               stageCommand.matched
-                ? stageTurnPrompt(
-                    stageCommand.text,
-                    sessionChangedFiles(
-                      current.blocks,
-                      sessionWorkCwd(current),
-                    ),
-                  )
+                ? stageCommand.mcpContext +
+                    stageTurnPrompt(
+                      stageCommand.text,
+                      sessionChangedFiles(
+                        current.blocks,
+                        sessionWorkCwd(current),
+                      ),
+                    )
                 : promptText,
             ));
 
@@ -8213,6 +8214,9 @@ function Workspace({
         ...(ciContext ? { ciContext } : {}),
         ...(operatorCommand.matched ? { monocode: true } : {}),
         ...(intent === "plan" || intent === "orchestrate" ? { intent } : {}),
+        ...(intent === "build" && approvedPlan
+          ? { buildPlanBlockId: approvedPlan.id }
+          : {}),
         ...(options?.appRequestId
           ? { appRequestId: options.appRequestId }
           : {}),

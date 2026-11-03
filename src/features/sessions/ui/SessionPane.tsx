@@ -137,6 +137,7 @@ import {
   canEditLastTurn,
   lastTurnRecall,
   lastTurnRetry,
+  runLastTurnRetry,
 } from "../model/editLastTurn";
 import { signInProvider } from "../../providers/model/providerSignIn";
 import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../../providers/model/providerAccounts";
@@ -457,7 +458,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
             session.providerAccountId ?? DEFAULT_PROVIDER_ACCOUNT_ID,
           )
       : undefined;
-  const signInRetry = providerSignIn ? lastTurnRetry(session) : null;
+  const lastRetry = providerSignIn ? lastTurnRetry(session) : null;
+  // The plan card offers no build once its worktree is gone; neither does Retry.
+  const signInRetry =
+    lastRetry?.planBlockId && session.worktreeRemoved ? null : lastRetry;
   const draftBlock = sessionDraftBlock(session);
   useSyncExternalStore(
     subscribeProjectChatBackground,
@@ -1241,14 +1245,16 @@ const LocalSessionPane = memo(function LocalSessionPane({
                       signInRetry
                         ? () => {
                             onFocus(session.id);
-                            onSubmit(
-                              session.id,
-                              signInRetry.text,
-                              signInRetry.attachments,
-                              signInRetry.intent
-                                ? { intent: signInRetry.intent }
-                                : undefined,
-                            );
+                            runLastTurnRetry(signInRetry, {
+                              buildPlan,
+                              submit: (text, attachments, options) =>
+                                onSubmit(
+                                  session.id,
+                                  text,
+                                  attachments,
+                                  options,
+                                ),
+                            });
                           }
                         : undefined
                     }

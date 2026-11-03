@@ -169,7 +169,32 @@ export function lastTurnRecall(session: Session): LastTurnRecall | null {
 
 export type LastTurnRetry = LastTurnRecall & {
   intent?: Block["intent"];
+  /** Rebuild this approved plan instead of resending the turn's text. */
+  planBlockId?: string;
 };
+
+/** Send a failed turn again along the path that started it. */
+export function runLastTurnRetry(
+  retry: LastTurnRetry,
+  actions: {
+    buildPlan: (planBlockId: string) => void;
+    submit: (
+      text: string,
+      attachments: Attachment[],
+      options?: { intent: NonNullable<Block["intent"]> },
+    ) => void;
+  },
+): void {
+  if (retry.planBlockId) {
+    actions.buildPlan(retry.planBlockId);
+    return;
+  }
+  actions.submit(
+    retry.text,
+    retry.attachments,
+    retry.intent ? { intent: retry.intent } : undefined,
+  );
+}
 
 /**
  * The latest message as the user sent it, to send again after its turn
@@ -189,6 +214,17 @@ export function lastTurnRetry(session: Session): LastTurnRetry | null {
   }
   const recall = lastTurnRecall(session);
   if (!recall) return null;
+  if (block.buildPlanBlockId) {
+    // A build's text is only a label; the plan holds the request.
+    const plan = session.blocks.find(
+      (entry) => entry.id === block.buildPlanBlockId && entry.role === "plan",
+    );
+    return plan?.plan?.status === "ready" && plan.text.trim()
+      ? { ...recall, planBlockId: plan.id }
+      : null;
+  }
+  // Builds saved before the plan link cannot be traced back to their plan.
+  if (block.text === "Build approved plan") return null;
   return block.intent ? { ...recall, intent: block.intent } : recall;
 }
 

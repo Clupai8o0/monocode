@@ -5,9 +5,11 @@ import {
   createEditedResendCoordinator,
   lastEditableTurnStartIndex,
   lastTurnRecall,
+  lastTurnRetry,
   lastUserTurnStartIndex,
   prepareEditedResend,
   replaceEditedResend,
+  runLastTurnRetry,
   truncateBeforeLastEditableTurn,
   truncateBeforeLastUserTurn,
 } from "./editLastTurn";
@@ -237,5 +239,51 @@ describe("editLastTurn", () => {
       }),
     ).toBe(false);
     expect(canEditLastTurn({ ...chat([]), harness: "claude" })).toBe(false);
+  });
+
+  describe("retrying a failed approved-plan build", () => {
+    const build = (status: "ready" | "built", extra: Partial<Block> = {}) =>
+      chat([
+        { id: "plan", role: "plan", text: "# Plan", plan: { status } },
+        {
+          id: "turn",
+          role: "user",
+          text: "Build approved plan",
+          buildPlanBlockId: "plan",
+          ...extra,
+        },
+        { id: "error", role: "assistant", text: "Not logged in" },
+      ]);
+
+    it("rebuilds the plan instead of sending the label as a prompt", () => {
+      const retry = lastTurnRetry(build("ready"));
+      expect(retry?.planBlockId).toBe("plan");
+      const buildPlan = vi.fn();
+      const submit = vi.fn();
+      runLastTurnRetry(retry!, { buildPlan, submit });
+      expect(buildPlan).toHaveBeenCalledWith("plan");
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it("offers no retry when the plan cannot be built again", () => {
+      expect(lastTurnRetry(build("built"))).toBeNull();
+      expect(
+        lastTurnRetry(build("ready", { buildPlanBlockId: "missing" })),
+      ).toBeNull();
+      expect(
+        lastTurnRetry(build("ready", { buildPlanBlockId: undefined })),
+      ).toBeNull();
+    });
+
+    it("still resends an ordinary turn with its intent", () => {
+      const retry = lastTurnRetry(
+        chat([{ id: "u", role: "user", text: "plan it", intent: "plan" }]),
+      );
+      const buildPlan = vi.fn();
+      const submit = vi.fn();
+      runLastTurnRetry(retry!, { buildPlan, submit });
+      expect(buildPlan).not.toHaveBeenCalled();
+      expect(submit).toHaveBeenCalledWith("plan it", [], { intent: "plan" });
+    });
   });
 });

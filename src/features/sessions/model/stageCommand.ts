@@ -1,6 +1,7 @@
 import { isEditTool } from "../../../integrations/harness/core/preview";
 import { displayPath } from "../../../shared/lib/paths";
 import type { BuiltinSkill } from "../../skills/model/skills";
+import { splitMcpContext } from "./mcpPicker";
 import type { Block } from "./session";
 
 const FILE_LIMIT = 200;
@@ -27,6 +28,22 @@ export function consumeStageCommand(text: string): {
   const match = text.match(/^\s*\/stage(?=\s|$)\s*/i);
   if (!match) return { text, matched: false };
   return { text: text.slice(match[0].length).trim(), matched: true };
+}
+
+/**
+ * Parse a submitted turn, which can carry the composer's MCP context ahead of
+ * the command. The context is returned for the expanded prompt to keep.
+ */
+export function parseStageSubmission(text: string): {
+  text: string;
+  matched: boolean;
+  mcpContext: string;
+} {
+  const { context, body } = splitMcpContext(text);
+  const command = consumeStageCommand(body);
+  return command.matched
+    ? { ...command, mcpContext: context }
+    : { text, matched: false, mcpContext: "" };
 }
 
 /**
