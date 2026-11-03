@@ -11,7 +11,9 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => {
   return {
     ...original,
     invoke: (command: string, args?: unknown) =>
-      command === "mcp_discover" || command === "claude_mcp_list"
+      command === "mcp_discover" ||
+      command === "claude_mcp_list" ||
+      command === "cursor_mcp_list"
         ? mcpInvoke(command, args)
         : original.invoke(command, args),
   };
@@ -149,7 +151,7 @@ describe("Composer question focus", () => {
     ) => boolean | void,
     onSubmit: (text: string, attachments: Attachment[]) => void = () => {},
     sessionId?: string,
-    harness: "claude" | "codex" = "claude",
+    harness: "claude" | "codex" | "cursor" = "claude",
   ) {
     await act(async () =>
       root.render(
@@ -534,6 +536,44 @@ describe("Composer question focus", () => {
     expect(
       container.querySelector('[data-mcp-tag="@mcp/docs"]'),
     ).not.toBeNull();
+  });
+
+  it("loads Cursor MCP health when opening the picker on a Cursor harness", async () => {
+    mcpInvoke.mockImplementation(async (command: string) =>
+      command === "mcp_discover"
+        ? [
+            {
+              provider: "cursor",
+              name: "docs",
+              scope: "project",
+              configPath: "/repo/.cursor/mcp.json",
+              transport: "stdio",
+            },
+          ]
+        : command === "cursor_mcp_list"
+          ? "docs: connected"
+          : undefined,
+    );
+    await renderComposer(undefined, vi.fn(), false, 0, "/mcp", undefined, vi.fn(), undefined, "cursor");
+    const textarea = container.querySelector("textarea")!;
+    await act(async () =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(mcpInvoke).toHaveBeenCalledWith("cursor_mcp_list", { cwd: "/repo" });
+    expect(mcpInvoke).not.toHaveBeenCalledWith(
+      "claude_mcp_list",
+      expect.anything(),
+    );
+    const docs = container.querySelector<HTMLButtonElement>(
+      '[data-mcp-picker] [role="option"]',
+    )!;
+    expect(docs.disabled).toBe(false);
   });
 
   it("restores a Codex MCP tag and its context after switching sessions", async () => {

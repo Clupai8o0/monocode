@@ -16,6 +16,37 @@ afterEach(() => {
   invoke.mockClear();
 });
 
+it("gives Cursor artifact links without running Claude's script or leaking Claude metadata", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const session = newSession("cursor", "/repo");
+  session.blocks = [
+    {
+      id: "a",
+      role: "assistant",
+      text: "https://claude.ai/artifact/cursor-review",
+    },
+  ];
+  let status: SessionStatus | null = null;
+  function Probe() {
+    status = useSessionStatus(session, true);
+    return null;
+  }
+  try {
+    await act(async () => root.render(createElement(Probe)));
+    expect(status).toMatchObject({
+      data: null,
+      line: null,
+      links: ["https://claude.ai/artifact/cursor-review"],
+    });
+    expect(status?.limits).toBeUndefined();
+    expect(invoke).not.toHaveBeenCalled();
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
 it("gives Codex artifact links without running Claude's script or leaking Claude metadata", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
