@@ -134,10 +134,19 @@ it("shows recording failures instead of implying there were no changes", async (
 
 it("says nothing once the session's folder has been removed", async () => {
   probes.status.mockRejectedValue(new Error("/repo: Not a directory"));
-  probes.listDir.mockRejectedValue(new Error("/repo: Not a directory"));
+  probes.listDir.mockRejectedValue(
+    "/repo: No such file or directory (os error 2)",
+  );
   await render();
   expect(probes.listDir).toHaveBeenCalledWith("/repo");
   expect(container.textContent).toBe("");
+});
+
+it("still reports a failure when the folder is there but can't be read", async () => {
+  probes.status.mockRejectedValue(new Error("Final checkpoint failed"));
+  probes.listDir.mockRejectedValue("/repo: Permission denied (os error 13)");
+  await render();
+  expect(container.textContent).toContain("Couldn’t record changes");
 });
 
 it("ignores a late load from a different session", async () => {

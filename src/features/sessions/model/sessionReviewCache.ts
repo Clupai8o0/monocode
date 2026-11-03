@@ -19,6 +19,8 @@ type Entry = {
 };
 
 export const EMPTY_SESSION_REVIEW: Snapshot = { files: [], error: null };
+/** The system's own word that a path isn't a folder: missing, or now a file. */
+const FOLDER_GONE = /\(os error (?:2|3|20)\)$/;
 const entries = new Map<string, Entry>();
 let unsubscribe: (() => void) | undefined;
 
@@ -73,7 +75,7 @@ function load(entry: Entry): Promise<void> {
       // A worktree merged and removed leaves nothing to record or to undo.
       const folderGone = await listDir(entry.cwd).then(
         () => false,
-        () => true,
+        (failure: unknown) => FOLDER_GONE.test(String(failure)),
       );
       if (revision === entry.revision)
         publish(
