@@ -63,6 +63,7 @@ type SessionConfigOption = {
 type SessionSetupResult = {
   sessionId?: string;
   configOptions?: unknown;
+  modes?: { currentModeId?: string; availableModes?: Array<{ id: string }> };
 };
 
 type PendingToolEnrichment = {
@@ -77,6 +78,8 @@ type Live = {
   cwd: string;
   modelConfigId: string;
   configOptions: SessionConfigOption[];
+  modeId?: string;
+  availableModes: string[];
   muteUpdates: boolean;
   cancelled: boolean;
   runtimeMode: RuntimeMode;
@@ -129,17 +132,18 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
   }
   if (cancelledThreads.delete(input.sessionId)) return;
 
-  live.onEvent = input.onEvent;
-  live.runtimeMode = input.runtimeMode;
-  live.planning = input.intent === "plan";
   live.turns = live.turns
     .catch(() => undefined)
     .then(async () => {
+      live.onEvent = input.onEvent;
+      live.runtimeMode = input.runtimeMode;
+      live.planning = input.intent === "plan";
       live.cancelled = false;
       live.muteUpdates = false;
       scheduleCursorToolEnrichment(live, 0);
       try {
         await applyModelSelection(live, input);
+        await applySessionMode(live);
         if (live.cancelled) return;
         await prompt(live, input);
       } catch (error) {
@@ -270,9 +274,6 @@ export function bindCursorSession(
 async function ensureLive(input: SendTurnInput): Promise<Live> {
   const existing = liveByThread.get(input.sessionId);
   if (existing && existing.cwd === input.cwd) {
-    existing.onEvent = input.onEvent;
-    existing.runtimeMode = input.runtimeMode;
-    existing.planning = input.intent === "plan";
     return existing;
   }
   if (existing) {
@@ -379,6 +380,9 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
       cwd: input.cwd,
       modelConfigId: extractModelConfigId(setup),
       configOptions: readConfigOptions(setup?.configOptions),
+      modeId: setup?.modes?.currentModeId,
+      availableModes:
+        setup?.modes?.availableModes?.map((mode) => mode.id) ?? [],
       muteUpdates: didLoad,
       cancelled: false,
       runtimeMode: input.runtimeMode,
@@ -429,20 +433,36 @@ async function applyModelSelection(
 
   try {
     await setConfigOption(live, live.modelConfigId, base);
-  } catch {
-    await live.acp
-      .request("session/set_model", {
+  } catch (error) {
+    try {
+      await live.acp.request("session/set_model", {
         sessionId: live.acpSessionId,
         modelId: base,
-      })
-      .catch(() => undefined);
+      });
+      const current = live.configOptions.find(
+        (option) => option.id === live.modelConfigId,
+      );
+      if (current) current.currentValue = base;
+    } catch {
+      throw error;
+    }
   }
 
   for (const [settingId, value] of Object.entries(settings)) {
     const configId = resolveSettingConfigId(live.configOptions, settingId);
-    if (!configId) continue;
-    await setConfigOption(live, configId, value).catch(() => undefined);
+    if (!configId) throw new Error(`Unsupported Cursor setting: ${settingId}`);
+    await setConfigOption(live, configId, value);
   }
+}
+
+async function applySessionMode(live: Live): Promise<void> {
+  const modeId = live.planning ? "plan" : "agent";
+  if (!live.availableModes.includes(modeId) || live.modeId === modeId) return;
+  await live.acp.request("session/set_mode", {
+    sessionId: live.acpSessionId,
+    modeId,
+  });
+  live.modeId = modeId;
 }
 
 async function setConfigOption(
@@ -464,6 +484,8 @@ async function setConfigOption(
   if (result?.configOptions) {
     live.configOptions = readConfigOptions(result.configOptions);
     live.modelConfigId = extractModelConfigId(result) || live.modelConfigId;
+  } else if (current) {
+    current.currentValue = value;
   }
 }
 
@@ -738,30 +760,51 @@ async function handlePermission(live: Live, id: number, params: unknown) {
   }
 
   const options = Array.isArray(rec?.options) ? rec.options : [];
+  const optionsByKind = new Map<string, string>();
+  for (const option of options) {
+    const entry = asRecord(option);
+    if (typeof entry?.kind === "string" && typeof entry.optionId === "string") {
+      optionsByKind.set(entry.kind.replace(/-/g, "_"), entry.optionId);
+    }
+  }
   const optionIds = options
     .map((item) => asRecord(item)?.optionId)
     .filter((value): value is string => typeof value === "string");
+  const select = (preferred: string[]) => {
+    for (const kind of preferred) {
+      const id = optionsByKind.get(kind.replace(/-/g, "_"));
+      if (id) return id;
+    }
+    return pickOption(optionIds, preferred);
+  };
+  const respond = (optionId: string | null) =>
+    live.acp.respond(id, {
+      outcome: optionId
+        ? { outcome: "selected", optionId }
+        : { outcome: "cancelled" },
+    });
 
   if (live.planning) {
     const normalized = (preview?.kind ?? kind ?? "").toLowerCase();
     const readOnly = normalized === "read" || normalized === "search";
     const optionId = readOnly
-      ? pickOption(optionIds, ["allow-once", "allow_once", "allow"])
-      : pickOption(optionIds, ["reject-once", "reject_once", "reject-always"]);
-    await live.acp.respond(id, {
-      outcome: {
-        outcome: "selected",
-        optionId: optionId ?? (readOnly ? "allow-once" : "reject-once"),
-      },
-    });
+      ? select(["allow-once", "allow_once", "allow"])
+      : select([
+          "reject-once",
+          "reject_once",
+          "reject-always",
+          "reject_always",
+        ]);
+    await respond(optionId);
     return;
   }
 
-  const auto = pickAutoOption(live.runtimeMode, kind, optionIds);
+  const auto = pickAutoOption(live.runtimeMode, kind, [
+    ...optionIds,
+    ...optionsByKind.keys(),
+  ]);
   if (auto) {
-    await live.acp.respond(id, {
-      outcome: { outcome: "selected", optionId: auto },
-    });
+    await respond(select([auto]));
     return;
   }
 
@@ -782,21 +825,15 @@ async function handlePermission(live: Live, id: number, params: unknown) {
 
   const optionId =
     decision === "allow"
-      ? pickOption(optionIds, [
-          "allow-once",
-          "allow_once",
-          "allow-always",
-          "allow_always",
-        ])
-      : pickOption(optionIds, ["reject-once", "reject_once", "reject-always"]);
+      ? select(["allow-once", "allow_once", "allow-always", "allow_always"])
+      : select([
+          "reject-once",
+          "reject_once",
+          "reject-always",
+          "reject_always",
+        ]);
 
-  await live.acp.respond(id, {
-    outcome: {
-      outcome: "selected",
-      optionId:
-        optionId ?? (decision === "allow" ? "allow-once" : "reject-once"),
-    },
-  });
+  await respond(optionId);
 }
 
 function handleSessionUpdate(live: Live, params: unknown) {
@@ -844,6 +881,11 @@ function handleSessionUpdate(live: Live, params: unknown) {
             : "Compacting context…",
       key: "compaction",
     });
+    return;
+  }
+
+  if (kind === "current_mode_update") {
+    live.modeId = stringField(update, "currentModeId") ?? live.modeId;
     return;
   }
 

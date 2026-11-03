@@ -33,6 +33,7 @@ const {
   cancelCursorTurn,
   stopCursorSession,
   compactCursorContext,
+  respondCursorApproval,
   __cursorTestReset,
 } = await import("./cursor");
 import type { HarnessEvent } from "../../core/types";
@@ -69,7 +70,7 @@ function outboundRequest(method: string) {
   return parse().find((message) => message.method === method);
 }
 
-async function startTurn(sessionId: string) {
+async function startTurn(sessionId: string, intent?: "plan") {
   const events: HarnessEvent[] = [];
   const turn = sendCursorTurn({
     sessionId,
@@ -79,6 +80,7 @@ async function startTurn(sessionId: string) {
     runtimeMode: "supervised",
     text: "explore the codebase",
     attachments: [],
+    intent,
     onEvent: (event) => events.push(event),
   });
 
@@ -91,6 +93,10 @@ async function startTurn(sessionId: string) {
   await waitFor(() => !!outboundRequest("session/new"), "session/new");
   reply(outboundRequest("session/new")!.id as number, {
     sessionId: "cursor_1",
+    modes: {
+      currentModeId: "agent",
+      availableModes: [{ id: "agent" }, { id: "plan" }],
+    },
     configOptions: [
       {
         id: "model",
@@ -100,6 +106,15 @@ async function startTurn(sessionId: string) {
     ],
   });
 
+  await waitFor(
+    () =>
+      !!outboundRequest("session/prompt") ||
+      !!outboundRequest("session/set_mode"),
+    "mode or prompt",
+  );
+  if (outboundRequest("session/set_mode")) {
+    reply(outboundRequest("session/set_mode")!.id as number, {});
+  }
   await waitFor(() => !!outboundRequest("session/prompt"), "session/prompt");
   const promptId = outboundRequest("session/prompt")!.id as number;
   return { events, promptId, turn };
@@ -140,6 +155,239 @@ beforeEach(() => {
 afterEach(async () => {
   await stopCursorSession("cursor-live");
   __cursorTestReset();
+});
+
+describe("cursor session controls", () => {
+  it("keeps a queued Plan turn from changing the running turn mode", async () => {
+    const first = await startTurn("cursor-live");
+    reply(first.promptId, {});
+    await first.turn;
+    sent.length = 0;
+    const send = (model: string, intent?: "plan") =>
+      sendCursorTurn({
+        sessionId: "cursor-live",
+        cwd: "/repo",
+        model,
+        intent,
+        runtimeMode: "supervised",
+        text: "hello",
+        attachments: [],
+        onEvent: () => undefined,
+      });
+    const agent = send("cursor:gpt-5.4");
+    await waitFor(
+      () => !!outboundRequest("session/set_config_option"),
+      "model selection",
+    );
+    const plan = send("cursor:gpt-5.4", "plan");
+    await Promise.resolve();
+    reply(outboundRequest("session/set_config_option")!.id as number, {});
+    await waitFor(
+      () =>
+        !!outboundRequest("session/prompt") ||
+        !!outboundRequest("session/set_mode"),
+      "mode or prompt",
+    );
+    const prematureMode = outboundRequest("session/set_mode");
+    if (prematureMode) reply(prematureMode.id as number, {});
+    await waitFor(() => !!outboundRequest("session/prompt"), "agent prompt");
+    reply(outboundRequest("session/prompt")!.id as number, {});
+    await agent;
+    sent.length = 0;
+    await waitFor(
+      () =>
+        !!outboundRequest("session/set_mode") ||
+        !!outboundRequest("session/prompt"),
+      "plan mode",
+    );
+    if (outboundRequest("session/set_mode"))
+      reply(outboundRequest("session/set_mode")!.id as number, {});
+    await waitFor(() => !!outboundRequest("session/prompt"), "plan prompt");
+    reply(outboundRequest("session/prompt")!.id as number, {});
+    await plan;
+    expect(prematureMode).toBeUndefined();
+  });
+
+  it("rejects unsupported explicit settings before prompting", async () => {
+    const first = await startTurn("cursor-live");
+    reply(first.promptId, {});
+    await first.turn;
+    sent.length = 0;
+    const next = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      modelSettings: { effort: "high" },
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    await expect(next).rejects.toThrow("Unsupported Cursor setting: effort");
+    expect(outboundRequest("session/prompt")).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    "applies the original model again after a successful model change (legacy=%s)",
+    async (legacy) => {
+      const first = await startTurn("cursor-live");
+      reply(first.promptId, {});
+      await first.turn;
+      const send = (model: string) =>
+        sendCursorTurn({
+          sessionId: "cursor-live",
+          cwd: "/repo",
+          model,
+          runtimeMode: "supervised",
+          text: "hello",
+          attachments: [],
+          onEvent: () => undefined,
+        });
+      for (const model of ["gpt-5.4", "composer-2.5"]) {
+        sent.length = 0;
+        const turn = send(`cursor:${model}`);
+        await waitFor(
+          () =>
+            !!outboundRequest("session/set_config_option") ||
+            !!outboundRequest("session/prompt"),
+          "model or prompt",
+        );
+        const selection = outboundRequest("session/set_config_option");
+        if (selection && legacy) {
+          onLine!(
+            JSON.stringify({
+              id: selection.id,
+              error: { code: -32601, message: "Method not found" },
+            }),
+          );
+          await waitFor(
+            () => !!outboundRequest("session/set_model"),
+            "legacy selection",
+          );
+          reply(outboundRequest("session/set_model")!.id as number, {});
+        } else if (selection) {
+          reply(selection.id as number, {});
+        }
+        await waitFor(() => !!outboundRequest("session/prompt"), "prompt");
+        reply(outboundRequest("session/prompt")!.id as number, {});
+        await turn;
+        expect(selection?.params).toMatchObject({
+          configId: "model",
+          value: model,
+        });
+      }
+    },
+  );
+
+  it("reports rejected model selection instead of prompting with a different model", async () => {
+    const first = await startTurn("cursor-live");
+    reply(first.promptId, {});
+    await first.turn;
+    sent.length = 0;
+    const next = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:unavailable",
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    const rejected = expect(next).rejects.toThrow("Invalid model");
+    await waitFor(
+      () => !!outboundRequest("session/set_config_option"),
+      "model selection",
+    );
+    onLine!(
+      JSON.stringify({
+        id: outboundRequest("session/set_config_option")!.id,
+        error: { code: -32602, message: "Invalid model" },
+      }),
+    );
+    await waitFor(
+      () => !!outboundRequest("session/set_model"),
+      "legacy model selection",
+    );
+    onLine!(
+      JSON.stringify({
+        id: outboundRequest("session/set_model")!.id,
+        error: { code: -32601, message: "Method not found" },
+      }),
+    );
+    await rejected;
+    expect(outboundRequest("session/prompt")).toBeUndefined();
+  });
+
+  it("selects native Plan mode before prompting and restores Agent on the next turn", async () => {
+    const { turn, promptId } = await startTurn("cursor-live", "plan");
+    expect(outboundRequest("session/set_mode")?.params).toEqual({
+      sessionId: "cursor_1",
+      modeId: "plan",
+    });
+    reply(promptId, {});
+    await turn;
+    sent.length = 0;
+    const next = sendCursorTurn({
+      sessionId: "cursor-live",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      runtimeMode: "supervised",
+      text: "implement",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    await waitFor(() => !!outboundRequest("session/set_mode"), "agent mode");
+    expect(outboundRequest("session/set_mode")?.params).toEqual({
+      sessionId: "cursor_1",
+      modeId: "agent",
+    });
+    reply(outboundRequest("session/set_mode")!.id as number, {});
+    await waitFor(() => !!outboundRequest("session/prompt"), "next prompt");
+    reply(outboundRequest("session/prompt")!.id as number, {});
+    await next;
+  });
+
+  it("answers permissions using advertised opaque option IDs", async () => {
+    const { turn, promptId, events } = await startTurn("cursor-live");
+    request(901, "session/request_permission", {
+      toolCall: { kind: "execute" },
+      options: [
+        { optionId: "yes-123", kind: "allow_once" },
+        { optionId: "no-456", kind: "reject_once" },
+      ],
+    });
+    await waitFor(
+      () => events.some((event) => event.type === "approval.requested"),
+      "approval",
+    );
+    respondCursorApproval("cursor-live", 901, "allow");
+    await waitFor(
+      () => parse().some((message) => message.id === 901),
+      "permission response",
+    );
+    expect(parse().find((message) => message.id === 901)?.result).toEqual({
+      outcome: { outcome: "selected", optionId: "yes-123" },
+    });
+    reply(promptId, {});
+    await turn;
+  });
+
+  it("cancels permission requests that provide no usable option", async () => {
+    const { turn, promptId } = await startTurn("cursor-live", "plan");
+    request(902, "session/request_permission", {
+      toolCall: { kind: "execute" },
+      options: [],
+    });
+    await waitFor(
+      () => parse().some((message) => message.id === 902),
+      "permission response",
+    );
+    expect(parse().find((message) => message.id === 902)?.result).toEqual({
+      outcome: { outcome: "cancelled" },
+    });
+    reply(promptId, {});
+    await turn;
+  });
 });
 
 describe("cursor background subagents", () => {
@@ -418,9 +666,7 @@ describe("cursor background subagents", () => {
         rawInput: { command: "npm test" },
       },
     });
-    const step = events
-      .filter((event) => event.type === "agent.step")
-      .at(-1);
+    const step = events.filter((event) => event.type === "agent.step").at(-1);
     expect(step).toMatchObject({
       callId: "call_agent",
       stepId: "tool:child_bash",
@@ -546,9 +792,7 @@ describe("cursor background subagents", () => {
       },
     });
     expect(
-      events.some(
-        (e) => e.type === "background.updated" && e.tasks.length > 0,
-      ),
+      events.some((e) => e.type === "background.updated" && e.tasks.length > 0),
     ).toBe(true);
     reply(promptId, { stopReason: "end_turn" });
     await turn;
@@ -704,7 +948,11 @@ describe("cursor context usage", () => {
 
 describe("cursor context compaction", () => {
   it("compacts by prompting /compact on the live ACP session", async () => {
-    const { events: _events, promptId, turn } = await startTurn("cursor-compact");
+    const {
+      events: _events,
+      promptId,
+      turn,
+    } = await startTurn("cursor-compact");
     reply(promptId, { stopReason: "end_turn" });
     await turn;
 
