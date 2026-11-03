@@ -129,5 +129,5 @@ export function cleanupResult(archived: number, kept: number): string {
   if (kept === 0) {
     return done;
   }
-  return `${done} Kept ${kept} that changed, started working or could not be archived.`;
+  return `${done} Kept ${kept}: changed, in use or could not be archived.`;
 }

@@ -8,6 +8,8 @@ vi.mock("../../features/sessions/data/sessionStore", async (load) => ({
   ...(await load<object>()),
   listSessionsByProject,
 }));
+const focusSessionElsewhere = vi.fn();
+vi.mock("../workspaces/workspaces", () => ({ focusSessionElsewhere }));
 vi.mock("../sessionRead", () => ({
   readSession: vi.fn(() => Promise.resolve(null)),
 }));
@@ -49,6 +51,8 @@ beforeEach(() => {
     "/p/alpha": [session("a1", "/p/alpha"), session("a2", "/p/alpha")],
     "/p/beta": [session("b1", "/p/beta")],
   };
+  focusSessionElsewhere.mockReset();
+  focusSessionElsewhere.mockResolvedValue(false);
   listSessionsByProject.mockReset();
   listSessionsByProject.mockImplementation(async (cwd: string) => projects[cwd]);
   setCloseState("a1", SAVED, { kind: "safe", detail: "" });
@@ -176,6 +180,15 @@ it("keeps a session that moved on after the panel opened", async () => {
     session("a2", "/p/alpha"),
   ];
   await click(buttonNamed(/^Archive 2$/));
+  expect(onArchive.mock.calls).toEqual([["b1", true]]);
+  expect(document.body.textContent).toContain("Archived 1. Kept 1");
+});
+
+it("keeps a session another window holds, without moving that window", async () => {
+  focusSessionElsewhere.mockImplementation(async (id: string) => id === "a1");
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  expect(focusSessionElsewhere).toHaveBeenCalledWith("a1", false);
   expect(onArchive.mock.calls).toEqual([["b1", true]]);
   expect(document.body.textContent).toContain("Archived 1. Kept 1");
 });
