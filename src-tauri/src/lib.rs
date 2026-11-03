@@ -762,6 +762,7 @@ pub fn run() {
             fork_workspaces::fork_workspace_list_in_flight, // Fork
             fork_workspaces::fork_window_sessions_set,      // Fork
             fork_workspaces::fork_claim_session,            // Fork
+            fork_workspaces::fork_session_held_elsewhere,   // Fork
             fork_workspaces::fork_workspace_chrome,         // Fork
             fork_account_homes::fork_account_homes,         // Fork
             fork_account_homes::fork_add_cx_account,        // Fork

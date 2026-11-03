@@ -119,6 +119,24 @@ export function useWindowSessions(ids: readonly string[]): void {
 let reporting: Promise<unknown> = Promise.resolve();
 
 /**
+ * Fork: whether another window has this session open. Only looks, so a session
+ * nobody holds stays free, unlike `focusSessionElsewhere`. Reads as held when
+ * the answer cannot be had: callers use it to keep out.
+ */
+export async function sessionHeldElsewhere(
+  sessionId: string,
+): Promise<boolean> {
+  if (!FORK_WORKSPACES) {
+    return false;
+  }
+  try {
+    return await invoke<boolean>("fork_session_held_elsewhere", { sessionId });
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Fork: call before this window opens a session. True when another window
  * already has it: that window is brought forward and shows it, and the
  * caller should stop. False means this window now holds it. `focus: false`

@@ -9,7 +9,7 @@ import { prettyCwd, projectName } from "../../shared/lib/paths";
 import { Modal } from "../../shared/ui/Modal";
 import { SecondaryButton } from "../../shared/ui/SecondaryButton";
 import { CloseBadge, keepFromAutoArchive } from "../closeBadges/CloseBadges";
-import { focusSessionElsewhere } from "../workspaces/workspaces";
+import { sessionHeldElsewhere } from "../workspaces/workspaces";
 import {
   cachedCloseState,
   closeChecksRunning,
@@ -191,7 +191,7 @@ export function SessionCleanup({
         try {
           // Archiving stops its agent, which another window may be running.
           done =
-            !(await focusSessionElsewhere(row.id, false)) &&
+            !(await sessionHeldElsewhere(row.id)) &&
             (await latest.current.onArchive(row.id, true)) !== false;
         } catch {
           done = false;
