@@ -113,7 +113,7 @@ const PROFILES: FirstClassProviderProfile[] = [
     mcpDiscovery: true,
     cliUpdates: true,
     handoff: true,
-    restoreTaskLists: false,
+    restoreTaskLists: false, // Task 8 may flip if Codex needs in-memory seed
     toHandoffPrefs: identityToPrefs,
     fromHandoffPrefs: (prefs, helpers) =>
       mapIncomingPrefs("codex", prefs, helpers, "full-access"),
