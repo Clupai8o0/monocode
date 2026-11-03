@@ -18,6 +18,10 @@ use crate::session_store::SessionStore;
 const MENTIONS: &str = "instr({column},'git commit')>0 OR instr({column},'git -C')>0
     OR instr({column},'gh pr')>0 OR instr({column},'pull_request')>0
     OR instr({column},'git -c')>0 OR instr({column},'add_review_to_pr')>0";
+/// A running sub-agent's `updated_at` keeps changing, so its whole transcript
+/// is only parsed when it could hold a launch.
+const LAUNCH_MENTIONS: &str = "instr({column},'monoSpawnedSessions')>0
+    OR instr({column},'sessions.start')>0 OR instr({column},'sessions.send')>0";
 const MONTH_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 static GIT_COMMAND: LazyLock<Regex> =
@@ -73,6 +77,11 @@ struct Session {
     blocks: Vec<String>,
 }
 
+struct LaunchSnapshot {
+    updated_at: i64,
+    blocks: Vec<String>,
+}
+
 #[tauri::command]
 pub async fn fork_mono_contributions(
     app: AppHandle,
@@ -97,6 +106,7 @@ pub async fn fork_mono_contributions(
             since_ms,
             check_landed,
             |id, scanned| store.with_read_conn(|conn| load_session(conn, id, scanned)),
+            |id, scanned| store.with_read_conn(|conn| load_launches(conn, id, scanned)),
         )
     })
     .await?
@@ -119,7 +129,9 @@ fn init_cache(conn: &Connection) -> Result<(), String> {
             at INTEGER NOT NULL, additions INTEGER NOT NULL DEFAULT 0, deletions INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(kind,reference));
         CREATE INDEX IF NOT EXISTS contributions_by_session ON contributions(session_id,at);
-        CREATE TABLE IF NOT EXISTS scanned(session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL);")
+        CREATE TABLE IF NOT EXISTS scanned(session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS session_launches(
+            session_id TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, launched_ids TEXT NOT NULL);")
         .map_err(|e| e.to_string())
 }
 
@@ -156,16 +168,47 @@ fn load_session(
     if scanned == Some(session.updated_at) {
         return Ok(Some(session));
     }
+    session.blocks = load_blocks(conn, id, MENTIONS)?;
+    Ok(Some(session))
+}
+
+fn load_launches(
+    conn: &Connection,
+    id: &str,
+    scanned: Option<i64>,
+) -> Result<Option<LaunchSnapshot>, String> {
+    let updated_at = conn
+        .query_row("SELECT updated_at FROM sessions WHERE id=?1", [id], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(updated_at) = updated_at else {
+        return Ok(None);
+    };
+    Ok(Some(LaunchSnapshot {
+        updated_at,
+        blocks: if scanned == Some(updated_at) {
+            Vec::new()
+        } else {
+            load_blocks(conn, id, LAUNCH_MENTIONS)?
+        },
+    }))
+}
+
+fn load_blocks(conn: &Connection, id: &str, mentions: &str) -> Result<Vec<String>, String> {
+    let mut blocks = Vec::new();
+    let filter = |column| format!(" AND ({})", mentions.replace("{column}", column));
     let sql = format!(
-        "SELECT blocks_json FROM sessions WHERE id=?1 AND ({})",
-        MENTIONS.replace("{column}", "blocks_json")
+        "SELECT blocks_json FROM sessions WHERE id=?1{}",
+        filter("blocks_json")
     );
     if let Some(text) = conn
         .query_row(&sql, [id], |r| r.get(0))
         .optional()
         .map_err(|e| e.to_string())?
     {
-        session.blocks.push(text);
+        blocks.push(text);
     }
     let has_mono: bool = conn
         .query_row(
@@ -176,18 +219,266 @@ fn load_session(
         .map_err(|e| e.to_string())?;
     if has_mono {
         let sql = format!(
-            "SELECT block_json FROM mono_blocks WHERE session_id=?1 AND ({}) ORDER BY seq",
-            MENTIONS.replace("{column}", "block_json")
+            "SELECT block_json FROM mono_blocks WHERE session_id=?1{} ORDER BY seq",
+            filter("block_json")
         );
         let mut query = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = query
             .query_map([id], |r| r.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
         for row in rows {
-            session.blocks.push(row.map_err(|e| e.to_string())?);
+            blocks.push(row.map_err(|e| e.to_string())?);
         }
     }
-    Ok(Some(session))
+    Ok(blocks)
+}
+
+fn expand_ids(
+    cache: &Connection,
+    ids: &[String],
+    mut load: impl FnMut(&str, Option<i64>) -> Result<Option<LaunchSnapshot>, String>,
+) -> Result<Vec<String>, String> {
+    let mut seen = HashSet::new();
+    // Reserve every requested id before spending the remaining slots on launches.
+    let mut expanded: Vec<_> = ids
+        .iter()
+        .filter(|id| seen.insert((*id).clone()))
+        .cloned()
+        .collect();
+    for id in ids {
+        if expanded.len() >= 2000 {
+            break;
+        }
+        let previous = cache
+            .query_row(
+                "SELECT updated_at,launched_ids FROM session_launches WHERE session_id=?1",
+                [id],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let scanned = previous.as_ref().map(|(at, _)| *at);
+        let Some(snapshot) = load(id, scanned)? else {
+            continue;
+        };
+        let launches = if scanned == Some(snapshot.updated_at) {
+            previous.unwrap().1
+        } else {
+            let mut launches = Vec::new();
+            let mut unique = HashSet::new();
+            // The store's read lock has been released before any JSON is parsed.
+            for text in &snapshot.blocks {
+                let Ok(value) = serde_json::from_str::<Value>(text) else {
+                    continue;
+                };
+                let blocks = match &value {
+                    Value::Array(blocks) => blocks.as_slice(),
+                    Value::Object(_) => std::slice::from_ref(&value),
+                    _ => continue,
+                };
+                for block in blocks {
+                    for launched in launched_ids(block) {
+                        if crate::session_store::validate_id(&launched, "session").is_ok()
+                            && unique.insert(launched.clone())
+                        {
+                            launches.push(launched);
+                        }
+                    }
+                }
+            }
+            // Valid ids cannot contain newlines: reuse this list without JSON on
+            // later polls. A concurrent newer snapshot must not be overwritten.
+            let launches = launches.join("\n");
+            cache.execute(
+                "INSERT INTO session_launches VALUES(?1,?2,?3)
+                ON CONFLICT(session_id) DO UPDATE SET updated_at=excluded.updated_at,launched_ids=excluded.launched_ids
+                WHERE session_launches.updated_at=?4",
+                params![id, snapshot.updated_at, launches, scanned],
+            ).map_err(|e| e.to_string())?;
+            launches
+        };
+        for launched in launches.lines() {
+            if expanded.len() >= 2000 {
+                break;
+            }
+            if crate::session_store::validate_id(launched, "session").is_ok()
+                && seen.insert(launched.to_string())
+            {
+                expanded.push(launched.to_string());
+            }
+        }
+    }
+    Ok(expanded)
+}
+
+fn launched_ids(block: &Value) -> Vec<String> {
+    let mut ids: Vec<_> = block["monoSpawnedSessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry["sessionId"].as_str().map(String::from))
+        .collect();
+    let tool = &block["tool"];
+    if !matches!(tool["status"].as_str(), Some("completed" | "success")) {
+        return ids;
+    }
+    let Some(action) = launch_action(block) else {
+        return ids;
+    };
+    let receipt = tool["detail"]
+        .as_str()
+        .and_then(|detail| serde_json::from_str::<Value>(detail).ok());
+    if let Some(receipt) = receipt.filter(|receipt| receipt["ok"] == true) {
+        let result = &receipt["result"];
+        let id = if action == "sessions.start" {
+            result["id"].as_str().filter(|id| id.starts_with("app-"))
+        } else if result["submitted"] == true {
+            result["sessionId"].as_str()
+        } else {
+            None
+        };
+        if let Some(id) = id {
+            ids.push(id.into());
+        }
+    }
+    ids
+}
+
+/// Mirror monoCodeToolCall: accept a single app invocation, never a mention,
+/// shell expansion or a compound command. Preview commands take precedence.
+fn launch_action(block: &Value) -> Option<&'static str> {
+    if !matches!(block["role"].as_str(), Some("tool" | "approval")) {
+        return None;
+    }
+    let tool = &block["tool"];
+    let candidate = if tool["preview"]["kind"] == "shell" {
+        tool["preview"]["title"].as_str()
+    } else {
+        tool["title"].as_str().or_else(|| block["text"].as_str())
+    }?;
+    static PREFIX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^Run(?:ning)?\s+command:\s*").unwrap());
+    let mut command = PREFIX.replace(candidate.trim(), "").into_owned();
+    for _ in 0..2 {
+        let words = launch_words(&command)?;
+        let executable = words
+            .first()?
+            .rsplit(['/', '\\'])
+            .next()?
+            .to_ascii_lowercase();
+        let flag = match executable.as_str() {
+            "sh" | "bash" | "zsh" | "dash" | "ksh" => words.iter().position(|word| {
+                word == "--command"
+                    || (word.starts_with('-')
+                        && word[1..].chars().all(|c| c.is_ascii_alphabetic())
+                        && word.contains('c'))
+            }),
+            "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => words
+                .iter()
+                .skip(1)
+                .take_while(|word| !matches!(word.to_ascii_lowercase().as_str(), "-file" | "-f"))
+                .position(|word| matches!(word.to_ascii_lowercase().as_str(), "-command" | "-c"))
+                .map(|i| i + 1),
+            "cmd" | "cmd.exe" => words
+                .iter()
+                .position(|word| word.eq_ignore_ascii_case("/c")),
+            _ => break,
+        };
+        let Some(flag) = flag else {
+            break;
+        };
+        let script = words.get(flag + 1)?;
+        command = if matches!(
+            executable.as_str(),
+            "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" | "cmd" | "cmd.exe"
+        ) && words.len() > flag + 2
+        {
+            words[flag + 1..]
+                .iter()
+                .map(|word| shlex::try_quote(word))
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?
+                .join(" ")
+        } else {
+            script.clone()
+        };
+    }
+    let words = launch_words(&command)?;
+    let executable = words.first()?.rsplit(['/', '\\']).next()?;
+    if !(executable.eq_ignore_ascii_case("monocode")
+        || executable.eq_ignore_ascii_case("monocode.exe"))
+        || words.get(1)?.as_str() != "app"
+    {
+        return None;
+    }
+    let action = match words.get(2)?.as_str() {
+        "sessions.start" => "sessions.start",
+        "sessions.send" => "sessions.send",
+        _ => return None,
+    };
+    for option in words[3..].chunks(2) {
+        if option.len() != 2
+            || !matches!(option[0].as_str(), "--json" | "--input" | "--request-id")
+            || option[1].is_empty()
+        {
+            return None;
+        }
+    }
+    Some(action)
+}
+
+fn launch_words(command: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote = None;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quote == Some('\'') {
+            if c == '\'' {
+                quote = None;
+            } else {
+                word.push(c);
+            }
+            continue;
+        }
+        if c == '\'' && quote.is_none() {
+            quote = Some(c);
+            started = true;
+        } else if c == '"' {
+            quote = if quote == Some(c) { None } else { Some(c) };
+            started = true;
+        } else if c == '\\' {
+            let next = *chars.peek()?;
+            if (quote == Some('"') && !"\\\"$`".contains(next))
+                || (quote.is_none()
+                    && !next.is_whitespace()
+                    && !"'\"\\;&|<>()[]{}$`#".contains(next))
+            {
+                word.push(c);
+            } else {
+                word.push(chars.next()?);
+            }
+            started = true;
+        } else if c == '$' || c == '`' || (quote.is_none() && "\r\n;&|<>()[]{}#".contains(c)) {
+            return None;
+        } else if quote.is_none() && c.is_whitespace() {
+            if started {
+                words.push(std::mem::take(&mut word));
+            }
+            started = false;
+        } else {
+            word.push(c);
+            started = true;
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if started {
+        words.push(word);
+    }
+    Some(words)
 }
 
 fn scanned_at(conn: &Connection, id: &str) -> Result<Option<i64>, String> {
@@ -206,7 +497,9 @@ fn collect(
     since: u64,
     landed: bool,
     mut load: impl FnMut(&str, Option<i64>) -> Result<Option<Session>, String>,
+    launches: impl FnMut(&str, Option<i64>) -> Result<Option<LaunchSnapshot>, String>,
 ) -> Result<MonoContributions, String> {
+    let ids = expand_ids(cache, ids, launches)?;
     let mut sessions = Vec::new();
     let mut seen = HashSet::new();
     for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
@@ -915,8 +1208,308 @@ mod tests {
             since,
             false,
             |id, scanned| load_session(conn, id, scanned),
+            |id, scanned| load_launches(conn, id, scanned),
         )
         .unwrap()
+    }
+
+    fn launch_block(action: &str, result: Value) -> Value {
+        json!({"role":"tool", "text":format!("monocode app {action} --json '{{}}'"),
+            "tool":{"status":"completed", "detail":json!({"ok":true,"result":result}).to_string()}})
+    }
+
+    #[test]
+    fn launches_without_git_mentions_are_found_in_both_block_tables() {
+        for mono in [false, true] {
+            for launch in [
+                json!({"role":"user", "monoSpawnedSessions":[{"sessionId":"app-child"}]}),
+                launch_block("sessions.start", json!({"id":"app-child"})),
+                launch_block(
+                    "sessions.send",
+                    json!({"sessionId":"app-child","submitted":true}),
+                ),
+            ] {
+                let conn = db();
+                let mut cache = cache();
+                save(&conn, "parent", 1, "[]");
+                save(&conn, "app-child", 2, "[]");
+                assert!(!launch.to_string().contains("git"));
+                if mono {
+                    conn.execute(
+                        "INSERT INTO mono_blocks VALUES('parent',0,?1)",
+                        [launch.to_string()],
+                    )
+                    .unwrap();
+                } else {
+                    save(&conn, "parent", 1, &json!([launch]).to_string());
+                }
+                let result = collect_test(&conn, &mut cache, &["parent"], 0);
+                assert_eq!(
+                    result
+                        .sessions
+                        .iter()
+                        .map(|s| s.id.as_str())
+                        .collect::<Vec<_>>(),
+                    ["parent", "app-child"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn launched_commits_are_scanned_cached_and_removed_when_session_is_deleted() {
+        let conn = db();
+        conn.execute("DROP TABLE mono_blocks", []).unwrap();
+        let mut cache = cache();
+        save(
+            &conn,
+            "parent",
+            1,
+            &json!([launch_block("sessions.start", json!({"id":"app-child"}))]).to_string(),
+        );
+        save(
+            &conn,
+            "app-child",
+            2,
+            &json!([block("git commit -m child", "[main abcdef0] child")]).to_string(),
+        );
+        for _ in 0..2 {
+            let result = collect_test(&conn, &mut cache, &["parent"], 0);
+            assert_eq!(result.contributions.len(), 1);
+            assert_eq!(result.contributions[0].session_id, "app-child");
+            assert_eq!(result.contributions[0].reference, "abcdef0");
+            assert_eq!(result.sessions.len(), 2);
+        }
+        conn.execute("DELETE FROM sessions WHERE id='app-child'", [])
+            .unwrap();
+        let result = collect_test(&conn, &mut cache, &["parent"], 0);
+        assert!(result.contributions.is_empty());
+        assert_eq!(result.sessions.len(), 1);
+    }
+
+    #[test]
+    fn launches_are_expanded_one_level_and_deduplicated() {
+        let conn = db();
+        let mut cache = cache();
+        save(&conn, "parent", 1, &json!([{"monoSpawnedSessions":[{"sessionId":"app-child"},{"sessionId":"parent"},{"sessionId":"app-child"}]}]).to_string());
+        save(
+            &conn,
+            "app-child",
+            2,
+            &json!([{"monoSpawnedSessions":[{"sessionId":"grandchild"}]}]).to_string(),
+        );
+        save(&conn, "grandchild", 3, "[]");
+        let result = collect_test(&conn, &mut cache, &["parent", "parent"], 0);
+        assert_eq!(
+            result
+                .sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["parent", "app-child"]
+        );
+        let result = collect_test(&conn, &mut cache, &["parent", "app-child"], 0);
+        assert_eq!(
+            result
+                .sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["parent", "app-child", "grandchild"]
+        );
+    }
+
+    #[test]
+    fn malformed_receipts_and_invalid_launched_ids_are_ignored() {
+        let conn = db();
+        let mut cache = cache();
+        let mut bad_json = launch_block("sessions.start", json!({"id":"app-bad-json"}));
+        bad_json["tool"]["detail"] = json!("{broken");
+        let mut failed = launch_block("sessions.start", json!({"id":"app-failed"}));
+        failed["tool"]["status"] = json!("failed");
+        let mut not_ok = launch_block("sessions.start", json!({"id":"app-not-ok"}));
+        not_ok["tool"]["detail"] = json!(r#"{"ok":false,"result":{"id":"app-not-ok"}}"#);
+        let mut mention = launch_block("sessions.start", json!({"id":"app-mention"}));
+        mention["text"] = json!("echo monocode app sessions.start");
+        let mut blocks = vec![
+            bad_json,
+            failed,
+            not_ok,
+            mention,
+            launch_block("sessions.list", json!({"id":"app-list"})),
+            launch_block("sessions.start", json!({"id":"other"})),
+            launch_block(
+                "sessions.send",
+                json!({"sessionId":"unsent","submitted":false}),
+            ),
+            launch_block("sessions.start", json!({"id":"app-../bad"})),
+            launch_block(
+                "sessions.send",
+                json!({"sessionId":"../bad","submitted":true}),
+            ),
+            json!({"monoSpawnedSessions":[{"sessionId":""},{"sessionId":"../bad"},{"sessionId":42},{"sessionId":"valid"}]}),
+        ];
+        for command in [
+            "monocode app sessions.start && echo extra",
+            "monocode app sessions.start --unknown value",
+            "monocode app sessions.start --json \"$(echo bad)\"",
+        ] {
+            let mut launch = launch_block("sessions.start", json!({"id":"app-compound"}));
+            launch["text"] = json!(command);
+            blocks.push(launch);
+        }
+        save(&conn, "parent", 1, &json!(blocks).to_string());
+        for id in [
+            "app-bad-json",
+            "app-failed",
+            "app-not-ok",
+            "app-mention",
+            "app-list",
+            "other",
+            "unsent",
+            "app-../bad",
+            "../bad",
+            "app-compound",
+            "valid",
+        ] {
+            save(&conn, id, 2, "[]");
+        }
+        let result = collect_test(&conn, &mut cache, &["parent"], 0);
+        assert_eq!(
+            result
+                .sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["parent", "valid"]
+        );
+    }
+
+    #[test]
+    fn launch_commands_use_shell_preview_title_and_wrapped_commands() {
+        for command in [
+            "monocode app sessions.start --json '{}'",
+            "Running command: '/Applications/MonoCode App/monocode' app sessions.start --input -",
+            "/bin/zsh -lc \"monocode app sessions.start --json '{}'\"",
+            "\"C:\\Program Files\\MonoCode\\monocode.exe\" app sessions.start",
+            "pwsh -Command monocode app sessions.start --json '{}'",
+            "cmd.exe /c monocode app sessions.start --input -",
+        ] {
+            for source in ["text", "title", "preview"] {
+                let conn = db();
+                let mut cache = cache();
+                let mut launch = launch_block("sessions.start", json!({"id":"app-child"}));
+                launch["tool"]["status"] = json!("success");
+                launch["text"] = json!("Start a session");
+                if source == "text" {
+                    launch["text"] = json!(command);
+                } else if source == "title" {
+                    launch["tool"]["title"] = json!(command);
+                } else {
+                    launch["tool"]["title"] = json!("Start a session");
+                    launch["tool"]["preview"] = json!({"kind":"shell","title":command});
+                }
+                save(&conn, "parent", 1, &json!([launch]).to_string());
+                save(&conn, "app-child", 2, "[]");
+                assert_eq!(
+                    collect_test(&conn, &mut cache, &["parent"], 0)
+                        .sessions
+                        .len(),
+                    2,
+                    "{source}: {command}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn expanded_limit_reserves_space_for_every_requested_id() {
+        let conn = db();
+        let mut cache = cache();
+        let ids: Vec<_> = (0..2000).map(|i| format!("requested-{i}")).collect();
+        for id in &ids {
+            save(&conn, id, 1, "[]");
+        }
+        save(
+            &conn,
+            &ids[0],
+            1,
+            &json!([{"monoSpawnedSessions":[{"sessionId":"launch-1"},{"sessionId":"launch-2"}]}])
+                .to_string(),
+        );
+        for id in ["launch-1", "launch-2"] {
+            save(&conn, id, 2, "[]");
+        }
+        let requested: Vec<_> = ids.iter().map(String::as_str).collect();
+        let result = collect_test(&conn, &mut cache, &requested[..1999], 0);
+        assert_eq!(result.sessions.len(), 2000);
+        assert_eq!(result.sessions[1998].id, ids[1998]);
+        assert_eq!(result.sessions[1999].id, "launch-1");
+        let result = collect_test(&conn, &mut cache, &requested, 0);
+        assert_eq!(
+            result
+                .sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            requested
+        );
+    }
+
+    #[test]
+    fn unchanged_sessions_do_not_read_launch_blocks_again() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let conn = db();
+        let mut cache = cache();
+        save(
+            &conn,
+            "parent",
+            1,
+            &json!([{"monoSpawnedSessions":[{"sessionId":"app-child"}]}]).to_string(),
+        );
+        save(&conn, "app-child", 2, "[]");
+        assert_eq!(
+            collect_test(&conn, &mut cache, &["parent"], 0)
+                .sessions
+                .len(),
+            2
+        );
+        conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+            AuthAction::Read {
+                table_name: "sessions",
+                column_name: "blocks_json",
+            }
+            | AuthAction::Read {
+                table_name: "mono_blocks",
+                ..
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+        assert_eq!(
+            collect_test(&conn, &mut cache, &["parent"], 0)
+                .sessions
+                .len(),
+            2
+        );
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        save(
+            &conn,
+            "parent",
+            3,
+            &json!([{"monoSpawnedSessions":[{"sessionId":"new-child"}]}]).to_string(),
+        );
+        save(&conn, "new-child", 4, "[]");
+        let result = collect_test(&conn, &mut cache, &["parent"], 0);
+        assert_eq!(
+            result
+                .sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["parent", "new-child"]
+        );
     }
 
     #[test]
