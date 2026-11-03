@@ -304,3 +304,11 @@ it("rejects remote text above the transport ceiling before reading its content",
   project.write("too-large.txt", "x".repeat(16 * 1024 * 1024 + 1));
   await expect(commands.run("read_text_file", { path })).rejects.toThrow("16 MB remote transport limit");
 });
+
+it("reports escaped JSON text exceeding the remote response ceiling", async () => {
+  const { commands, repo } = fixture();
+  const project = repo();
+  const path = join(project.cwd, "escaped.txt");
+  project.write("escaped.txt", "\n".repeat(9 * 1024 * 1024));
+  await expect(commands.run("read_text_file", { path })).rejects.toThrow("16 MB remote transport limit");
+});
