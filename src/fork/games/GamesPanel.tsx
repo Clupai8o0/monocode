@@ -60,6 +60,7 @@ import { TableGames } from "./table/TableGames";
 import { TableScore } from "./table/TableScore";
 import { ALL_GAMES, gameEntry, isTableGame } from "./catalog";
 import { GamePicker } from "./GamePicker";
+import { preloadGame } from "./gameLoaders";
 import {
   flushBest,
   liveScore,
@@ -116,6 +117,12 @@ function withSize(
 
 const GAME_IDS = ALL_GAMES.map((entry) => entry.id);
 const MODE_OPTIONS = ARCADE_MODES.map((id) => ({ id, label: id }));
+
+/** Warms the game the panel would open with, before the click that opens it. */
+export function preloadLastGame()
+{
+  preloadGame(loadLastGame(GAME_IDS));
+}
 
 type ResizeAxis = "both" | "x" | "y";
 
@@ -218,6 +225,12 @@ export function GamesPanel() {
     const fit = () => setBounds(room());
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
+  }, []);
+
+  // Quitting inside the second a new best waits to be written would lose it.
+  useEffect(() => {
+    window.addEventListener("pagehide", flushBest);
+    return () => window.removeEventListener("pagehide", flushBest);
   }, []);
 
   // Side by side, the app narrows to the space left of the panel, so
@@ -565,6 +578,7 @@ export function GamesPanel() {
           value={gameId}
           onPick={pickGame}
           onOpenChange={setPickerOpen}
+          onHover={preloadGame}
         />
         {entry?.usesMode === false ? null : (
           <ChipSelect

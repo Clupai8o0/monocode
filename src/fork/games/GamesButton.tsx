@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { GameController } from "../../shared/ui/icons";
-import { gamesPanel } from "./gamesPanelStore";
+import { ALL_GAMES, gameEntry } from "./catalog";
+import { gamesPanel, loadLastGame } from "./gamesPanelStore";
 
 /**
  * Fork: the row in the footer's More chip that opens the games panel, to play something while agents
@@ -24,7 +25,7 @@ function loadPanel()
 
 export function preloadGamesPanel()
 {
-  void loadPanel().catch(() => {});
+  void loadPanel().then(({ preloadLastGame }) => preloadLastGame()).catch(() => {});
 }
 
 function mountPanel()
@@ -53,6 +54,8 @@ export function GamesButton(props: Props) {
 
 function Games({ onBeforeToggle, onToggled }: Props) {
   const open = useSyncExternalStore(gamesPanel.subscribe, gamesPanel.isOpen);
+  // The game this opens, so the row says where it leads.
+  const game = gameEntry(loadLastGame(ALL_GAMES.map((entry) => entry.id)))?.label;
   return (
     <button
       type="button"
@@ -73,6 +76,7 @@ function Games({ onBeforeToggle, onToggled }: Props) {
     >
       <GameController className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
       <span>Games</span>
+      {game ? <span className="ml-auto min-w-0 truncate font-normal text-content/45">{game}</span> : null}
     </button>
   );
 }

@@ -6,6 +6,7 @@ import {
   type LeetcodeAccountApi,
   type RunCode,
 } from "../../src/fork/games/code/CodeTable";
+import { CodeScore } from "../../src/fork/games/code/CodeScore";
 import { gamesPanel } from "../../src/fork/games/gamesPanelStore";
 import type { LeetcodeFetch } from "../../src/fork/games/code/leetcode";
 import {
@@ -362,6 +363,7 @@ function LabHarness() {
       className="text-content"
       style={{ width: 720, height: 560, margin: "24px auto" }}
     >
+      <CodeScore />
       <CodeTable
         mode="low"
         runId={runId}
@@ -382,6 +384,7 @@ createRoot(document.getElementById("root")!).render(
       className="text-content"
       style={{ width: 720, height: 560, margin: "24px auto" }}
     >
+      <CodeScore />
       <CodeTable
         mode="low"
         runId={0}

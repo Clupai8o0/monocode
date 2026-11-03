@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { CODE_PROGRESS_EVENT, loadProgress, streakDays } from "./codeModel";
+import {
+  CODE_PROGRESS_EVENT,
+  loadProgress,
+  solvedTodayCount,
+  streakDays,
+} from "./codeModel";
 
 export function CodeScore()
 {
@@ -10,14 +15,22 @@ export function CodeScore()
     return () => window.removeEventListener(CODE_PROGRESS_EVENT, onRun);
   }, []);
   const progress = loadProgress();
+  const now = Date.now();
+  const streak = streakDays(progress, now);
   return (
-    <>
-      <span data-fork-games-score={progress.totalPoints}>
+    <span data-fork-code-stats="" className="flex min-w-0 items-center gap-3">
+      <span
+        data-fork-games-score={progress.totalPoints}
+        data-fork-code-points={progress.totalPoints}
+      >
         points {progress.totalPoints}
       </span>
       <span className="text-content/35">
-        streak {streakDays(progress, Date.now())}
+        streak {streak} {streak === 1 ? "day" : "days"}
       </span>
-    </>
+      <span className="text-content/35">
+        solved today {solvedTodayCount(progress, now)}
+      </span>
+    </span>
   );
 }

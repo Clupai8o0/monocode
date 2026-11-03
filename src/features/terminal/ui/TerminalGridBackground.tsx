@@ -213,6 +213,16 @@ export function TerminalGridBackground({
   const [playing, setPlaying] = useState(!!host);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
+  // Fork: a host draws the score itself, so the board doesn't re-render for it.
+  const showScore = useCallback((next: number) => {
+    scoreRef.current = next;
+    const gameHost = hostRef.current;
+    if (gameHost) {
+      gameHost.onStats(next, livesRef.current, overRef.current);
+    } else {
+      setScore(next);
+    }
+  }, []);
   const [mode, setMode] = useState<ArcadeMode>("mid");
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -386,6 +396,11 @@ export function TerminalGridBackground({
       if (!board.started && playingRef.current) {
         board.arcade.setMode(hostRef.current?.mode ?? modeRef.current);
         board.arcade.takeControl();
+        // Fork: a key already down while this game's code loaded still counts.
+        for (const [code, heading] of heldRef.current) {
+          if (code === "Space") board.arcade.action?.();
+          else board.arcade.steer(heading.x, heading.y);
+        }
       }
       board.started = playingRef.current;
     };
@@ -561,8 +576,7 @@ export function TerminalGridBackground({
 
       const nextScore = active.arcade.score();
       if (nextScore !== scoreRef.current) {
-        scoreRef.current = nextScore;
-        setScore(nextScore);
+        showScore(nextScore);
       }
       const nextLives = active.arcade.lives();
       if (nextLives !== livesRef.current) {
@@ -649,12 +663,12 @@ export function TerminalGridBackground({
     scoreRef.current = board?.arcade.score() ?? 0;
     livesRef.current = board?.arcade.lives() ?? 0;
     overRef.current = board?.arcade.gameOver() ?? false;
-    setScore(scoreRef.current);
+    showScore(scoreRef.current);
     setLives(livesRef.current);
     setOver(overRef.current);
     invalidateRef.current();
     if (hostRef.current?.active) rootRef.current?.focus();
-  }, [hostGameId, hostRunId, releaseHeld]);
+  }, [hostGameId, hostRunId, releaseHeld, showScore]);
 
   const hostMode = host?.mode;
   useEffect(() => {
@@ -671,10 +685,10 @@ export function TerminalGridBackground({
     invalidateRef.current();
   }, [hostActive]);
 
-  // Fork: tell the host about every score change, in one place.
+  // Fork: lives and game over reach the host here; the score goes in showScore.
   useEffect(() => {
-    hostRef.current?.onStats(score, lives, over);
-  }, [score, lives, over]);
+    hostRef.current?.onStats(scoreRef.current, lives, over);
+  }, [lives, over]);
 
   const takeControl = useCallback(() => {
     const board = boardsRef.current?.[indexRef.current];
@@ -684,12 +698,12 @@ export function TerminalGridBackground({
     livesRef.current = board?.arcade.lives() ?? 0;
     overRef.current = false;
     setOver(false);
-    setScore(0);
+    showScore(0);
     setLives(livesRef.current);
     setPlaying(true);
     const active = document.activeElement;
     if (active instanceof HTMLElement) active.blur();
-  }, [mode]);
+  }, [mode, showScore]);
 
   const pickMode = useCallback((next: ArcadeMode) => {
     const board = boardsRef.current?.[indexRef.current];
@@ -700,10 +714,9 @@ export function TerminalGridBackground({
   const releaseControl = useCallback(() => {
     releaseHeld();
     boardsRef.current?.[indexRef.current]?.arcade.releaseControl();
-    scoreRef.current = 0;
-    setScore(0);
+    showScore(0);
     setPlaying(false);
-  }, [releaseHeld]);
+  }, [releaseHeld, showScore]);
 
   useEffect(() => {
     slideAtRef.current = performance.now();

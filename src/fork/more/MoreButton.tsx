@@ -1,7 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import { MoreHorizontal } from "../../shared/ui/icons";
 import { Popover } from "../../shared/ui/Popover";
-import { GamesButton } from "../games/GamesButton";
+import { GamesButton, preloadGamesPanel } from "../games/GamesButton";
 import { gamesPanel } from "../games/gamesPanelStore";
 import { ringAlert, RingPanel, useRingStatus } from "../location/RingButton";
 import { ringSentence } from "../location/location";
@@ -45,6 +45,8 @@ function More({ inset }: { inset: boolean }) {
         aria-haspopup="dialog"
         aria-label={`More: ${hover}`}
         title={hover}
+        // Reaching for the chip is the moment to fetch the games.
+        onPointerEnter={preloadGamesPanel}
         onClick={() => setOpen(!open)}
       >
         <MoreHorizontal className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
