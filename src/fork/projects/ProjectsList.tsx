@@ -6,7 +6,10 @@ import {
   type CSSProperties,
 } from "react";
 import type { LiveAgent } from "../../features/sessions/model/liveAgents";
-import { sameProjectPath } from "../../features/projects/model/recents";
+import {
+  sameProjectPath,
+  type RecentProject,
+} from "../../features/projects/model/recents";
 import {
   CurrentProjectIcon,
   useProjectLabel,
@@ -23,12 +26,14 @@ import {
   projectStatusLabel,
   type ProjectRow,
 } from "./projectsModel";
+import { useProjectUse } from "./projectUse";
 
 export function ProjectsList({
   paths,
   cwd,
   agents,
   busyPaths,
+  recents,
   onSelectProject,
   onOpenProject,
   onProjectContextMenu,
@@ -40,6 +45,7 @@ export function ProjectsList({
   cwd: string;
   agents: readonly LiveAgent[];
   busyPaths?: Iterable<string>;
+  recents?: readonly RecentProject[];
   onSelectProject: (path: string) => void;
   onOpenProject?: () => void;
   onProjectContextMenu: (
@@ -54,9 +60,10 @@ export function ProjectsList({
   capped?: boolean;
   style?: CSSProperties;
 }) {
+  const use = useProjectUse();
   const sorted = useMemo(
-    () => projectRows(paths, agents, busyPaths),
-    [paths, agents, busyPaths],
+    () => projectRows(paths, agents, busyPaths, { current: cwd, recents, use }),
+    [paths, agents, busyPaths, cwd, recents, use],
   );
   const [heldOrder, setHeldOrder] = useState<string[] | null>(null);
   const pointerInside = useRef(false);
@@ -93,6 +100,18 @@ export function ProjectsList({
       ?.querySelector<HTMLElement>('[aria-current="page"]')
       ?.scrollIntoView?.({ block: "nearest" });
   }, [cwd]);
+  const topProject = rows[0]?.path;
+  const previousTop = useRef(topProject);
+  useEffect(() => {
+    if (previousTop.current === topProject) {
+      return;
+    }
+    previousTop.current = topProject;
+    // A new top row is what just changed, so don't leave it scrolled away.
+    if (!heldOrder && list.current) {
+      list.current.scrollTop = 0;
+    }
+  }, [topProject, heldOrder]);
 
   return (
     <section

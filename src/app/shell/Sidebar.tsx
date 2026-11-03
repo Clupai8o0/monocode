@@ -2707,6 +2707,7 @@ function SidebarComponent({
             cwd={cwd}
             agents={liveAgents}
             busyPaths={busyProjectPaths}
+            recents={recents}
             onSelectProject={onSelectProject}
             onOpenProject={onOpenProject}
             onProjectContextMenu={headerProjectMenu.open}
