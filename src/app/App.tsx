@@ -708,6 +708,12 @@ import {
   operatorEnabledInThread,
 } from "../features/sessions/model/operatorCommand";
 import {
+  canStageInTurn,
+  parseStageSubmission,
+  sessionChangedFiles,
+  stageTurnPrompt,
+} from "../features/sessions/model/stageCommand";
+import {
   createMono,
   findMono,
   isMonoSession,
@@ -733,6 +739,11 @@ import {
   writeAgentFile,
 } from "../features/monos/model/monoFiles";
 import { useMonoHabits } from "./hooks/useMonoHabits";
+import {
+  createMonoSkill,
+  readMonoSkill,
+  updateMonoSkill,
+} from "../features/monos/model/monoSkills";
 import { useFloatingMono } from "./hooks/useFloatingMono";
 import {
   dropRelays,
@@ -1586,7 +1597,7 @@ function Workspace({
       sessions.flatMap((session) => {
         if (
           !supportsHarnessLogin(session.harness) ||
-          !latestTurnNeedsHarnessLogin(session.blocks)
+          !latestTurnNeedsHarnessLogin(session.blocks, session.harness)
         ) {
           return [];
         }
@@ -2391,7 +2402,10 @@ function Workspace({
       id: usageSource.id,
       harness: usageSource.harness,
       model: usageSource.model,
-      authRequired: latestTurnNeedsHarnessLogin(usageSource.blocks),
+      authRequired: latestTurnNeedsHarnessLogin(
+        usageSource.blocks,
+        usageSource.harness,
+      ),
       providerAccountId:
         usageSource.providerAccountId ??
         (usageSource.blocks.some((block) => block.role === "user")
@@ -2408,8 +2422,10 @@ function Workspace({
   const activeProviderSignInRequest = useMemo(() => {
     if (
       !active ||
+      // A local conversation offers sign-in under the failed turn instead.
+      (!isMonoSession(active.id) && !remoteProjectFor(active.cwd)) ||
       !supportsHarnessLogin(active.harness) ||
-      !latestTurnNeedsHarnessLogin(active.blocks)
+      !latestTurnNeedsHarnessLogin(active.blocks, active.harness)
     ) {
       return null;
     }
@@ -7770,13 +7786,50 @@ function Workspace({
         ? operatorCommand.text.trim() ||
           "Explain what you can do in MonoCode with the app CLI."
         : submittedText;
+      // `/stage` is a MonoCode command, so expand it before native slash routing.
+      const stageCommand = operatorCommand.matched
+        ? { text: promptText, matched: false, mcpContext: "" }
+        : parseStageSubmission(submittedText);
+      if (
+        stageCommand.matched &&
+        !canStageInTurn({
+          intent,
+          orchestrating: Boolean(
+            current.orchestrationLeadId ||
+              current.inboxAsk ||
+              orchestrator.run(sessionId),
+          ),
+        })
+      ) {
+        enqueueHarnessEvent(sessionId, {
+          type: "status",
+          text: "Use /stage from a regular session turn, outside Plan or Orchestrator mode.",
+        });
+        flushHarnessEvents();
+        return false;
+      }
       const rawCommand =
         !operatorCommand.matched &&
+        !stageCommand.matched &&
         isNativeCommandPrompt(submittedText, current.harness);
       const ciContext = options?.ciRepair?.prompt ?? options?.ciContext;
       const harnessText =
         options?.ciRepair?.prompt ??
-        (rawCommand ? submittedText : composeNoteMessage(noteCard, promptText));
+        (rawCommand
+          ? submittedText
+          : composeNoteMessage(
+              noteCard,
+              stageCommand.matched
+                ? stageCommand.mcpContext +
+                    stageTurnPrompt(
+                      stageCommand.text,
+                      sessionChangedFiles(
+                        current.blocks,
+                        sessionWorkCwd(current),
+                      ),
+                    )
+                : promptText,
+            ));
 
       const pendingSwitch = pendingComposerSwitch(current);
 
@@ -8161,6 +8214,9 @@ function Workspace({
         ...(ciContext ? { ciContext } : {}),
         ...(operatorCommand.matched ? { monocode: true } : {}),
         ...(intent === "plan" || intent === "orchestrate" ? { intent } : {}),
+        ...(intent === "build" && approvedPlan
+          ? { buildPlanBlockId: approvedPlan.id }
+          : {}),
         ...(options?.appRequestId
           ? { appRequestId: options.appRequestId }
           : {}),
@@ -8845,7 +8901,7 @@ function Workspace({
             agentFiles &&
             agentLook &&
             agentPlan &&
-            (agentPlan.soul || agentPlan.memory)
+            (agentPlan.soul || agentPlan.memory || agentPlan.skills)
           ) {
             appContext.push(monoContext(agentLook, agentFiles, agentPlan));
           }
@@ -12439,6 +12495,11 @@ function Workspace({
             // Fork: projects.create puts the new folder on the rail.
             addProject: (path) => setRecents(rememberProject(path)),
             habits: { load: loadHabits, update: updateHabits },
+            skills: {
+              read: readMonoSkill,
+              create: createMonoSkill,
+              update: updateMonoSkill,
+            },
             agentFiles: (monoId) => loadMonoFiles(monoId),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>

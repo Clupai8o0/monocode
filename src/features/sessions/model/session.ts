@@ -345,6 +345,8 @@ export type Block = {
   monocode?: boolean;
   /** The Plan or Orchestrator mode this user turn was sent in. */
   intent?: Extract<TurnIntent, "plan" | "orchestrate">;
+  /** The plan block this user turn asked to build. */
+  buildPlanBlockId?: string;
   /** Stable CLI request that submitted this turn, for safe retries. */
   appRequestId?: string;
   /** Provider-reported token metrics for this user turn, when available. */

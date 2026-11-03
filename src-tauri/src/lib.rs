@@ -71,6 +71,7 @@ mod menu;
 mod mobile_access;
 mod mobile_router;
 mod mono;
+mod mono_skills;
 #[cfg(target_os = "macos")]
 mod mono_chat;
 mod mono_transcript;
@@ -619,6 +620,8 @@ pub fn run() {
             mono::mono_load,
             mono::mono_read,
             mono::mono_save,
+            mono_skills::mono_skill_read,
+            mono_skills::mono_skill_remove,
             checkpoint::session_checkpoint_ensure,
             checkpoint::session_checkpoint_begin_turn,
             checkpoint::session_checkpoint_finish_turn,

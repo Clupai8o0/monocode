@@ -23,6 +23,7 @@ import {
   assistantTextBlocks,
   assistantThinkingBlocks,
   assistantToolUses,
+  authFailureFromAssistant,
   backgroundOutputPath,
   contextFromResult,
   contextUsedFromAssistant,
@@ -918,6 +919,14 @@ function handleAssistant(live: Live, rec: Record<string, unknown>): void {
 
   const used = contextUsedFromAssistant(rec);
   if (used !== undefined) live.onEvent({ type: "context", used });
+
+  // Report a failed sign-in as the error it is, not as the reply.
+  const authFailure = authFailureFromAssistant(rec);
+  if (authFailure) {
+    closePendingAssistantMessage(live);
+    live.onEvent({ type: "session.error", message: authFailure });
+    return;
+  }
 
   const snapshot = assistantTextBlocks(rec).join("");
   if (snapshot) closePendingAssistantMessage(live);
