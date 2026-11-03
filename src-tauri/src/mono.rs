@@ -696,8 +696,54 @@ mod tests {
         assert!(save(&root, "b", None, "skills.json", &remaining, None).is_err());
         let dir = agent_dir(&root, "a", None).unwrap();
         let invalid = serde_json::json!([{"name":"outside","description":"Workflow","path":crate::fs::path_to_js(&root.join("outside/SKILL.md"))}]).to_string();
-        std::fs::write(dir.join("skills.json"), &invalid).unwrap();
         assert!(save(&root, "a", None, "skills.json", &invalid, None).is_err());
+        std::fs::write(dir.join("skills.json"), &invalid).unwrap();
+        assert!(save(&root, "a", None, "skills.json", &invalid, None).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn assignment_edits_preserve_retired_plugin_metadata_without_authorizing_reads() {
+        let root = temp_root();
+        let retired = root.join("plugins/cache/review/1.2.3/skills");
+        let entry = |name: &str| {
+            serde_json::json!({
+                "name": name, "description": "Retired plugin workflow",
+                "path": crate::fs::path_to_js(&retired.join(name).join("SKILL.md"))
+            })
+        };
+        // One source still exists but its plugin version no longer appears in
+        // discovery; the other version's definition has been removed entirely.
+        let existing = retired.join("first/SKILL.md");
+        std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        std::fs::write(
+            &existing,
+            "---\nname: first\ndescription: Retired\n---\nPRIVATE\n",
+        )
+        .unwrap();
+        let valid = root.join("app/.agents/skills/new/SKILL.md");
+        std::fs::create_dir_all(valid.parent().unwrap()).unwrap();
+        std::fs::write(&valid, "---\nname: new\ndescription: Current\n---\n").unwrap();
+        let new = serde_json::json!({"name":"new","description":"Current","path":crate::fs::path_to_js(&valid)});
+        let original = serde_json::json!([entry("first"), entry("second")]).to_string();
+        for (mono, retained) in [("a", "first"), ("b", "second")] {
+            let dir = agent_dir(&root, mono, None).unwrap();
+            // This catalog was persisted while the old plugin was installed.
+            std::fs::write(dir.join("skills.json"), &original).unwrap();
+            let with_new = serde_json::json!([entry("first"), entry("second"), new]).to_string();
+            assert!(save(&root, mono, None, "skills.json", &with_new, None).is_ok());
+            let remaining = serde_json::json!([entry(retained), new]).to_string();
+            assert!(save(&root, mono, None, "skills.json", &remaining, None).is_ok());
+            let listed = load(&root, mono, None).unwrap();
+            let old = listed
+                .skills
+                .iter()
+                .find(|skill| skill.name == retained)
+                .unwrap();
+            assert!(!old.available);
+            assert!(old.hash.is_empty());
+            assert!(crate::mono_skills::validate_assignments(&original, None).is_err());
+            assert!(save(&root, mono, None, "skills.json", &with_new, None).is_err());
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 }
