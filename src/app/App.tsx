@@ -127,6 +127,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useStableValue } from "../shared/hooks/useStableValue";
+import { useProjectUseTracking } from "../fork/projects/projectUse"; // Fork
 import { useDragResize } from "../shared/hooks/useDragResize";
 import { beginLayoutTransition } from "../shared/lib/layoutTransition";
 import { noteProjectStep, Sidebar } from "./shell/Sidebar";
@@ -14504,6 +14505,7 @@ function Workspace({
       session.busy && session.cwd ? [session.cwd] : [],
     ),
   );
+  useProjectUseTracking(busyProjectPaths); // Fork
   const onOpenRailMono = useCallback(
     (monoId: string) => void onOpenMono(monoId),
     [onOpenMono],

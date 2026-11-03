@@ -4,10 +4,12 @@ vi.mock("@tauri-apps/api/path", () => ({
 }));
 vi.mock("../../platform/tauri/fs", () => ({
   createPath: vi.fn(async () => "/app-data/handoffs"),
-  statFiles: vi.fn(async () => [{ mtimeMs: 1 }]),
+  listDir: vi.fn(async () => []),
+  // stat_files only returns timestamps for regular files, never directories.
+  statFiles: vi.fn(async () => [{ mtimeMs: null }]),
   writeTextFile: vi.fn(async () => {}),
 }));
-import { createPath, statFiles, writeTextFile } from "../../platform/tauri/fs";
+import { createPath, listDir, writeTextFile } from "../../platform/tauri/fs";
 import { writeHandoffArchive } from "./handoffArchive";
 
 beforeEach(() => vi.clearAllMocks());
@@ -20,8 +22,14 @@ it("writes complete text in app data before returning a usable path", async () =
 it("reuses the archive directory when it already exists", async () => {
   vi.mocked(createPath).mockRejectedValueOnce(new Error("Already exists"));
   await writeHandoffArchive("Context");
-  expect(statFiles).toHaveBeenCalledWith(["/app-data/handoffs"]);
+  expect(listDir).toHaveBeenCalledWith("/app-data/handoffs");
   expect(writeTextFile).toHaveBeenCalled();
+});
+it("preserves the creation error if the archive path is not a directory", async () => {
+  vi.mocked(createPath).mockRejectedValueOnce(new Error("Cannot create archive"));
+  vi.mocked(listDir).mockRejectedValueOnce(new Error("Not a directory"));
+  await expect(writeHandoffArchive("Context")).rejects.toThrow("Cannot create archive");
+  expect(writeTextFile).not.toHaveBeenCalled();
 });
 it("does not return a dead file reference when writing fails", async () => {
   vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("Disk full"));

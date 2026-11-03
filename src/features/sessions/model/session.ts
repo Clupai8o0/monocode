@@ -362,6 +362,10 @@ export type Block = {
     paths?: string[];
     /** Left running by the agent when it yielded; the turn waits on it. */
     background?: boolean;
+    /** Full shell script behind a background command's one-line title. */
+    command?: string;
+    /** File the background command is writing to on this machine. */
+    outputPath?: string;
   };
   approval?: {
     requestId: number;

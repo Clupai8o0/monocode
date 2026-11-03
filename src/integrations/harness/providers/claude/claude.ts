@@ -23,6 +23,7 @@ import {
   assistantTextBlocks,
   assistantThinkingBlocks,
   assistantToolUses,
+  backgroundOutputPath,
   contextFromResult,
   contextUsedFromAssistant,
   turnMetricsFromResult,
@@ -73,7 +74,7 @@ import {
   type ClaudeCliSettings,
   type ClaudeControlRequest,
 } from "./claudeProtocol";
-import { isAgentToolName } from "../../core/preview";
+import { extractShellCommand, isAgentToolName } from "../../core/preview";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
 import {
   questionPromptTitle,
@@ -148,6 +149,7 @@ type Live = {
   nextControlId: number;
   toolsByIndex: Map<number, InFlightTool>;
   toolsById: Map<string, InFlightTool>;
+  outputPathsByToolId: Map<string, string>;
   agentTasks: Map<string, LiveAgentTask>;
   /**
    * Every task Claude still runs for this session, by id: subagents, shells it
@@ -518,6 +520,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     nextControlId: 1,
     toolsByIndex: new Map(),
     toolsById: new Map(),
+    outputPathsByToolId: new Map(),
     agentTasks: new Map(),
     backgroundTasks: new Map(),
     backgroundRows: new Map(),
@@ -662,6 +665,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.pendingAssistantBoundary = false;
   live.toolsByIndex.clear();
   live.toolsById.clear();
+  live.outputPathsByToolId.clear();
   live.agentTasks.clear();
   live.backgroundTasks.clear();
   live.backgroundRows.clear();
@@ -1002,6 +1006,10 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
     return;
   }
   for (const result of toolResultsFromUserMessage(rec)) {
+    const outputPath = backgroundOutputPath(result.text);
+    if (outputPath) {
+      live.outputPathsByToolId.set(result.toolUseId, outputPath);
+    }
     const tool = live.toolsById.get(result.toolUseId);
     if (!tool) continue;
     if (isAgentToolName(tool.name) && isBackgroundedAgentTool(live, tool.id)) {
@@ -1715,6 +1723,10 @@ function showBackgroundRows(live: Live): void {
       ? live.toolsById.get(task.toolUseId)
       : undefined;
     if (source && isAgentToolName(source.name)) continue;
+    const command = source ? extractShellCommand(source.input) : undefined;
+    const outputPath = source
+      ? live.outputPathsByToolId.get(source.id)
+      : undefined;
     const callId = `background:${taskId}`;
     live.backgroundRows.set(taskId, callId);
     live.onEvent({
@@ -1724,6 +1736,8 @@ function showBackgroundRows(live: Live): void {
       kind: source ? toolKindFromName(source.name) : "execute",
       status: "in_progress",
       background: true,
+      ...(command !== undefined ? { command } : {}),
+      ...(outputPath !== undefined ? { outputPath } : {}),
       ...(source
         ? { preview: previewFromTool(source.name, source.input) }
         : {}),

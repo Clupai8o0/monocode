@@ -168,7 +168,11 @@ function emitInlineSubagent(taskId = "t1") {
   });
 }
 
-function emitBackgroundBash(taskId = "b1") {
+function emitBackgroundBash(taskId = "b1", options: {
+  command?: string;
+  outputPath?: string;
+  input?: Record<string, unknown>;
+} = {}) {
   emit({
     type: "assistant",
     session_id: "sess_1",
@@ -178,7 +182,10 @@ function emitBackgroundBash(taskId = "b1") {
           type: "tool_use",
           id: "toolu_bash",
           name: "Bash",
-          input: { command: "sleep 30 && echo done", run_in_background: true },
+          input: options.input ?? {
+            command: options.command ?? "sleep 30 && echo done",
+            run_in_background: true,
+          },
         },
       ],
     },
@@ -210,7 +217,11 @@ function emitBackgroundBash(taskId = "b1") {
         {
           type: "tool_result",
           tool_use_id: "toolu_bash",
-          content: `Command running in background with ID: ${taskId}`,
+          content: `Command running in background with ID: ${taskId}${
+            options.outputPath
+              ? `. Output is being written to: ${options.outputPath}. You will be notified when it completes.`
+              : ""
+          }`,
         },
       ],
     },
@@ -1822,6 +1833,83 @@ describe("claude subagents", () => {
 });
 
 describe("claude background tasks", () => {
+  it("sends the full script and output path on the background row", async () => {
+    const { events } = await startTurn("s1");
+    const command = "sleep 30\nprintf 'done\\n'";
+    const outputPath = "/private/tmp/claude-501/my project/session/tasks/b1.output";
+    emitBackgroundBash("b1", { command, outputPath });
+
+    expect(events.find((event) =>
+      event.type === "tool.started" && event.callId === "background:b1",
+    )).toMatchObject({ command, outputPath, title: "sleep 30" });
+  });
+
+  it("leaves the output path unset when the tool result has none", async () => {
+    const { events } = await startTurn("s1");
+    emitBackgroundBash();
+    const row = events.find((event) =>
+      event.type === "tool.started" && event.callId === "background:b1",
+    );
+    expect(row).toHaveProperty("command", "sleep 30 && echo done");
+    expect(row).not.toHaveProperty("outputPath");
+  });
+
+  it("leaves command metadata unset for a task without a source tool", async () => {
+    const { events } = await startTurn("s1");
+    emit({
+      type: "system",
+      subtype: "task_started",
+      task_id: "orphan",
+      description: "A resumed command",
+      task_type: "local_bash",
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    const row = events.find((event) =>
+      event.type === "tool.started" && event.callId === "background:orphan",
+    );
+    expect(row).toMatchObject({ title: "A resumed command", background: true });
+    expect(row).not.toHaveProperty("command");
+    expect(row).not.toHaveProperty("outputPath");
+  });
+
+  it("leaves the command unset when the source has no shell script", async () => {
+    const { events } = await startTurn("s1");
+    emitBackgroundBash("b1", { input: { description: "wait" } });
+    const row = events.find((event) =>
+      event.type === "tool.started" && event.callId === "background:b1",
+    );
+    expect(row).toMatchObject({ background: true });
+    expect(row).not.toHaveProperty("command");
+  });
+
+  it("clears remembered paths before the next user turn", async () => {
+    const { events, turn } = await startTurn("s1");
+    emitBackgroundBash("b1", { outputPath: "/tmp/claude-501/tasks/b1.output" });
+    emitBashFinished();
+    emitFollowUpTurn("Done.");
+    await turn;
+
+    const nextTurn = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "again",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    await waitFor(() => parse().filter((m) => m.type === "user").length === 2, "next prompt");
+    emitBackgroundBash("b2");
+    const row = events.find((event) =>
+      event.type === "tool.started" && event.callId === "background:b2",
+    );
+    expect(row).toHaveProperty("command", "sleep 30 && echo done");
+    expect(row).not.toHaveProperty("outputPath");
+    await cancelClaudeTurn("s1");
+    await nextTurn;
+  });
+
   it("keeps the turn working through a background command and Claude's follow-up", async () => {
     const { events, turn } = await startTurn("s1");
     let settled = false;

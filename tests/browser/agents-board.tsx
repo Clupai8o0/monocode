@@ -46,6 +46,33 @@ const command = {
   tool: { kind: "execute", title: "npm run dev -- --port 1420", status: "in_progress", background: true },
 } as Block;
 const user = { id: "u1", role: "user", text: "Review this" } as Block;
+const script = {
+  id: "c2",
+  role: "tool",
+  text: "",
+  tool: {
+    kind: "execute",
+    title: "cd src-tauri",
+    status: "in_progress",
+    background: true,
+    command: "cd src-tauri\ncargo build --release\ncargo test --release --workspace\nnpm run stage\ncat target/report.txt",
+    outputPath: "/private/tmp/claude-501/lab/session/tasks/b1.output",
+  },
+} as Block;
+
+// Stands in for the native side: the scene's command prints what __print adds.
+let printed = "";
+let printedCount = 0;
+const lab = window as unknown as Record<string, unknown>;
+lab.__print = (lines: number) => {
+  for (let index = 0; index < lines; index += 1) {
+    printedCount += 1;
+    printed += `\u001b[32m   Compiling\u001b[0m crate-${printedCount} v1.0.0\n`;
+  }
+};
+lab.__TAURI_INTERNALS__ = {
+  invoke: async () => (printed ? { text: printed, truncated: false, size: printed.length } : null),
+};
 
 function session(scene: string): { busy: boolean; blocks: Block[] } {
   if (scene === "sequential") {
@@ -53,6 +80,9 @@ function session(scene: string): { busy: boolean; blocks: Block[] } {
   }
   if (scene === "single") {
     return { busy: true, blocks: [user, runs[2].block] };
+  }
+  if (scene === "output") {
+    return { busy: true, blocks: [user, script] };
   }
   if (scene === "alldone") {
     return { busy: true, blocks: [user, runs[0].block, runs[1].block] };
