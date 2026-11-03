@@ -49,13 +49,9 @@ import {
 } from "./gamesPanelStore";
 import { ChipSelect, IconButton } from "./ChipSelect";
 // Fork: poker, blackjack and chess share the panel with the grid games.
-import {
-  TABLE_GAMES,
-  TableGames,
-  TableScore,
-  isTableGame,
-  tableHint,
-} from "./table/TableGames";
+import { TableGames } from "./table/TableGames";
+import { TableScore } from "./table/TableScore";
+import { ALL_GAMES, TABLE_GAMES, gameEntry, isTableGame } from "./catalog";
 
 /**
  * Fork: a floating panel that plays the grid games. It isn't modal, so the chat
@@ -103,6 +99,7 @@ const GAME_OPTIONS = [...GRID_GAMES, ...TABLE_GAMES].map(({ id, label }) => ({
   id,
   label,
 }));
+const GAME_IDS = ALL_GAMES.map((entry) => entry.id);
 const MODE_OPTIONS = ARCADE_MODES.map((id) => ({ id, label: id }));
 
 type ResizeAxis = "both" | "x" | "y";
@@ -126,7 +123,7 @@ export function GamesPanel() {
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [gameId, setGameId] = useState(() =>
-    loadLastGame([...GRID_GAMES, ...TABLE_GAMES].map((game) => game.id)),
+    loadLastGame(GAME_IDS),
   );
   const [mode, setMode] = useState<ArcadeMode>("mid");
   const [runId, setRunId] = useState(0);
@@ -492,7 +489,7 @@ export function GamesPanel() {
           </span>
         ) : null}
         <span className="ml-auto truncate text-content/35">
-          {activityLabel(activity) || (atTable ? tableHint(gameId) : game.hint)}
+          {activityLabel(activity) || gameEntry(gameId)?.hint}
         </span>
       </div>
       <div
