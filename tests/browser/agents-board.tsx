@@ -59,10 +59,17 @@ const script = {
     outputPath: "/private/tmp/claude-501/lab/session/tasks/b1.output",
   },
 } as Block;
+// A short script leaves its console room to grow as output arrives.
+const shortScript = {
+  ...script,
+  id: "c3",
+  tool: { ...script.tool, title: "npm test", command: "npm test" },
+} as Block;
 
 // Stands in for the native side: the scene's command prints what __print adds.
 let printed = "";
 let printedCount = 0;
+let cut = false;
 const lab = window as unknown as Record<string, unknown>;
 lab.__print = (lines: number) => {
   for (let index = 0; index < lines; index += 1) {
@@ -70,8 +77,11 @@ lab.__print = (lines: number) => {
     printed += `\u001b[32m   Compiling\u001b[0m crate-${printedCount} v1.0.0\n`;
   }
 };
+lab.__cut = () => {
+  cut = true;
+};
 lab.__TAURI_INTERNALS__ = {
-  invoke: async () => (printed ? { text: printed, truncated: false, size: printed.length } : null),
+  invoke: async () => (printed ? { text: printed, truncated: cut, size: printed.length } : null),
 };
 
 function session(scene: string): { busy: boolean; blocks: Block[] } {
@@ -83,6 +93,9 @@ function session(scene: string): { busy: boolean; blocks: Block[] } {
   }
   if (scene === "output") {
     return { busy: true, blocks: [user, script] };
+  }
+  if (scene === "output-among") {
+    return { busy: true, blocks: [user, ...runs.slice(2).map((run) => run.block), command, shortScript] };
   }
   if (scene === "alldone") {
     return { busy: true, blocks: [user, runs[0].block, runs[1].block] };

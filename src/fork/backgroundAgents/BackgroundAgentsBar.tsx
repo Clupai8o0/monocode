@@ -66,13 +66,13 @@ function useSecondTick(active: boolean): void {
  * without an animation: while growing they would have no height to reveal yet.
  * `filled` is for a row whose content arrives just after it opens.
  */
-function useRevealWhenOpen(open: boolean, filled = false) {
+function useRevealWhenOpen(open: boolean) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) {
       row.current?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [open, filled]);
+  }, [open]);
   return row;
 }
 
@@ -419,7 +419,7 @@ function CommandRow({
 }) {
   const [open, setOpen] = useState(false);
   const output = useTaskOutput(block.tool?.outputPath, open);
-  const row = useRevealWhenOpen(open, !!output.text);
+  const row = useRevealWhenOpen(open);
   const title = block.tool?.title || block.text || "Command";
   return (
     <div ref={row} className="flex min-w-0 flex-col">
@@ -485,11 +485,20 @@ function CommandConsole({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const height = useRef(0);
   useLayoutEffect(() => {
-    if (box.current && following.current) {
-      box.current.scrollTop = box.current.scrollHeight;
+    const view = box.current;
+    if (!view || !following.current) {
+      return;
     }
-  }, [output.text]);
+    view.scrollTop = view.scrollHeight;
+    // Still growing, so its end may be under the panel's fold. Once it is full
+    // it scrolls itself, and leaves the panel to whoever is reading other rows.
+    if (view.clientHeight !== height.current) {
+      height.current = view.clientHeight;
+      view.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [output.text, output.truncated]);
   const note = commandNote(hasFile, output);
   return (
     <div className="min-w-0 py-1 pl-[22px]">
@@ -527,5 +536,5 @@ function commandNote(hasFile: boolean, output: TaskOutput): string | null {
   if (output.text === "" && !output.truncated) {
     return "No output yet.";
   }
-  return output.text && output.truncated ? "Earlier output left out." : null;
+  return output.truncated ? "Earlier output left out." : null;
 }
