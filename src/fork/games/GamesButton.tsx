@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { GameController } from "../../shared/ui/icons";
-import { GamesPanel } from "./GamesPanel";
 import { gamesPanel } from "./gamesPanelStore";
 
 /**
@@ -12,16 +11,34 @@ import { gamesPanel } from "./gamesPanelStore";
 export const FORK_GAMES = import.meta.env.MODE !== "test";
 
 let mounted = false;
+let panelModule: Promise<typeof import("./GamesPanel")> | undefined;
 
-function mountPanel() {
-  if (mounted) {
-    return;
-  }
-  mounted = true;
-  const host = document.createElement("div");
-  host.setAttribute("data-fork-games-root", "");
-  document.body.appendChild(host);
-  createRoot(host).render(<GamesPanel />);
+function loadPanel()
+{
+  panelModule ??= import("./GamesPanel").catch((error) => {
+    panelModule = undefined;
+    throw error;
+  });
+  return panelModule;
+}
+
+export function preloadGamesPanel()
+{
+  void loadPanel().catch(() => {});
+}
+
+function mountPanel()
+{
+  void loadPanel().then(({ GamesPanel }) => {
+    if (mounted) {
+      return;
+    }
+    mounted = true;
+    const host = document.createElement("div");
+    host.setAttribute("data-fork-games-root", "");
+    document.body.appendChild(host);
+    createRoot(host).render(<GamesPanel />);
+  }).catch((error) => console.error("Could not load games", error));
 }
 
 type Props = {

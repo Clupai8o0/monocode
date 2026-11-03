@@ -34,6 +34,15 @@ const FRAME_MS = 33;
 const SLIDE_MS = 800;
 /** Fork: how often a paused host game repaints. */
 const PAUSED_PAINT_MS = 250;
+// Fork: less than one alpha byte of error, with no per-cell strings in paint.
+const OPACITY_LEVELS = 1024;
+
+function cellFills(rgb: string)
+{
+  return Array.from({ length: OPACITY_LEVELS + 1 }, (_, level) =>
+    `rgba(${rgb}, ${level / OPACITY_LEVELS})`,
+  );
+}
 
 const HEADING: Record<string, { x: number; y: number }> = {
   ArrowUp: { x: 0, y: -1 },
@@ -75,6 +84,12 @@ type Board = {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   bubbleAt: { x: number; y: number } | null;
+  cols: number;
+  rows: number;
+  started: boolean;
+  width: number;
+  height: number;
+  dpr: number;
 };
 
 /**
@@ -180,8 +195,10 @@ export function TerminalGridBackground({
   host,
 }: { host?: GridGameHost } = {}) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
-  const boardsRef = useRef<Board[] | null>(null);
+  // Fork: empty slots cost no canvas memory until their game is shown.
+  const slotsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const invalidateRef = useRef<() => void>(() => {});
+  const boardsRef = useRef<(Board | undefined)[] | null>(null);
   const indexRef = useRef(0);
   const playingRef = useRef(false);
   const scoreRef = useRef(0);
@@ -197,8 +214,10 @@ export function TerminalGridBackground({
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [mode, setMode] = useState<ArcadeMode>("mid");
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [slide, setSlide] = useState<{ index: number; dir: 1 | -1 }>({
-    index: 0,
+    index: Math.max(0, GRID_GAMES.findIndex((item) => item.id === host?.gameId)),
     dir: 1,
   });
   const [hovered, setHovered] = useState(false);
@@ -212,20 +231,15 @@ export function TerminalGridBackground({
     const root = rootRef.current;
     if (!root) return;
 
-    const boards: Board[] = [];
-    for (let i = 0; i < GRID_GAMES.length; i++) {
-      const canvas = canvasRefs.current[i];
-      const ctx = canvas?.getContext("2d");
-      const spec = GRID_GAMES[i];
-      if (!canvas || !ctx || !spec) return;
-      boards.push({
-        game: spec,
-        arcade: spec.create(),
-        canvas,
-        ctx,
-        bubbleAt: null,
-      });
-    }
+    // Fork: only visible games are imported and made; parked boards keep state.
+    const boards: (Board | undefined)[] = [];
+    const loading = new Set<number>();
+    let disposed = false;
+    let layoutDirty = true;
+    let gridDirty = true;
+    let dpr = 0;
+    let previous = indexRef.current;
+    let lastIndex = indexRef.current;
     boardsRef.current = boards;
 
     const logos = Object.fromEntries(
@@ -249,15 +263,23 @@ export function TerminalGridBackground({
     let height = 0;
     let stamp = new Float32Array(0);
     let rgb = parseContentRgb();
+    let fills = cellFills(rgb);
     let surfaceRgb = parseSurfaceRgb();
     let lastFrame = 0;
     let lastPausedPaint = 0;
 
     const drawGrid = () => {
       if (!gridCtx || width <= 0 || height <= 0) return;
-      const dpr = window.devicePixelRatio || 1;
-      gridCanvas.width = Math.floor(width * dpr);
-      gridCanvas.height = Math.floor(height * dpr);
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (gridCanvas.width !== pixelWidth) {
+        gridCanvas.width = pixelWidth;
+      }
+      if (gridCanvas.height !== pixelHeight) {
+        gridCanvas.height = pixelHeight;
+      }
+      gridCtx.setTransform(1, 0, 0, 1, 0, 0);
+      gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
       gridCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gridCtx.lineWidth = 1;
       gridCtx.strokeStyle = `rgba(${rgb}, ${BORDER_OPACITY})`;
@@ -273,37 +295,99 @@ export function TerminalGridBackground({
       }
     };
 
-    // Hidden tabs collapse to zero size, so the loop parks itself there and
-    // the resize observer wakes it once the pane shows again.
+    const onScreen = () => !document.hidden && (!hostRef.current || hostRef.current.active);
     const start = () => {
-      if (raf || document.hidden || width <= 0 || height <= 0) return;
-      lastFrame = 0;
+      if (raf || !onScreen()) {
+        return;
+      }
       raf = requestAnimationFrame(draw);
+    };
+    const invalidate = () => {
+      layoutDirty = true;
+      if (!raf) {
+        lastFrame = 0;
+      }
+      start();
+    };
+    invalidateRef.current = invalidate;
+
+    const ensureBoard = (index: number) => {
+      const spec = GRID_GAMES[index];
+      if (!spec || boards[index] || loading.has(index)) {
+        return;
+      }
+      loading.add(index);
+      void spec.load().then((create) => {
+        loading.delete(index);
+        const slot = slotsRef.current[index];
+        if (disposed || !create || !slot || index !== indexRef.current || !onScreen()) {
+          return;
+        }
+        const rect = root.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return;
+        }
+        canvas.className = "absolute inset-0 h-full w-full";
+        canvas.setAttribute("aria-hidden", "true");
+        slot.appendChild(canvas);
+        boards[index] = {
+          game: spec, arcade: create(), canvas, ctx, bubbleAt: null,
+          cols: 0, rows: 0, started: false, width: 0, height: 0, dpr: 0,
+        };
+        invalidate();
+      }).catch((error) => {
+        loading.delete(index);
+        console.error("Could not load arcade", error);
+      });
     };
 
     const layout = () => {
+      layoutDirty = false;
       const rect = root.getBoundingClientRect();
-      width = rect.width;
-      height = rect.height;
-      if (width <= 0 || height <= 0) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      const nextCols = Math.ceil(width / PITCH);
-      const nextRows = Math.ceil(height / PITCH);
-
-      for (const board of boards) {
-        board.canvas.width = Math.floor(width * dpr);
-        board.canvas.height = Math.floor(height * dpr);
-        board.canvas.style.width = `${width}px`;
-        board.canvas.style.height = `${height}px`;
-        board.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        board.arcade.resize(nextCols, nextRows);
+      const nextDpr = window.devicePixelRatio || 1;
+      if (rect.width !== width || rect.height !== height || nextDpr !== dpr) {
+        width = rect.width;
+        height = rect.height;
+        dpr = nextDpr;
+        cols = Math.ceil(width / PITCH);
+        rows = Math.ceil(height / PITCH);
+        gridDirty = true;
       }
+    };
 
-      cols = nextCols;
-      rows = nextRows;
-      drawGrid();
-      start();
+    const sizeBoard = (board: Board) => {
+      if (board.width === width && board.height === height && board.dpr === dpr && board.started === playingRef.current) {
+        return;
+      }
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (board.canvas.width !== pixelWidth) {
+        board.canvas.width = pixelWidth;
+      }
+      if (board.canvas.height !== pixelHeight) {
+        board.canvas.height = pixelHeight;
+      }
+      board.canvas.style.width = `${width}px`;
+      board.canvas.style.height = `${height}px`;
+      board.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (board.cols !== cols || board.rows !== rows) {
+        board.arcade.resize(cols, rows);
+        board.cols = cols;
+        board.rows = rows;
+      }
+      board.width = width;
+      board.height = height;
+      board.dpr = dpr;
+      if (!board.started && playingRef.current) {
+        board.arcade.setMode(hostRef.current?.mode ?? modeRef.current);
+        board.arcade.takeControl();
+      }
+      board.started = playingRef.current;
     };
 
     const paint = (board: Board, width: number, height: number) => {
@@ -317,11 +401,16 @@ export function TerminalGridBackground({
       ctx.clearRect(0, 0, width, height);
 
       const peak = PEAK_OPACITY * dim;
+      let lastLevel = -1;
       for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
           const fillOpacity = (stamp[y * cols + x] ?? 0) * peak;
           if (fillOpacity > 0.02) {
-            ctx.fillStyle = `rgba(${rgb}, ${fillOpacity})`;
+            const level = Math.min(OPACITY_LEVELS, Math.round(fillOpacity * OPACITY_LEVELS));
+            if (level !== lastLevel) {
+              ctx.fillStyle = fills[level]!;
+              lastLevel = level;
+            }
             ctx.fillRect(x * PITCH, y * PITCH, CELL, CELL);
           }
         }
@@ -401,38 +490,70 @@ export function TerminalGridBackground({
       );
     };
 
-    function draw(time: number) {
-      if (document.hidden || width <= 0 || height <= 0) {
-        raf = 0;
+    function draw(time: number)
+    {
+      raf = 0;
+      if (!onScreen()) {
+        lastFrame = 0;
         return;
       }
-      raf = requestAnimationFrame(draw);
-      if (time - lastFrame < FRAME_MS) return;
-      const dt = lastFrame ? time - lastFrame : FRAME_MS;
-      lastFrame = time;
-
+      const relayout = layoutDirty;
+      if (layoutDirty) {
+        layout();
+      }
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      start();
       const current = indexRef.current;
-      const controlled = playingRef.current;
-      // Fork: a paused host game holds still, repainting only now and then
-      // so a resize or a theme change still shows.
-      if (hostRef.current?.paused) {
-        if (time - lastPausedPaint < PAUSED_PAINT_MS) return;
-        lastPausedPaint = time;
-        const held = boards[current];
-        if (held) paint(held, width, height);
-        return;
+      if (lastIndex !== current) {
+        previous = lastIndex;
+        lastIndex = current;
       }
-      // Only the board on screen needs pixels, bar mid-slide when two show.
-      const sliding = time - slideAtRef.current < SLIDE_MS;
-
+      ensureBoard(current);
+      const sliding = !playingRef.current && time - slideAtRef.current < SLIDE_MS;
+      const visible = new Set([current]);
+      if (sliding && previous !== current) {
+        const slot = slotsRef.current[previous]?.getBoundingClientRect();
+        const rootBox = rootRef.current?.getBoundingClientRect();
+        if (slot && rootBox && slot.right > rootBox.left && slot.left < rootBox.right) {
+          visible.add(previous);
+        }
+      }
       for (let i = 0; i < boards.length; i++) {
         const board = boards[i];
-        if (!board) continue;
-        // A live game only ticks the board you're on; idle keeps neighbours
-        // moving so a slide doesn't reveal a frozen frame.
-        if (controlled && i !== current) continue;
-        board.arcade.step(dt);
-        if (i === current || sliding) paint(board, width, height);
+        if (board && visible.has(i)) {
+          sizeBoard(board);
+        }
+      }
+      if (gridDirty) {
+        drawGrid();
+        gridDirty = false;
+      }
+      if (!relayout && time - lastFrame < FRAME_MS) {
+        return;
+      }
+      const dt = lastFrame ? time - lastFrame : FRAME_MS;
+      lastFrame = time;
+      const controlled = playingRef.current;
+      const paused = hostRef.current?.paused;
+      if (paused && !relayout && time - lastPausedPaint < PAUSED_PAINT_MS) {
+        return;
+      }
+      if (paused) {
+        lastPausedPaint = time;
+      }
+      for (let i = 0; i < boards.length; i++) {
+        const board = boards[i];
+        if (!board || (controlled && i !== current)) {
+          continue;
+        }
+        if (!paused) {
+          board.arcade.step(dt);
+        }
+        if (visible.has(i)) {
+          paint(board, width, height);
+        }
       }
 
       const active = boards[current];
@@ -455,11 +576,15 @@ export function TerminalGridBackground({
       }
     }
 
-    layout();
+    invalidate();
 
-    document.addEventListener("visibilitychange", start);
+    const visibilityChanged = () => {
+      lastFrame = 0;
+      invalidate();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
 
-    const resizeObserver = new ResizeObserver(layout);
+    const resizeObserver = new ResizeObserver(invalidate);
     resizeObserver.observe(root);
 
     const themeObserver = new MutationObserver(() => {
@@ -467,7 +592,9 @@ export function TerminalGridBackground({
       surfaceRgb = parseSurfaceRgb();
       if (next === rgb) return;
       rgb = next;
-      drawGrid();
+      fills = cellFills(rgb);
+      gridDirty = true;
+      invalidate();
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
@@ -475,8 +602,13 @@ export function TerminalGridBackground({
     });
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
-      document.removeEventListener("visibilitychange", start);
+      invalidateRef.current = () => {};
+      for (const board of boards) {
+        board?.canvas.remove();
+      }
+      document.removeEventListener("visibilitychange", visibilityChanged);
       resizeObserver.disconnect();
       themeObserver.disconnect();
       boardsRef.current = null;
@@ -495,12 +627,12 @@ export function TerminalGridBackground({
   // Fork: the host's game and run decide what's on the board.
   const hostGameId = host?.gameId;
   const hostRunId = host?.runId;
+  const lastHostRunRef = useRef(hostRunId);
   useEffect(() => {
     if (hostGameId === undefined) return;
     const boards = boardsRef.current;
     if (!boards) return;
     releaseHeld();
-    boards[indexRef.current]?.arcade.releaseControl();
     const next = Math.max(
       0,
       GRID_GAMES.findIndex((item) => item.id === hostGameId),
@@ -509,24 +641,34 @@ export function TerminalGridBackground({
     indexRef.current = next;
     setSlide({ index: next, dir: 1 });
     board?.arcade.setMode(hostRef.current?.mode ?? "mid");
-    board?.arcade.takeControl();
-    scoreRef.current = 0;
+    if (board && hostRunId !== lastHostRunRef.current) {
+      board.arcade.releaseControl();
+      board.arcade.takeControl();
+    }
+    lastHostRunRef.current = hostRunId;
+    scoreRef.current = board?.arcade.score() ?? 0;
     livesRef.current = board?.arcade.lives() ?? 0;
-    overRef.current = false;
-    setScore(0);
+    overRef.current = board?.arcade.gameOver() ?? false;
+    setScore(scoreRef.current);
     setLives(livesRef.current);
-    setOver(false);
+    setOver(overRef.current);
+    invalidateRef.current();
     if (hostRef.current?.active) rootRef.current?.focus();
   }, [hostGameId, hostRunId, releaseHeld]);
 
   const hostMode = host?.mode;
   useEffect(() => {
-    if (hostMode) boardsRef.current?.[indexRef.current]?.arcade.setMode(hostMode);
+    if (hostMode) {
+      boardsRef.current?.[indexRef.current]?.arcade.setMode(hostMode);
+    }
   }, [hostMode]);
 
   const hostActive = host?.active;
   useEffect(() => {
-    if (hostActive) rootRef.current?.focus();
+    if (hostActive) {
+      rootRef.current?.focus();
+    }
+    invalidateRef.current();
   }, [hostActive]);
 
   // Fork: tell the host about every score change, in one place.
@@ -565,6 +707,7 @@ export function TerminalGridBackground({
 
   useEffect(() => {
     slideAtRef.current = performance.now();
+    invalidateRef.current();
   }, [slide.index]);
 
   const showGame = useCallback((next: number) => {
@@ -751,16 +894,10 @@ export function TerminalGridBackground({
           {GRID_GAMES.map((item, i) => (
             <div
               key={item.id}
+              ref={(el) => { slotsRef.current[i] = el; }}
+              data-grid-game={item.id}
               className="relative h-full w-full min-w-full shrink-0"
-            >
-              <canvas
-                ref={(el) => {
-                  canvasRefs.current[i] = el;
-                }}
-                className="absolute inset-0 h-full w-full"
-                aria-hidden
-              />
-            </div>
+            />
           ))}
         </div>
       </div>

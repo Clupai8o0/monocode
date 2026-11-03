@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { Session } from "../../../features/sessions/model/session";
+import { liveTurns, resetLiveTurns, subscribeTurns, type LiveTurn } from "../liveTurns";
+export { publishTurns, type LiveTurn } from "../liveTurns";
 import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 
 /**
@@ -8,14 +9,6 @@ import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
  * app's own: App publishes its sessions here (through publishRunningWork), so
  * bets settle whether or not the games panel is open.
  */
-
-export type LiveTurn = {
-  sessionId: string;
-  title: string;
-  startedAt: number;
-  /** False for a turn already running when the app first saw it: its start is a guess, so no bets. */
-  knownStart: boolean;
-};
 
 export type Bet = {
   sessionId: string;
@@ -137,12 +130,10 @@ function writeRecord(record: BetRecord) {
 }
 
 let state: State | null = null;
-/** Sessions seen at least once, so a turn starting later has a known start. */
-let seen = false;
 const listeners = new Set<() => void>();
 
 function current(): State {
-  state ??= { live: [], bets: [], record: readRecord() };
+  state ??= { live: liveTurns(), bets: [], record: readRecord() };
   return state;
 }
 
@@ -156,7 +147,7 @@ function emit(next: State) {
 /** For tests: forget everything, including what has been seen. */
 export function resetTurnBet() {
   state = null;
-  seen = false;
+  resetLiveTurns();
 }
 
 export function settle(record: BetRecord, result: BetResult): BetRecord {
@@ -172,41 +163,11 @@ export function settle(record: BetRecord, result: BetResult): BetRecord {
  * App calls this with every session change. A turn starts when a session goes
  * busy and ends when it stops; ending settles any bet on it.
  */
-export function publishTurns(
-  sessions: readonly (Pick<Session, "id" | "title" | "busy"> &
-    Partial<Pick<Session, "ephemeral" | "inboxAsk" | "sidebarHidden">>)[],
-  now: number = Date.now(),
-) {
+function settleTurns(live: LiveTurn[], finished: Set<string>, now: number)
+{
   const was = current();
   const before = new Map(was.live.map((turn) => [turn.sessionId, turn]));
-  const live: LiveTurn[] = [];
-  for (const session of sessions) {
-    // Only the chats you can see: habit runs and Inbox asks aren't yours to bet on.
-    if (!session.busy || session.ephemeral || session.inboxAsk || session.sidebarHidden) {
-      continue;
-    }
-    const known = before.get(session.id);
-    live.push(
-      known
-        ? { ...known, title: session.title || known.title }
-        : {
-            sessionId: session.id,
-            title: session.title || "Untitled",
-            startedAt: now,
-            knownStart: seen,
-          },
-    );
-  }
-  seen = true;
-
   const still = new Set(live.map((turn) => turn.sessionId));
-  // Only a session that is still here, still shown and now idle has finished
-  // its turn; one that vanished or was hidden mid-turn never did.
-  const finished = new Set(
-    sessions
-      .filter((session) => !session.busy && !session.ephemeral && !session.inboxAsk && !session.sidebarHidden)
-      .map((session) => session.id),
-  );
   let record = was.record;
   const bets: Bet[] = [];
   for (const bet of was.bets) {
@@ -284,3 +245,6 @@ export function turnBetSnapshot(): State {
 export function useTurnBet(): State {
   return useSyncExternalStore(subscribe, turnBetSnapshot, turnBetSnapshot);
 }
+
+// Once loaded, bets keep settling even when the panel is hidden.
+subscribeTurns(settleTurns);

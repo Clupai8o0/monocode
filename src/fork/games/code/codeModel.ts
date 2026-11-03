@@ -57,10 +57,10 @@ export type RunErrorSummary = {
 };
 
 /** Ask Dojo asks App to open the Dojo Mono with this event. */
-export const OPEN_DOJO_EVENT = "monocode:fork-open-dojo";
+export { OPEN_DOJO_EVENT } from "./events";
 
 /** The stats row in the panel header listens for this after a run. */
-export const CODE_PROGRESS_EVENT = "monocode:fork-code-progress";
+export { CODE_PROGRESS_EVENT } from "./events";
 
 const PROGRESS_KEY = "monocode.fork.games.code.progress";
 

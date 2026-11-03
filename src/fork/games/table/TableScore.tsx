@@ -1,44 +1,23 @@
-import { useEffect, useState } from "react";
-import { useBankroll, useRivals } from "./kit";
-import { AGENTS, AGENT_IDS } from "./agents";
-import { formatTokens, rivalLine } from "./tokens";
-import { GardenScore } from "../calm/GardenTable";
-import { useTurnBet } from "../calm/turnBet";
-import {
-  CODE_PROGRESS_EVENT,
-  loadProgress,
-  streakDays,
-} from "../code/codeModel";
+import { lazy, Suspense, useSyncExternalStore } from "react";
+import { AGENT_IDS, AGENT_NAMES } from "./agentNames";
+import { formatTokens, rivalLine, tokenStore } from "./tokens";
+
+const CodeScore = lazy(() => import("../code/CodeScore").then((m) => ({ default: m.CodeScore })));
+const GardenScore = lazy(() => import("../calm/GardenScore").then((m) => ({ default: m.GardenScore })));
+const TurnBetScore = lazy(() => import("../calm/TurnBetScore").then((m) => ({ default: m.TurnBetScore })));
 
 /** The panel's score row for a table: tokens and peak, or your chess record. */
 export function TableScore({ gameId }: { gameId: string }) {
-  const bankroll = useBankroll();
-  const rivals = useRivals();
-  // Fork: the Code tab's points change under this row, so listen for a run.
-  const [, setCodeRuns] = useState(0);
-  useEffect(() => {
-    const onRun = () => setCodeRuns((value) => value + 1);
-    window.addEventListener(CODE_PROGRESS_EVENT, onRun);
-    return () => window.removeEventListener(CODE_PROGRESS_EVENT, onRun);
-  }, []);
+  const bankroll = useSyncExternalStore(tokenStore.subscribe, tokenStore.bankroll);
+  const rivals = useSyncExternalStore(tokenStore.subscribe, tokenStore.rivals);
   if (gameId === "code") {
-    const progress = loadProgress();
-    return (
-      <>
-        <span data-fork-games-score={progress.totalPoints}>
-          points {progress.totalPoints}
-        </span>
-        <span className="text-content/35">
-          streak {streakDays(progress, Date.now())}
-        </span>
-      </>
-    );
+    return <Suspense fallback={null}><CodeScore /></Suspense>;
   }
   if (gameId === "garden") {
-    return <GardenScore />;
+    return <Suspense fallback={null}><GardenScore /></Suspense>;
   }
   if (gameId === "turnbet") {
-    return <TurnBetScore />;
+    return <Suspense fallback={null}><TurnBetScore /></Suspense>;
   }
   if (gameId === "solitaire" || gameId === "sort" || gameId === "sudoku" || gameId === "pipeline" || gameId === "merge" || gameId === "race") {
     return null;
@@ -71,21 +50,9 @@ export function TableScore({ gameId }: { gameId: string }) {
       <span className="text-content/35">best {formatTokens(bankroll.peak)}</span>
       {top ? (
         <span className="truncate text-content/35" data-rival-line="">
-          {rivalLine(AGENTS[top.id].name, top.net)}
+          {rivalLine(AGENT_NAMES[top.id], top.net)}
         </span>
       ) : null}
-    </>
-  );
-}
-
-function TurnBetScore() {
-  const { record, live } = useTurnBet();
-  return (
-    <>
-      <span data-fork-games-score={record.points}>points {record.points}</span>
-      <span className="text-content/35">
-        {live.length} {live.length === 1 ? "turn" : "turns"} running
-      </span>
     </>
   );
 }
