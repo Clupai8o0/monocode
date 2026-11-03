@@ -145,9 +145,12 @@ export function ContinuedFromView({
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center px-3 pt-2.5">
+      {/* Solid fill. The inset modal glass is a 2% tint, and this bar sits
+          on the scrolling transcript, so that tint lets the text behind it
+          show through the label. */}
       <div
         data-fork-continued-from
-        className="pointer-events-auto flex w-full max-w-[720px] min-w-0 items-center gap-3 modal-surface rounded-xl bg-background-base px-3 py-2 font-sans shadow-[0_8px_24px_-12px_rgb(0_0_0/0.55)]"
+        className="pointer-events-auto flex w-full max-w-[720px] min-w-0 items-center gap-3 rounded-xl border border-content/10 bg-background-base px-3 py-2 font-sans shadow-[0_8px_24px_-12px_rgb(0_0_0/0.55)]"
       >
         <span className="flex shrink-0 items-center gap-1">
           <HarnessIcon harness={origin.from} className="size-4" />
@@ -158,7 +161,7 @@ export function ContinuedFromView({
           <p className="truncate text-[13px] font-medium text-content" title={origin.title}>
             {origin.title}
           </p>
-          <p className="truncate text-[11px] text-content/50">
+          <p className="truncate text-[11px] text-content/80">
             Continued from {HARNESS_TITLE[origin.from]}
             {origin.files > 0
               ? `, with ${origin.files} changed ${origin.files === 1 ? "file" : "files"}`
@@ -169,7 +172,7 @@ export function ContinuedFromView({
           <button
             type="button"
             onClick={onOpen}
-            className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-content/70 hover:bg-content/8 hover:text-content ${PRESS}`}
+            className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-content hover:bg-content/8 ${PRESS}`}
           >
             <Replace className="size-3.5" strokeWidth={1.75} aria-hidden />
             Open original
