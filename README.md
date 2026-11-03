@@ -38,6 +38,7 @@ Open a project folder, choose an agent, and send a message. Each tab is a sessio
 - Use separate Git worktrees for parallel tasks.
 - Edit files and review changes in the app.
 - Start a message with `/operator` to let an agent open sessions and manage worktrees and notes.
+- Type `/stage` to have the agent stage only the files it changed in this session.
 
 Monos are experimental agents that work across your projects. They keep a memory and can run scheduled tasks you set up with them.
 
