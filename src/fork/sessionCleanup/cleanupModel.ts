@@ -27,7 +27,10 @@ export type CleanupHeld = {
   approval: ReadonlySet<string>;
 };
 
-/** Whether a session is working, waiting on the user, or on screen right now. */
+/**
+ * Whether a session is working, waiting on the user, or in focus. A session in
+ * another split pane is not held: it counts as open, so it starts unticked.
+ */
 export function isHeld(sessionId: string, held: CleanupHeld): boolean {
   return (
     sessionId === held.activeSessionId ||
@@ -78,14 +81,16 @@ export function inCleanupFilter(
 
 /**
  * What starts ticked. "Everything" is a browsing view, so nothing; a session
- * open in a tab or that said it is not safe waits for a deliberate tick.
+ * open in a tab or that said it is not safe waits for a deliberate tick. So
+ * does one not read yet, which may turn out not safe (`checked` is false).
  */
 export function tickedByDefault(
   kind: CloseKind | undefined,
   filter: CleanupFilter,
   open: boolean,
+  checked: boolean,
 ): boolean {
-  return filter !== "all" && !open && kind !== "unsafe";
+  return checked && filter !== "all" && !open && kind !== "unsafe";
 }
 
 export type CleanupGroup<T> = { cwd: string; rows: T[] };

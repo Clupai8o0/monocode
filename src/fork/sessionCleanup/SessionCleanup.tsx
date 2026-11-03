@@ -136,11 +136,14 @@ export function SessionCleanup({
     inCleanupFilter(row.updatedAt, kindOf(row), choice, now);
   const open = new Set(openSessionIds);
   const visible = candidates.filter((row) => inFilter(row, filter));
+  const isChecked = (row: SessionSummary) =>
+    closeEntry(row.id)?.at === row.updatedAt;
   const isTicked = (row: SessionSummary) =>
-    overrides.get(row.id) ?? tickedByDefault(kindOf(row), filter, open.has(row.id));
+    overrides.get(row.id) ??
+    tickedByDefault(kindOf(row), filter, open.has(row.id), isChecked(row));
   const selected = visible.filter(isTicked);
   const checking = closeChecksRunning()
-    ? candidates.filter((row) => closeEntry(row.id)?.at !== row.updatedAt).length
+    ? candidates.filter((row) => !isChecked(row)).length
     : 0;
   const working = progress !== null;
 

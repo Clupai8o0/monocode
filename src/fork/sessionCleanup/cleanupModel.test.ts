@@ -81,14 +81,18 @@ describe("inCleanupFilter", () => {
 
 describe("tickedByDefault", () => {
   it("ticks closed, finished sessions", () => {
-    expect(tickedByDefault("safe", "safe", false)).toBe(true);
-    expect(tickedByDefault(undefined, "idle", false)).toBe(true);
+    expect(tickedByDefault("safe", "safe", false, true)).toBe(true);
+    expect(tickedByDefault(undefined, "idle", false, true)).toBe(true);
   });
 
   it("never starts ticked for open, unsafe or Everything", () => {
-    expect(tickedByDefault("safe", "safe", true)).toBe(false);
-    expect(tickedByDefault("unsafe", "idle", false)).toBe(false);
-    expect(tickedByDefault("safe", "all", false)).toBe(false);
+    expect(tickedByDefault("safe", "safe", true, true)).toBe(false);
+    expect(tickedByDefault("unsafe", "idle", false, true)).toBe(false);
+    expect(tickedByDefault("safe", "all", false, true)).toBe(false);
+  });
+
+  it("waits for a session's last reply to be read", () => {
+    expect(tickedByDefault(undefined, "idle", false, false)).toBe(false);
   });
 });
 
