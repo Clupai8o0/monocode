@@ -212,7 +212,7 @@ export type GitDiffIndex = {
 const pendingGitReads = new Map<string, Promise<unknown>>();
 let gitReadEpoch = 0;
 
-/** A filesystem event invalidates reads already running for this checkout. */
+/** Let a watcher reload start fresh; existing callers still settle normally. */
 export function invalidateGitReads(cwd: string): void {
   for (const key of pendingGitReads.keys()) {
     if (key.endsWith(`\0${cwd}`)) pendingGitReads.delete(key);
@@ -228,11 +228,11 @@ function readGit<T>(command: string, cwd: string): Promise<T> {
   const request: Promise<T> = invoke<T>(command, { cwd })
     .then(
       (result) =>
-        epoch === gitReadEpoch && pendingGitReads.get(key) === request
+        epoch === gitReadEpoch
           ? result
           : readGit<T>(command, cwd),
       (error) => {
-        if (epoch !== gitReadEpoch || pendingGitReads.get(key) !== request) {
+        if (epoch !== gitReadEpoch) {
           return readGit<T>(command, cwd);
         }
         throw error;
