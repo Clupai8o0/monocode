@@ -1,3 +1,4 @@
+import { AGENT_IDS, AGENT_NAMES, type AgentId } from "./agentNames";
 import type { Random } from "../kit";
 import type { BjStyle } from "./blackjack";
 import type { ChessStyle } from "./chessAi";
@@ -44,21 +45,12 @@ export type Agent = {
   lines: Record<ChatterEvent, readonly string[]>;
 };
 
-export const AGENT_IDS = [
-  "claude",
-  "codex",
-  "deepseek",
-  "gemini",
-  "grok",
-  "muse",
-  "kimi",
-] as const;
-export type AgentId = (typeof AGENT_IDS)[number];
+export { AGENT_IDS, type AgentId } from "./agentNames";
 
 export const AGENTS: Record<AgentId, Agent> = {
   claude: {
     id: "claude",
-    name: "Claude",
+    name: AGENT_NAMES.claude,
     color: "#d97757",
     poker: { looseness: -0.05, aggression: 0.35, bluff: 0.02, shove: 0, noise: 0.02, sizing: 0.6, tilt: 0.1 },
     blackjack: "careful",
@@ -211,7 +203,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   codex: {
     id: "codex",
-    name: "Codex",
+    name: AGENT_NAMES.codex,
     color: "#10a37f",
     poker: { looseness: 0, aggression: 0.55, bluff: 0.04, shove: 0, noise: 0, sizing: 0.75, tilt: 0 },
     blackjack: "basic",
@@ -332,7 +324,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   deepseek: {
     id: "deepseek",
-    name: "DeepSeek",
+    name: AGENT_NAMES.deepseek,
     color: "#4d6bfe",
     poker: { looseness: 0.04, aggression: 0.7, bluff: 0.38, shove: 0.02, noise: 0.08, sizing: 0.9, tilt: 0.3 },
     blackjack: "confident",
@@ -486,7 +478,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   gemini: {
     id: "gemini",
-    name: "Gemini",
+    name: AGENT_NAMES.gemini,
     color: "#5b93f5",
     poker: { looseness: 0.2, aggression: 0.25, bluff: 0.06, shove: 0, noise: 0.06, sizing: 0.5, tilt: 0.1 },
     blackjack: "splitter",
@@ -636,7 +628,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   grok: {
     id: "grok",
-    name: "Grok",
+    name: AGENT_NAMES.grok,
     color: "currentColor",
     poker: { looseness: 0.1, aggression: 0.9, bluff: 0.22, shove: 0.14, noise: 0.1, sizing: 1.2, tilt: 0.7 },
     blackjack: "doubler",
@@ -788,7 +780,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   muse: {
     id: "muse",
-    name: "Muse",
+    name: AGENT_NAMES.muse,
     color: "#a860f0",
     poker: { looseness: 0.08, aggression: 0.5, bluff: 0.2, shove: 0.06, noise: 0.25, sizing: 0.8, tilt: 0.2 },
     blackjack: "dreamer",
@@ -936,7 +928,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   kimi: {
     id: "kimi",
-    name: "Kimi",
+    name: AGENT_NAMES.kimi,
     color: "#2f9fd8",
     poker: { looseness: 0, aggression: 0.45, bluff: 0.1, shove: 0.01, noise: 0.08, sizing: 0.65, tilt: 0.2 },
     blackjack: "dealerLike",

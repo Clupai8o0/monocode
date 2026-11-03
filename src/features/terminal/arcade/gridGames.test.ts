@@ -41,9 +41,10 @@ describe("grid game slider", () => {
     expect(stepSlider(0, -1, 0)).toEqual({ index: 0, dir: 1 });
   });
 
-  it("boots every catalogued game onto a board", () => {
+  it("boots every catalogued game onto a board", async () => {
     for (const game of GRID_GAMES) {
-      const arcade = game.create();
+      const create = (await game.load())!;
+      const arcade = create();
       arcade.resize(172, 28);
       arcade.step(33);
       expect(arcade.fade()).toBeGreaterThan(0);
@@ -51,10 +52,11 @@ describe("grid game slider", () => {
     }
   });
 
-  it("gives every game a hint, and Space to games that say they use it", () => {
+  it("gives every game a hint, and Space to games that say they use it", async () => {
     for (const game of GRID_GAMES) {
       expect(game.hint).toBeTruthy();
-      expect(Boolean(game.create().action)).toBe(Boolean(game.hasAction));
+      const create = (await game.load())!;
+      expect(Boolean(create().action)).toBe(Boolean(game.hasAction));
     }
   });
 });

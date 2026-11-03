@@ -56,8 +56,6 @@ import {
   pickNextDrill,
   recordRun,
   saveProgress,
-  solvedTodayCount,
-  streakDays,
   validateDrills,
   type CodeProgress,
   type CodeRunResult,
@@ -771,7 +769,6 @@ export function CodeTable({
   }
 
   const now = Date.now();
-  const streak = streakDays(progress, now);
   const canSeeSolution = session.failed >= 2;
   const slug = drillSlug(drill.id);
   const slugState = slug ? problemState(lcSnapshot, slug) : null;
@@ -805,110 +802,103 @@ export function CodeTable({
             width={110}
           />
         </div>
-        <span
-          className="ml-auto font-mono text-[11px] tabular-nums text-content/55"
-          data-fork-code-stats=""
+        <div
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5"
+          data-fork-code-leetcode=""
         >
-          <span data-fork-code-points={progress.totalPoints}>
-            points {progress.totalPoints}
+          <span className="pr-1 text-[11px] text-content/45">LeetCode</span>
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={leetcodeBusy}
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+            onClick={() => void fetchFromLeetcode({ kind: "daily" })}
+          >
+            Daily
+          </button>
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={leetcodeBusy}
+            title={`A random ${level} problem`}
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+            onClick={() => void fetchFromLeetcode({ kind: "random", level })}
+          >
+            Random
+          </button>
+          <input
+            type="text"
+            value={leetcodeText}
+            disabled={leetcodeBusy}
+            placeholder="number, name or link"
+            aria-label="LeetCode problem"
+            spellCheck={false}
+            className="h-6 w-40 rounded bg-content/5 px-1.5 text-[11px] text-content placeholder:text-content/35 focus:outline-none"
+            onChange={(event) => setLeetcodeText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void fetchFromLeetcode(parseLeetcodeInput(leetcodeText));
+              }
+            }}
+          />
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={leetcodeBusy || !leetcodeText.trim()}
+            className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
+            onClick={() => void fetchFromLeetcode(parseLeetcodeInput(leetcodeText))}
+          >
+            {leetcodeBusy ? "Fetching…" : "Load"}
+          </button>
+          <span className="ml-auto flex items-center gap-0.5" data-fork-leetcode-account="">
+            {lcUser ? (
+              <>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  title="Dojo picks your next problems from your LeetCode history"
+                  className={`${CHIP} ${CHIP_OFF}`}
+                  data-fork-leetcode-pick=""
+                  onClick={() => void pickForMe()}
+                >
+                  Pick for me
+                </button>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-pressed={lcPanel === "account"}
+                  className={`${CHIP} ${lcPanel === "account" ? CHIP_ON : CHIP_OFF}`}
+                  onClick={() => setLcPanel(lcPanel === "account" ? null : "account")}
+                >
+                  {lcSyncing ? "Syncing…" : `@${lcUser}`}
+                </button>
+              </>
+            ) : lcUser === null ? (
+              <>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className={`${CHIP} ${CHIP_OFF}`}
+                  data-fork-leetcode-connect=""
+                  onClick={connectAccount}
+                >
+                  Connect account
+                </button>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-pressed={lcPanel === "paste"}
+                  title="Paste your LeetCode session instead of signing in here"
+                  className={`${CHIP} ${lcPanel === "paste" ? CHIP_ON : CHIP_OFF}`}
+                  onClick={() => setLcPanel(lcPanel === "paste" ? null : "paste")}
+                >
+                  Paste
+                </button>
+              </>
+            ) : null}
           </span>
-          {` · streak ${streak} ${streak === 1 ? "day" : "days"} · solved today ${solvedTodayCount(progress, now)}`}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-0.5" data-fork-code-leetcode="">
-        <span className="pr-1 text-[11px] text-content/45">LeetCode</span>
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={leetcodeBusy}
-          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
-          onClick={() => void fetchFromLeetcode({ kind: "daily" })}
-        >
-          Daily
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={leetcodeBusy}
-          title={`A random ${level} problem`}
-          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
-          onClick={() => void fetchFromLeetcode({ kind: "random", level })}
-        >
-          Random
-        </button>
-        <input
-          type="text"
-          value={leetcodeText}
-          disabled={leetcodeBusy}
-          placeholder="number, name or link"
-          aria-label="LeetCode problem"
-          spellCheck={false}
-          className="h-6 w-40 rounded bg-content/5 px-1.5 text-[11px] text-content placeholder:text-content/35 focus:outline-none"
-          onChange={(event) => setLeetcodeText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void fetchFromLeetcode(parseLeetcodeInput(leetcodeText));
-            }
-          }}
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={leetcodeBusy || !leetcodeText.trim()}
-          className={`${CHIP} ${CHIP_OFF} disabled:opacity-40`}
-          onClick={() => void fetchFromLeetcode(parseLeetcodeInput(leetcodeText))}
-        >
-          {leetcodeBusy ? "Fetching…" : "Load"}
-        </button>
-        <span className="ml-auto flex items-center gap-0.5" data-fork-leetcode-account="">
-          {lcUser ? (
-            <>
-              <button
-                type="button"
-                tabIndex={-1}
-                title="Dojo picks your next problems from your LeetCode history"
-                className={`${CHIP} ${CHIP_OFF}`}
-                data-fork-leetcode-pick=""
-                onClick={() => void pickForMe()}
-              >
-                Pick for me
-              </button>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-pressed={lcPanel === "account"}
-                className={`${CHIP} ${lcPanel === "account" ? CHIP_ON : CHIP_OFF}`}
-                onClick={() => setLcPanel(lcPanel === "account" ? null : "account")}
-              >
-                {lcSyncing ? "Syncing…" : `@${lcUser}`}
-              </button>
-            </>
-          ) : lcUser === null ? (
-            <>
-              <button
-                type="button"
-                tabIndex={-1}
-                className={`${CHIP} ${CHIP_OFF}`}
-                data-fork-leetcode-connect=""
-                onClick={connectAccount}
-              >
-                Connect account
-              </button>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-pressed={lcPanel === "paste"}
-                title="Paste your LeetCode session instead of signing in here"
-                className={`${CHIP} ${lcPanel === "paste" ? CHIP_ON : CHIP_OFF}`}
-                onClick={() => setLcPanel(lcPanel === "paste" ? null : "paste")}
-              >
-                Paste
-              </button>
-            </>
-          ) : null}
-        </span>
+        </div>
       </div>
 
       {lcPanel === "account" && lcUser ? (

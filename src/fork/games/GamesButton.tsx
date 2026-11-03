@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { GameController } from "../../shared/ui/icons";
-import { GamesPanel } from "./GamesPanel";
-import { gamesPanel } from "./gamesPanelStore";
+import { ALL_GAMES, gameEntry } from "./catalog";
+import { gamesPanel, loadLastGame } from "./gamesPanelStore";
 
 /**
  * Fork: the row in the footer's More chip that opens the games panel, to play something while agents
@@ -12,16 +12,38 @@ import { gamesPanel } from "./gamesPanelStore";
 export const FORK_GAMES = import.meta.env.MODE !== "test";
 
 let mounted = false;
+let panelModule: Promise<typeof import("./GamesPanel")> | undefined;
 
-function mountPanel() {
-  if (mounted) {
-    return;
-  }
-  mounted = true;
-  const host = document.createElement("div");
-  host.setAttribute("data-fork-games-root", "");
-  document.body.appendChild(host);
-  createRoot(host).render(<GamesPanel />);
+function loadPanel()
+{
+  panelModule ??= import("./GamesPanel").catch((error) => {
+    panelModule = undefined;
+    throw error;
+  });
+  return panelModule;
+}
+
+export function preloadGamesPanel()
+{
+  void loadPanel().then(({ preloadLastGame }) => preloadLastGame()).catch(() => {});
+}
+
+function mountPanel()
+{
+  void loadPanel().then(({ GamesPanel }) => {
+    if (mounted) {
+      return;
+    }
+    mounted = true;
+    const host = document.createElement("div");
+    host.setAttribute("data-fork-games-root", "");
+    document.body.appendChild(host);
+    createRoot(host).render(<GamesPanel />);
+  }).catch((error) => {
+    console.error("Could not load games", error);
+    // Nothing's on screen, so the next click should open it rather than close it.
+    gamesPanel.hide();
+  });
 }
 
 type Props = {
@@ -36,6 +58,8 @@ export function GamesButton(props: Props) {
 
 function Games({ onBeforeToggle, onToggled }: Props) {
   const open = useSyncExternalStore(gamesPanel.subscribe, gamesPanel.isOpen);
+  // The game this opens, so the row says where it leads.
+  const game = gameEntry(loadLastGame(ALL_GAMES.map((entry) => entry.id)))?.label;
   return (
     <button
       type="button"
@@ -56,6 +80,7 @@ function Games({ onBeforeToggle, onToggled }: Props) {
     >
       <GameController className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
       <span>Games</span>
+      {game ? <span className="ml-auto min-w-0 truncate font-normal text-content/45">{game}</span> : null}
     </button>
   );
 }

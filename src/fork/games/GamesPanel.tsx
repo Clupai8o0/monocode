@@ -1,18 +1,23 @@
 import {
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { GlassBackdrop } from "../../app/shell/GlassBackdrop";
 import {
   ARCADE_MODES,
   type ArcadeMode,
 } from "../../features/terminal/arcade/gridArcade";
 import { GRID_GAMES } from "../../features/terminal/arcade/gridGames";
-import { TerminalGridBackground } from "../../features/terminal/ui/TerminalGridBackground";
+import {
+  TerminalGridBackground,
+  type GridGameHost,
+} from "../../features/terminal/ui/TerminalGridBackground";
 import { LAYER } from "../../shared/lib/layers";
 import {
   Maximize2,
@@ -22,7 +27,11 @@ import {
   Play,
   RotateCcw,
 } from "../../shared/ui/icons";
-import { useAgentActivity } from "../backgroundAgents/runningAgents";
+import {
+  useAgentActivity,
+  waitingSessionId,
+} from "../backgroundAgents/runningAgents";
+import { openOwnSession } from "../sessionRefs/sessionRefs";
 // Fork: finished agent work grows the garden, open or not.
 import { noteAgentActivity } from "./calm/garden";
 import {
@@ -33,35 +42,42 @@ import {
   DEFAULT_SIZES,
   activityLabel,
   activityNotice,
+  gamePopups,
   gamesPanel,
-  loadBest,
   loadFullscreen,
   loadLastGame,
   loadSizes,
-  saveBest,
   saveFullscreen,
   saveLastGame,
   saveSizes,
-  type BestScores,
   type PanelKind,
   type PanelSize,
   type PanelSizes,
 } from "./gamesPanelStore";
 import { ChipSelect, IconButton } from "./ChipSelect";
 // Fork: poker, blackjack and chess share the panel with the grid games.
+import { TableGames } from "./table/TableGames";
+import { TableScore } from "./table/TableScore";
+import { ALL_GAMES, gameEntry, isTableGame } from "./catalog";
+import { GamePicker } from "./GamePicker";
+import { preloadGame } from "./gameLoaders";
 import {
-  TABLE_GAMES,
-  TableGames,
-  TableScore,
-  isTableGame,
-  tableHint,
-} from "./table/TableGames";
+  flushBest,
+  liveScore,
+  reportScore,
+  subscribeLiveScore,
+} from "./liveScore";
+import "./games.css";
 
 /**
  * Fork: a floating panel that plays the grid games. It isn't modal, so the chat
  * underneath keeps working; the game simply pauses whenever the board doesn't
  * have the keyboard. Hiding is display:none, which parks the board's draw loop
  * and keeps the game where it was.
+ *
+ * Nothing that changes while you play re-renders this: the score goes straight
+ * to its readout, and a drag writes the size to the DOM until it ends. The board
+ * and the tables only hear about what they use.
  */
 
 /** Clear of the footer and the window's edge. */
@@ -99,11 +115,14 @@ function withSize(
   return kind === "grid" ? { ...sizes, grid: size } : { ...sizes, table: size };
 }
 
-const GAME_OPTIONS = [...GRID_GAMES, ...TABLE_GAMES].map(({ id, label }) => ({
-  id,
-  label,
-}));
+const GAME_IDS = ALL_GAMES.map((entry) => entry.id);
 const MODE_OPTIONS = ARCADE_MODES.map((id) => ({ id, label: id }));
+
+/** Warms the game the panel would open with, before the click that opens it. */
+export function preloadLastGame()
+{
+  preloadGame(loadLastGame(GAME_IDS));
+}
 
 type ResizeAxis = "both" | "x" | "y";
 
@@ -117,7 +136,43 @@ type ResizeSession = {
   startY: number;
   startSize: PanelSize;
   size: PanelSize;
+  /** Where the pointer is now; drawn once a frame, however fast it reports. */
+  x: number;
+  y: number;
+  frame: number | null;
 };
+
+const MemoGrid = memo(TerminalGridBackground);
+const MemoTables = memo(TableGames);
+
+/** Jumps to a session from a panel that may be in a window without one. */
+async function goToSession(id: string) {
+  try {
+    await openOwnSession(id);
+  } catch {
+    // Outside the app there's no session to open.
+  }
+}
+
+/** The one thing here that changes many times a second. */
+function GridScore({ gameId, showLives }: { gameId: string; showLives: boolean }) {
+  const { score, lives, best } = useSyncExternalStore(
+    subscribeLiveScore,
+    liveScore,
+    liveScore,
+  );
+  return (
+    <>
+      <span data-fork-games-score={score}>score {score}</span>
+      <span className="text-content/35">best {best[gameId] ?? 0}</span>
+      {showLives ? (
+        <span className="text-content/35" aria-label={`${lives} lives`}>
+          {"•".repeat(lives)}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 export function GamesPanel() {
   const open = useSyncExternalStore(gamesPanel.subscribe, gamesPanel.isOpen);
@@ -126,7 +181,7 @@ export function GamesPanel() {
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [gameId, setGameId] = useState(() =>
-    loadLastGame([...GRID_GAMES, ...TABLE_GAMES].map((game) => game.id)),
+    loadLastGame(GAME_IDS),
   );
   const [mode, setMode] = useState<ArcadeMode>("mid");
   const [runId, setRunId] = useState(0);
@@ -134,8 +189,8 @@ export function GamesPanel() {
   const [notice, setNotice] = useState<string | null>(null);
   // Fork: a pause you asked for, which hiding the panel keeps.
   const [userPaused, setUserPaused] = useState(false);
-  const [stats, setStats] = useState({ score: 0, lives: 0, over: false });
-  const [best, setBest] = useState<BestScores>(loadBest);
+  const [over, setOver] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Fork: grid games and tables are sized apart, and full screen is a choice.
   const [sizes, setSizes] = useState<PanelSizes>(loadSizes);
   const sizesRef = useRef(sizes);
@@ -163,12 +218,19 @@ export function GamesPanel() {
   const paused = !open || !focused || notice !== null || atTable || userPaused;
   const kind: PanelKind = atTable ? "table" : "grid";
   const size = clampSize(sizes[kind], bounds);
+  const entry = gameEntry(gameId);
 
   // A smaller window takes room back from a panel made for a bigger one.
   useEffect(() => {
     const fit = () => setBounds(room());
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
+  }, []);
+
+  // Quitting inside the second a new best waits to be written would lose it.
+  useEffect(() => {
+    window.addEventListener("pagehide", flushBest);
+    return () => window.removeEventListener("pagehide", flushBest);
   }, []);
 
   // Side by side, the app narrows to the space left of the panel, so
@@ -220,10 +282,24 @@ export function GamesPanel() {
     }
   }, [activity]);
 
-  const resume = () => {
+  // A best waiting on its timer goes to disk once the run or the panel is done.
+  useEffect(() => {
+    if (over || !open) {
+      flushBest();
+    }
+  }, [over, open]);
+
+  const resume = useCallback(() => {
     setNotice(null);
     setUserPaused(false);
-  };
+  }, []);
+
+  // Esc on a dropdown is the dropdown's; the board hears it first.
+  const hideFromKey = useCallback(() => {
+    if (!gamePopups.anyOpen()) {
+      gamesPanel.hide();
+    }
+  }, []);
 
   const focusBoard = () => {
     root.current
@@ -253,19 +329,24 @@ export function GamesPanel() {
     focusBoard();
   };
 
+  // What the board's stable callbacks read when they fire.
+  const latest = useRef({ userPaused, notice, over, gridId });
+  latest.current = { userPaused, notice, over, gridId };
+
   // Fork: P parks a grid game where it is, and brings it back.
-  const togglePause = () => {
-    if (userPaused || notice) {
+  const togglePause = useCallback(() => {
+    const now = latest.current;
+    if (now.userPaused || now.notice) {
       resume();
       return;
     }
-    if (!stats.over) {
+    if (!now.over) {
       setUserPaused(true);
     }
-  };
+  }, [resume]);
 
   // Fork: fills the window, but never the footer. Not the OS's own full screen.
-  const toggleFullscreen = () => {
+  const toggleFullscreen = useCallback(() => {
     // Side by side has no full screen; F waits until the panel floats again.
     if (gamesPanel.isDocked()) {
       return;
@@ -275,6 +356,53 @@ export function GamesPanel() {
       saveFullscreen(next);
       return next;
     });
+  }, []);
+
+  const onStats = useCallback((score: number, lives: number, ended: boolean) => {
+    reportScore(latest.current.gridId, score, lives);
+    setOver(ended);
+  }, []);
+
+  const hostActive = open && !atTable;
+  const host = useMemo<GridGameHost>(
+    () => ({
+      gameId: gridId,
+      mode,
+      runId,
+      paused,
+      active: hostActive,
+      onStats,
+      onExit: hideFromKey,
+      onFocusChange: setFocused,
+      onInput: resume,
+      onPauseKey: togglePause,
+      onFullscreenKey: toggleFullscreen,
+    }),
+    [
+      gridId,
+      mode,
+      runId,
+      paused,
+      hostActive,
+      onStats,
+      hideFromKey,
+      resume,
+      togglePause,
+      toggleFullscreen,
+    ],
+  );
+
+  /** Takes you to whoever is waiting. Docked, the app is already beside the game. */
+  const openWaiting = () => {
+    const id = waitingSessionId();
+    setNotice(null);
+    if (!id) {
+      return;
+    }
+    if (!gamesPanel.isDocked()) {
+      gamesPanel.hide();
+    }
+    void goToSession(id);
   };
 
   const startResize =
@@ -298,24 +426,26 @@ export function GamesPanel() {
         startY: event.clientY,
         startSize: start,
         size: start,
+        x: event.clientX,
+        y: event.clientY,
+        frame: null,
       };
     };
 
-  const resizeTo = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const session = resizing.current;
-    if (!session || session.pointerId !== event.pointerId) {
-      return;
-    }
-    event.preventDefault();
+  /** Draws a drag straight to the DOM, so the panel and the app don't re-render for it. */
+  const drawResize = (session: ResizeSession) => {
+    const panel = root.current;
     if (session.docked) {
       const width = clampDockWidth(
-        session.startSize.width + session.startX - event.clientX,
+        session.startSize.width + session.startX - session.x,
         // The margins come out first, so the app keeps its full minimum.
         window.innerWidth - MARGIN * 2,
         MIN_WIDTH,
       );
       session.size = { width, height: 0 };
-      setDockWanted(width);
+      if (panel) {
+        panel.style.width = `${width}px`;
+      }
       return;
     }
     const next = clampSize(
@@ -323,18 +453,33 @@ export function GamesPanel() {
         width:
           session.axis === "y"
             ? session.startSize.width
-            : session.startSize.width + session.startX - event.clientX,
+            : session.startSize.width + session.startX - session.x,
         height:
           session.axis === "x"
             ? session.startSize.height
-            : session.startSize.height + session.startY - event.clientY,
+            : session.startSize.height + session.startY - session.y,
       },
       room(),
     );
     session.size = next;
-    const updated = withSize(sizesRef.current, session.kind, next);
-    sizesRef.current = updated;
-    setSizes(updated);
+    if (panel) {
+      panel.style.width = `${next.width}px`;
+      panel.style.height = `${next.height}px`;
+    }
+  };
+
+  const resizeTo = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const session = resizing.current;
+    if (!session || session.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    session.x = event.clientX;
+    session.y = event.clientY;
+    session.frame ??= requestAnimationFrame(() => {
+      session.frame = null;
+      drawResize(session);
+    });
   };
 
   const endResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -348,12 +493,23 @@ export function GamesPanel() {
     } catch {
       // Already released.
     }
-    // Written once the drag ends, never on every step.
+    if (session.frame !== null) {
+      cancelAnimationFrame(session.frame);
+      session.frame = null;
+    }
+    session.x = event.clientX;
+    session.y = event.clientY;
+    drawResize(session);
+    // State, the app beside a docked panel and the disk all hear once, at the end.
     if (session.docked) {
+      setDockWanted(session.size.width);
       saveDockWidth(session.size.width);
       return;
     }
-    saveSizes(withSize(sizesRef.current, session.kind, session.size));
+    const updated = withSize(sizesRef.current, session.kind, session.size);
+    sizesRef.current = updated;
+    setSizes(updated);
+    saveSizes(updated);
   };
 
   const resetSize = () => {
@@ -363,20 +519,8 @@ export function GamesPanel() {
     saveSizes(next);
   };
 
-  const onStats = (score: number, lives: number, over: boolean) => {
-    setStats({ score, lives, over });
-    setBest((current) => {
-      if (score <= (current[gridId] ?? 0)) {
-        return current;
-      }
-      const next = { ...current, [gridId]: score };
-      saveBest(next);
-      return next;
-    });
-  };
-
   // Fork: a drill has no clock, and a finished grid game has nothing to pause.
-  const canPause = atTable ? gameId !== "code" : !stats.over;
+  const canPause = atTable ? gameId !== "code" : !over;
 
   const status = notice
     ? notice
@@ -386,13 +530,14 @@ export function GamesPanel() {
         : "paused · P or click to resume"
       : atTable
         ? null
-        : stats.over
+        : over
           ? game.hasAction
             ? "game over · space to retry"
             : "game over"
           : !focused && open
             ? "paused · click to play"
             : null;
+  const label = activityLabel(activity);
 
   return (
     <div
@@ -400,12 +545,13 @@ export function GamesPanel() {
       role="dialog"
       aria-label="Games"
       data-fork-games-panel=""
+      data-docked={docked ? "" : undefined}
       onKeyDown={(event) => {
         // Fork: a parked table ignores keys, so Esc is heard here instead.
         if (userPaused && atTable && event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
-          gamesPanel.hide();
+          hideFromKey();
         }
       }}
       style={{
@@ -420,27 +566,37 @@ export function GamesPanel() {
             : { width: size.width, height: size.height }),
         display: open ? undefined : "none",
       }}
-      className="fixed isolate flex flex-col overflow-hidden rounded-xl border border-content/10 text-content shadow-xl"
+      className={`fixed isolate flex flex-col overflow-hidden rounded-xl border border-content/10 text-content ${
+        docked ? "" : "shadow-xl"
+      }`}
     >
-      <GlassBackdrop />
       <header
-        className="relative z-[1] flex shrink-0 items-center gap-1.5 px-2 pt-2 pb-1.5"
+        className="flex h-10 shrink-0 items-center gap-1.5 pr-2 pl-3"
         onMouseDown={(event) => event.preventDefault()}
       >
-        <ChipSelect
-          label="Game"
+        <GamePicker
           value={gameId}
-          options={GAME_OPTIONS}
-          onChange={pickGame}
+          onPick={pickGame}
+          onOpenChange={setPickerOpen}
+          onHover={preloadGame}
         />
-        <ChipSelect
-          label="Difficulty"
-          value={mode}
-          options={MODE_OPTIONS}
-          onChange={pickMode}
-          width={110}
-        />
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        {entry?.usesMode === false ? null : (
+          <ChipSelect
+            label="Difficulty"
+            value={mode}
+            options={MODE_OPTIONS}
+            onChange={pickMode}
+            width={110}
+          />
+        )}
+        <div className="ml-1.5 flex min-w-0 flex-1 items-center gap-3 overflow-hidden whitespace-nowrap font-mono text-[11px] tabular-nums text-content/55">
+          {atTable ? (
+            <TableScore gameId={gameId} />
+          ) : (
+            <GridScore gameId={gameId} showLives={game.lives} />
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
           {canPause ? (
             <IconButton
               icon={userPaused ? Play : Pause}
@@ -477,26 +633,8 @@ export function GamesPanel() {
           <IconButton icon={Minus} label="Hide" onClick={() => gamesPanel.hide()} />
         </div>
       </header>
-      <div className="relative z-[1] flex shrink-0 items-center gap-3 px-3 pb-1.5 font-mono text-[11px] tabular-nums text-content/55">
-        {atTable ? (
-          <TableScore gameId={gameId} />
-        ) : (
-          <>
-            <span data-fork-games-score={stats.score}>score {stats.score}</span>
-            <span className="text-content/35">best {best[gameId] ?? 0}</span>
-          </>
-        )}
-        {!atTable && game.lives ? (
-          <span className="text-content/35" aria-label={`${stats.lives} lives`}>
-            {"•".repeat(stats.lives)}
-          </span>
-        ) : null}
-        <span className="ml-auto truncate text-content/35">
-          {activityLabel(activity) || (atTable ? tableHint(gameId) : game.hint)}
-        </span>
-      </div>
       <div
-        className={`relative z-[1] min-h-0 flex-1 ${atTable ? "" : "cursor-pointer"}`}
+        className={`relative isolate min-h-0 flex-1 ${atTable ? "" : "cursor-pointer"}`}
         onMouseDown={() => {
           resume();
           if (!atTable) {
@@ -509,41 +647,28 @@ export function GamesPanel() {
           style={atTable ? { display: "none" } : undefined}
         >
           {/* Mounted with the panel, so it's only ever made once it's wanted. */}
-          <TerminalGridBackground
-            host={{
-              gameId: gridId,
-              mode,
-              runId,
-              paused,
-              active: open && !atTable,
-              onStats,
-              onExit: () => gamesPanel.hide(),
-              onFocusChange: setFocused,
-              onInput: resume,
-              onPauseKey: togglePause,
-              onFullscreenKey: toggleFullscreen,
-            }}
-          />
+          <MemoGrid host={host} />
         </div>
         {tableOpened.current ? (
-          <TableGames
+          <MemoTables
             gameId={gameId}
             mode={mode}
             runId={tableRun}
             open={open}
-            paused={!open || userPaused}
+            // The picker's search box has the keyboard, so a race can't run behind it.
+            paused={!open || userPaused || pickerOpen}
             waiting={activity.waiting}
-            onExit={() => gamesPanel.hide()}
+            onExit={hideFromKey}
             onInput={resume}
           />
         ) : null}
-        {status ? (
+        <div key={gameId} aria-hidden="true" className="games-swap" />
+        {status && !pickerOpen ? (
           <div
-            className={`absolute inset-0 z-30 grid place-items-center ${
-              userPaused
-                ? "pointer-events-auto cursor-pointer"
-                : "pointer-events-none"
-            }`}
+            data-fork-games-status=""
+            className={`absolute inset-0 z-30 grid justify-items-center ${
+              notice ? "items-start pt-3" : "items-center"
+            } ${userPaused ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}`}
             onMouseDown={
               userPaused
                 ? (event) => {
@@ -562,13 +687,96 @@ export function GamesPanel() {
                 : undefined
             }
           >
-            <span
-              role="status"
-              className="bg-background-base/85 px-3 py-1.5 font-mono text-[11px] tracking-[0.14em] text-content/85"
-            >
-              {status}
-            </span>
+            <div className="games-card">
+              {notice === "An agent needs you" ? (
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 shrink-0 rounded-full bg-amber-400"
+                />
+              ) : null}
+              <span
+                role="status"
+                className="min-w-0 truncate font-mono text-[11px] tracking-[0.04em] text-content/85"
+              >
+                {status}
+              </span>
+              {notice ? (
+                <span className="flex shrink-0 items-center gap-1">
+                  {notice === "An agent needs you" ? (
+                    <button
+                      type="button"
+                      data-fork-games-open-session=""
+                      className="games-action games-action-primary"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openWaiting();
+                      }}
+                    >
+                      Open session
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="games-action"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      resume();
+                      focusBoard();
+                    }}
+                  >
+                    Keep playing
+                  </button>
+                </span>
+              ) : over && !atTable && !userPaused ? (
+                <button
+                  type="button"
+                  data-fork-games-again=""
+                  className="games-action games-action-primary"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={newGame}
+                >
+                  Play again
+                </button>
+              ) : null}
+            </div>
           </div>
+        ) : null}
+      </div>
+      <div
+        data-fork-games-foot=""
+        className="flex h-6 shrink-0 items-center gap-3 px-3 font-mono text-[11px] text-content/40"
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        <span className="min-w-0 truncate">{entry?.hint}</span>
+        {label ? (
+          activity.waiting ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              title="Open the session that needs you"
+              className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded px-1 text-content/70 transition-colors duration-100 hover:bg-content/10 hover:text-content"
+              onClick={openWaiting}
+            >
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-400" />
+              {label}
+            </button>
+          ) : (
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-content/25" />
+              {label}
+            </span>
+          )
         ) : null}
       </div>
       {docked ? (
@@ -606,7 +814,7 @@ export function GamesPanel() {
             aria-label="Resize games"
             data-fork-games-resize=""
             tabIndex={-1}
-            className="absolute top-0 left-0 z-20 grid h-3.5 w-3.5 cursor-nwse-resize touch-none place-items-center text-content/25 outline-none hover:text-content/50"
+            className="absolute top-0 left-0 z-20 grid h-3 w-3 cursor-nwse-resize touch-none place-items-center text-content/50 opacity-0 outline-none transition-opacity duration-100 hover:opacity-100"
             onPointerDown={startResize("both")}
             onPointerMove={resizeTo}
             onPointerUp={endResize}

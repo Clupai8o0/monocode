@@ -43,6 +43,25 @@ export const gamesPanel = {
   },
 };
 
+/**
+ * A dropdown open over the panel owns Esc. The boards hear the key first and ask
+ * here before hiding the panel, and a dropdown closing counts as open until the
+ * key that closed it has finished going round, whichever listener ran first.
+ */
+let popups = 0;
+
+export const gamePopups = {
+  opened() {
+    popups += 1;
+  },
+  closed() {
+    setTimeout(() => {
+      popups -= 1;
+    }, 0);
+  },
+  anyOpen: () => popups > 0,
+};
+
 export type BestScores = Record<string, number>;
 
 export function loadBest(): BestScores {

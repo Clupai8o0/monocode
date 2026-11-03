@@ -34,6 +34,17 @@ const FRAME_MS = 33;
 const SLIDE_MS = 800;
 /** Fork: how often a paused host game repaints. */
 const PAUSED_PAINT_MS = 250;
+// Fork: less than one alpha byte of error, with no per-cell strings in paint.
+const OPACITY_LEVELS = 1024;
+/** After a game's code fails to load, how long before asking for it again. */
+const LOAD_RETRY_MS = 5000;
+
+function cellFills(rgb: string)
+{
+  return Array.from({ length: OPACITY_LEVELS + 1 }, (_, level) =>
+    `rgba(${rgb}, ${level / OPACITY_LEVELS})`,
+  );
+}
 
 const HEADING: Record<string, { x: number; y: number }> = {
   ArrowUp: { x: 0, y: -1 },
@@ -75,6 +86,12 @@ type Board = {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   bubbleAt: { x: number; y: number } | null;
+  cols: number;
+  rows: number;
+  started: boolean;
+  width: number;
+  height: number;
+  dpr: number;
 };
 
 /**
@@ -180,8 +197,10 @@ export function TerminalGridBackground({
   host,
 }: { host?: GridGameHost } = {}) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
-  const boardsRef = useRef<Board[] | null>(null);
+  // Fork: empty slots cost no canvas memory until their game is shown.
+  const slotsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const invalidateRef = useRef<() => void>(() => {});
+  const boardsRef = useRef<(Board | undefined)[] | null>(null);
   const indexRef = useRef(0);
   const playingRef = useRef(false);
   const scoreRef = useRef(0);
@@ -192,13 +211,28 @@ export function TerminalGridBackground({
   hostRef.current = host;
   const overRef = useRef(false);
   const heldRef = useRef(new Map<string, { x: number; y: number }>());
+  // Fork: keys pressed before this game's code had loaded, played when it has.
+  const missedRef = useRef(new Map<string, { x: number; y: number }>());
+  const [loadFailed, setLoadFailed] = useState<number | null>(null);
   const [over, setOver] = useState(false);
   const [playing, setPlaying] = useState(!!host);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
+  // Fork: a host draws the score itself, so the board doesn't re-render for it.
+  const showScore = useCallback((next: number) => {
+    scoreRef.current = next;
+    const gameHost = hostRef.current;
+    if (gameHost) {
+      gameHost.onStats(next, livesRef.current, overRef.current);
+    } else {
+      setScore(next);
+    }
+  }, []);
   const [mode, setMode] = useState<ArcadeMode>("mid");
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [slide, setSlide] = useState<{ index: number; dir: 1 | -1 }>({
-    index: 0,
+    index: Math.max(0, GRID_GAMES.findIndex((item) => item.id === host?.gameId)),
     dir: 1,
   });
   const [hovered, setHovered] = useState(false);
@@ -212,20 +246,14 @@ export function TerminalGridBackground({
     const root = rootRef.current;
     if (!root) return;
 
-    const boards: Board[] = [];
-    for (let i = 0; i < GRID_GAMES.length; i++) {
-      const canvas = canvasRefs.current[i];
-      const ctx = canvas?.getContext("2d");
-      const spec = GRID_GAMES[i];
-      if (!canvas || !ctx || !spec) return;
-      boards.push({
-        game: spec,
-        arcade: spec.create(),
-        canvas,
-        ctx,
-        bubbleAt: null,
-      });
-    }
+    // Fork: only visible games are imported and made; parked boards keep state.
+    const boards: (Board | undefined)[] = [];
+    const loading = new Set<number>();
+    let disposed = false;
+    let layoutDirty = true;
+    let gridDirty = true;
+    let dpr = 0;
+    const retryAt = new Map<number, number>();
     boardsRef.current = boards;
 
     const logos = Object.fromEntries(
@@ -249,15 +277,23 @@ export function TerminalGridBackground({
     let height = 0;
     let stamp = new Float32Array(0);
     let rgb = parseContentRgb();
+    let fills = cellFills(rgb);
     let surfaceRgb = parseSurfaceRgb();
     let lastFrame = 0;
     let lastPausedPaint = 0;
 
     const drawGrid = () => {
       if (!gridCtx || width <= 0 || height <= 0) return;
-      const dpr = window.devicePixelRatio || 1;
-      gridCanvas.width = Math.floor(width * dpr);
-      gridCanvas.height = Math.floor(height * dpr);
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (gridCanvas.width !== pixelWidth) {
+        gridCanvas.width = pixelWidth;
+      }
+      if (gridCanvas.height !== pixelHeight) {
+        gridCanvas.height = pixelHeight;
+      }
+      gridCtx.setTransform(1, 0, 0, 1, 0, 0);
+      gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
       gridCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gridCtx.lineWidth = 1;
       gridCtx.strokeStyle = `rgba(${rgb}, ${BORDER_OPACITY})`;
@@ -273,37 +309,117 @@ export function TerminalGridBackground({
       }
     };
 
-    // Hidden tabs collapse to zero size, so the loop parks itself there and
-    // the resize observer wakes it once the pane shows again.
+    const onScreen = () => !document.hidden && (!hostRef.current || hostRef.current.active);
     const start = () => {
-      if (raf || document.hidden || width <= 0 || height <= 0) return;
-      lastFrame = 0;
+      if (raf || !onScreen()) {
+        return;
+      }
       raf = requestAnimationFrame(draw);
+    };
+    const invalidate = () => {
+      layoutDirty = true;
+      if (!raf) {
+        lastFrame = 0;
+      }
+      start();
+    };
+    invalidateRef.current = invalidate;
+
+    const ensureBoard = (index: number) => {
+      const spec = GRID_GAMES[index];
+      if (
+        !spec || boards[index] || loading.has(index) ||
+        performance.now() < (retryAt.get(index) ?? 0)
+      ) {
+        return;
+      }
+      loading.add(index);
+      void spec.load().then((create) => {
+        loading.delete(index);
+        const slot = slotsRef.current[index];
+        if (disposed || !create || !slot || index !== indexRef.current || !onScreen()) {
+          return;
+        }
+        const rect = root.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return;
+        }
+        canvas.className = "absolute inset-0 h-full w-full";
+        canvas.setAttribute("aria-hidden", "true");
+        const arcade = create();
+        slot.appendChild(canvas);
+        boards[index] = {
+          game: spec, arcade, canvas, ctx, bubbleAt: null,
+          cols: 0, rows: 0, started: false, width: 0, height: 0, dpr: 0,
+        };
+        retryAt.delete(index);
+        setLoadFailed((failed) => (failed === index ? null : failed));
+        invalidate();
+      }).catch((error) => {
+        loading.delete(index);
+        // The draw loop asks every frame, so it waits a while before asking again.
+        retryAt.set(index, performance.now() + LOAD_RETRY_MS);
+        setLoadFailed(index);
+        console.error("Could not load arcade", error);
+      });
     };
 
     const layout = () => {
-      const rect = root.getBoundingClientRect();
-      width = rect.width;
-      height = rect.height;
-      if (width <= 0 || height <= 0) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      const nextCols = Math.ceil(width / PITCH);
-      const nextRows = Math.ceil(height / PITCH);
-
-      for (const board of boards) {
-        board.canvas.width = Math.floor(width * dpr);
-        board.canvas.height = Math.floor(height * dpr);
-        board.canvas.style.width = `${width}px`;
-        board.canvas.style.height = `${height}px`;
-        board.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        board.arcade.resize(nextCols, nextRows);
+      layoutDirty = false;
+      // Fork: not the bounding box. The panel opens on a scale animation, and no
+      // resize fires when that ends, so a size read halfway through would stick.
+      const nextWidth = root.clientWidth;
+      const nextHeight = root.clientHeight;
+      const nextDpr = window.devicePixelRatio || 1;
+      if (nextWidth !== width || nextHeight !== height || nextDpr !== dpr) {
+        width = nextWidth;
+        height = nextHeight;
+        dpr = nextDpr;
+        cols = Math.ceil(width / PITCH);
+        rows = Math.ceil(height / PITCH);
+        gridDirty = true;
       }
+    };
 
-      cols = nextCols;
-      rows = nextRows;
-      drawGrid();
-      start();
+    const sizeBoard = (board: Board) => {
+      if (board.width === width && board.height === height && board.dpr === dpr && board.started === playingRef.current) {
+        return;
+      }
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (board.canvas.width !== pixelWidth) {
+        board.canvas.width = pixelWidth;
+      }
+      if (board.canvas.height !== pixelHeight) {
+        board.canvas.height = pixelHeight;
+      }
+      board.canvas.style.width = `${width}px`;
+      board.canvas.style.height = `${height}px`;
+      board.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (board.cols !== cols || board.rows !== rows) {
+        board.arcade.resize(cols, rows);
+        board.cols = cols;
+        board.rows = rows;
+      }
+      board.width = width;
+      board.height = height;
+      board.dpr = dpr;
+      if (!board.started && playingRef.current) {
+        board.arcade.setMode(hostRef.current?.mode ?? modeRef.current);
+        board.arcade.takeControl();
+        // Fork: a key already down while this game's code loaded still counts.
+        for (const [code, heading] of missedRef.current) {
+          if (code === "Space") board.arcade.action?.();
+          else board.arcade.steer(heading.x, heading.y);
+        }
+        missedRef.current.clear();
+      }
+      board.started = playingRef.current;
     };
 
     const paint = (board: Board, width: number, height: number) => {
@@ -317,11 +433,16 @@ export function TerminalGridBackground({
       ctx.clearRect(0, 0, width, height);
 
       const peak = PEAK_OPACITY * dim;
+      let lastLevel = -1;
       for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
           const fillOpacity = (stamp[y * cols + x] ?? 0) * peak;
           if (fillOpacity > 0.02) {
-            ctx.fillStyle = `rgba(${rgb}, ${fillOpacity})`;
+            const level = Math.min(OPACITY_LEVELS, Math.round(fillOpacity * OPACITY_LEVELS));
+            if (level !== lastLevel) {
+              ctx.fillStyle = fills[level]!;
+              lastLevel = level;
+            }
             ctx.fillRect(x * PITCH, y * PITCH, CELL, CELL);
           }
         }
@@ -401,38 +522,69 @@ export function TerminalGridBackground({
       );
     };
 
-    function draw(time: number) {
-      if (document.hidden || width <= 0 || height <= 0) {
-        raf = 0;
+    function draw(time: number)
+    {
+      raf = 0;
+      if (!onScreen()) {
+        lastFrame = 0;
         return;
       }
-      raf = requestAnimationFrame(draw);
-      if (time - lastFrame < FRAME_MS) return;
-      const dt = lastFrame ? time - lastFrame : FRAME_MS;
-      lastFrame = time;
-
+      const relayout = layoutDirty;
+      if (layoutDirty) {
+        layout();
+      }
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      start();
       const current = indexRef.current;
-      const controlled = playingRef.current;
-      // Fork: a paused host game holds still, repainting only now and then
-      // so a resize or a theme change still shows.
-      if (hostRef.current?.paused) {
-        if (time - lastPausedPaint < PAUSED_PAINT_MS) return;
-        lastPausedPaint = time;
-        const held = boards[current];
-        if (held) paint(held, width, height);
-        return;
+      ensureBoard(current);
+      const sliding = !playingRef.current && time - slideAtRef.current < SLIDE_MS;
+      const visible = new Set([current]);
+      if (sliding) {
+        // Any board the track is carrying past the window, not only the last one.
+        const rootBox = rootRef.current?.getBoundingClientRect();
+        boards.forEach((board, i) => {
+          const slot = board && slotsRef.current[i]?.getBoundingClientRect();
+          if (slot && rootBox && slot.right > rootBox.left && slot.left < rootBox.right) {
+            visible.add(i);
+          }
+        });
       }
-      // Only the board on screen needs pixels, bar mid-slide when two show.
-      const sliding = time - slideAtRef.current < SLIDE_MS;
-
       for (let i = 0; i < boards.length; i++) {
         const board = boards[i];
-        if (!board) continue;
-        // A live game only ticks the board you're on; idle keeps neighbours
-        // moving so a slide doesn't reveal a frozen frame.
-        if (controlled && i !== current) continue;
-        board.arcade.step(dt);
-        if (i === current || sliding) paint(board, width, height);
+        if (board && visible.has(i)) {
+          sizeBoard(board);
+        }
+      }
+      if (gridDirty) {
+        drawGrid();
+        gridDirty = false;
+      }
+      if (!relayout && time - lastFrame < FRAME_MS) {
+        return;
+      }
+      const dt = lastFrame ? time - lastFrame : FRAME_MS;
+      lastFrame = time;
+      const controlled = playingRef.current;
+      const paused = hostRef.current?.paused;
+      if (paused && !relayout && time - lastPausedPaint < PAUSED_PAINT_MS) {
+        return;
+      }
+      if (paused) {
+        lastPausedPaint = time;
+      }
+      for (let i = 0; i < boards.length; i++) {
+        const board = boards[i];
+        if (!board || (controlled && i !== current)) {
+          continue;
+        }
+        if (!paused) {
+          board.arcade.step(dt);
+        }
+        if (visible.has(i)) {
+          paint(board, width, height);
+        }
       }
 
       const active = boards[current];
@@ -440,8 +592,7 @@ export function TerminalGridBackground({
 
       const nextScore = active.arcade.score();
       if (nextScore !== scoreRef.current) {
-        scoreRef.current = nextScore;
-        setScore(nextScore);
+        showScore(nextScore);
       }
       const nextLives = active.arcade.lives();
       if (nextLives !== livesRef.current) {
@@ -455,11 +606,15 @@ export function TerminalGridBackground({
       }
     }
 
-    layout();
+    invalidate();
 
-    document.addEventListener("visibilitychange", start);
+    const visibilityChanged = () => {
+      lastFrame = 0;
+      invalidate();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
 
-    const resizeObserver = new ResizeObserver(layout);
+    const resizeObserver = new ResizeObserver(invalidate);
     resizeObserver.observe(root);
 
     const themeObserver = new MutationObserver(() => {
@@ -467,7 +622,9 @@ export function TerminalGridBackground({
       surfaceRgb = parseSurfaceRgb();
       if (next === rgb) return;
       rgb = next;
-      drawGrid();
+      fills = cellFills(rgb);
+      gridDirty = true;
+      invalidate();
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
@@ -475,8 +632,13 @@ export function TerminalGridBackground({
     });
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
-      document.removeEventListener("visibilitychange", start);
+      invalidateRef.current = () => {};
+      for (const board of boards) {
+        board?.canvas.remove();
+      }
+      document.removeEventListener("visibilitychange", visibilityChanged);
       resizeObserver.disconnect();
       themeObserver.disconnect();
       boardsRef.current = null;
@@ -490,17 +652,18 @@ export function TerminalGridBackground({
       arcade?.steerEnd?.(heading.x, heading.y);
     }
     heldRef.current.clear();
+    missedRef.current.clear();
   }, []);
 
   // Fork: the host's game and run decide what's on the board.
   const hostGameId = host?.gameId;
   const hostRunId = host?.runId;
+  const lastHostRunRef = useRef(hostRunId);
   useEffect(() => {
     if (hostGameId === undefined) return;
     const boards = boardsRef.current;
     if (!boards) return;
     releaseHeld();
-    boards[indexRef.current]?.arcade.releaseControl();
     const next = Math.max(
       0,
       GRID_GAMES.findIndex((item) => item.id === hostGameId),
@@ -509,45 +672,56 @@ export function TerminalGridBackground({
     indexRef.current = next;
     setSlide({ index: next, dir: 1 });
     board?.arcade.setMode(hostRef.current?.mode ?? "mid");
-    board?.arcade.takeControl();
-    scoreRef.current = 0;
-    livesRef.current = board?.arcade.lives() ?? 0;
-    overRef.current = false;
-    setScore(0);
+    if (board && hostRunId !== lastHostRunRef.current) {
+      board.arcade.releaseControl();
+      board.arcade.takeControl();
+    }
+    lastHostRunRef.current = hostRunId;
+    scoreRef.current = board?.arcade.score() ?? 0;
+    // Fork: a board still loading hasn't lost any lives.
+    livesRef.current = board?.arcade.lives() ?? 3;
+    overRef.current = board?.arcade.gameOver() ?? false;
+    showScore(scoreRef.current);
     setLives(livesRef.current);
-    setOver(false);
+    setOver(overRef.current);
+    invalidateRef.current();
     if (hostRef.current?.active) rootRef.current?.focus();
-  }, [hostGameId, hostRunId, releaseHeld]);
+  }, [hostGameId, hostRunId, releaseHeld, showScore]);
 
   const hostMode = host?.mode;
   useEffect(() => {
-    if (hostMode) boardsRef.current?.[indexRef.current]?.arcade.setMode(hostMode);
+    if (hostMode) {
+      boardsRef.current?.[indexRef.current]?.arcade.setMode(hostMode);
+    }
   }, [hostMode]);
 
   const hostActive = host?.active;
   useEffect(() => {
-    if (hostActive) rootRef.current?.focus();
+    if (hostActive) {
+      rootRef.current?.focus();
+    }
+    invalidateRef.current();
   }, [hostActive]);
 
-  // Fork: tell the host about every score change, in one place.
+  // Fork: lives and game over reach the host here; the score goes in showScore.
   useEffect(() => {
-    hostRef.current?.onStats(score, lives, over);
-  }, [score, lives, over]);
+    hostRef.current?.onStats(scoreRef.current, lives, over);
+  }, [lives, over]);
 
   const takeControl = useCallback(() => {
     const board = boardsRef.current?.[indexRef.current];
     board?.arcade.setMode(mode);
     board?.arcade.takeControl();
     scoreRef.current = 0;
-    livesRef.current = board?.arcade.lives() ?? 0;
+    livesRef.current = board?.arcade.lives() ?? 3;
     overRef.current = false;
     setOver(false);
-    setScore(0);
+    showScore(0);
     setLives(livesRef.current);
     setPlaying(true);
     const active = document.activeElement;
     if (active instanceof HTMLElement) active.blur();
-  }, [mode]);
+  }, [mode, showScore]);
 
   const pickMode = useCallback((next: ArcadeMode) => {
     const board = boardsRef.current?.[indexRef.current];
@@ -558,13 +732,13 @@ export function TerminalGridBackground({
   const releaseControl = useCallback(() => {
     releaseHeld();
     boardsRef.current?.[indexRef.current]?.arcade.releaseControl();
-    scoreRef.current = 0;
-    setScore(0);
+    showScore(0);
     setPlaying(false);
-  }, [releaseHeld]);
+  }, [releaseHeld, showScore]);
 
   useEffect(() => {
     slideAtRef.current = performance.now();
+    invalidateRef.current();
   }, [slide.index]);
 
   const showGame = useCallback((next: number) => {
@@ -615,7 +789,10 @@ export function TerminalGridBackground({
         else releaseControl();
         return;
       }
-      const arcade = boardsRef.current?.[indexRef.current]?.arcade;
+      // Fork: a board made but not yet started ignores keys, so it waits like one
+      // still loading.
+      const board = boardsRef.current?.[indexRef.current];
+      const arcade = board?.started ? board.arcade : undefined;
       const heading = HEADING[event.key] ?? HEADING[event.key.toLowerCase()];
       const isSpace = event.key === " ";
       // Fork: P pauses or resumes without playing a move.
@@ -657,12 +834,14 @@ export function TerminalGridBackground({
       if (isSpace) {
         if (event.repeat) return;
         heldRef.current.set(event.code, HEADING.ArrowUp!);
-        arcade?.action?.();
+        if (arcade) arcade.action?.();
+        else missedRef.current.set(event.code, HEADING.ArrowUp!);
         return;
       }
       if (heading) {
         heldRef.current.set(event.code, heading);
-        arcade?.steer(heading.x, heading.y);
+        if (arcade) arcade.steer(heading.x, heading.y);
+        else missedRef.current.set(event.code, heading);
       }
     };
 
@@ -671,6 +850,7 @@ export function TerminalGridBackground({
       const heading = heldRef.current.get(event.code);
       if (!heading) return;
       heldRef.current.delete(event.code);
+      missedRef.current.delete(event.code);
       event.preventDefault();
       event.stopPropagation();
       boardsRef.current?.[indexRef.current]?.arcade.steerEnd?.(
@@ -751,19 +931,22 @@ export function TerminalGridBackground({
           {GRID_GAMES.map((item, i) => (
             <div
               key={item.id}
+              ref={(el) => { slotsRef.current[i] = el; }}
+              data-grid-game={item.id}
               className="relative h-full w-full min-w-full shrink-0"
-            >
-              <canvas
-                ref={(el) => {
-                  canvasRefs.current[i] = el;
-                }}
-                className="absolute inset-0 h-full w-full"
-                aria-hidden
-              />
-            </div>
+            />
           ))}
         </div>
       </div>
+
+      {host && loadFailed === slide.index ? (
+        <p
+          data-grid-load-failed=""
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center text-[12px] text-content/55"
+        >
+          This game didn't load. Trying again.
+        </p>
+      ) : null}
 
       {host ? null : playing ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid grid-cols-3 items-center px-3 py-2 font-mono text-[11px] tracking-[0.14em] text-content/50">

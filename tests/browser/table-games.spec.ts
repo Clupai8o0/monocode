@@ -11,6 +11,10 @@ const THEMES = ["dark", "light"] as const;
 async function pickGame(page: Page, name: string) {
   await page.getByRole("button", { name: "Game", exact: true }).click();
   await page.getByRole("option", { name, exact: true }).click();
+  // A table's code loads when it's first picked, and it takes keys from then on.
+  if (name !== "snake" && name !== "agent run") {
+    await expect(page.locator("[data-table-active] [data-table-board]")).toBeFocused();
+  }
 }
 
 const gameSelect = (page: Page) => page.getByRole("button", { name: "Game", exact: true });

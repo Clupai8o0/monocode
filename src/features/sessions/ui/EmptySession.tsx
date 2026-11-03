@@ -12,7 +12,15 @@ import {
   subscribeGridArcadeEnabled,
 } from "../../settings/model/settings";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
-import { TerminalGridBackground } from "../../terminal/ui/TerminalGridBackground";
+import { lazySurface } from "../../../shared/ui/lazySurface";
+// Fork: idle games load only when an empty session shows them.
+const TerminalGridBackground = lazySurface(() =>
+  import("../../terminal/ui/TerminalGridBackground")
+    .then((module) => ({ default: module.TerminalGridBackground }))
+    // Only a backdrop here: a session works without it, so a failed load can't
+    // be allowed to take the window down.
+    .catch(() => ({ default: () => null })),
+);
 
 type Props = {
   cwd: string;
@@ -49,7 +57,10 @@ export function EmptySession({ cwd, composer, hasChatBackground }: Props) {
       ref={lockOverscroll}
       className="@container relative flex h-full min-h-0 overflow-y-auto overscroll-none"
     >
-      {arcadeEnabled && !hasChatBackground ? <TerminalGridBackground /> : null}
+      {/* Fork: keep the composer in place while the background loads. */}
+      {arcadeEnabled && !hasChatBackground ? (
+        <TerminalGridBackground />
+      ) : null}
       {composer ? (
         // Same box as the docked composer (max-w-4xl, p-1.5), so the input
         // keeps its width when the first message docks it. The spacers center

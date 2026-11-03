@@ -1,0 +1,144 @@
+/* Fork: the games panel's shell. A solid surface, not glass: blurring the moving
+   app behind a game cost frames every frame and showed blobs through the board. */
+[data-fork-games-panel],
+.games-popup {
+  --games-surface: color-mix(in srgb, var(--color-content) 3%, var(--color-background-base));
+  --games-raised: color-mix(in srgb, var(--color-content) 8%, var(--color-background-base));
+  --games-ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+html.theme-light [data-fork-games-panel],
+html.theme-light .games-popup {
+  --games-raised: var(--color-background-base);
+}
+
+[data-fork-games-panel] {
+  background: var(--games-surface);
+  transform-origin: 100% 100%;
+  /* Hiding is display:none, so this replays each time the panel comes back. */
+  animation: games-panel-in 140ms var(--games-ease) backwards;
+}
+
+/* Side by side it's a pane of the app, and panes don't float or grow. */
+[data-fork-games-panel][data-docked] {
+  animation-name: games-panel-fade;
+}
+
+@keyframes games-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes games-panel-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The dropdowns are solid for the same reason, and sit one step above the panel. */
+.games-popup {
+  border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent);
+  border-radius: 8px;
+  background: var(--games-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+}
+
+html.theme-light .games-popup {
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* One game fading in over the last, without touching the boards underneath. */
+.games-swap {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: var(--games-surface);
+  animation: games-swap 120ms ease-out both;
+}
+
+@keyframes games-swap {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* Paused, game over, an agent wanting you. */
+.games-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--games-raised);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.24);
+  animation: games-card-in 120ms var(--games-ease) backwards;
+}
+
+html.theme-light .games-card {
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.1);
+}
+
+@keyframes games-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+.games-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 24px;
+  border-radius: 4px;
+  padding: 0 8px;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-content) 80%, transparent);
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 90ms var(--games-ease);
+}
+
+.games-action:hover {
+  background: color-mix(in srgb, var(--color-content) 10%, transparent);
+  color: var(--color-content);
+}
+
+.games-action:active {
+  transform: scale(0.97);
+}
+
+.games-action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.games-action-primary {
+  background: color-mix(in srgb, var(--color-content) 12%, transparent);
+  color: var(--color-content);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-fork-games-panel],
+  .games-card {
+    animation: none;
+  }
+  .games-swap {
+    display: none;
+  }
+  .games-action {
+    transition: none;
+  }
+}
