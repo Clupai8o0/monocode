@@ -82,7 +82,8 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 42] = [
+const APP_ACTIONS: [&str; 43] = [
+    "projects.list",
     "models.list",
     "monos.list",
     "monos.configure",
@@ -130,11 +131,17 @@ const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /o
 
 Usage: {exe} app ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
+Operator sessions can communicate across known local projects. Use projects.list,
+then sessions.list with {"project":"*"} to discover sessions and their cwd.
+Pass {"project":"<path or name>"} to sessions.list/read/send for another project.
+Session management, launches and drafts keep their existing project scope.
+
 A Mono works on several projects: add "project":"<path or name>" to the
 sessions.*, worktrees.*, folders.*, projects.logo* and projects.look* actions
 to choose which one. It may be left out when the Mono has a single project.
 
 Actions:
+  projects.list  {}  Known local projects (cwd and name) available for communication.
   models.list    {}  Available providers, models, settings and permission modes.
   monos.list     {}  Monos assigned only to this local project, with id, name,
                   instructions, soulHash and habits. Requires Monos enabled.
@@ -207,13 +214,14 @@ Actions:
                   is refused), add it to MonoCode and to the Mono's projects,
                   and return its path to pass as "project".
   sessions.list  {}  Project sessions with IDs, busy status, hasDraft and archived.
+                  {"project":"*"} lists across projects and includes each cwd.
   sessions.read  {"sessionId":"...","before":"<turnId>","limit":3,"maxChars":1200}
                   Read up to 3 recent user/assistant exchanges. Tools and
                   reasoning are omitted. Omit before for the newest page;
                   pass nextBefore from a result for older exchanges. maxChars
                   caps each message (200-6000, default 1200).
   sessions.send  {"sessionId":"...","prompt":"...","notifyOnComplete":true}
-                  Submit a follow-up to an idle session in this project.
+                  Submit a follow-up to an idle session; pass project for another project.
                   A busy session is rejected. Reuse --request-id on retries.
                   Its permission mode cannot exceed the calling session's.
                   Optional notifyOnComplete:true asks for a completion report
@@ -743,6 +751,7 @@ mod tests {
         assert!(app_help().contains("notes.read"));
         assert!(app_help().contains("notes.write"));
         for action in [
+            "projects.list",
             "worktrees.list",
             "worktrees.create",
             "projects.logo",

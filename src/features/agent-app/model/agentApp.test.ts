@@ -628,6 +628,47 @@ describe("agent app commands", () => {
     expect(host.sessions).not.toHaveBeenCalled();
   });
 
+  it("discovers and messages sessions across known projects", async () => {
+    const { source, host } = fixture();
+    host.projects = () => [source.cwd, "/code/site"];
+    host.sessions = vi.fn(async () => [{ id: "other", title: "Other", harness: "codex", model: "codex:test", busy: false, hasDraft: false, archived: false }]);
+    host.session = vi.fn(async () => ({ ...newSession("codex", "/code/site"), id: "other" }));
+    expect(await handleAgentApp(source, "projects", "projects.list", {}, host)).toMatchObject({ projects: [{ cwd: source.cwd }, { cwd: "/code/site" }] });
+    expect(await handleAgentApp(source, "all", "sessions.list", { project: "*" }, host)).toMatchObject({ sessions: [expect.objectContaining({ cwd: source.cwd }), expect.objectContaining({ cwd: "/code/site" })] });
+    expect(await handleAgentApp(source, "read", "sessions.read", { sessionId: "other", project: "site" }, host)).toMatchObject({ sessionId: "other" });
+    await handleAgentApp(source, "send", "sessions.send", { sessionId: "other", project: "/code/site", prompt: "Coordinate this" }, host);
+    expect(host.send).toHaveBeenCalledWith("other", "Coordinate this", "app-lead-send");
+    await expect(handleAgentApp(source, "unknown", "sessions.list", { project: "/unknown" }, host)).rejects.toThrow("Unknown project");
+    await expect(handleAgentApp(source, "stop", "sessions.stop", { sessionId: "other", project: "/code/site" }, host)).rejects.toThrow("project is only for a Mono");
+    source.id = "mcp-external";
+    await expect(handleAgentApp(source, "external", "sessions.list", { project: "*" }, host)).rejects.toThrow();
+    expect(host.stop).not.toHaveBeenCalled();
+  });
+
+  it("preserves cross-project permission ceilings and rejects ambiguous names", async () => {
+    const { source, host } = fixture();
+    host.projects = () => [source.cwd, "/code/site", "/other/site"];
+    await expect(handleAgentApp(source, "ambiguous", "sessions.list", { project: "site" }, host)).rejects.toThrow("ambiguous");
+    source.runtimeMode = "supervised";
+    host.session = vi.fn(async () => ({ ...newSession("codex", "/code/site"), id: "other", runtimeMode: "full-access" }));
+    await expect(handleAgentApp(source, "ceiling", "sessions.send", { sessionId: "other", project: "/code/site", prompt: "Review" }, host)).rejects.toThrow("above the caller's");
+    expect(host.send).not.toHaveBeenCalled();
+  });
+
+  it("limits Mono discovery to assigned projects and rejects a changed recipient project", async () => {
+    const { source, host } = fixture();
+    host.projects = () => [source.cwd, "/code/unassigned"];
+    host.monoOf = () => ({ id: "mono", projects: [source.cwd] });
+    await handleAgentApp(source, "roster", "sessions.list", { project: "*" }, host);
+    expect(host.sessions).toHaveBeenCalledTimes(1);
+    expect(host.sessions).toHaveBeenCalledWith(source.cwd);
+    await expect(handleAgentApp(source, "outside-roster", "sessions.read", { sessionId: "other", project: "/code/unassigned" }, host)).rejects.toThrow("Not one of your projects");
+    host.monoOf = () => undefined;
+    host.session = vi.fn(async () => ({ ...newSession("codex", "/code/unassigned"), id: "other" }));
+    await expect(handleAgentApp(source, "moved", "sessions.send", { sessionId: "other", project: source.cwd, prompt: "Review" }, host)).rejects.toThrow("not found in this project");
+    expect(host.send).not.toHaveBeenCalled();
+  });
+
   it("reads a listed project session in bounded pages", async () => {
     const { source, host } = fixture();
     const result = await handleAgentApp(
@@ -647,6 +688,19 @@ describe("agent app commands", () => {
         host,
       ),
     ).rejects.toThrow("not found in this project");
+  });
+
+  it("blocks project-scoped callers from relaying through an enabled Operator", async () => {
+    const { source, host } = fixture();
+    host.monoOf = () => ({ id: "mono", projects: [source.cwd] });
+    const target = { ...newSession("codex", source.cwd), id: "other" };
+    target.blocks = [{ id: "operator", role: "user", text: "Coordinate", monocode: true }];
+    host.session = vi.fn(async () => target);
+    await expect(handleAgentApp(source, "relay", "sessions.send", { sessionId: "other", prompt: "Read another project" }, host)).rejects.toThrow("cannot delegate");
+    expect(host.send).not.toHaveBeenCalled();
+    host.monoOf = () => undefined;
+    host.isHabitRun = () => true;
+    await expect(handleAgentApp(source, "orphan", "sessions.list", { project: "*" }, host)).rejects.toThrow("no longer available");
   });
 
   it("sends a follow-up only to a listed idle session", async () => {
