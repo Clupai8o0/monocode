@@ -1090,6 +1090,7 @@ function sanitizeBlock(
   }
   const noteCard = sanitizeNoteCard(block.noteCard);
   if (noteCard) next.noteCard = noteCard;
+  if (block.role === "assistant" && block.fileDelivery === true) next.fileDelivery = true;
   if (Array.isArray(block.artifactCards)) {
     const cards = block.artifactCards.flatMap((card) => {
       if (

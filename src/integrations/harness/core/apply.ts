@@ -64,6 +64,22 @@ export function applyHarnessEvent(
       return patchStreaming(session, "assistant", event.text, true);
     case "message.completed":
       return finishRole(session, "assistant");
+    case "file.delivered": {
+      const blocks = sealLastStream(session.blocks);
+      // Keep the answer and its files together for transcript folding and
+      // consumers that read the last assistant reply (handoffs, habits, etc.).
+      const turnStart = lastMatchingBlock(blocks, (block) => block.role === "user" &&
+        (block.sentAt == null || block.startedAt != null) &&
+        !session.queuedMessages?.some((message) => message.blockId === block.id));
+      const index = lastMatchingBlock(blocks, (block, at) => at > turnStart && block.role === "assistant");
+      if (index >= 0) {
+        blocks[index] = { ...blocks[index], streaming: false,
+          text: `${blocks[index].text}\n\n${event.text}`, fileDelivery: true };
+      } else {
+        blocks.push({ id: crypto.randomUUID(), role: "assistant", text: event.text, fileDelivery: true });
+      }
+      return { ...session, blocks };
+    }
     case "image.generated":
       if (!("path" in event)) return session;
       return appendImage(session, event);
