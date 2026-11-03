@@ -527,6 +527,37 @@ fn claim(held: &mut Held, asking: &str, id: &str, now: Instant) -> Option<String
     None
 }
 
+/// Whether another window holds `id`, by its report or a live claim. Only looks:
+/// unlike `claim`, it never reserves the session for the asking window.
+fn held_elsewhere(held: &Held, asking: &str, id: &str, now: Instant) -> bool {
+    held.reports
+        .iter()
+        .any(|(label, ids)| label.as_str() != asking && ids.contains(id))
+        || held.claims.get(id).is_some_and(|(owner, at)| {
+            owner != asking && now.saturating_duration_since(*at) < CLAIM_TTL
+        })
+}
+
+/// For work that must keep out of a session another window has open.
+#[tauri::command(async)]
+pub fn fork_session_held_elsewhere(
+    app: AppHandle,
+    window: WebviewWindow,
+    session_id: String,
+) -> Result<bool, String> {
+    if !valid_id(&session_id) {
+        return Ok(false);
+    }
+    let state = app.state::<ForkWorkspaces>();
+    let held = state.held.lock().map_err(|_| "locked")?;
+    Ok(held_elsewhere(
+        &held,
+        window.label(),
+        &session_id,
+        Instant::now(),
+    ))
+}
+
 /// Before a window opens `session_id`: if another window has it, bring that
 /// window forward, ask it to show the session, and return true. Otherwise the
 /// caller now holds it and returns false. The target opens the session itself
@@ -688,6 +719,22 @@ mod tests {
         assert_eq!(claim(&mut held, "ws-b", "s1", now).as_deref(), Some("main"));
         assert_eq!(claim(&mut held, "main", "s2", now).as_deref(), Some("ws-a"));
         assert_eq!(claim(&mut held, "main", "s3", now), None);
+    }
+
+    #[test]
+    fn looking_for_a_holder_finds_it_and_claims_nothing() {
+        let now = Instant::now();
+        let mut held = Held::default();
+        held.reports
+            .insert("other".into(), HashSet::from(["reported".to_string()]));
+        held.claims
+            .insert("claimed".into(), ("other".into(), now));
+        assert!(held_elsewhere(&held, "main", "reported", now));
+        assert!(held_elsewhere(&held, "main", "claimed", now));
+        assert!(!held_elsewhere(&held, "other", "reported", now));
+        assert!(!held_elsewhere(&held, "main", "free", now));
+        assert!(!held.claims.contains_key("free"));
+        assert!(!held_elsewhere(&held, "main", "claimed", now + CLAIM_TTL));
     }
 
     #[test]

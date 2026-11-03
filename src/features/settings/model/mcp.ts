@@ -1,7 +1,13 @@
 export type McpServer = { name: string; status: string };
 
 export type McpConnection = {
-  provider: "claude" | "claude_desktop" | "codex" | "cursor" | "opencode";
+  provider:
+    | "claude"
+    | "claude_desktop"
+    | "codex"
+    | "cursor"
+    | "grok"
+    | "opencode";
   name: string;
   scope: "local" | "project" | "user";
   configPath: string;
@@ -14,6 +20,7 @@ export const MCP_PROVIDER_LABELS: Record<McpConnection["provider"], string> = {
   claude_desktop: "Claude Desktop",
   codex: "Codex",
   cursor: "Cursor",
+  grok: "Grok Build",
   opencode: "OpenCode",
 };
 
@@ -26,5 +33,15 @@ export function parseClaudeMcpList(output: string): McpServer[] {
     const parts = detail.split(/ - | — /);
     const status = parts[parts.length - 1];
     return [{ name: match[1], status }];
+  });
+}
+
+/** Cursor `agent mcp list` — name/status lines; tolerate Claude-like `name: detail`. */
+export function parseCursorMcpList(output: string): McpServer[] {
+  if (/no mcp servers configured/i.test(output)) return [];
+  return output.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s+(.+)$/);
+    if (!match) return [];
+    return [{ name: match[1], status: match[2].trim() }];
   });
 }

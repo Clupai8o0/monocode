@@ -2,6 +2,19 @@ import { asRecord } from "../../../integrations/harness/providers/codex/codexPro
 
 export type RateLimitProvider = "claude" | "codex" | "opencode" | "devin";
 
+const RATE_LIMIT_PROVIDERS: readonly RateLimitProvider[] = [
+  "claude",
+  "codex",
+  "opencode",
+  "devin",
+];
+
+export function isRateLimitProvider(
+  provider: string,
+): provider is RateLimitProvider {
+  return RATE_LIMIT_PROVIDERS.some((candidate) => candidate === provider);
+}
+
 export type RateLimitStatus =
   "idle" | "fetching" | "ok" | "error" | "unavailable";
 

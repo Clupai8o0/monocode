@@ -3,7 +3,7 @@ use tauri::Manager;
 mod account_identity;
 // Fork: runs the Claude Code status line for the composer strip.
 mod fork_statusline;
-mod fork_extra_usage; // Fork: Muse, Antigravity and DeepSeek usage for the footer.
+mod fork_extra_usage; // Fork: Muse, Antigravity, Cursor and DeepSeek usage for the footer.
 // Fork: the shared Docker stacks panel (vault stacks.py).
 mod fork_stacks;
 mod fork_lab; // Fork: home lab Remote Control scope and RDP files.
@@ -536,6 +536,7 @@ pub fn run() {
             harness::harness_runtime_binary_paths,
             harness::harness_resolve_claude,
             harness::claude_mcp_list,
+            harness::cursor_mcp_list,
             mcp::mcp_discover,
             mcp::mcp_add,
             harness::claude_mcp_add,
@@ -761,6 +762,7 @@ pub fn run() {
             fork_workspaces::fork_workspace_list_in_flight, // Fork
             fork_workspaces::fork_window_sessions_set,      // Fork
             fork_workspaces::fork_claim_session,            // Fork
+            fork_workspaces::fork_session_held_elsewhere,   // Fork
             fork_workspaces::fork_workspace_chrome,         // Fork
             fork_account_homes::fork_account_homes,         // Fork
             fork_account_homes::fork_add_cx_account,        // Fork

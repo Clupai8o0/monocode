@@ -499,6 +499,16 @@ fn discover(
         &codex_home.join("config.toml"),
     );
 
+    let grok_home = std::env::var_os("GROK_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".grok"));
+    add_toml_file(
+        &mut connections,
+        "grok",
+        "user",
+        &grok_home.join("config.toml"),
+    );
+
     for file in ["opencode.json", "opencode.jsonc"] {
         add_json_file(
             &mut connections,
@@ -537,6 +547,12 @@ fn discover(
             "codex",
             "project",
             &directory.join(".codex/config.toml"),
+        );
+        add_toml_file(
+            &mut connections,
+            "grok",
+            "project",
+            &directory.join(".grok/config.toml"),
         );
         for file in [
             "opencode.json",
@@ -1056,6 +1072,30 @@ mod tests {
             value["mcp"]["servers"]["docs"]["url"],
             "https://example.com/mcp"
         );
+    }
+
+    #[test]
+    fn discovers_grok_user_config() {
+        let root =
+            std::env::temp_dir().join(format!("monocode-mcp-grok-{}", uuid::Uuid::new_v4()));
+        let home = root.join("home");
+        let project = root.join("project");
+        std::fs::create_dir_all(home.join(".grok")).unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(
+            home.join(".grok/config.toml"),
+            "[mcp_servers.demo]\ncommand = 'node'\n",
+        )
+        .unwrap();
+        let found = discover(&home, &project, None, &root.join("desktop.json"), None);
+        let demo = found
+            .iter()
+            .find(|entry| entry.provider == "grok" && entry.name == "demo")
+            .expect("grok demo server");
+        assert_eq!(demo.scope, "user");
+        assert_eq!(demo.transport, "stdio");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

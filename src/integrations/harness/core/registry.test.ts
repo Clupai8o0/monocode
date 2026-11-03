@@ -149,7 +149,7 @@ describe("harness registry", () => {
     ).toEqual({
       claude: true,
       codex: true,
-      cursor: false,
+      cursor: true,
       grok: true,
       opencode: true,
       pi: true,

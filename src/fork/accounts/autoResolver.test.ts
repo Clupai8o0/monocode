@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ProviderRateLimits,
   RateLimitWindow,
@@ -38,6 +38,20 @@ import {
 
 const PROJECT = "/Users/me/projects/app";
 
+function mockLocalStorage() {
+  const data = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => data.set(key, value),
+    removeItem: (key: string) => data.delete(key),
+    clear: () => data.clear(),
+    key: (index: number) => [...data.keys()][index] ?? null,
+    get length() {
+      return data.size;
+    },
+  });
+}
+
 function window(usedPercent: number): RateLimitWindow {
   return { usedPercent, windowMinutes: 300, resetsAt: Date.now() + 3_600_000 };
 }
@@ -56,11 +70,15 @@ function usage(usedPercent: number): ProviderRateLimits {
 }
 
 beforeEach(() => {
-  localStorage.clear();
+  mockLocalStorage();
   clearCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID);
   clearCachedRateLimits("claude", "account-cx");
   installAutoAccountResolver();
   saveProviderAccount({ id: "account-cx", provider: "claude", label: "cx" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("Auto account choice", () => {

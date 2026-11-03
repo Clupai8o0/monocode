@@ -29,6 +29,7 @@ import {
 import { stopCursorTitleGeneration } from "./cursorTitle";
 import type {
   ApprovalDecision,
+  CompactContextInput,
   HarnessEvent,
   SendTurnInput,
   SteerTurnInput,
@@ -91,6 +92,7 @@ type Live = {
   taskListTools: Set<string>;
   agentTools: Map<string, string>;
   backgroundAgentTools: Set<string>;
+  backgroundKey: string;
   subagentRuns: Map<string, StoredCursorSubagentRun>;
   subagentRevisions: Record<string, string>;
   subagentGeneration: number;
@@ -113,6 +115,7 @@ const cancelledThreads = new Set<string>();
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
   terminal: false,
+  session: { compaction: {} },
   _meta: { parameterizedModelPicker: true },
 };
 
@@ -145,6 +148,20 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
       }
     });
   await live.turns;
+}
+
+export async function compactCursorContext(
+  input: CompactContextInput,
+): Promise<void> {
+  const live = liveByThread.get(input.sessionId);
+  if (!live?.acpSessionId) {
+    throw new Error("Cursor session is not connected");
+  }
+  live.onEvent = input.onEvent;
+  await live.acp.request("session/prompt", {
+    sessionId: live.acpSessionId,
+    prompt: [{ type: "text", text: "/compact" }],
+  });
 }
 
 export async function steerCursorTurn(input: SteerTurnInput): Promise<void> {
@@ -195,6 +212,7 @@ export async function cancelCursorTurn(sessionId: string): Promise<void> {
   live.taskListTools.clear();
   live.agentTools.clear();
   live.backgroundAgentTools.clear();
+  syncCursorBackgroundWait(live);
   if (live.toolEnrichmentTimer) clearTimeout(live.toolEnrichmentTimer);
   live.toolEnrichmentTimer = undefined;
   for (const [, resolve] of live.approvals) resolve("deny");
@@ -220,6 +238,7 @@ export async function stopCursorSession(sessionId: string): Promise<void> {
     live.pendingToolEnrichments.clear();
     live.agentTools.clear();
     live.backgroundAgentTools.clear();
+    syncCursorBackgroundWait(live);
     for (const [, resolve] of live.approvals) resolve("deny");
     live.approvals.clear();
     for (const [, resolve] of live.questions) resolve({ kind: "skipped" });
@@ -374,6 +393,7 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
       taskListTools: new Set(),
       agentTools: new Map(),
       backgroundAgentTools: new Set(),
+      backgroundKey: "",
       subagentRuns: new Map(),
       subagentRevisions: {},
       subagentGeneration: 0,
@@ -456,6 +476,8 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     live.subagentRuns.clear();
     live.subagentRevisions = {};
     live.backgroundAgentTools.clear();
+    live.backgroundKey = "";
+    syncCursorBackgroundWait(live);
     live.taskListTools.clear();
     live.promptActive = true;
     const pending = live.acp.request("session/prompt", {
@@ -467,6 +489,7 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     live.promptActive = false;
     if (live.cancelled) {
       live.backgroundAgentTools.clear();
+      syncCursorBackgroundWait(live);
       return;
     }
     settleCursorBackgroundAgents(live, "completed");
@@ -572,6 +595,7 @@ function handleCursorTask(live: Live, params: unknown): void {
   const title = cursorAgentTitle(task, undefined, live.agentTools.get(callId));
   live.agentTools.set(callId, title);
   if (background) live.backgroundAgentTools.add(callId);
+  syncCursorBackgroundWait(live);
   const status = background
     ? "in_progress"
     : (live.toolStatuses.get(callId) ??
@@ -787,6 +811,42 @@ function handleSessionUpdate(live: Live, params: unknown) {
     update.sessionUpdate ?? update.session_update ?? update.type ?? "",
   );
 
+  if (kind === "usage_update") {
+    const used =
+      numberField(update, "used") ??
+      numberField(update, "usedTokens") ??
+      numberField(update, "used_tokens");
+    const window =
+      numberField(update, "size") ??
+      numberField(update, "window") ??
+      numberField(update, "contextWindow") ??
+      numberField(update, "context_window");
+    if (used != null || window != null) {
+      emit({
+        type: "context",
+        ...(used != null ? { used } : {}),
+        ...(window != null ? { window } : {}),
+      });
+    }
+    return;
+  }
+
+  if (kind === "compaction_update") {
+    const status = stringField(update, "status") ?? "in_progress";
+    const error = stringField(update, "error");
+    live.onEvent({
+      type: "status",
+      text:
+        status === "failed"
+          ? error || "Context compaction failed"
+          : status === "completed"
+            ? "Context compacted"
+            : "Compacting context…",
+      key: "compaction",
+    });
+    return;
+  }
+
   if (kind === "agent_message_chunk" || kind === "agent_message") {
     // Whole-message arrays contain distinct content blocks; chunks are exact deltas.
     const text = textFromContent(
@@ -886,6 +946,7 @@ function handleSessionUpdate(live: Live, params: unknown) {
       status === "completed" &&
       cursorToolOutputIsBackground(update, tool);
     if (background) live.backgroundAgentTools.add(callId);
+    syncCursorBackgroundWait(live);
     const displayedStatus = background ? "in_progress" : status;
     if (displayedStatus) live.toolStatuses.set(callId, displayedStatus);
     emit({
@@ -1051,6 +1112,17 @@ function cursorSubagentDetail(
   return undefined;
 }
 
+function syncCursorBackgroundWait(live: Live): void {
+  const waiting = [...live.backgroundAgentTools].map(
+    (callId) => live.agentTools.get(callId) ?? "Background agent",
+  );
+  const key = waiting.join("\n");
+  if (key === live.backgroundKey) return;
+  live.backgroundKey = key;
+  if (live.muteUpdates) return;
+  live.onEvent({ type: "background.updated", tasks: waiting });
+}
+
 function settleCursorBackgroundAgents(
   live: Live,
   status: "completed" | "failed",
@@ -1067,6 +1139,7 @@ function settleCursorBackgroundAgents(
     });
   }
   live.backgroundAgentTools.clear();
+  syncCursorBackgroundWait(live);
 }
 
 const TOOL_ENRICH_MAX_ATTEMPTS = 20;

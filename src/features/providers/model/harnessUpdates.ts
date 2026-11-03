@@ -2,18 +2,25 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { HarnessId } from "../../sessions/model/session";
 import {
+  firstClassProviders,
+  supportsFirstClassCliUpdates,
+} from "../../../integrations/harness/core/firstClassProviders";
+import {
   compareSemver,
   parseOpenCodeVersion,
 } from "../../../integrations/harness/providers/opencode/opencodeProtocol";
 
+/** Non-first-class harnesses MonoCode can still self-update. */
+const EXTRA_UPDATABLE = ["opencode", "pi"] as const satisfies readonly HarnessId[];
+
 /**
  * Harnesses with an npm version feed and a self-updater MonoCode can run.
+ * Derived from first-class CLI-updatable profiles plus EXTRA_UPDATABLE.
+ * Grok is excluded (no cliUpdates on its profile).
  */
 export const UPDATABLE_HARNESSES: ReadonlySet<HarnessId> = new Set([
-  "claude",
-  "codex",
-  "opencode",
-  "pi",
+  ...firstClassProviders().filter(supportsFirstClassCliUpdates),
+  ...EXTRA_UPDATABLE,
 ]);
 
 export type HarnessUpdate = {

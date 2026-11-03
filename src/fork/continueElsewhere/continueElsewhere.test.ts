@@ -1,9 +1,9 @@
-// @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   continuedOrigin,
   continueLabel,
   continueTarget,
+  handoffTargets,
   saveContinuedOrigin,
   withTranscriptPointer,
   type ContinuedOrigin,
@@ -17,19 +17,73 @@ const origin = (sessionId = "src"): ContinuedOrigin => ({
   files: 3,
 });
 
-beforeEach(() => localStorage.clear());
+const memory = new Map<string, string>();
+beforeEach(() => {
+  memory.clear();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        memory.set(key, value);
+      },
+      clear: () => memory.clear(),
+      removeItem: (key: string) => {
+        memory.delete(key);
+      },
+    },
+  });
+});
 
-describe("continueTarget", () => {
-  it("goes both ways between Claude and Codex", () => {
-    expect(continueTarget("claude")).toBe("codex");
-    expect(continueTarget("codex")).toBe("claude");
-    expect(continueLabel("claude")).toBe("Continue in Codex");
-    expect(continueLabel("codex")).toBe("Continue in Claude Code");
+describe("handoffTargets", () => {
+  it("offers first-class peers plus Cursor", () => {
+    expect(handoffTargets("claude").sort()).toEqual(["codex", "cursor", "grok"]);
+    expect(handoffTargets("codex").sort()).toEqual(["claude", "cursor", "grok"]);
+    expect(handoffTargets("grok").sort()).toEqual(["claude", "codex", "cursor"]);
+    expect(handoffTargets("cursor").sort()).toEqual(["claude", "codex", "grok"]);
   });
 
-  it("offers nothing for other providers", () => {
-    expect(continueTarget("grok")).toBeNull();
-    expect(continueLabel("grok")).toBeNull();
+  it("keeps continueTarget as the primary peer when usage is unknown", () => {
+    expect(continueTarget("claude")).toBe("codex");
+    expect(continueTarget("codex")).toBe("claude");
+    expect(continueTarget("grok")).toBe("claude");
+    expect(continueTarget("cursor")).toBe("claude");
+    expect(continueLabel("grok")).toBe("Continue in Claude Code");
+    expect(continueLabel("cursor")).toBe("Continue in Claude Code");
+  });
+
+  it("offers nothing for providers outside the continue pool", () => {
+    expect(continueTarget("fx")).toBeNull();
+    expect(continueLabel("fx")).toBeNull();
+  });
+
+  it("picks the live candidate with the most headroom", () => {
+    expect(
+      continueTarget("cursor", {
+        isLive: (id) => id === "claude" || id === "codex",
+        usedPercent: (id) => (id === "codex" ? 10 : 80),
+      }),
+    ).toBe("codex");
+    expect(
+      continueTarget("claude", {
+        isLive: (id) => id === "codex" || id === "cursor",
+        usedPercent: (id) => (id === "cursor" ? 5 : 90),
+      }),
+    ).toBe("cursor");
+  });
+
+  it("skips agents that are not live", () => {
+    expect(
+      continueTarget("cursor", {
+        isLive: (id) => id === "codex",
+        usedPercent: () => 0,
+      }),
+    ).toBe("codex");
+    expect(
+      continueTarget("claude", {
+        isLive: () => false,
+      }),
+    ).toBeNull();
   });
 });
 

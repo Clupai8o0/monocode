@@ -211,5 +211,12 @@ async function pump() {
     }
   } finally {
     pumping = false;
+    // A failed read emits nothing, so say the queue has drained.
+    emit();
   }
+}
+
+/** Whether saved transcripts are still being read for their close line. */
+export function closeChecksRunning(): boolean {
+  return pumping || queue.size > 0;
 }

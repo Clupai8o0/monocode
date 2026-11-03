@@ -715,7 +715,7 @@ export function Composer({
       setMcpStatus(
         new Map(
           snapshot.servers
-            .filter((server) => server.provider === "claude")
+            .filter((server) => server.provider === harness)
             .map((server) => [server.name, server.status]),
         ),
       );
@@ -727,6 +727,7 @@ export function Composer({
     if (cached) apply(cached);
     void loadMcpSettings(executionCwd, false, {
       claudeHealth: harness === "claude",
+      cursorHealth: harness === "cursor",
     });
     return stop;
   }, [executionCwd, harness, mcpPickerOpen]);

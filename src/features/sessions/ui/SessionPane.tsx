@@ -101,7 +101,7 @@ import type { LaunchedSessionView } from "../../monos/model/monoSpawnedSessions"
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { ContextMeter } from "./ContextMeter";
 import { UsageChips } from "../../../app/shell/UsageFooter";
-import type { RateLimitProvider } from "../../providers/model/rateLimits";
+import { monoUsageProviders } from "../../providers/model/usageProviders";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
 import { QuestionForm } from "./QuestionForm";
 import {
@@ -889,7 +889,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
       usageLimit={session.usageLimit}
       usageLimitAction={
         remote || agent ? undefined : (
-          <ContinueElsewhereButton sessionId={session.id} harness={session.harness} />
+          <ContinueElsewhereButton
+            sessionId={session.id}
+            harness={session.harness}
+            cwd={session.cwd}
+          />
         )
       }
       onUsageLimitResume={() => onUsageLimitResume(session.id)}
@@ -1434,13 +1438,3 @@ const LocalSessionPane = memo(function LocalSessionPane({
     </div>
   );
 });
-
-/** The providers whose plan usage a Mono on `harness` shows by its composer. */
-function monoUsageProviders(harness: HarnessId): RateLimitProvider[] {
-  return harness === "claude" ||
-    harness === "codex" ||
-    harness === "opencode" ||
-    harness === "devin"
-    ? [harness]
-    : [];
-}

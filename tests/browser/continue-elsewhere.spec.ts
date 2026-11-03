@@ -13,7 +13,10 @@ for (const theme of ["dark", "light"] as const) {
     await page.setViewportSize({ width: 820, height: 320 });
     await page.goto(`/tests/browser/continue-elsewhere.html?theme=${theme}`);
     await expect(
-      page.getByRole("button", { name: "Continue in Codex" }),
+      page.locator("[data-fork-continue-elsewhere]"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Continue elsewhere" }),
     ).toBeVisible();
     await expect(page.getByText("Continued from Claude")).toBeVisible();
     await page.screenshot({ path: `${dir}/limit-and-card-${theme}.png` });

@@ -4,9 +4,10 @@ import { useSyncExternalStore } from "react";
 /**
  * Fork feature: usage for agents MonoCode has no usage API for, read by
  * `fork_extra_usage` (Rust) and parsed here. Muse and Antigravity report
- * windows like Claude's; DeepSeek reports a prepaid balance.
+ * windows like Claude's; Cursor reports Auto and API plan pools; DeepSeek
+ * reports a prepaid balance.
  */
-export type ExtraUsageProvider = "muse" | "antigravity" | "deepseek";
+export type ExtraUsageProvider = "muse" | "antigravity" | "cursor" | "deepseek";
 
 export type UsageBar = {
   /** Short window name, e.g. "5h" or "wk". */
@@ -116,6 +117,54 @@ export function parseAntigravityQuota(body: string): ExtraUsage {
   return { status: "ok", bars, checkedAt: Date.now() };
 }
 
+/**
+ * Cursor `GetCurrentPeriodUsage`: Auto (first-party) and API (third-party)
+ * pools for the current billing cycle. Cycle bounds arrive as epoch-ms strings.
+ */
+export function parseCursorUsage(body: string): ExtraUsage {
+  const data = record(JSON.parse(body));
+  const plan = record(data?.planUsage);
+  const resetsAt = epochMs(data?.billingCycleEnd);
+  const bars: UsageBar[] = [];
+  const auto = percent(plan?.autoPercentUsed);
+  if (auto != null) {
+    bars.push({ label: "Auto", usedPercent: auto, resetsAt });
+  }
+  const api = percent(plan?.apiPercentUsed);
+  if (api != null) {
+    bars.push({ label: "API", usedPercent: api, resetsAt });
+  }
+  if (bars.length === 0) {
+    const total = percent(plan?.totalPercentUsed);
+    if (total != null) {
+      bars.push({ label: "plan", usedPercent: total, resetsAt });
+    }
+  }
+  if (bars.length === 0) {
+    return {
+      status: "error",
+      message: "Cursor did not report usage",
+      checkedAt: Date.now(),
+    };
+  }
+  const detail =
+    typeof data?.displayMessage === "string" && data.displayMessage.trim()
+      ? data.displayMessage.trim()
+      : undefined;
+  return { status: "ok", bars, detail, checkedAt: Date.now() };
+}
+
+function epochMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber)) return asNumber;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 const CURRENCY: Record<string, string> = { USD: "$", CNY: "¥" };
 
 /** DeepSeek `/user/balance`: one prepaid balance per currency, no windows. */
@@ -152,6 +201,7 @@ export function parseDeepseekBalance(body: string): ExtraUsage {
 const PARSERS: Record<ExtraUsageProvider, (body: string) => ExtraUsage> = {
   muse: parseMuseUsage,
   antigravity: parseAntigravityQuota,
+  cursor: parseCursorUsage,
   deepseek: parseDeepseekBalance,
 };
 
@@ -172,6 +222,16 @@ const IDLE: ExtraUsage = { status: "idle" };
 
 export function getExtraUsage(provider: ExtraUsageProvider): ExtraUsage {
   return cache.get(provider) ?? IDLE;
+}
+
+/** Billing-cycle end from the last Cursor usage read, for the limit notice. */
+export function cursorUsageResetsAt(now = Date.now()): number | undefined {
+  const usage = getExtraUsage("cursor");
+  if (usage.status !== "ok") return undefined;
+  const resets = usage.bars
+    .map((bar) => bar.resetsAt)
+    .filter((value): value is number => value != null && value > now);
+  return resets.length > 0 ? Math.min(...resets) : undefined;
 }
 
 export function useExtraUsage(provider: ExtraUsageProvider): ExtraUsage {

@@ -92,7 +92,7 @@ export function mcpPickerServers(
     )
     .map((server) => {
       const status =
-        server.provider === "claude"
+        server.provider === harness
           ? claudeStatus.get(server.name)
           : undefined;
       const matches = server.provider === harness;

@@ -89,11 +89,14 @@ export function useSessionStatus(
   visible: boolean,
 ): SessionStatus | null {
   const claude = session.harness === "claude";
-  const provider = ["codex", "opencode", "devin"].includes(session.harness)
+  const rateLimitHarness = ["codex", "opencode", "devin"].includes(
+    session.harness,
+  )
     ? (session.harness as "codex" | "opencode" | "devin")
-    : "claude";
+    : null;
+  // Hooks must run unconditionally; only Codex-family harnesses surface limits.
   const limits = useCachedRateLimits(
-    provider,
+    rateLimitHarness ?? "claude",
     session.providerAccountId ?? "default",
   );
   const [line, setLine] = useState<string | null>(null);
@@ -162,9 +165,9 @@ export function useSessionStatus(
       data: claude ? data : null,
       line: claude ? line : null,
       links,
-      ...(session.harness === provider ? { limits } : {}),
+      ...(rateLimitHarness ? { limits } : {}),
     }),
-    [claude, data, line, links, limits, session.harness, provider],
+    [claude, data, line, links, limits, rateLimitHarness],
   );
 }
 

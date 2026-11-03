@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
-import {
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
+const {
+  cursorUsageResetsAt,
   getExtraUsage,
+  loadExtraUsage,
   parseAntigravityQuota,
+  parseCursorUsage,
   parseDeepseekBalance,
   parseMuseUsage,
-} from "./extraUsage";
+} = await import("./extraUsage");
+
+beforeEach(() => {
+  invoke.mockReset();
+});
 
 describe("parseMuseUsage", () => {
   it("reads the rolling and weekly windows from `muse usage --json`", () => {
@@ -105,6 +116,58 @@ describe("parseAntigravityQuota", () => {
   });
 });
 
+describe("parseCursorUsage", () => {
+  it("reads Auto and API pools from GetCurrentPeriodUsage", () => {
+    const usage = parseCursorUsage(
+      JSON.stringify({
+        billingCycleStart: "1793610982490",
+        billingCycleEnd: "1794215782490",
+        planUsage: {
+          autoPercentUsed: 22.6,
+          apiPercentUsed: 0,
+          totalPercentUsed: 22.6,
+        },
+        displayMessage: "You've used 23% of your included usage",
+      }),
+    );
+    expect(usage).toMatchObject({
+      status: "ok",
+      detail: "You've used 23% of your included usage",
+      bars: [
+        { label: "Auto", usedPercent: 22.6, resetsAt: 1794215782490 },
+        { label: "API", usedPercent: 0, resetsAt: 1794215782490 },
+      ],
+    });
+  });
+
+  it("falls back to the total when Auto and API are missing", () => {
+    expect(
+      parseCursorUsage(
+        JSON.stringify({
+          billingCycleEnd: "2026-11-10T12:00:00.000Z",
+          planUsage: { totalPercentUsed: 41 },
+        }),
+      ),
+    ).toMatchObject({
+      status: "ok",
+      bars: [
+        {
+          label: "plan",
+          usedPercent: 41,
+          resetsAt: Date.parse("2026-11-10T12:00:00.000Z"),
+        },
+      ],
+    });
+  });
+
+  it("reports an error when Cursor has no plan meters", () => {
+    expect(parseCursorUsage(JSON.stringify({ planUsage: {} }))).toMatchObject({
+      status: "error",
+      message: "Cursor did not report usage",
+    });
+  });
+});
+
 describe("parseDeepseekBalance", () => {
   it("shows the prepaid balance with its currency", () => {
     expect(
@@ -134,4 +197,17 @@ describe("parseDeepseekBalance", () => {
 
 it("hands React the same idle snapshot until a read lands", () => {
   expect(getExtraUsage("muse")).toBe(getExtraUsage("muse"));
+});
+
+it("exposes Cursor's next billing-cycle end after a successful read", async () => {
+  const end = Date.now() + 86_400_000;
+  invoke.mockResolvedValue({
+    status: "ok",
+    body: JSON.stringify({
+      billingCycleEnd: String(end),
+      planUsage: { autoPercentUsed: 40, apiPercentUsed: 10 },
+    }),
+  });
+  await loadExtraUsage("cursor", true);
+  expect(cursorUsageResetsAt(Date.now())).toBe(end);
 });

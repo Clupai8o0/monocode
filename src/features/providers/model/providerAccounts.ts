@@ -4,6 +4,11 @@ import {
   AUTO_ACCOUNT_ID,
   supportsAutoAccount,
 } from "../../../fork/accounts/autoAccount"; // Fork
+import {
+  firstClassProviders,
+  supportsFirstClassAccounts,
+  supportsFirstClassAccountProfiles,
+} from "../../../integrations/harness/core/firstClassProviders";
 
 const ACCOUNTS_KEY = "monocode.providerAccounts.v1";
 const SELECTIONS_KEY = "monocode.providerAccountSelections.v1";
@@ -23,15 +28,24 @@ export function sameProviderAccountId(
   );
 }
 
-/** Providers listed under Accounts, each with at least its CLI's own login. */
+/** Devin is not first-class but still appears under Accounts (default login only). */
+const EXTRA_ACCOUNT_PROVIDERS = ["devin"] as const satisfies readonly HarnessId[];
+
+/**
+ * Providers listed under Accounts, each with at least its CLI's own login.
+ * Derived from first-class account-capable profiles plus EXTRA_ACCOUNT_PROVIDERS.
+ * Grok is included as default-only (like Devin); named profiles stay claude/codex.
+ */
 export const PROVIDER_ACCOUNT_PROVIDERS = [
-  "claude",
-  "codex",
-  "devin",
-] as const satisfies readonly HarnessId[];
+  ...firstClassProviders().filter(supportsFirstClassAccounts),
+  ...EXTRA_ACCOUNT_PROVIDERS,
+] as readonly ProviderAccountProvider[];
 
 export type ProviderAccountProvider =
-  (typeof PROVIDER_ACCOUNT_PROVIDERS)[number];
+  | "claude"
+  | "codex"
+  | "grok"
+  | "devin";
 
 export function supportsProviderAccounts(
   provider: HarnessId,
@@ -40,20 +54,15 @@ export function supportsProviderAccounts(
 }
 
 /**
- * Providers whose CLIs can keep isolated, locally named profiles. Devin has
- * no config-dir override on Windows, so it offers only its default login.
+ * Providers whose CLIs can keep isolated, locally named profiles. Devin and
+ * Grok offer only their default login (no config-dir override / Rust isolation).
  */
-const PROFILE_PROVIDERS = [
-  "claude",
-  "codex",
-] as const satisfies readonly ProviderAccountProvider[];
-
-export type ProfileAccountProvider = (typeof PROFILE_PROVIDERS)[number];
+export type ProfileAccountProvider = "claude" | "codex";
 
 export function supportsAccountProfiles(
   provider: HarnessId,
 ): provider is ProfileAccountProvider {
-  return PROFILE_PROVIDERS.some((candidate) => candidate === provider);
+  return supportsFirstClassAccountProfiles(provider);
 }
 
 export type ProviderAccount = {

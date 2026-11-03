@@ -32,6 +32,7 @@ const {
   sendCursorTurn,
   cancelCursorTurn,
   stopCursorSession,
+  compactCursorContext,
   __cursorTestReset,
 } = await import("./cursor");
 import type { HarnessEvent } from "../../core/types";
@@ -532,6 +533,32 @@ describe("cursor background subagents", () => {
     await turn;
   });
 
+  it("reports background.updated while a background agent is waiting", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-bg-wait");
+    emitAgentStart();
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_agent",
+        status: "completed",
+        rawOutput: { isBackground: true },
+      },
+    });
+    expect(
+      events.some(
+        (e) => e.type === "background.updated" && e.tasks.length > 0,
+      ),
+    ).toBe(true);
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+    expect(
+      events.some(
+        (e) => e.type === "background.updated" && e.tasks.length === 0,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps an ACP background task active until the prompt completes", async () => {
     const { events, promptId, turn } = await startTurn("cursor-live");
     let settled = false;
@@ -639,5 +666,72 @@ describe("cursor background subagents", () => {
     reply(promptId, { stopReason: "end_turn" });
     await turn;
     expect(agentEvents(events).at(-1)).toMatchObject({ status: "completed" });
+  });
+});
+
+describe("cursor context usage", () => {
+  it("emits context from ACP usage_update", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-context");
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 53_000,
+        size: 200_000,
+      },
+    });
+    expect(events.some((e) => e.type === "context")).toBe(true);
+    expect(events.find((e) => e.type === "context")).toMatchObject({
+      type: "context",
+      used: 53_000,
+      window: 200_000,
+    });
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+  });
+
+  it("ignores usage_update without numeric used/size", async () => {
+    const { events, promptId, turn } = await startTurn("cursor-context-empty");
+    notify("session/update", {
+      sessionId: "cursor_1",
+      update: { sessionUpdate: "usage_update" },
+    });
+    expect(events.some((e) => e.type === "context")).toBe(false);
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+  });
+});
+
+describe("cursor context compaction", () => {
+  it("compacts by prompting /compact on the live ACP session", async () => {
+    const { events: _events, promptId, turn } = await startTurn("cursor-compact");
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+
+    const compact = compactCursorContext({
+      sessionId: "cursor-compact",
+      cwd: "/repo",
+      model: "cursor:composer-2.5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      onEvent: () => undefined,
+    });
+
+    await waitFor(
+      () =>
+        parse().some(
+          (message) =>
+            message.method === "session/prompt" &&
+            JSON.stringify(message.params).includes("/compact"),
+        ),
+      "compact prompt",
+    );
+    const compactId = parse().find(
+      (message) =>
+        message.method === "session/prompt" &&
+        JSON.stringify(message.params).includes("/compact"),
+    )!.id as number;
+    reply(compactId, { stopReason: "end_turn" });
+    await compact;
   });
 });

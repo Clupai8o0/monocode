@@ -462,6 +462,16 @@ fn claude_mcp_command(
     mcp_command(binary, args, cwd, timeout)
 }
 
+fn cursor_mcp_command(
+    args: Vec<String>,
+    cwd: String,
+    timeout: Duration,
+    binary_path: Option<&str>,
+) -> Result<String, String> {
+    let binary = resolve_mcp_binary("cursor", binary_path)?;
+    mcp_command(binary, args, cwd, timeout)
+}
+
 fn mcp_command(
     binary: PathBuf,
     args: Vec<String>,
@@ -502,6 +512,21 @@ pub async fn claude_mcp_list(host: State<'_, HarnessHost>, cwd: String) -> Resul
             }
         }
         Ok(output)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cursor_mcp_list(host: State<'_, HarnessHost>, cwd: String) -> Result<String, String> {
+    let binary_path = host.runtime_binary_path("cursor");
+    tauri::async_runtime::spawn_blocking(move || {
+        cursor_mcp_command(
+            vec!["mcp".into(), "list".into()],
+            cwd,
+            Duration::from_secs(30),
+            binary_path.as_deref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?

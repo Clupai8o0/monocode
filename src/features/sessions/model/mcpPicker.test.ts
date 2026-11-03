@@ -32,6 +32,20 @@ const servers: McpConnection[] = [
   },
 ];
 
+it("uses Cursor health for Cursor servers on the Cursor harness", () => {
+  const ranked = mcpPickerServers(
+    servers,
+    "cursor",
+    new Map([["other", "needs authentication"]]),
+    "",
+  );
+  expect(ranked.map((server) => [server.name, server.availability])).toEqual([
+    ["other", "authentication"],
+    ["docs", "unavailable"],
+    ["needs-login", "unavailable"],
+  ]);
+});
+
 it("prioritizes usable servers while retaining authentication and other providers", () => {
   const ranked = mcpPickerServers(
     servers,

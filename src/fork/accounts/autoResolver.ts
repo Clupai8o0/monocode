@@ -9,6 +9,7 @@ import {
   setAutoProviderAccountResolver,
   type ProviderAccountProvider,
 } from "../../features/providers/model/providerAccounts";
+import { isRateLimitProvider } from "../../features/providers/model/rateLimits";
 import {
   getAllRateLimits,
   getCachedRateLimits,
@@ -32,7 +33,9 @@ export function autoCandidates(
   now = Date.now(),
 ): AutoCandidate[] {
   return providerAccounts(provider).map((account) => {
-    const limits = getCachedRateLimits(provider, account.id);
+    const limits = isRateLimitProvider(provider)
+      ? getCachedRateLimits(provider, account.id)
+      : undefined;
     const headroom = accountHeadroom(limits, now) ?? undefined;
     return {
       id: account.id,
@@ -95,6 +98,7 @@ export function useAutoAccountUsage(
     if (!ids) {
       return;
     }
+    if (!isRateLimitProvider(provider)) return;
     for (const id of ids.split("|")) {
       void loadRateLimits(provider, id, false);
     }
