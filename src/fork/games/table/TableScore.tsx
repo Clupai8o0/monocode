@@ -1,10 +1,12 @@
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { type ComponentType, lazy, Suspense, useSyncExternalStore } from "react";
 import { AGENT_IDS, AGENT_NAMES } from "./agentNames";
 import { formatTokens, rivalLine, tokenStore } from "./tokens";
 
-const CodeScore = lazy(() => import("../code/CodeScore").then((m) => ({ default: m.CodeScore })));
-const GardenScore = lazy(() => import("../calm/GardenScore").then((m) => ({ default: m.GardenScore })));
-const TurnBetScore = lazy(() => import("../calm/TurnBetScore").then((m) => ({ default: m.TurnBetScore })));
+// A score row that fails to load just isn't there; the game still plays.
+const noScore = () => ({ default: () => null });
+const CodeScore = lazy<ComponentType>(() => import("../code/CodeScore").then((m) => ({ default: m.CodeScore })).catch(noScore));
+const GardenScore = lazy<ComponentType>(() => import("../calm/GardenScore").then((m) => ({ default: m.GardenScore })).catch(noScore));
+const TurnBetScore = lazy<ComponentType>(() => import("../calm/TurnBetScore").then((m) => ({ default: m.TurnBetScore })).catch(noScore));
 
 /** The panel's score row for a table: tokens and peak, or your chess record. */
 export function TableScore({ gameId }: { gameId: string }) {

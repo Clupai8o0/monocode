@@ -1,20 +1,66 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { type ComponentType, useEffect, useState } from "react";
 import type { ArcadeMode } from "../../../features/terminal/arcade/gridArcade";
 import { tableLoaders } from "../gameLoaders";
 import { isTableGame } from "../catalog";
+import type { TableProps } from "./PokerTable";
 
-const PokerTable = lazy(tableLoaders.poker);
-const BlackjackTable = lazy(tableLoaders.blackjack);
-const ChessTable = lazy(tableLoaders.chess);
-const CodeTable = lazy(tableLoaders.code);
-const GardenTable = lazy(tableLoaders.garden);
-const SolitaireTable = lazy(tableLoaders.solitaire);
-const SortTable = lazy(tableLoaders.sort);
-const SudokuTable = lazy(tableLoaders.sudoku);
-const MergeTable = lazy(tableLoaders.merge);
-const RaceTable = lazy(tableLoaders.race);
-const PipelineTable = lazy(tableLoaders.pipeline);
-const TurnBetTable = lazy(tableLoaders.turnbet);
+type TableId = keyof typeof tableLoaders;
+const TABLE_IDS = Object.keys(tableLoaders) as TableId[];
+
+/**
+ * Loads one table's code. Not React.lazy: that remembers a failed load for good
+ * and, with no boundary above it, takes the whole panel down with it.
+ */
+function LoadedTable({ id, ...props }: TableProps & { id: TableId })
+{
+  const [Table, setTable] = useState<ComponentType<TableProps> | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    tableLoaders[id]().then(
+      (module) => {
+        if (live) {
+          setTable(() => module.default);
+        }
+      },
+      (error) => {
+        console.error("Could not load game", error);
+        if (live) {
+          setFailed(true);
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, attempt]);
+
+  if (Table) {
+    return <Table {...props} />;
+  }
+  if (!failed) {
+    return null;
+  }
+  return (
+    <div
+      data-fork-games-load-failed=""
+      className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[12px] text-content/55"
+    >
+      This game didn't load.
+      <button
+        type="button"
+        className="games-action games-action-primary"
+        onClick={() => {
+          setFailed(false);
+          setAttempt((was) => was + 1);
+        }}
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
 
 /**
  * Fork: poker, blackjack and chess in the games panel. Each table stays mounted
@@ -61,91 +107,11 @@ export function TableGames({
 
   return (
     <>
-      {visited.has("poker") ? (
-        <div className="absolute inset-0" {...shown("poker")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <PokerTable {...tableProps("poker")} />
-          </Suspense>
+      {TABLE_IDS.filter((id) => visited.has(id)).map((id) => (
+        <div key={id} className="absolute inset-0" {...shown(id)}>
+          <LoadedTable id={id} {...tableProps(id)} />
         </div>
-      ) : null}
-      {visited.has("blackjack") ? (
-        <div className="absolute inset-0" {...shown("blackjack")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <BlackjackTable {...tableProps("blackjack")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("chess") ? (
-        <div className="absolute inset-0" {...shown("chess")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <ChessTable {...tableProps("chess")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {/* Fork: the Code tab stays mounted like the tables, code and all. */}
-      {visited.has("code") ? (
-        <div className="absolute inset-0" {...shown("code")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <CodeTable {...tableProps("code")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("garden") ? (
-        <div className="absolute inset-0" {...shown("garden")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <GardenTable {...tableProps("garden")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("solitaire") ? (
-        <div className="absolute inset-0" {...shown("solitaire")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <SolitaireTable {...tableProps("solitaire")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("sort") ? (
-        <div className="absolute inset-0" {...shown("sort")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <SortTable {...tableProps("sort")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("sudoku") ? (
-        <div className="absolute inset-0" {...shown("sudoku")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <SudokuTable {...tableProps("sudoku")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("pipeline") ? (
-        <div className="absolute inset-0" {...shown("pipeline")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <PipelineTable {...tableProps("pipeline")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("merge") ? (
-        <div className="absolute inset-0" {...shown("merge")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <MergeTable {...tableProps("merge")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("race") ? (
-        <div className="absolute inset-0" {...shown("race")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <RaceTable {...tableProps("race")} />
-          </Suspense>
-        </div>
-      ) : null}
-      {visited.has("turnbet") ? (
-        <div className="absolute inset-0" {...shown("turnbet")}>
-          <Suspense fallback={<div className="absolute inset-0" />}>
-            <TurnBetTable {...tableProps("turnbet")} />
-          </Suspense>
-        </div>
-      ) : null}
+      ))}
     </>
   );
 }

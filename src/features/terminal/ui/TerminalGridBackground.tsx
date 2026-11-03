@@ -36,6 +36,8 @@ const SLIDE_MS = 800;
 const PAUSED_PAINT_MS = 250;
 // Fork: less than one alpha byte of error, with no per-cell strings in paint.
 const OPACITY_LEVELS = 1024;
+/** After a game's code fails to load, how long before asking for it again. */
+const LOAD_RETRY_MS = 5000;
 
 function cellFills(rgb: string)
 {
@@ -209,6 +211,9 @@ export function TerminalGridBackground({
   hostRef.current = host;
   const overRef = useRef(false);
   const heldRef = useRef(new Map<string, { x: number; y: number }>());
+  // Fork: keys pressed before this game's code had loaded, played when it has.
+  const missedRef = useRef(new Map<string, { x: number; y: number }>());
+  const [loadFailed, setLoadFailed] = useState<number | null>(null);
   const [over, setOver] = useState(false);
   const [playing, setPlaying] = useState(!!host);
   const [score, setScore] = useState(0);
@@ -248,8 +253,7 @@ export function TerminalGridBackground({
     let layoutDirty = true;
     let gridDirty = true;
     let dpr = 0;
-    let previous = indexRef.current;
-    let lastIndex = indexRef.current;
+    const retryAt = new Map<number, number>();
     boardsRef.current = boards;
 
     const logos = Object.fromEntries(
@@ -323,7 +327,10 @@ export function TerminalGridBackground({
 
     const ensureBoard = (index: number) => {
       const spec = GRID_GAMES[index];
-      if (!spec || boards[index] || loading.has(index)) {
+      if (
+        !spec || boards[index] || loading.has(index) ||
+        performance.now() < (retryAt.get(index) ?? 0)
+      ) {
         return;
       }
       loading.add(index);
@@ -344,25 +351,34 @@ export function TerminalGridBackground({
         }
         canvas.className = "absolute inset-0 h-full w-full";
         canvas.setAttribute("aria-hidden", "true");
+        const arcade = create();
         slot.appendChild(canvas);
         boards[index] = {
-          game: spec, arcade: create(), canvas, ctx, bubbleAt: null,
+          game: spec, arcade, canvas, ctx, bubbleAt: null,
           cols: 0, rows: 0, started: false, width: 0, height: 0, dpr: 0,
         };
+        retryAt.delete(index);
+        setLoadFailed((failed) => (failed === index ? null : failed));
         invalidate();
       }).catch((error) => {
         loading.delete(index);
+        // The draw loop asks every frame, so it waits a while before asking again.
+        retryAt.set(index, performance.now() + LOAD_RETRY_MS);
+        setLoadFailed(index);
         console.error("Could not load arcade", error);
       });
     };
 
     const layout = () => {
       layoutDirty = false;
-      const rect = root.getBoundingClientRect();
+      // Fork: not the bounding box. The panel opens on a scale animation, and no
+      // resize fires when that ends, so a size read halfway through would stick.
+      const nextWidth = root.clientWidth;
+      const nextHeight = root.clientHeight;
       const nextDpr = window.devicePixelRatio || 1;
-      if (rect.width !== width || rect.height !== height || nextDpr !== dpr) {
-        width = rect.width;
-        height = rect.height;
+      if (nextWidth !== width || nextHeight !== height || nextDpr !== dpr) {
+        width = nextWidth;
+        height = nextHeight;
         dpr = nextDpr;
         cols = Math.ceil(width / PITCH);
         rows = Math.ceil(height / PITCH);
@@ -397,10 +413,11 @@ export function TerminalGridBackground({
         board.arcade.setMode(hostRef.current?.mode ?? modeRef.current);
         board.arcade.takeControl();
         // Fork: a key already down while this game's code loaded still counts.
-        for (const [code, heading] of heldRef.current) {
+        for (const [code, heading] of missedRef.current) {
           if (code === "Space") board.arcade.action?.();
           else board.arcade.steer(heading.x, heading.y);
         }
+        missedRef.current.clear();
       }
       board.started = playingRef.current;
     };
@@ -521,19 +538,18 @@ export function TerminalGridBackground({
       }
       start();
       const current = indexRef.current;
-      if (lastIndex !== current) {
-        previous = lastIndex;
-        lastIndex = current;
-      }
       ensureBoard(current);
       const sliding = !playingRef.current && time - slideAtRef.current < SLIDE_MS;
       const visible = new Set([current]);
-      if (sliding && previous !== current) {
-        const slot = slotsRef.current[previous]?.getBoundingClientRect();
+      if (sliding) {
+        // Any board the track is carrying past the window, not only the last one.
         const rootBox = rootRef.current?.getBoundingClientRect();
-        if (slot && rootBox && slot.right > rootBox.left && slot.left < rootBox.right) {
-          visible.add(previous);
-        }
+        boards.forEach((board, i) => {
+          const slot = board && slotsRef.current[i]?.getBoundingClientRect();
+          if (slot && rootBox && slot.right > rootBox.left && slot.left < rootBox.right) {
+            visible.add(i);
+          }
+        });
       }
       for (let i = 0; i < boards.length; i++) {
         const board = boards[i];
@@ -636,6 +652,7 @@ export function TerminalGridBackground({
       arcade?.steerEnd?.(heading.x, heading.y);
     }
     heldRef.current.clear();
+    missedRef.current.clear();
   }, []);
 
   // Fork: the host's game and run decide what's on the board.
@@ -661,7 +678,8 @@ export function TerminalGridBackground({
     }
     lastHostRunRef.current = hostRunId;
     scoreRef.current = board?.arcade.score() ?? 0;
-    livesRef.current = board?.arcade.lives() ?? 0;
+    // Fork: a board still loading hasn't lost any lives.
+    livesRef.current = board?.arcade.lives() ?? 3;
     overRef.current = board?.arcade.gameOver() ?? false;
     showScore(scoreRef.current);
     setLives(livesRef.current);
@@ -695,7 +713,7 @@ export function TerminalGridBackground({
     board?.arcade.setMode(mode);
     board?.arcade.takeControl();
     scoreRef.current = 0;
-    livesRef.current = board?.arcade.lives() ?? 0;
+    livesRef.current = board?.arcade.lives() ?? 3;
     overRef.current = false;
     setOver(false);
     showScore(0);
@@ -813,12 +831,14 @@ export function TerminalGridBackground({
       if (isSpace) {
         if (event.repeat) return;
         heldRef.current.set(event.code, HEADING.ArrowUp!);
-        arcade?.action?.();
+        if (arcade) arcade.action?.();
+        else missedRef.current.set(event.code, HEADING.ArrowUp!);
         return;
       }
       if (heading) {
         heldRef.current.set(event.code, heading);
-        arcade?.steer(heading.x, heading.y);
+        if (arcade) arcade.steer(heading.x, heading.y);
+        else missedRef.current.set(event.code, heading);
       }
     };
 
@@ -827,6 +847,7 @@ export function TerminalGridBackground({
       const heading = heldRef.current.get(event.code);
       if (!heading) return;
       heldRef.current.delete(event.code);
+      missedRef.current.delete(event.code);
       event.preventDefault();
       event.stopPropagation();
       boardsRef.current?.[indexRef.current]?.arcade.steerEnd?.(
@@ -914,6 +935,15 @@ export function TerminalGridBackground({
           ))}
         </div>
       </div>
+
+      {host && loadFailed === slide.index ? (
+        <p
+          data-grid-load-failed=""
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center text-[12px] text-content/55"
+        >
+          This game didn't load. Trying again.
+        </p>
+      ) : null}
 
       {host ? null : playing ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid grid-cols-3 items-center px-3 py-2 font-mono text-[11px] tracking-[0.14em] text-content/50">

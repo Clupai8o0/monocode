@@ -39,7 +39,11 @@ function mountPanel()
     host.setAttribute("data-fork-games-root", "");
     document.body.appendChild(host);
     createRoot(host).render(<GamesPanel />);
-  }).catch((error) => console.error("Could not load games", error));
+  }).catch((error) => {
+    console.error("Could not load games", error);
+    // Nothing's on screen, so the next click should open it rather than close it.
+    gamesPanel.hide();
+  });
 }
 
 type Props = {

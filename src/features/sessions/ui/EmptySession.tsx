@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode, useSyncExternalStore } from "react";
+import { type ReactNode, useSyncExternalStore } from "react";
 import { basename } from "../../../platform/tauri/fs";
 import { projectKey } from "../../../shared/lib/paths";
 import { looksLikeProject } from "../../projects/model/recents";
@@ -12,11 +12,14 @@ import {
   subscribeGridArcadeEnabled,
 } from "../../settings/model/settings";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
+import { lazySurface } from "../../../shared/ui/lazySurface";
 // Fork: idle games load only when an empty session shows them.
-const TerminalGridBackground = lazy(() =>
-  import("../../terminal/ui/TerminalGridBackground").then((module) => ({
-    default: module.TerminalGridBackground,
-  })),
+const TerminalGridBackground = lazySurface(() =>
+  import("../../terminal/ui/TerminalGridBackground")
+    .then((module) => ({ default: module.TerminalGridBackground }))
+    // Only a backdrop here: a session works without it, so a failed load can't
+    // be allowed to take the window down.
+    .catch(() => ({ default: () => null })),
 );
 
 type Props = {
@@ -56,7 +59,7 @@ export function EmptySession({ cwd, composer, hasChatBackground }: Props) {
     >
       {/* Fork: keep the composer in place while the background loads. */}
       {arcadeEnabled && !hasChatBackground ? (
-        <Suspense fallback={null}><TerminalGridBackground /></Suspense>
+        <TerminalGridBackground />
       ) : null}
       {composer ? (
         // Same box as the docked composer (max-w-4xl, p-1.5), so the input
