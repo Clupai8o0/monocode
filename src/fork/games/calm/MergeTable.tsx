@@ -214,11 +214,11 @@ export function MergeTable({ mode, runId, active, onExit, onInput }: TableProps)
           ) : conflict ? (
             <div ref={slide} className="flex w-full max-w-[460px] flex-col gap-4">
               <div className="rounded-sm bg-content/[0.07] px-3 py-2 font-mono text-[12px] leading-5">
-                <div className="text-amber-300/70">{"<<<<<<< ours"}</div>
+                <div className="text-amber-600">{"<<<<<<< ours"}</div>
                 <div className="whitespace-pre text-content/85">{conflict.ours}</div>
                 <div className="text-content/40">{"======="}</div>
                 <div className="whitespace-pre text-content/85">{conflict.theirs}</div>
-                <div className="text-sky-300/70">{">>>>>>> theirs"}</div>
+                <div className="text-sky-600">{">>>>>>> theirs"}</div>
               </div>
               <div className="flex flex-col gap-2 px-1">
                 <span className="w-fit rounded-sm bg-content/15 px-2 py-0.5 font-mono text-[11px] text-content/90">
