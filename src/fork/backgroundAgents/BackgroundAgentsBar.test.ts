@@ -153,6 +153,16 @@ it("says so while a command has printed nothing, then shows what comes", async (
   expect(board.querySelectorAll("pre")[1].textContent).toBe("ready");
 });
 
+it("notes the cut even when the tail it can see hasn't changed", async () => {
+  vi.useFakeTimers();
+  invoke.mockResolvedValue({ text: "same\n", truncated: false, size: 5 });
+  const { board } = await openCommand();
+  expect(board.textContent).not.toContain("Earlier output left out.");
+  invoke.mockResolvedValue({ text: "same\n", truncated: true, size: 90000 });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(board.textContent).toContain("Earlier output left out.");
+});
+
 it("doesn't call a long run of blank output no output", async () => {
   invoke.mockResolvedValue({ text: "\n\n", truncated: true, size: 90000 });
   const { board } = await openCommand();

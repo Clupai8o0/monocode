@@ -46,6 +46,7 @@ export function useTaskOutput(
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let seen: string | undefined;
+    let seenTruncated = false;
     const next = () => {
       timer = setTimeout(read, POLL_MS);
     };
@@ -60,11 +61,13 @@ export function useTaskOutput(
             return;
           }
           const raw = tail?.text ?? "";
-          if (raw !== seen) {
+          const truncated = !!tail?.truncated;
+          if (raw !== seen || truncated !== seenTruncated) {
             seen = raw;
+            seenTruncated = truncated;
             setOutput({
               text: cleanOutput(raw),
-              truncated: !!tail?.truncated,
+              truncated,
               unavailable: false,
             });
           }
