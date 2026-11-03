@@ -53,6 +53,20 @@ function useSecondTick(active: boolean): void {
   }, [active]);
 }
 
+/**
+ * The panel is short, so a row near its edge would open out of sight. Rows open
+ * without an animation: while growing they would have no height to reveal yet.
+ */
+function useRevealWhenOpen(open: boolean) {
+  const row = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) {
+      row.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [open]);
+  return row;
+}
+
 /** App publishes in an effect, so a new run can render once before it is timed. */
 function timingOf(block: Block, now: number): RunTiming {
   return (
@@ -198,6 +212,7 @@ function AgentRow({
   now: number;
 }) {
   const [open, setOpen] = useState(false);
+  const row = useRevealWhenOpen(open);
   const name = subagentName(block);
   const model = subagentModelName(block);
   const state = toolCallState(block);
@@ -281,7 +296,7 @@ function AgentRow({
     );
   }
   return (
-    <div className="flex min-w-0 flex-col">
+    <div ref={row} className="flex min-w-0 flex-col">
       <button
         type="button"
         aria-expanded={open}
@@ -296,19 +311,17 @@ function AgentRow({
       >
         {body}
       </button>
-      <div className="zen-phase-body" data-open={open}>
-        {open ? (
-          <div className="min-w-0 pl-[22px]">
-            <SubagentTrail
-              block={block}
-              cwd={cwd}
-              active={active}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenDiff}
-            />
-          </div>
-        ) : null}
-      </div>
+      {open ? (
+        <div className="min-w-0 pl-[22px]">
+          <SubagentTrail
+            block={block}
+            cwd={cwd}
+            active={active}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -396,9 +409,10 @@ function CommandRow({
   now: number;
 }) {
   const [open, setOpen] = useState(false);
+  const row = useRevealWhenOpen(open);
   const title = block.tool?.title || block.text || "Command";
   return (
-    <div className="flex min-w-0 flex-col">
+    <div ref={row} className="flex min-w-0 flex-col">
       <button
         type="button"
         aria-expanded={open}
@@ -416,8 +430,12 @@ function CommandRow({
           strokeWidth={1.75}
           aria-hidden="true"
         />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-content/70">
-          {title}
+        <span
+          className={`min-w-0 flex-1 truncate text-[12px] ${
+            open ? "font-sans text-content/55" : "font-mono text-content/70"
+          }`}
+        >
+          {open ? "Command" : title}
         </span>
         <span className="shrink-0 font-sans text-[12px] tabular-nums text-content/55">
           {formatLiveElapsed(timing.start, timing.end ?? now)}
@@ -430,19 +448,17 @@ function CommandRow({
           aria-hidden="true"
         />
       </button>
-      <div className="zen-phase-body" data-open={open}>
-        {open ? (
-          <div className="flex min-w-0 flex-col gap-1 py-1 pl-[22px]">
-            <pre className="max-h-32 min-w-0 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-content/70">
-              {title}
-            </pre>
-            {/* A running command's output is not sent here until it ends. */}
-            <p className="font-sans text-[12px] text-content/45">
-              Its output appears in the transcript when it finishes.
-            </p>
-          </div>
-        ) : null}
-      </div>
+      {open ? (
+        <div className="flex min-w-0 flex-col gap-1 py-1 pl-[22px]">
+          <pre className="max-h-32 min-w-0 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-content/70">
+            {title}
+          </pre>
+          {/* A running command's output is not sent here until it ends. */}
+          <p className="font-sans text-[12px] text-content/45">
+            Its output appears in the transcript when it finishes.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

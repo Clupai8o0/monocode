@@ -16,10 +16,15 @@ for (const theme of ["dark", "light"] as const) {
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.goto(`/tests/browser/agents-board.html?theme=${theme}`);
 
-    // Overlapping runs open by themselves.
-    await expect(page.locator(board)).toBeVisible();
+    // Stays one line until asked, however many runs overlap.
+    await expect(page.locator(board)).toHaveCount(0);
     await expect(page.locator(strip)).toContainText("2 of 5 agents done, 1 command running");
     await expect(page.locator(strip)).toContainText("1 failed");
+    await page.screenshot({ path: `${dir}/agents-strip-${theme}.png` });
+    await page.locator(strip).click();
+    await expect(page.locator(board)).toBeVisible();
+    // Opened, it scrolls inside a small panel instead of pushing the chat up.
+    expect((await page.locator(board).boundingBox())!.height).toBeLessThanOrEqual(168);
     await expect(page.getByText("Done · 14 steps")).toBeVisible();
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
     await expect(page.getByText(/^Run npm test -- --run src\/features\/auth\/ --reporter=dot$/)).toBeVisible();
@@ -57,12 +62,22 @@ for (const theme of ["dark", "light"] as const) {
     await page.screenshot({ path: `${dir}/agents-board-row-${theme}.png` });
     await page.getByRole("button", { name: "Hide Migration audit's work" }).click();
 
-    // The user's toggle wins.
-    await page.locator(strip).click();
+    // A running command opens in place to show all of itself.
+    await page.getByRole("button", { name: "Show command: npm run dev -- --port 1420" }).click();
+    await expect(page.locator(`${board} pre`)).toHaveText("npm run dev -- --port 1420");
+    await expect(page.locator(`${board} pre`)).toBeInViewport({ ratio: 1 });
+    await expect(page.getByText("Its output appears in the transcript when it finishes.")).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: `${dir}/agents-board-command-${theme}.png` });
+    await page.getByRole("button", { name: "Hide command: npm run dev -- --port 1420" }).click();
+    await expect(page.locator(`${board} pre`)).toHaveCount(0);
+
+    // Escape closes it, and it stays closed.
+    await page.locator(board).focus();
+    await page.keyboard.press("Escape");
     await expect(page.locator(board)).toHaveCount(0);
+    await expect(page.locator(strip)).toBeFocused();
     await page.waitForTimeout(1200);
     await expect(page.locator(board)).toHaveCount(0);
-    await page.screenshot({ path: `${dir}/agents-strip-${theme}.png` });
   });
 
   test(`agents board narrow, ${theme}`, async ({ page }, testInfo) => {
@@ -70,6 +85,7 @@ for (const theme of ["dark", "light"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.goto(`/tests/browser/agents-board.html?theme=${theme}&width=420`);
+    await page.locator(strip).click();
     await expect(page.locator(board)).toBeVisible();
     const row = page.getByRole("button", { name: "Show Correctness review's work" });
     const svg = (await row.locator("svg:not(.size-3\\.5):not(.size-3)").last().boundingBox())!;
@@ -85,11 +101,10 @@ test("sequential runs stay closed", async ({ page }) => {
   await expect(page.locator(board)).toHaveCount(0);
 });
 
-test("a finished board stays up, closed, and keeps its wording", async ({ page }) => {
+test("the tray clears once all work has finished", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html?scene=alldone");
-  await expect(page.locator(strip)).toContainText("2 of 2 agents done");
-  await expect(page.locator(strip)).toContainText("1 failed");
-  await expect(page.locator(board)).toHaveCount(0);
+  await expect(page.locator("[data-switch-session]")).toBeVisible();
+  await expect(page.locator(strip)).toHaveCount(0);
 });
 
 test("a single agent keeps the tray's wording", async ({ page }) => {
@@ -101,7 +116,7 @@ test("a single agent keeps the tray's wording", async ({ page }) => {
 test("the toggle does not leak between sessions", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html");
   await page.locator(strip).click();
-  await expect(page.locator(board)).toHaveCount(0);
-  await page.locator("[data-switch-session]").click();
   await expect(page.locator(board)).toBeVisible();
+  await page.locator("[data-switch-session]").click();
+  await expect(page.locator(board)).toHaveCount(0);
 });
