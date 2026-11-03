@@ -210,7 +210,7 @@ export function SessionCleanup({
     // The list was read when the panel opened: a session that moved on since
     // may no longer be finished, whatever its old close line said.
     const fresh = new Map<string, SessionSummary>();
-    for (const cwd of new Set(targets.map((row) => row.cwd))) {
+    const reread = async (cwd: string) => {
       try {
         for (const row of await listSessionsByProject(cwd)) {
           fresh.set(row.id, row);
@@ -218,16 +218,26 @@ export function SessionCleanup({
       } catch {
         // Not re-read means not removed; those rows are reported as kept.
       }
+    };
+    for (const cwd of new Set(targets.map((row) => row.cwd))) {
+      await reread(cwd);
     }
     const removed: SessionSummary[] = [];
     let kept = 0;
     for (const [index, row] of targets.entries()) {
       setProgress({ verb, done: index, total: targets.length });
+      // Stopping the last session's agent takes a while, and a delete can't be
+      // taken back, so look again right before each one.
+      if (mode === "delete") {
+        fresh.delete(row.id);
+        await reread(row.cwd);
+      }
       const current = fresh.get(row.id);
       const unchanged =
         current &&
         current.updatedAt === row.updatedAt &&
         !current.pinned &&
+        !current.draft &&
         !current.archived &&
         !isHeld(row.id, latest.current.held);
       let done = false;

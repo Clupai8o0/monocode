@@ -6306,6 +6306,12 @@ function Workspace({
     [onRemoveHistorySession],
   );
 
+  // Fork: a lead waiting on its workers is not busy, but removing it ends the run.
+  const cleanupBusySessionIds = useMemo(
+    () => withRunningLeads(busySessionIds, orchestrationRuns),
+    [busySessionIds, orchestrationRuns],
+  );
+
   // Fork: the cleanup panel has asked already. Worktrees are left alone: one
   // prompt per worktree would be no way to clear many sessions at once.
   const onDeleteCleanupSession = useCallback(
@@ -14923,6 +14929,7 @@ function Workspace({
       onCancelReminders={sessionReminders.cancel}
       onDeleteSession={onDeleteHistorySession}
       onDeleteSessions={onDeleteHistorySessions}
+      cleanupBusySessionIds={cleanupBusySessionIds}
       onDeleteCleanupSession={onDeleteCleanupSession}
       onOpenFile={onOpenFile}
       onOpenTerminal={onOpenTerminal}

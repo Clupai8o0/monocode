@@ -287,6 +287,41 @@ it("keeps what moved on, what another window holds and what failed", async () =>
   );
 });
 
+it("looks again before each delete, so one changed meanwhile stays", async () => {
+  onDelete.mockImplementationOnce(async () => {
+    projects["/p/beta"] = [session("b1", "/p/beta", { pinned: true })];
+    return true;
+  });
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  await click(buttonNamed(/^Delete 2 for good$/));
+  expect(deletedIds()).toEqual(["a1"]);
+  expect(document.body.textContent).toContain("Deleted 1. Kept 1");
+});
+
+it("keeps one that went missing or could not be read before its delete", async () => {
+  onDelete.mockImplementationOnce(async () => {
+    listSessionsByProject.mockImplementation(async () => {
+      throw new Error("locked");
+    });
+    return true;
+  });
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  await click(buttonNamed(/^Delete 2 for good$/));
+  expect(deletedIds()).toEqual(["a1"]);
+  expect(document.body.textContent).toContain("Deleted 1. Kept 1");
+});
+
+it("keeps a session that started working after the question", async () => {
+  await mount();
+  await click(buttonNamed(/^Delete 2…$/));
+  await mount({ busy: ["a1"] });
+  await click(buttonNamed(/^Delete 2 for good$/));
+  expect(deletedIds()).toEqual(["b1"]);
+  expect(document.body.textContent).toContain("Deleted 1. Kept 1");
+});
+
 it("a failed delete throwing still keeps the row", async () => {
   onDelete.mockImplementation(async () => {
     throw new Error("locked");

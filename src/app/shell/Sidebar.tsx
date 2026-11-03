@@ -393,6 +393,8 @@ type Props = {
   onCancelReminders?: (sessionIds: readonly string[]) => void;
   onDeleteSession?: (sessionId: string) => void;
   onDeleteSessions?: (sessionIds: readonly string[]) => void;
+  /** Fork: what the cleanup panel must leave alone: busy, or leading a run. */
+  cleanupBusySessionIds?: ReadonlySet<string>;
   /** Fork: the cleanup panel's delete, which has already asked. */
   onDeleteCleanupSession?: (row: SessionSummary) => Promise<boolean>;
   onOpenFile: OpenFileFn;
@@ -513,6 +515,7 @@ function SidebarComponent({
   onCancelReminders,
   onDeleteSession: onDeleteLocalSession,
   onDeleteSessions: onDeleteLocalSessions,
+  cleanupBusySessionIds,
   onDeleteCleanupSession,
   onOpenFile,
   onOpenTerminal,
@@ -2753,7 +2756,7 @@ function SidebarComponent({
             .map((project) => project.path)
             .filter((path) => !isRemoteProjectPath(path))}
           activeSessionId={activeSessionId}
-          busySessionIds={busySessionIds}
+          busySessionIds={cleanupBusySessionIds ?? busySessionIds}
           approvalSessionIds={approvalSessionIds}
           openSessionIds={allOpenSessionIds}
           onArchive={onArchiveLocalSession}
