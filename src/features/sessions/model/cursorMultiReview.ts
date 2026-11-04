@@ -24,7 +24,8 @@ export const CURSOR_MULTI_REVIEW_APP_PREFIX = "cursor-multi-review-";
 export const CURSOR_MULTI_REVIEW_TITLE_PREFIX = "Review · ";
 const USER_LIMIT = 400;
 const REPORT_LIMIT = 900;
-const PROMPT_LIMIT = 1_800;
+const PROMPT_LIMIT = 4_500;
+const NOTE_REQUEST_LIMIT = 120;
 export const CHILD_REPORT_LIMIT = 3_000;
 
 export type CursorMultiReviewRole = "claude" | "peer";
@@ -200,6 +201,7 @@ type Pair = {
   pairId: string;
   sourceSessionId: string;
   turnId: string;
+  userRequest?: string;
   children: Map<
     string,
     { settled: boolean; result?: CursorMultiReviewChildResult }
@@ -236,9 +238,19 @@ export function truncateReviewReport(text: string): string {
 
 export function buildCursorMultiReviewFanInText(
   results: CursorMultiReviewChildResult[],
+  userRequest = "",
 ): string {
+  // Notes can arrive after newer turns, so name the turn this one is about.
+  const request = userRequest.replace(/\s+/g, " ").trim();
+  const turn = request
+    ? `your turn "${
+        request.length <= NOTE_REQUEST_LIMIT
+          ? request
+          : `${request.slice(0, NOTE_REQUEST_LIMIT)}…`
+      }"`
+    : "your last turn";
   const parts = [
-    "Multi-review of your last turn is ready (read-only).",
+    `Multi-review of ${turn} is ready (read-only).`,
     "Consensus and disagreements below. Apply fixes you agree with; do not redo the whole task.",
   ];
   for (const result of results) {
@@ -259,13 +271,25 @@ export function buildCursorMultiReviewFanInText(
   return parts.join("\n\n");
 }
 
+/** Shown in Cursor when every reviewer ended without writing anything. */
+export function cursorMultiReviewEmptyStatus(
+  results: CursorMultiReviewChildResult[],
+): string {
+  const details = results.map((result) => {
+    const reason = result.error ? `: ${result.error}` : "";
+    return `${HARNESS_TITLE[result.harness]} ${result.status}${reason}`;
+  });
+  return `Auto-review ended without a report. ${details.join("; ")}.`;
+}
+
 export function buildCursorMultiReviewQueueMessage(
   pairId: string,
   results: CursorMultiReviewChildResult[],
+  userRequest?: string,
 ): QueuedMessage {
   return {
     id: `${CURSOR_MULTI_REVIEW_APP_PREFIX}${pairId}`,
-    text: buildCursorMultiReviewFanInText(results),
+    text: buildCursorMultiReviewFanInText(results, userRequest),
     attachments: [],
   };
 }
@@ -290,6 +314,7 @@ export class CursorMultiReviewPairs {
     sourceSessionId: string;
     turnId: string;
     childSessionIds: string[];
+    userRequest?: string;
   }): string {
     const pairId = crypto.randomUUID();
     const children = new Map(
@@ -299,6 +324,7 @@ export class CursorMultiReviewPairs {
       pairId,
       sourceSessionId: input.sourceSessionId,
       turnId: input.turnId,
+      userRequest: input.userRequest,
       children,
     };
     this.pairs.set(pairId, pair);
@@ -325,11 +351,19 @@ export class CursorMultiReviewPairs {
     if (!child || child.settled) return;
     child.settled = true;
     child.result = result;
-    if ([...pair.children.values()].some((c) => !c.settled)) return;
-    const results = [...pair.children.values()].map((c) => c.result!);
-    this.pairs.delete(pairId);
-    for (const id of pair.children.keys()) this.byChild.delete(id);
-    this.onReady({ ...pair, results });
+    this.release(pair.sourceSessionId);
+  }
+
+  /** Hands over finished pairs in turn order, so older notes stay first. */
+  private release(sourceSessionId: string) {
+    for (const [pairId, pair] of [...this.pairs]) {
+      if (pair.sourceSessionId !== sourceSessionId) continue;
+      if ([...pair.children.values()].some((c) => !c.settled)) return;
+      const results = [...pair.children.values()].map((c) => c.result!);
+      this.pairs.delete(pairId);
+      for (const id of pair.children.keys()) this.byChild.delete(id);
+      this.onReady({ ...pair, results });
+    }
   }
 
   /** Drop fan-in if the Cursor source was removed. */

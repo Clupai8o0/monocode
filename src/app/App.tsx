@@ -818,6 +818,7 @@ import {
   buildCursorMultiReviewQueueMessage,
   buildCursorMultiReviewRequest,
   cursorMultiReviewChildResult,
+  cursorMultiReviewEmptyStatus,
   latestUserTurn,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
@@ -10476,12 +10477,12 @@ function Workspace({
         setTabs(nextTabs);
         // A background pane opens where its source is; the user stays put.
         if (focusNew && tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
-      } else {
+      } else if (focusNew) {
         const nextTab = newTab(session.id);
         appendTab(nextTab, cwd);
-        // Do not steal the active tab when launching background review panes.
-        if (focusNew) setActiveTabId(nextTab.id);
+        setActiveTabId(nextTab.id);
       }
+      // A background session with no pane to sit beside stays in the sidebar.
 
       if (focusNew) {
         setProjectTerminalFocused(false);
@@ -10497,11 +10498,19 @@ function Workspace({
         (s) => s.id === pair.sourceSessionId,
       );
       if (!source || removingSessionIds.current.has(source.id)) return;
-      // Nothing to act on, so don't spend a Cursor turn on it.
-      if (!pair.results.some((result) => result.text.trim())) return;
+      // Nothing to act on, so say so without spending a Cursor turn on it.
+      if (!pair.results.some((result) => result.text.trim())) {
+        enqueueHarnessEvent(source.id, {
+          type: "status",
+          text: cursorMultiReviewEmptyStatus(pair.results),
+        });
+        flushHarnessEvents();
+        return;
+      }
       const message = buildCursorMultiReviewQueueMessage(
         pair.pairId,
         pair.results,
+        pair.userRequest,
       );
       setSessions((prev) =>
         prev.map((session) => {
@@ -10623,6 +10632,7 @@ function Workspace({
         sourceSessionId: sourceId,
         turnId,
         childSessionIds: childIds,
+        userRequest: turnUserRequest(turn),
       });
       cursorMultiReviewPanes.current.set(sourceId, [
         ...retireCursorMultiReviewPanes(sourceId),

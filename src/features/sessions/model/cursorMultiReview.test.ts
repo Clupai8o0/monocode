@@ -13,6 +13,7 @@ import {
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
   cursorMultiReviewChildResult,
+  cursorMultiReviewEmptyStatus,
   truncateReviewReport,
 } from "./cursorMultiReview";
 
@@ -127,6 +128,19 @@ describe("buildCursorMultiReviewPrompt", () => {
     expect(prompt).toMatch(/UI\/UX|a11y|layout/i);
   });
 
+  it("keeps the file list after a full request and report", () => {
+    const prompt = buildCursorMultiReviewPrompt({
+      from: "cursor",
+      to: "codex",
+      role: "peer",
+      userRequest: "x".repeat(400),
+      report: "y".repeat(900),
+      files: ["src/a.ts"],
+      frontendFocus: false,
+    });
+    expect(prompt).toContain("- src/a.ts");
+  });
+
   it("keeps the frontend focus when the file list overflows the limit", () => {
     const prompt = buildCursorMultiReviewPrompt({
       from: "cursor",
@@ -136,7 +150,8 @@ describe("buildCursorMultiReviewPrompt", () => {
       report: "y",
       files: Array.from(
         { length: 40 },
-        (_, i) => `src/features/settings/ui/components/File${i}.tsx`,
+        (_, i) =>
+          `src/features/settings/ui/components/${"deep/".repeat(20)}File${i}.tsx`,
       ),
       frontendFocus: true,
     });
@@ -273,6 +288,91 @@ describe("shouldStartCursorMultiReview", () => {
         ],
       }),
     ).toBe(false);
+  });
+});
+
+describe("cursorMultiReviewEmptyStatus", () => {
+  it("names each reviewer and why it ended", () => {
+    expect(
+      cursorMultiReviewEmptyStatus([
+        {
+          status: "failed",
+          harness: "codex",
+          title: "Review · Codex",
+          text: "",
+          error: "usage limited",
+        },
+        {
+          status: "cancelled",
+          harness: "grok",
+          title: "Review · Grok",
+          text: "",
+        },
+      ]),
+    ).toBe(
+      "Auto-review ended without a report. Codex failed: usage limited; Grok Build cancelled.",
+    );
+  });
+});
+
+describe("buildCursorMultiReviewFanInText request", () => {
+  const results = [
+    {
+      status: "completed" as const,
+      harness: "codex" as const,
+      title: "Review · Codex",
+      text: "Fine.",
+    },
+  ];
+
+  it("names the turn it reviewed", () => {
+    expect(buildCursorMultiReviewFanInText(results, "Fix\nthe footer")).toMatch(
+      /your turn "Fix the footer"/,
+    );
+  });
+
+  it("falls back to the last turn with no request", () => {
+    expect(buildCursorMultiReviewFanInText(results)).toMatch(/your last turn/);
+  });
+});
+
+describe("CursorMultiReviewPairs order", () => {
+  const done = (harness: HarnessId) => ({
+    status: "completed" as const,
+    harness,
+    title: "Review",
+    text: "ok",
+  });
+
+  it("holds a newer turn's note until the older turn's reviews finish", () => {
+    const ready: string[] = [];
+    const pairs = new CursorMultiReviewPairs((pair) => {
+      ready.push(pair.turnId);
+    });
+    pairs.begin({
+      sourceSessionId: "cursor-1",
+      turnId: "turn-a",
+      childSessionIds: ["a1"],
+    });
+    pairs.begin({
+      sourceSessionId: "cursor-1",
+      turnId: "turn-b",
+      childSessionIds: ["b1"],
+    });
+    pairs.begin({
+      sourceSessionId: "cursor-2",
+      turnId: "other",
+      childSessionIds: ["c1"],
+    });
+
+    pairs.settleChild("b1", done("codex"));
+    expect(ready).toEqual([]);
+    // Another session's reviews are not held back.
+    pairs.settleChild("c1", done("codex"));
+    expect(ready).toEqual(["other"]);
+
+    pairs.settleChild("a1", done("claude"));
+    expect(ready).toEqual(["other", "turn-a", "turn-b"]);
   });
 });
 
