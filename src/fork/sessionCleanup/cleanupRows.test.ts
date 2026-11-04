@@ -5,8 +5,13 @@ vi.mock("../../features/sessions/data/sessionStore", () => ({
   listSessionsByProject,
 }));
 
-const { SCAN_GAP_MS, cachedCleanupRows, requestCleanupScan, resetCleanupRows } =
-  await import("./cleanupRows");
+const {
+  SCAN_GAP_MS,
+  cachedCleanupRows,
+  forgetCleanupRows,
+  requestCleanupScan,
+  resetCleanupRows,
+} = await import("./cleanupRows");
 
 const row = (id: string) => ({ id }) as never;
 
@@ -79,4 +84,11 @@ it("an ask during a scan runs after it, and stays urgent", async () => {
   await settle();
   expect(listSessionsByProject).toHaveBeenCalledTimes(2);
   expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["/a#1"]);
+});
+
+it("forgets removed sessions straight away", async () => {
+  requestCleanupScan(["/a", "/b"]);
+  await settle();
+  forgetCleanupRows(["/a#1"]);
+  expect(cachedCleanupRows(["/a", "/b"]).map((r) => r.id)).toEqual(["/b#1"]);
 });

@@ -54,6 +54,21 @@ export async function readCleanupProject(
   return rows;
 }
 
+/** Drops sessions just removed, so the count falls before the next read. */
+export function forgetCleanupRows(sessionIds: readonly string[]) {
+  if (sessionIds.length === 0) {
+    return;
+  }
+  const gone = new Set(sessionIds);
+  for (const [path, rows] of byProject) {
+    byProject.set(
+      path,
+      rows.filter((row) => !gone.has(row.id)),
+    );
+  }
+  emit();
+}
+
 async function scan(paths: readonly string[]) {
   scanning = true;
   try {

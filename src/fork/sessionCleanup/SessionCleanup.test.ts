@@ -16,7 +16,8 @@ vi.mock("../sessionRead", () => ({
 
 const { SessionCleanup } = await import("./SessionCleanup");
 const { setCloseState } = await import("../closeBadges/closeState");
-const { resetCleanupRows } = await import("./cleanupRows");
+const { cachedCleanupRows, resetCleanupRows } = await import("./cleanupRows");
+const { readSession } = await import("../sessionRead");
 
 type Row = {
   id: string;
@@ -421,4 +422,32 @@ it("goes to a session and closes the panel without ticking it", async () => {
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(onOpenSession).toHaveBeenCalledWith("a1");
   expect(rowBox("a1")?.checked).toBe(before);
+});
+
+it("picks the tab only after unread sessions have been checked", async () => {
+  vi.mocked(readSession).mockResolvedValueOnce({
+    blocks: [
+      { role: "assistant", text: "**Close:** Safe to close: nothing left to do." },
+    ],
+  } as never);
+  projects = { "/p/alpha": [session("fresh", "/p/alpha", { updatedAt: SAVED + 1 })], "/p/beta": [] };
+  await mount();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(buttonNamed(/^Safe to close/).getAttribute("aria-pressed")).toBe("true");
+  expect(rowBox("fresh")?.checked).toBe(true);
+});
+
+it("takes archived sessions out of the shared list, so the count falls", async () => {
+  await mount();
+  expect(cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id)).toContain("a1");
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const left = cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id);
+  expect(left).not.toContain("a1");
+  expect(left).not.toContain("b1");
+  expect(left).toContain("a2");
 });

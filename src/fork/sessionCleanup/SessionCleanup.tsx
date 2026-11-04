@@ -35,7 +35,11 @@ import {
   type CleanupFilter,
   type CleanupMode,
 } from "./cleanupModel";
-import { cachedCleanupRows, readCleanupProject } from "./cleanupRows";
+import {
+  cachedCleanupRows,
+  forgetCleanupRows,
+  readCleanupProject,
+} from "./cleanupRows";
 
 const EMPTY: Record<CleanupFilter, string> = {
   safe: "No session says it is safe to close.",
@@ -172,10 +176,13 @@ export function SessionCleanup({
   const checkKey = candidates.map((c) => `${c.id}@${c.updatedAt}`).join(",");
   const latest = useRef({ candidates, held, onArchive, onDelete });
   latest.current = { candidates, held, onArchive, onDelete };
+  // Which list has been sent to be read: until then, none of it counts as done.
+  const [requestedKey, setRequestedKey] = useState<string | null>(null);
   useEffect(() => {
     for (const candidate of latest.current.candidates) {
       requestCloseState(candidate.id, candidate.updatedAt);
     }
+    setRequestedKey(checkKey);
   }, [checkKey]);
 
   const kindOf = (row: SessionSummary) =>
@@ -197,7 +204,7 @@ export function SessionCleanup({
   const locked = working || pendingDelete !== null;
 
   // Nothing known yet at opening: settle on a tab once it has all been read.
-  const settled = !loading && checking === 0;
+  const settled = !loading && requestedKey === checkKey && checking === 0;
   useEffect(() => {
     if (settled && !tabChosen.current) {
       tabChosen.current = true;
@@ -307,6 +314,7 @@ export function SessionCleanup({
     }
     setRows((all) => all.map((row) => fresh.get(row.id) ?? row));
     setRemovedIds((ids) => new Set([...ids, ...removed.map((r) => r.id)]));
+    forgetCleanupRows(removed.map((r) => r.id));
     setOverrides(new Map());
     setProgress(null);
     setResult({
