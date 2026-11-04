@@ -16,6 +16,8 @@ let byProject = new Map<string, readonly SessionSummary[]>();
 let version = 0;
 /** Counts removals and restores, so a read that began before one is not kept. */
 let changes = 0;
+/** The project list each removed session was on, for putting it back. */
+const removedFrom = new Map<string, string>();
 const listeners = new Set<() => void>();
 
 let scanning = false;
@@ -50,13 +52,16 @@ export function cachedCleanupRows(paths: readonly string[]): SessionSummary[] {
 export async function readCleanupProject(
   path: string,
 ): Promise<readonly SessionSummary[]> {
-  const startedAt = changes;
-  const rows = await listSessionsByProject(path);
-  // Read before a session was removed or restored: it would undo that change.
-  if (startedAt === changes) {
-    byProject.set(path, rows);
-    emit();
-  }
+  let startedAt: number;
+  let rows: readonly SessionSummary[];
+  // A read that began before a session was removed or restored would undo that
+  // change, for the cache and for whoever is waiting on it, so read again.
+  do {
+    startedAt = changes;
+    rows = await listSessionsByProject(path);
+  } while (startedAt !== changes);
+  byProject.set(path, rows);
+  emit();
   return rows;
 }
 
@@ -68,12 +73,33 @@ export function forgetCleanupRows(sessionIds: readonly string[]) {
   changes += 1;
   const gone = new Set(sessionIds);
   for (const [path, rows] of byProject) {
+    for (const row of rows) {
+      if (gone.has(row.id)) {
+        removedFrom.set(row.id, path);
+      }
+    }
     byProject.set(
       path,
       rows.filter((row) => !gone.has(row.id)),
     );
   }
   emit();
+}
+
+/**
+ * These rows, in place of any with the same id: a read since the archive holds
+ * the session as archived, and would keep it off every list.
+ */
+export function withRestoredRows(
+  rows: readonly SessionSummary[],
+  restored: readonly SessionSummary[],
+): SessionSummary[] {
+  const byId = new Map(restored.map((row) => [row.id, row]));
+  const known = new Set(rows.map((row) => row.id));
+  return [
+    ...restored.filter((row) => !known.has(row.id)),
+    ...rows.map((row) => byId.get(row.id) ?? row),
+  ];
 }
 
 /** Puts back sessions just restored, under the projects they came from. */
@@ -83,9 +109,11 @@ export function restoreCleanupRows(restored: readonly SessionSummary[]) {
   }
   changes += 1;
   for (const row of restored) {
-    const rows = byProject.get(row.cwd);
-    if (rows && !rows.some((known) => known.id === row.id)) {
-      byProject.set(row.cwd, [row, ...rows]);
+    const path = removedFrom.get(row.id) ?? row.cwd;
+    removedFrom.delete(row.id);
+    const rows = byProject.get(path);
+    if (rows) {
+      byProject.set(path, withRestoredRows(rows, [row]));
     }
   }
   emit();
@@ -149,6 +177,7 @@ export function resetCleanupRows() {
     waitTimer = null;
   }
   byProject = new Map();
+  removedFrom.clear();
   scanning = false;
   lastScanAt = Number.NEGATIVE_INFINITY;
   queued = null;

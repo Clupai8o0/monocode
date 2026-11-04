@@ -9,6 +9,7 @@ const {
   SCAN_GAP_MS,
   cachedCleanupRows,
   forgetCleanupRows,
+  readCleanupProject,
   requestCleanupScan,
   resetCleanupRows,
   restoreCleanupRows,
@@ -106,10 +107,53 @@ it("a read that began before a removal does not bring the session back", async (
   );
   requestCleanupScan(["/a"], { now: true });
   await settle();
+  listSessionsByProject.mockResolvedValue([]);
   forgetCleanupRows(["/a#1"]);
   finish();
   await settle();
   expect(cachedCleanupRows(["/a"])).toEqual([]);
+});
+
+it("reads again after a change, so the caller never gets the old list", async () => {
+  requestCleanupScan(["/a"]);
+  await settle();
+  let finish = () => {};
+  listSessionsByProject.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve([row("/a#1")]);
+      }),
+  );
+  listSessionsByProject.mockResolvedValue([row("/a#2")]);
+  const reading = readCleanupProject("/a");
+  await settle();
+  forgetCleanupRows(["/a#1"]);
+  finish();
+  await settle();
+  expect((await reading).map((r) => r.id)).toEqual(["/a#2"]);
+  expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["/a#2"]);
+});
+
+it("restoring replaces a row a later read saw as archived", async () => {
+  requestCleanupScan(["/a"]);
+  await settle();
+  const live = { id: "/a#1", cwd: "/a", archived: false } as never;
+  forgetCleanupRows(["/a#1"]);
+  listSessionsByProject.mockResolvedValue([
+    { id: "/a#1", cwd: "/a", archived: true },
+  ]);
+  requestCleanupScan(["/a"], { now: true });
+  await settle();
+  restoreCleanupRows([live]);
+  expect(cachedCleanupRows(["/a"])).toEqual([live]);
+});
+
+it("restores to the project it was removed from, whatever its cwd says", async () => {
+  requestCleanupScan(["/a"]);
+  await settle();
+  forgetCleanupRows(["/a#1"]);
+  restoreCleanupRows([{ id: "/a#1", cwd: "/a/" } as never]);
+  expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["/a#1"]);
 });
 
 it("puts a restored session back, once", async () => {

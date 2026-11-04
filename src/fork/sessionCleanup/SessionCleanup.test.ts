@@ -465,3 +465,38 @@ it("Undo puts sessions back in the shared list, so the count returns", async () 
   const ids = cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id);
   expect(ids).toEqual(expect.arrayContaining(["a1", "b1"]));
 });
+
+it("Undo brings back a session a slow read saw as archived", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  let finish = () => {};
+  listSessionsByProject.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(projects["/p/alpha"]);
+      }),
+  );
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  projects["/p/alpha"] = [
+    session("a1", "/p/alpha", { archived: true }),
+    session("a2", "/p/alpha"),
+  ];
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeUndefined();
+  await click(buttonNamed(/^Undo$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeDefined();
+  expect(
+    cachedCleanupRows(["/p/alpha"]).find((r) => r.id === "a1")?.archived,
+  ).toBeFalsy();
+});
