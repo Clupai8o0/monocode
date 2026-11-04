@@ -9,6 +9,7 @@ import {
   updateMono,
 } from "../../features/monos/model/mono";
 import { withMonoConfigurationLock } from "../../features/monos/model/monoConfigurationLock";
+import { STYLIST_STATE_KEY } from "./stylistId";
 
 /**
  * Fork: the Stylist, a Mono whose only job is each project's look: its real
@@ -17,7 +18,7 @@ import { withMonoConfigurationLock } from "../../features/monos/model/monoConfig
  * seen; a project the user takes off it stays off. Deleting the Stylist keeps
  * it deleted.
  */
-const STATE_KEY = "monocode.fork.stylist";
+const STATE_KEY = STYLIST_STATE_KEY;
 
 export const STYLIST_NAME = "Stylist";
 export const STYLIST_MASCOT = "beret";
@@ -30,6 +31,7 @@ Tools (run with the app command, always passing "project"):
 - \`app projects.look.set\`: label, color (#rrggbb or palette index) and mascot; null restores a default.
 - \`app projects.logo.set {"project":"<name>","path":"<absolute path>","background":"transparent"}\` and \`projects.logo.clear\`.
 - Your projects are the user's local projects; new ones are added for you when MonoCode starts.
+- Do all of this yourself. Never start or message project sessions; those are coding agents that can change files.
 
 Find the real logo first:
 - Look read-only in the project: logo.*, icon.*, favicon.svg, apple-touch-icon.png, public/, static/, assets/, src/assets/, app/icon.*, src-tauri/icons/, AppIcon.appiconset, mipmap-*/ic_launcher*, manifest.json or site.webmanifest icons, images in the README.

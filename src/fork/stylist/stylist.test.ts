@@ -19,6 +19,8 @@ import {
   STYLIST_MASCOT,
   STYLIST_NAME,
 } from "./stylistMono";
+import { STYLIST_NO_SESSIONS } from "./stylistId";
+import { monoContext } from "../../features/monos/model/monoFiles";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke, convertFileSrc: (path: string) => path }));
@@ -162,5 +164,38 @@ describe("Stylist Mono", () => {
       project: SITE, projectRoot: SITE, sourcePath: "public/logo.svg",
     });
     saveTabGroupMascot(SITE, null);
+  });
+});
+
+// Fork: a session it starts is a coding agent that can change project files.
+describe("the Stylist does its look work itself", () => {
+  const files = (id: string) => ({
+    id, dir: "/data", soul: "Be brief.", soulHash: "s", memory: "", memoryHash: "m",
+    memoryPath: "/data/MEMORY.md", topics: [],
+  });
+  const look = { name: "Stylist", mascot: "beret", color: "#fff", projects: [{ path: APP, name: "app" }] };
+
+  it("leaves the delegation rules out of its prompt only", () => {
+    const id = ensureStylistMono([APP])!;
+    const stylist = monoContext(look, files(id), { soul: true, memory: false });
+    expect(stylist).toContain("<stylist_rules>");
+    expect(stylist).not.toContain("<session_delegation_rules>");
+    expect(stylist).not.toContain("hand it to a background session");
+    const other = monoContext(look, files("someone-else"), { soul: true, memory: false });
+    expect(other).toContain("<session_delegation_rules>");
+    expect(other).not.toContain("<stylist_rules>");
+  });
+
+  it("refuses to start, message or draft sessions", async () => {
+    const id = ensureStylistMono([APP])!;
+    const source = newSession("claude", APP);
+    const host = { monoOf: () => ({ id, projects: [APP] }) } as unknown as AgentAppHost;
+    for (const [action, input] of [
+      ["sessions.start", { prompt: "do all projects" }],
+      ["sessions.send", { sessionId: "other", prompt: "hi" }],
+      ["sessions.draft", { sessionId: "other", prompt: "hi" }],
+    ] as const) {
+      await expect(handleAgentApp(source, "req1", action, input, host)).rejects.toThrow(STYLIST_NO_SESSIONS);
+    }
   });
 });

@@ -92,6 +92,14 @@ describe("follow-up behavior setting", () => {
     localStorage.setItem(FOLLOW_UP_BEHAVIOR_KEY, "interrupt");
     expect(loadFollowUpBehavior()).toBe("steer");
   });
+
+  // Fork: queue was the fork's default until 4 Nov 2026.
+  it("clears a stored queue once, then keeps a later choice", () => {
+    localStorage.setItem(FOLLOW_UP_BEHAVIOR_KEY, "queue");
+    expect(loadFollowUpBehavior()).toBe("steer");
+    saveFollowUpBehavior("queue");
+    expect(loadFollowUpBehavior()).toBe("queue");
+  });
 });
 
 function mockLocalStorage() {
