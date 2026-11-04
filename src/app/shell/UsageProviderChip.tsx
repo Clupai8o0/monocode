@@ -46,6 +46,7 @@ import {
   meterWindows,
   UsageMeter,
 } from "../../features/providers/ui/ProviderAccountUsage";
+import { isHarnessAuthError } from "../../integrations/harness/core/authSupport";
 import {
   identityKey,
   identityOrganizationTag,
@@ -1177,14 +1178,15 @@ function EmptyUsageState({
 
 export function needsProviderLogin(limits: ProviderRateLimits): boolean {
   if (limits.status === "unavailable") return true;
-  if (limits.status !== "error") return false;
-  const text = limits.error?.toLowerCase() ?? "";
+  if (limits.status !== "error" || !limits.error) return false;
+  const text = limits.error.toLowerCase();
   return (
     text.includes("expired") ||
     text.includes("sign-in") ||
     text.includes("not signed in") ||
     text.includes("not connected") ||
-    text.includes("authentication")
+    text.includes("authentication") ||
+    isHarnessAuthError(limits.error)
   );
 }
 
