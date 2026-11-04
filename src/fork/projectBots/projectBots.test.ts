@@ -44,23 +44,27 @@ describe("project bots", () => {
     expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
-  it("offers the jar as a pick in the roster, with its eyes on holes", () => {
-    const jar = PROJECT_MASCOTS.find((mascot) => mascot.name === "jar");
-    expect(jar).toBeDefined();
-    for (const rows of [jar!.rest, jar!.talk]) {
+  it("offers the pig as a pick in the roster, with its one eye on a hole", () => {
+    const pig = PROJECT_MASCOTS.find((mascot) => mascot.name === "pig");
+    expect(pig).toBeDefined();
+    for (const rows of [pig!.rest, pig!.talk]) {
       expect(rows).toHaveLength(8);
       for (const row of rows) expect(row).toMatch(/^[#.]{8}$/);
-      // The lid sits lifted off the jar.
-      expect(rows[2]).toBe("........");
     }
-    const { eyes } = PROJECT_BOT_SPRITES.jar;
-    for (const [x, y] of eyes.rest) expect(jar!.rest[y][x]).toBe(".");
-    for (const [x, y] of eyes.talk) expect(jar!.talk[y][x]).toBe(".");
-    // Talking opens a mouth under the eyes and changes nothing else.
-    expect(jar!.rest[5][3]).toBe("#");
-    expect(jar!.talk[5][3]).toBe(".");
-    expect(jar!.talk.filter((row, y) => row !== jar!.rest[y])).toHaveLength(1);
+    const { eyes } = PROJECT_BOT_SPRITES.pig;
+    expect(eyes.rest).toEqual([[5, 3]]);
+    expect(eyes.talk).toEqual([[5, 3]]);
+    expect(pig!.rest[3][5]).toBe(".");
+    expect(pig!.talk[3][5]).toBe(".");
+    // Talking only drops the coin one row, towards the slot; the body stays put.
+    expect(pig!.rest.slice(0, 2)).toEqual(["...##...", "........"]);
+    expect(pig!.talk.slice(0, 2)).toEqual(["........", "...##..."]);
+    expect(pig!.talk.slice(2)).toEqual(pig!.rest.slice(2));
     expect(projectBotFor("/Users/sam/Documents/projects/coin-jar")).toBeNull();
+  });
+
+  it("no longer offers the jar", () => {
+    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).not.toContain("jar");
   });
 
   it("keeps bots out of the hashed default", () => {

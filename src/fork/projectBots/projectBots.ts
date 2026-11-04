@@ -405,33 +405,30 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [4, 2],
     ]),
   },
-  // Jar (pick only, no project maps to it): a face on a jar with its lid
-  // lifted, like Coin Jar's logo. The gap under the lid is what makes it a jar.
-  jar: {
+  // Pig (pick only, no project maps to it): a piggy bank side on, facing right,
+  // with its one eye and snout. While it talks the coin drops into the slot.
+  pig: {
     rest: [
-      ".#####..",
-      ".#####..",
+      "...##...",
       "........",
-      ".#####..",
-      "##.#.##.",
+      ".######.",
+      "#####.##",
+      "########",
       "#######.",
-      "#######.",
-      ".#####..",
+      ".#.#.#..",
+      ".#...#..",
     ],
     talk: [
-      ".#####..",
-      ".#####..",
       "........",
-      ".#####..",
-      "##.#.##.",
-      "###.###.",
+      "...##...",
+      ".######.",
+      "#####.##",
+      "########",
       "#######.",
-      ".#####..",
+      ".#.#.#..",
+      ".#...#..",
     ],
-    eyes: same([
-      [2, 4],
-      [4, 4],
-    ]),
+    eyes: same([[5, 3]]),
   },
 };
 
