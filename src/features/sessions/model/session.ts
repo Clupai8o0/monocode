@@ -295,6 +295,8 @@ export type MessageQueueStatus = "active" | "paused" | "resuming";
 
 /** The provider stopped the last turn at a usage limit. */
 export type UsageLimit = {
+  /** App preflight refused recovery; this is not a new provider quota failure. */
+  recoveryFailed?: boolean;
   /** Epoch ms when the provider's window resets, once known. */
   resetsAt?: number;
   /** Send a continue turn once the window resets. */

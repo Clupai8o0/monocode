@@ -1412,7 +1412,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                               id: session.id,
                               harness: session.harness,
                               model: session.model,
-                              providerAccountId: session.providerAccountId,
+                              providerAccountId: session.providerAccountId ??
+                                (session.blocks.some((block) => block.role === "user" && !block.draft) ? "default" : undefined),
                             }}
                             project={session.cwd}
                             accountPicker={false}

@@ -270,12 +270,17 @@ export function UsageChips({
     claudeAccountId,
   );
   const codexAccountAvailable = providerAccountExists("codex", codexAccountId);
-  // Fork: the project's choice may be Auto, which claudeAccountId resolved.
+  // Fork: a project's Auto choice resolves before the session starts.
   const claudeAuto =
     providerAccountChoice("claude", project) === AUTO_PROVIDER_ACCOUNT_ID;
   const claudePinned =
     session?.harness === "claude" ? session.providerAccountId : undefined;
+  const codexAuto =
+    providerAccountChoice("codex", project) === AUTO_PROVIDER_ACCOUNT_ID;
+  const codexPinned =
+    session?.harness === "codex" ? session.providerAccountId : undefined;
   useAutoAccountUsage("claude", wantClaude && claudeAuto && !claudePinned);
+  useAutoAccountUsage("codex", wantCodex && codexAuto && !codexPinned);
   const cachedClaude = useCachedRateLimits("claude", claudeAccountId);
   const cachedCodex = useCachedRateLimits("codex", codexAccountId);
   const opencode = useCachedRateLimits("opencode");
@@ -486,6 +491,8 @@ export function UsageChips({
     ? {
         accounts: codexAccounts,
         accountId: codexAccountId,
+        autoChoice: codexAuto && !codexPinned,
+        onSelectAuto: () => selectAccount("codex", AUTO_PROVIDER_ACCOUNT_ID),
         onSelectAccount: (accountId: string) =>
           selectAccount("codex", accountId),
         onAddAccount: (label: string) => addAccount("codex", label),
@@ -523,7 +530,7 @@ export function UsageChips({
           onOpen={() => openUsage("claude", claudeAccountId, claudeAccountAvailable)}
         />
       ) : null}
-      {/* Fork: one tap off an exhausted account; never automatic. */}
+      {/* Fork: manual fallback while automatic usage-limit recovery checks accounts. */}
       {wantClaude && claudePinned && accountPicker && onSelectAccount ? (
         <ExhaustedSwitch
           provider="claude"
