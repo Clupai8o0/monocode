@@ -237,8 +237,21 @@ export function cursorMultiReviewChildResult(
   };
 }
 
-function latestUserBlockId(blocks: Block[]): string | undefined {
+export function latestUserBlockId(blocks: Block[]): string | undefined {
   return latestUserTurn(blocks)?.find((b) => b.role === "user")?.id;
+}
+
+/** The turn that started with this user block, even if a newer one followed. */
+export function userTurnById(
+  blocks: Block[],
+  userBlockId: string | undefined,
+): Block[] | null {
+  if (!userBlockId) return null;
+  return (
+    groupTurns(blocks).find((turn) =>
+      turn.some((b) => b.role === "user" && b.id === userBlockId),
+    ) ?? null
+  );
 }
 
 /**

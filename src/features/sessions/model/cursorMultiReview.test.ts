@@ -8,7 +8,9 @@ import {
   CursorMultiReviewPairs,
   CURSOR_MULTI_REVIEW_APP_PREFIX,
   isFrontendReviewPath,
+  latestUserBlockId,
   latestUserTurn,
+  userTurnById,
   pathsLookFrontend,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
@@ -45,6 +47,18 @@ describe("latestUserTurn", () => {
     const first = [user("u1", "one"), assistant("a1", "ok")];
     const second = [user("u2", "two"), edit("e2", "src/a.ts")];
     expect(latestUserTurn([...first, ...second])).toEqual(second);
+  });
+});
+
+describe("userTurnById", () => {
+  it("finds the ended turn after a newer one started", () => {
+    const first = [user("u1", "one"), edit("e1", "src/a.ts")];
+    const second = [user("u2", "queued")];
+    const blocks = [...first, ...second];
+    expect(latestUserBlockId(first)).toBe("u1");
+    expect(userTurnById(blocks, "u1")).toEqual(first);
+    expect(userTurnById(blocks, "gone")).toBeNull();
+    expect(userTurnById(blocks, undefined)).toBeNull();
   });
 });
 

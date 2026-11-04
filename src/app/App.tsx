@@ -831,12 +831,14 @@ import {
   buildCursorMultiReviewRequest,
   cursorMultiReviewChildResult,
   cursorMultiReviewEmptyStatus,
-  latestUserTurn,
+  latestUserBlockId,
   settleCursorMultiReviewChildAfterGrace,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
+  userTurnById,
   type CursorMultiReviewer,
 } from "../features/sessions/model/cursorMultiReview";
+import { isProviderHidden } from "../features/sessions/model/projectProviders";
 
 import { PaneTree } from "../features/workspace/ui/PaneTree";
 import { SessionPane } from "../features/sessions/ui/SessionPane";
@@ -8517,11 +8519,17 @@ function Workspace({
       let nativeProposalText = "";
       let completedProposal: OrchestrationProposal | undefined;
       const settleCursorMultiReview = (outcome: ControlOutcome) => {
+        // Read now: a queued message or send-on can start the next turn first.
+        const endedTurnId = latestUserBlockId(
+          sessionsRef.current.find((s) => s.id === sessionId)?.blocks ?? [],
+        );
         window.setTimeout(() => {
           const finished = sessionsRef.current.find((s) => s.id === sessionId);
-          if (!finished || finished.busy) return;
+          if (!finished) return;
 
           if (cursorMultiReviewPairs.current.isChild(sessionId)) {
+            // A later turn settles it instead.
+            if (finished.busy) return;
             cursorMultiReviewPairs.current.noteChildOutcome(
               sessionId,
               finished.blocks,
@@ -8538,16 +8546,10 @@ function Workspace({
           }
 
           if (finished.harness !== "cursor") return;
-          // Fork: this turn only asked for more effort. Its send-on is the
-          // real turn, and is reviewed when it ends.
-          if (
-            outcome.status === "completed" &&
-            effortAutoFor(finished.id, finished.ephemeral) &&
-            endedForEffortRaise(finished)
-          ) {
-            return;
-          }
-          const turn = latestUserTurn(finished.blocks);
+          // A turn that only asked for more effort edited nothing, so the edit
+          // gate skips it. One that did edit is reviewed now: its send-on may
+          // edit nothing more, and would never be reviewed.
+          const turn = userTurnById(finished.blocks, endedTurnId);
           if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
         }, 0);
       };
@@ -10677,7 +10679,8 @@ function Workspace({
       }
       const reviewers = pickCursorMultiReviewers({
         isLive: (id) => isLiveHarness(id) && isHarnessAvailable(id),
-        isVisible: (id) => isPickerProviderVisible(id),
+        isVisible: (id) =>
+          isPickerProviderVisible(id) && !isProviderHidden(source.cwd, id),
         usedPercent: (id) => harnessUsedPercent(id, source.cwd),
       });
       if (reviewers.length === 0) return;
