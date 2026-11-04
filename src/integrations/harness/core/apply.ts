@@ -175,6 +175,17 @@ export function applyHarnessEvent(
         return rest;
       }
       return { ...session, backgroundTasks: event.tasks };
+    case "background.jobs":
+      if (event.jobs.length === 0) {
+        if (!session.backgroundJobs) return session;
+        const { backgroundJobs: _cleared, ...rest } = session;
+        return rest;
+      }
+      return { ...session, backgroundJobs: event.jobs };
+    case "session.woke":
+      return session.busy ? session : { ...session, busy: true };
+    case "session.idle":
+      return session.busy ? stopStreaming(session) : session;
     case "plan":
       return upsertPlan(session, event);
     case "session.error":
@@ -560,8 +571,11 @@ export function appendSteerUser(
 }
 
 export function stopStreaming(session: Session, endedAt = Date.now()): Session {
-  const { backgroundTasks: _cleared, ...settled } =
-    settlePendingApprovals(session);
+  const {
+    backgroundTasks: _cleared,
+    backgroundJobs: _stopped,
+    ...settled
+  } = settlePendingApprovals(session);
   return {
     ...settled,
     busy: false,

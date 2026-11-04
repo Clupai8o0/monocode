@@ -318,6 +318,15 @@ export type TurnMetrics = {
   cacheHitPercent?: number;
 };
 
+/** A background command, monitor, or subagent still running for this session. */
+export type BackgroundJob = {
+  id: string;
+  title: string;
+  /** The command a shell or monitor runs, when known. */
+  command?: string;
+  startedAt: number;
+};
+
 export type Block = {
   id: string;
   role: BlockRole;
@@ -488,6 +497,11 @@ export type Session = {
    * running in the background. In-memory only.
    */
   backgroundTasks?: string[];
+  /**
+   * Every background job the agent still runs, from any turn. In-memory only;
+   * used for the tray above the composer.
+   */
+  backgroundJobs?: BackgroundJob[];
   /** Follow-ups retained until they have been delivered. */
   queuedMessages?: QueuedMessage[];
   /** Paused after user stops current turn; resuming waits for continued turn. */
