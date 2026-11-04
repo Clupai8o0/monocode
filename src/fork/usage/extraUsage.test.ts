@@ -11,7 +11,35 @@ const {
   parseCursorUsage,
   parseDeepseekBalance,
   parseMuseUsage,
+  parseGrokUsage,
 } = await import("./extraUsage");
+
+describe("parseGrokUsage", () => {
+  it("reads the shared weekly allowance and reset from Grok credits", () => {
+    expect(parseGrokUsage(JSON.stringify({ config: {
+      creditUsagePercent: 24,
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-11-09T09:16:22.490Z" },
+    } }))).toMatchObject({ status: "ok", bars: [
+      { label: "wk", usedPercent: 24, resetsAt: Date.parse("2026-11-09T09:16:22.490Z") },
+    ] });
+  });
+
+  it("accepts zero usage without mistaking a missing allowance for zero", () => {
+    expect(parseGrokUsage('{"config":{"creditUsagePercent":0}}')).toMatchObject({
+      status: "ok", bars: [{ label: "Plan", usedPercent: 0, resetsAt: null }],
+    });
+    expect(parseGrokUsage('{"config":{}}').status).toBe("error");
+  });
+
+  it("handles monthly periods and invalid reset dates", () => {
+    expect(parseGrokUsage(JSON.stringify({ config: {
+      creditUsagePercent: 120,
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_MONTHLY", end: "invalid" },
+    } }))).toMatchObject({ status: "ok", bars: [
+      { label: "mo", usedPercent: 100, resetsAt: null },
+    ] });
+  });
+});
 
 beforeEach(() => {
   invoke.mockReset();
