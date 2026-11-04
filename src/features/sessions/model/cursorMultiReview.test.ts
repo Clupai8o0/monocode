@@ -10,7 +10,7 @@ import {
   isFrontendReviewPath,
   latestUserBlockId,
   latestUserTurn,
-  userTurnById,
+  cursorReviewRunBlocks,
   pathsLookFrontend,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
@@ -50,15 +50,30 @@ describe("latestUserTurn", () => {
   });
 });
 
-describe("userTurnById", () => {
-  it("finds the ended turn after a newer one started", () => {
-    const first = [user("u1", "one"), edit("e1", "src/a.ts")];
-    const second = [user("u2", "queued")];
-    const blocks = [...first, ...second];
-    expect(latestUserBlockId(first)).toBe("u1");
-    expect(userTurnById(blocks, "u1")).toEqual(first);
-    expect(userTurnById(blocks, "gone")).toBeNull();
-    expect(userTurnById(blocks, undefined)).toBeNull();
+describe("cursorReviewRunBlocks", () => {
+  const steered = [
+    user("u1", "one"),
+    assistant("a1", "ok"),
+    user("s1", "steer"),
+    edit("e1", "src/a.ts"),
+  ];
+  const next = [user("u2", "queued"), edit("e2", "src/b.ts")];
+
+  it("keeps edits made after a steer and stops at the next run", () => {
+    const blocks = [...steered, ...next];
+    expect(latestUserBlockId(steered)).toBe("s1");
+    expect(cursorReviewRunBlocks(blocks, "u1", "u2")).toEqual(steered);
+    expect(cursorReviewRunBlocks(blocks, "u2", "u2")).toEqual(next);
+  });
+
+  it("runs to the end when it is the latest run", () => {
+    expect(cursorReviewRunBlocks(steered, "u1", "u1")).toEqual(steered);
+    expect(cursorReviewRunBlocks(steered, "u1", undefined)).toEqual(steered);
+  });
+
+  it("is empty for an unknown start", () => {
+    expect(cursorReviewRunBlocks(steered, "gone", "u1")).toBeNull();
+    expect(cursorReviewRunBlocks(steered, undefined, "u1")).toBeNull();
   });
 });
 

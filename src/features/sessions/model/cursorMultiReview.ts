@@ -241,17 +241,22 @@ export function latestUserBlockId(blocks: Block[]): string | undefined {
   return latestUserTurn(blocks)?.find((b) => b.role === "user")?.id;
 }
 
-/** The turn that started with this user block, even if a newer one followed. */
-export function userTurnById(
+/**
+ * All of one run's blocks: from the message that started it up to the next
+ * run. Keeps edits made after a steer message, which starts a new group.
+ */
+export function cursorReviewRunBlocks(
   blocks: Block[],
-  userBlockId: string | undefined,
+  startId: string | undefined,
+  nextRunStartId: string | undefined,
 ): Block[] | null {
-  if (!userBlockId) return null;
-  return (
-    groupTurns(blocks).find((turn) =>
-      turn.some((b) => b.role === "user" && b.id === userBlockId),
-    ) ?? null
-  );
+  if (!startId) return null;
+  const start = blocks.findIndex((b) => b.id === startId);
+  if (start < 0) return null;
+  const next = nextRunStartId
+    ? blocks.findIndex((b) => b.id === nextRunStartId)
+    : -1;
+  return blocks.slice(start, next > start ? next : undefined);
 }
 
 /**

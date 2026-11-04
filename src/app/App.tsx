@@ -835,7 +835,7 @@ import {
   settleCursorMultiReviewChildAfterGrace,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
-  userTurnById,
+  cursorReviewRunBlocks,
   type CursorMultiReviewer,
 } from "../features/sessions/model/cursorMultiReview";
 import { isProviderHidden } from "../features/sessions/model/projectProviders";
@@ -8416,6 +8416,9 @@ function Workspace({
         cursorReviewTurnId = latestUserBlockId(
           sessionsRef.current.find((s) => s.id === sessionId)?.blocks ?? [],
         );
+        if (cursorReviewTurnId) {
+          cursorMultiReviewRunStarts.current.set(sessionId, cursorReviewTurnId);
+        }
       };
       if (!options?.resendEdited) {
         flushSync(commitSubmittedTurn);
@@ -8550,7 +8553,11 @@ function Workspace({
           // A turn that only asked for more effort edited nothing, so the edit
           // gate skips it. One that did edit is reviewed now: its send-on may
           // edit nothing more, and would never be reviewed.
-          const turn = userTurnById(finished.blocks, cursorReviewTurnId);
+          const turn = cursorReviewRunBlocks(
+            finished.blocks,
+            cursorReviewTurnId,
+            cursorMultiReviewRunStarts.current.get(sessionId),
+          );
           if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
         }, 0);
       };
@@ -10618,6 +10625,8 @@ function Workspace({
   // Each editing turn opens new reviewers, so older finished ones leave the
   // tab. Their sessions stay in the sidebar.
   const cursorMultiReviewPanes = useRef(new Map<string, string[]>());
+  /** Each session's latest run start, so an older run's review stops there. */
+  const cursorMultiReviewRunStarts = useRef(new Map<string, string>());
   const retireCursorMultiReviewPanes = useCallback(
     (sourceId: string): string[] => {
       const kept: string[] = [];
