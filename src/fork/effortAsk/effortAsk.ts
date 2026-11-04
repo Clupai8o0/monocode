@@ -43,14 +43,28 @@ const EFFORT_LINE = /^effort\s*:\s*([\w-]+)\s+now\s*,\s*([\w-]+)\s+needed\b/i;
 export function parseEffortLine(
   text: string,
 ): { now: string; needed: string } | null {
-  const first = text
-    .split("\n")
-    .map((line) => line.replace(/[*`_]/g, "").trim())
-    .find(Boolean);
+  const first = firstContentLine(text);
   const match = first ? EFFORT_LINE.exec(first) : null;
   return match
     ? { now: match[1].toLowerCase(), needed: match[2].toLowerCase() }
     : null;
+}
+
+/**
+ * The first non-empty line, with emphasis markers removed. A streaming reply
+ * is checked on every update, so the rest of a long message stays unread.
+ */
+function firstContentLine(text: string): string {
+  let start = 0;
+  const length = text.length;
+  while (start < length) {
+    let end = text.indexOf("\n", start);
+    if (end < 0) end = length;
+    const line = text.slice(start, end).replace(/[*`_]/g, "").trim();
+    if (line) return line;
+    start = end + 1;
+  }
+  return "";
 }
 
 /** Reads <needed> from a reply's first non-empty line, ignoring markdown. */
@@ -58,8 +72,22 @@ export function parseEffortNeeded(text: string): string | null {
   return parseEffortLine(text)?.needed ?? null;
 }
 
+const NO_QUEUED_BLOCKS: ReadonlySet<string> = new Set();
+
+function queuedBlockIds(
+  messages: Session["queuedMessages"] | undefined,
+): ReadonlySet<string> {
+  if (!messages?.length) return NO_QUEUED_BLOCKS;
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (message.blockId) ids.add(message.blockId);
+  }
+  return ids;
+}
+
 /** Index of the user block that started the current turn, or -1. */
 function turnStartIndex(session: Pick<Session, "blocks" | "queuedMessages">) {
+  const queued = queuedBlockIds(session.queuedMessages);
   for (let i = session.blocks.length - 1; i >= 0; i--) {
     const block = session.blocks[i];
     if (
@@ -67,7 +95,7 @@ function turnStartIndex(session: Pick<Session, "blocks" | "queuedMessages">) {
       !block.draft &&
       // Mid-turn follow-ups and queued messages do not start a turn.
       (block.sentAt == null || block.startedAt != null) &&
-      !session.queuedMessages?.some((message) => message.blockId === block.id)
+      !queued.has(block.id)
     ) {
       return i;
     }
@@ -83,7 +111,15 @@ function turnStartIndex(session: Pick<Session, "blocks" | "queuedMessages">) {
 export function effortNeededOfBlocks(
   blocks: readonly Pick<Block, "role" | "text">[],
 ): string | null {
-  for (let i = blocks.length - 1; i >= 0; i--) {
+  return effortNeededFrom(blocks, 0, blocks.length);
+}
+
+function effortNeededFrom(
+  blocks: readonly Pick<Block, "role" | "text">[],
+  start: number,
+  end: number,
+): string | null {
+  for (let i = end - 1; i >= start; i--) {
     const block = blocks[i];
     if (block.role !== "assistant" && block.role !== "plan") {
       continue;
@@ -109,23 +145,65 @@ const BARE_LINE =
   /^effort\s*:\s*[\w-]+\s+now\s*,\s*[\w-]+\s+needed\s*(\([^)\n]*\))?\s*\.?$/i;
 
 function onlyEffortLines(text: string): boolean {
-  const lines = text
-    .replace(/[*`_]/g, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const first = parseEffortLine(text);
-  return (
-    !!first &&
-    lines.every((line) => {
-      const parsed = parseEffortLine(line);
-      return (
-        BARE_LINE.test(line) &&
-        parsed?.now === first.now &&
-        parsed.needed === first.needed
-      );
-    })
-  );
+  let start = 0;
+  let first: { now: string; needed: string } | null = null;
+  const length = text.length;
+  while (start < length) {
+    let end = text.indexOf("\n", start);
+    if (end < 0) end = length;
+    const line = text.slice(start, end).replace(/[*`_]/g, "").trim();
+    start = end + 1;
+    if (!line) continue;
+    const parsed = parseEffortLine(line);
+    if (!first) {
+      first = parsed;
+      if (!first || !BARE_LINE.test(line)) return false;
+      continue;
+    }
+    if (
+      !BARE_LINE.test(line) ||
+      parsed?.now !== first.now ||
+      parsed.needed !== first.needed
+    ) {
+      return false;
+    }
+  }
+  return first != null;
+}
+
+/**
+ * True when a non-empty line follows the effort line and the block is not
+ * only that line repeated. Stops at the first such line.
+ */
+function continuedPastEffortLine(text: string): boolean {
+  let start = 0;
+  let first: { now: string; needed: string } | null = null;
+  let bare = true;
+  let extra = false;
+  const length = text.length;
+  while (start < length) {
+    let end = text.indexOf("\n", start);
+    if (end < 0) end = length;
+    const line = text.slice(start, end).replace(/[*`_]/g, "").trim();
+    start = end + 1;
+    if (!line) continue;
+    if (!first) {
+      first = parseEffortLine(line);
+      if (!first) return false;
+      if (!BARE_LINE.test(line)) bare = false;
+      continue;
+    }
+    extra = true;
+    const parsed = parseEffortLine(line);
+    if (
+      !BARE_LINE.test(line) ||
+      parsed?.now !== first.now ||
+      parsed.needed !== first.needed
+    ) {
+      return true;
+    }
+  }
+  return extra && !bare;
 }
 
 /** A plan-mode reply has been moved to a plan block by the time a turn ends. */
@@ -134,6 +212,17 @@ function isEffortLineBlock(block: Pick<Block, "role" | "text">): boolean {
     (block.role === "assistant" || block.role === "plan") &&
     parseEffortLine(block.text) != null
   );
+}
+
+function lastEffortLine(
+  blocks: readonly Pick<Block, "role" | "text">[],
+  start: number,
+  end: number,
+): number {
+  for (let i = end - 1; i >= start; i--) {
+    if (isEffortLineBlock(blocks[i])) return i;
+  }
+  return -1;
 }
 
 /**
@@ -146,36 +235,34 @@ function isEffortLineBlock(block: Pick<Block, "role" | "text">): boolean {
 export function stoppedAtEffortLine(
   blocks: readonly Pick<Block, "role" | "text">[],
 ): boolean {
-  let line = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (isEffortLineBlock(blocks[i])) {
-      line = i;
-      break;
-    }
-  }
-  if (line < 0) {
-    return false;
-  }
-  if (blocks.slice(line + 1).some((block) => block.role !== "reasoning")) {
-    return false;
+  return stoppedAtRange(blocks, 0, blocks.length);
+}
+
+function stoppedAtRange(
+  blocks: readonly Pick<Block, "role" | "text">[],
+  start: number,
+  end: number,
+): boolean {
+  const line = lastEffortLine(blocks, start, end);
+  if (line < 0) return false;
+  for (let i = line + 1; i < end; i++) {
+    if (blocks[i].role !== "reasoning") return false;
   }
   // Status notes may come first; work (tools, text) may not.
-  if (
-    blocks
-      .slice(0, line)
-      .some(
-        (block) =>
-          block.role !== "reasoning" &&
-          block.role !== "system" &&
-          !(
-            isEffortLineBlock(block) &&
-            onlyEffortLines(block.text) &&
-            parseEffortNeeded(block.text) ===
-              parseEffortNeeded(blocks[line].text)
-          ),
+  const needed = parseEffortNeeded(blocks[line].text);
+  for (let i = start; i < line; i++) {
+    const block = blocks[i];
+    if (
+      block.role !== "reasoning" &&
+      block.role !== "system" &&
+      !(
+        isEffortLineBlock(block) &&
+        onlyEffortLines(block.text) &&
+        parseEffortNeeded(block.text) === needed
       )
-  ) {
-    return false;
+    ) {
+      return false;
+    }
   }
   return onlyEffortLines(blocks[line].text);
 }
@@ -188,29 +275,22 @@ export function stoppedAtEffortLine(
 export function workedPastEffortLine(
   blocks: readonly Pick<Block, "role" | "text">[],
 ): boolean {
-  let line = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (isEffortLineBlock(blocks[i])) {
-      line = i;
-      break;
-    }
+  return workedPastRange(blocks, 0, blocks.length);
+}
+
+function workedPastRange(
+  blocks: readonly Pick<Block, "role" | "text">[],
+  start: number,
+  end: number,
+): boolean {
+  const line = lastEffortLine(blocks, start, end);
+  if (line < 0) return false;
+  if (continuedPastEffortLine(blocks[line].text)) return true;
+  for (let i = line + 1; i < end; i++) {
+    const role = blocks[i].role;
+    if (role !== "reasoning" && role !== "system") return true;
   }
-  if (line < 0) {
-    return false;
-  }
-  const lines = blocks[line].text
-    .split("\n")
-    .map((text) => text.replace(/[*`_]/g, "").trim());
-  const first = lines.findIndex(Boolean);
-  if (
-    !onlyEffortLines(blocks[line].text) &&
-    lines.slice(first + 1).some(Boolean)
-  ) {
-    return true;
-  }
-  return blocks
-    .slice(line + 1)
-    .some((block) => block.role !== "reasoning" && block.role !== "system");
+  return false;
 }
 
 /**
@@ -224,12 +304,14 @@ export function effortOverrunFor(session: Session): EffortChange | null {
   if (!session.busy || session.queuedMessages?.length) {
     return null;
   }
-  const change = effortChangeFor(session);
+  const start = turnStartIndex(session);
+  const change = effortChangeFrom(session, start);
   if (change?.direction !== "raised") {
     return null;
   }
-  const start = turnStartIndex(session);
-  return workedPastEffortLine(session.blocks.slice(start + 1)) ? change : null;
+  return workedPastRange(session.blocks, start + 1, session.blocks.length)
+    ? change
+    : null;
 }
 
 /** What MonoCode sends to carry on a turn the model stopped for a raise. */
@@ -284,14 +366,18 @@ function eligible(session: Session): boolean {
 
 /** What this session's finished turn asks to be switched to, if anything. */
 export function effortChangeFor(session: Session): EffortChange | null {
-  if (!eligible(session)) {
+  return effortChangeFrom(session, turnStartIndex(session));
+}
+
+function effortChangeFrom(session: Session, start: number): EffortChange | null {
+  if (!eligible(session) || start < 0) {
     return null;
   }
-  const start = turnStartIndex(session);
-  if (start < 0) {
-    return null;
-  }
-  const needed = effortNeededOfBlocks(session.blocks.slice(start + 1));
+  const needed = effortNeededFrom(
+    session.blocks,
+    start + 1,
+    session.blocks.length,
+  );
   const model = findModel(session.model);
   const setting = model && modelEffortSetting(model);
   if (!needed || !setting) {
@@ -331,12 +417,12 @@ export function resumeLevelFor(
   if (start < 0) {
     return null;
   }
-  const turn = session.blocks.slice(start + 1);
-  const lineBlock = [...turn].reverse().find(isEffortLineBlock);
-  const line = lineBlock && parseEffortLine(lineBlock.text);
+  const blocks = session.blocks;
+  const lineAt = lastEffortLine(blocks, start + 1, blocks.length);
+  const line = lineAt >= 0 ? parseEffortLine(blocks[lineAt].text) : null;
   const model = findModel(session.model);
   const setting = model && modelEffortSetting(model);
-  if (!line || !setting || !stoppedAtEffortLine(turn)) {
+  if (!line || !setting || !stoppedAtRange(blocks, start + 1, blocks.length)) {
     return null;
   }
   const now = EFFORT_RANK.indexOf(line.now);
@@ -391,20 +477,19 @@ export function endedForEffortRaise(session: Session): boolean {
   if (start < 0) {
     return false;
   }
-  const turn = session.blocks.slice(start + 1);
-  let end = turn.length;
+  const blocks = session.blocks;
+  let end = blocks.length;
   while (
-    end > 0 &&
-    turn[end - 1].role === "system" &&
-    EFFORT_NOTE.test(turn[end - 1].text)
+    end > start + 1 &&
+    blocks[end - 1].role === "system" &&
+    EFFORT_NOTE.test(blocks[end - 1].text)
   ) {
     end--;
   }
-  const noted = end < turn.length;
-  const work = turn.slice(0, end);
-  const lineBlock = [...work].reverse().find(isEffortLineBlock);
-  const line = lineBlock && parseEffortLine(lineBlock.text);
-  if (!line || !stoppedAtEffortLine(work)) {
+  const noted = end < blocks.length;
+  const lineAt = lastEffortLine(blocks, start + 1, end);
+  const line = lineAt >= 0 ? parseEffortLine(blocks[lineAt].text) : null;
+  if (!line || !stoppedAtRange(blocks, start + 1, end)) {
     return false;
   }
   const now = EFFORT_RANK.indexOf(line.now);
@@ -413,8 +498,8 @@ export function endedForEffortRaise(session: Session): boolean {
   }
   return (
     noted ||
-    effortChangeFor(session) != null ||
-    !RESUME_TEXT.test(session.blocks[start].text.trim())
+    effortChangeFrom(session, start) != null ||
+    !RESUME_TEXT.test(blocks[start].text.trim())
   );
 }
 

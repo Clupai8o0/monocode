@@ -6,10 +6,13 @@ import {
   cleanupResult,
   deleteCautions,
   deleteQuestion,
+  firstFilledFilter,
   groupByProject,
+  handoverLocation,
   IDLE_AFTER_MS,
   inCleanupFilter,
   isHeld,
+  readyToClose,
   tickedByDefault,
 } from "./cleanupModel";
 
@@ -138,5 +141,36 @@ describe("labels", () => {
       "Includes 2 marked not safe, 1 open in a tab.",
     );
     expect(deleteCautions(0, 3, 0)).toBe("Includes 3 not read yet.");
+  });
+});
+
+describe("firstFilledFilter", () => {
+  it("prefers the earliest tab with rows", () => {
+    expect(firstFilledFilter(() => 2)).toBe("safe");
+    expect(firstFilledFilter((f) => (f === "handover" || f === "all" ? 1 : 0))).toBe(
+      "handover",
+    );
+    expect(firstFilledFilter((f) => (f === "all" ? 3 : 0))).toBe("all");
+  });
+  it("falls back to Safe when there is nothing at all", () => {
+    expect(firstFilledFilter(() => 0)).toBe("safe");
+  });
+});
+
+describe("readyToClose", () => {
+  it("counts safe and handover only", () => {
+    expect(readyToClose(["safe", "handover", "unsafe", undefined, "safe"])).toBe(3);
+    expect(readyToClose([])).toBe(0);
+  });
+});
+
+describe("handoverLocation", () => {
+  it("shortens a path inside the project", () => {
+    expect(handoverLocation("/p/a/.claude/handoff.md", "/p/a")).toBe(".claude/handoff.md");
+    expect(handoverLocation("/p/a/x.md", "/p/a/")).toBe("x.md");
+  });
+  it("leaves anything else whole", () => {
+    expect(handoverLocation("/p/ab/x.md", "/p/a")).toBe("/p/ab/x.md");
+    expect(handoverLocation(".claude/handoff.md", "/p/a")).toBe(".claude/handoff.md");
   });
 });

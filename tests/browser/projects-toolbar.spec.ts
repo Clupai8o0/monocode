@@ -62,3 +62,34 @@ test("keeps notifications and workspace controls in the window's top-left toolba
   await settings.click();
   await expect(page.getByRole("region", { name: "Settings", exact: true })).toBeVisible();
 });
+
+test("the clean up button sits beside the bell, counts what is ready and opens in one click", async ({ page }, testInfo) => {
+  await page.goto("/tests/browser/workspace-performance.html?projects&safeClose");
+  const toolbar = page.locator("[data-inset-title-nav]");
+  const bell = toolbar.getByRole("button", { name: /^Notifications/ });
+  const cleanUp = toolbar.getByRole("button", { name: /^Clean up sessions/ });
+  await expect(cleanUp).toHaveCount(1);
+
+  const bellBox = (await bell.boundingBox())!;
+  const cleanUpBox = (await cleanUp.boundingBox())!;
+  expect(cleanUpBox.x).toBeGreaterThanOrEqual(bellBox.x + bellBox.width);
+  expect(cleanUpBox.x).toBeLessThan(bellBox.x + bellBox.width + 8);
+  expect(Math.abs(cleanUpBox.y - bellBox.y)).toBeLessThan(1);
+  expect(cleanUpBox.height).toBe(bellBox.height);
+  await expect(page.locator(".inset-sidebar").getByRole("button", { name: /^Clean up sessions/ })).toHaveCount(0);
+
+  await expect(cleanUp).toHaveAttribute("aria-label", /^Clean up sessions, \d+ ready to close$/, { timeout: 15_000 });
+  await page.screenshot({ path: testInfo.outputPath("clean-up-button.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("clean-up-button-zoom.png"),
+    clip: { x: 0, y: 0, width: 320, height: 44 },
+    scale: "device",
+  });
+
+  await cleanUp.click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "Clean up sessions" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Safe to close/ })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("clean-up-panel.png") });
+});

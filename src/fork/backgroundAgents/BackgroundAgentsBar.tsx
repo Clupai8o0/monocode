@@ -6,8 +6,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { Bot, ChevronRight, Terminal } from "../../shared/ui/icons";
-import type { Block, Session } from "../../features/sessions/model/session";
+import { Bot, ChevronRight, Square, Terminal } from "../../shared/ui/icons";
+import type {
+  BackgroundJob,
+  Block,
+  Session,
+} from "../../features/sessions/model/session";
 import { formatLiveElapsed } from "../../features/sessions/model/liveAgents";
 import {
   subagentBrief,
@@ -94,6 +98,7 @@ function timingOf(block: Block, now: number): RunTiming {
  * board with one lane per agent on a shared clock, so overlap and an agent that
  * has gone quiet can be seen at a glance. Details open only on request and
  * scroll within a bounded panel, keeping the composer and conversation usable.
+ * Claude background jobs from any turn join the same tray with a stop button.
  * It clears when all work finishes; reports stay in the transcript.
  */
 export function BackgroundAgentsBar({
@@ -101,33 +106,89 @@ export function BackgroundAgentsBar({
   cwd,
   onOpenFile,
   onOpenDiff,
+  onStopJob,
 }: OpenHandlers & {
-  session: Pick<Session, "busy" | "blocks" | "queuedMessages">;
+  session: Pick<
+    Session,
+    "busy" | "blocks" | "queuedMessages" | "backgroundJobs"
+  >;
+  onStopJob?: (jobId: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
   const panelId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const openedFor = useRef<string | null>(null);
   useBoardTimings();
   const turn = boardTurn(session);
+  const jobs = session.backgroundJobs ?? [];
+  // Prefer Claude's job list (with stop) over the same command's transcript row.
+  const jobKeys = new Set(
+    jobs.flatMap((job) => [job.title, job.command].filter(Boolean) as string[]),
+  );
+  const commands = turn.commands.filter((block) => {
+    const title = block.tool?.title || block.text;
+    const command = block.tool?.command;
+    return !(
+      (title && jobKeys.has(title)) ||
+      (command && jobKeys.has(command))
+    );
+  });
   const counts = boardCounts(turn.agents);
-  const running = counts.running + turn.commands.length;
+  const running = counts.running + commands.length + jobs.length;
   useSecondTick(running > 0);
-  const visible = boardVisible(turn);
+  const visible =
+    boardVisible({ agents: turn.agents, commands }) || jobs.length > 0;
+  // Open once when work appears so subagents read like live sessions, not a
+  // hidden badge. Later collapses stay put until the tray clears.
+  const workKey = [
+    ...turn.agents.map((block) => block.id),
+    ...commands.map((block) => block.id),
+    ...jobs.map((job) => job.id),
+  ].join(",");
   useEffect(() => {
     if (!visible) {
+      openedFor.current = null;
       setOpen(false);
+      return;
     }
-  }, [visible]);
+    if (openedFor.current !== workKey) {
+      openedFor.current = workKey;
+      setOpen(true);
+    }
+  }, [visible, workKey]);
   if (!visible) {
     return null;
   }
   const now = Date.now();
   const agentRuns = turn.agents.map((block) => timingOf(block, now));
-  const commandRuns = turn.commands.map((block) => timingOf(block, now));
-  const allRuns = [...agentRuns, ...commandRuns];
+  const commandRuns = commands.map((block) => timingOf(block, now));
+  const jobRuns = jobs.map((job) => ({
+    start: job.startedAt,
+    end: null as number | null,
+    lastStepAt: null as number | null,
+    steps: NO_STEPS,
+  }));
+  const allRuns = [...agentRuns, ...commandRuns, ...jobRuns];
   const axis = boardAxis(allRuns, now);
   const laneAxis = boardAxis(agentRuns, now);
-  const label = boardLabel(turn);
+  const labeled = boardLabel({ agents: turn.agents, commands });
+  const label =
+    labeled ||
+    (jobs.length
+      ? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"} running`
+      : "");
+  const stopJob = (jobId: string) => {
+    if (!onStopJob) return;
+    setStopping((ids) => new Set(ids).add(jobId));
+    void onStopJob(jobId).catch(() => {
+      setStopping((ids) => {
+        const next = new Set(ids);
+        next.delete(jobId);
+        return next;
+      });
+    });
+  };
   return (
     <div
       data-fork-background-agents
@@ -178,7 +239,7 @@ export function BackgroundAgentsBar({
           aria-label="Background agents and commands"
           tabIndex={0}
           data-fork-agents-board
-          className="@container/board mt-1 flex max-h-[min(24vh,15rem)] min-w-0 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-lg bg-content/[0.04] px-3 py-2"
+          className="@container/board mt-1 flex max-h-[min(40vh,22rem)] min-w-0 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-lg bg-content/[0.04] px-3 py-2"
         >
           {turn.agents.map((block, index) => (
             <AgentRow
@@ -192,7 +253,7 @@ export function BackgroundAgentsBar({
               onOpenDiff={onOpenDiff}
             />
           ))}
-          {turn.commands.map((block, index) => (
+          {commands.map((block, index) => (
             <CommandRow
               key={block.id}
               block={block}
@@ -200,7 +261,64 @@ export function BackgroundAgentsBar({
               now={now}
             />
           ))}
+          {jobs.map((job) => (
+            <JobRow
+              key={job.id}
+              job={job}
+              now={now}
+              stopping={stopping.has(job.id)}
+              onStop={onStopJob ? () => stopJob(job.id) : undefined}
+            />
+          ))}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function JobRow({
+  job,
+  now,
+  stopping,
+  onStop,
+}: {
+  job: BackgroundJob;
+  now: number;
+  stopping: boolean;
+  onStop?: () => void;
+}) {
+  return (
+    <div
+      className={`-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px] ${
+        stopping ? "opacity-50" : ""
+      }`}
+      title={job.command ? `${job.title}\n${job.command}` : job.title}
+    >
+      <Terminal
+        className="size-3.5 shrink-0 text-content/45"
+        strokeWidth={1.75}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-content/80">
+        {job.title}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-content/40">
+        {job.command}
+      </span>
+      <span className="shrink-0 tabular-nums text-content/55">
+        {formatLiveElapsed(job.startedAt, now)}
+      </span>
+      {onStop ? (
+        <button
+          type="button"
+          title="Stop"
+          aria-label={`Stop ${job.title}`}
+          disabled={stopping}
+          onClick={onStop}
+          className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content disabled:opacity-30"
+        >
+          <Square className="size-2.5 fill-current" strokeWidth={0} />
+        </button>
       ) : null}
     </div>
   );
@@ -220,13 +338,17 @@ function AgentRow({
   axis: Axis;
   now: number;
 }) {
-  const [open, setOpen] = useState(false);
-  const row = useRevealWhenOpen(open);
   const name = subagentName(block);
   const model = subagentModelName(block);
   const state = toolCallState(block);
   const active = state === "pending";
   const failed = state === "rejected";
+  // Running agents with a trail open themselves so the steps stay in view —
+  // the point of the tray is watching the work, not hunting for it.
+  const [open, setOpen] = useState(
+    () => active && (block.agentRun?.steps.length ?? 0) > 0,
+  );
+  const row = useRevealWhenOpen(open);
   const output = useToolDetail(block, open);
   const hasTrail =
     (block.agentRun?.steps.length ?? 0) > 0 ||

@@ -318,6 +318,15 @@ export type TurnMetrics = {
   cacheHitPercent?: number;
 };
 
+/** A background command, monitor, or subagent still running for this session. */
+export type BackgroundJob = {
+  id: string;
+  title: string;
+  /** The command a shell or monitor runs, when known. */
+  command?: string;
+  startedAt: number;
+};
+
 export type Block = {
   id: string;
   role: BlockRole;
@@ -345,6 +354,8 @@ export type Block = {
   monocode?: boolean;
   /** The Plan or Orchestrator mode this user turn was sent in. */
   intent?: Extract<TurnIntent, "plan" | "orchestrate">;
+  /** The plan block this user turn asked to build. */
+  buildPlanBlockId?: string;
   /** Stable CLI request that submitted this turn, for safe retries. */
   appRequestId?: string;
   /** Provider-reported token metrics for this user turn, when available. */
@@ -397,6 +408,8 @@ export type Block = {
   noteCard?: NoteCardMeta;
   /** Saved artifacts attached to this turn; their bodies live outside chat. */
   artifactCards?: import("../../artifacts/artifacts").ArtifactCard[];
+  /** A delivered file remains visible when later activity folds. */
+  fileDelivery?: boolean;
   /** Exact CI repair instructions and evidence supplied with this user turn. */
   ciContext?: string;
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */
@@ -484,6 +497,11 @@ export type Session = {
    * running in the background. In-memory only.
    */
   backgroundTasks?: string[];
+  /**
+   * Every background job the agent still runs, from any turn. In-memory only;
+   * used for the tray above the composer.
+   */
+  backgroundJobs?: BackgroundJob[];
   /** Follow-ups retained until they have been delivered. */
   queuedMessages?: QueuedMessage[];
   /** Paused after user stops current turn; resuming waits for continued turn. */

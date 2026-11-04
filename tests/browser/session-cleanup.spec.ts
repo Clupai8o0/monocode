@@ -20,6 +20,13 @@ for (const theme of ["dark", "light"] as const) {
     await expect(dialog.getByText("4 selected in 3 projects")).toBeVisible();
     await page.screenshot({ path: `${dir}/safe-${theme}.png` });
 
+    await dialog.getByRole("button", { name: /^Handover/ }).click();
+    await expect(dialog.getByRole("button", { name: /^Handover/ })).toHaveAttribute("aria-pressed", "true");
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(250); // The tab's colour change settles.
+    await expect(dialog.locator("[data-fork-handover-path]").first()).toHaveText(".claude/handoff.md");
+    await page.screenshot({ path: `${dir}/handover-${theme}.png` });
+
     await dialog.getByRole("button", { name: /^Everything/ }).click();
     await expect(dialog.getByRole("button", { name: "Archive", exact: true })).toBeDisabled();
     await expect(dialog.getByText("Nothing selected")).toBeVisible();

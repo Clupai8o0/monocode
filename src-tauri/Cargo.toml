@@ -36,12 +36,15 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.40.2", features = ["bundled", "hooks"], default-features = false }
+regex = "1" # Fork: contribution detection and strict argv validation.
+shlex = "2" # Fork: parse recorded commands without executing them.
 ureq = { version = "2.12.1", default-features = false, features = ["tls", "gzip"] }
 url = "2.5"
 time = { version = "0.3", features = ["parsing"] }
 tauri-plugin-process = "2"
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 png = "0.18"
+notify = "8.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

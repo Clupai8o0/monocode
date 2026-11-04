@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { MonoSkill } from "./monoSkills";
 import {
   findMono,
   HANDED_KEY,
@@ -22,6 +23,9 @@ export type MonoFiles = {
   memoryPath: string;
   /** Topic notes under memory/, by name; listed in the memory block. */
   topics: string[];
+  /** Definitions are read on demand; only this catalog loads into context. */
+  skills?: MonoSkill[];
+  skillsHash?: string;
 };
 
 type LoadedFiles = Omit<MonoFiles, "soul"> & { soul: string | null };
@@ -30,7 +34,12 @@ export type MonoFile = "soul" | "memory";
 
 /** An agent file by its path in the agent's folder. */
 export type AgentFilePath =
-  "SOUL.md" | "MEMORY.md" | "habits.json" | `memory/${string}.md`;
+  | "SOUL.md"
+  | "MEMORY.md"
+  | "habits.json"
+  | "skills.json"
+  | `memory/${string}.md`
+  | `skills/${string}/SKILL.md`;
 
 const FILE_PATH: Record<MonoFile, AgentFilePath> = {
   soul: "SOUL.md",
@@ -66,7 +75,7 @@ ${own || NO_INSTRUCTIONS}
  * Which folder the backend reads: the Mono's own, and while it still has one
  * to move, the folder it had as its project's Mono.
  */
-function folder(monoId: string) {
+export function monoFolder(monoId: string) {
   return {
     mono: monoId,
     legacyProject: findMono(monoId)?.legacyProject ?? null,
@@ -89,7 +98,7 @@ export function loadMonoFiles(monoId: string): Promise<MonoFiles> {
 const loading = new Map<string, Promise<MonoFiles>>();
 
 async function readMonoFiles(monoId: string): Promise<MonoFiles> {
-  const loaded = await invoke<LoadedFiles>("mono_load", folder(monoId));
+  const loaded = await invoke<LoadedFiles>("mono_load", monoFolder(monoId));
   // Once read, its old project folder is its own.
   if (findMono(monoId)?.legacyProject)
     updateMono(monoId, ({ legacyProject: _, ...mono }) => mono);
@@ -98,7 +107,7 @@ async function readMonoFiles(monoId: string): Promise<MonoFiles> {
   try {
     // Over the missing file only, so another window's seed is never replaced.
     const soulHash = await invoke<string>("mono_save", {
-      ...folder(monoId),
+      ...monoFolder(monoId),
       path: FILE_PATH.soul,
       text: soul,
       expectedHash: loaded.soulHash,
@@ -107,7 +116,7 @@ async function readMonoFiles(monoId: string): Promise<MonoFiles> {
     return { ...loaded, soul, soulHash };
   } catch (error) {
     if (error !== "conflict") throw error;
-    const seeded = await invoke<LoadedFiles>("mono_load", folder(monoId));
+    const seeded = await invoke<LoadedFiles>("mono_load", monoFolder(monoId));
     return { ...seeded, soul: seeded.soul ?? "" };
   }
 }
@@ -152,7 +161,7 @@ export async function readAgentFile(
   monoId: string,
   path: AgentFilePath,
 ): Promise<{ text: string | null; hash: string }> {
-  return invoke("mono_read", { ...folder(monoId), path });
+  return invoke("mono_read", { ...monoFolder(monoId), path });
 }
 
 /** Saves over `expectedHash`; throws `MonoFileConflict` if it moved. */
@@ -164,12 +173,12 @@ export async function writeAgentFile(
 ): Promise<string> {
   try {
     const hash = await invoke<string>("mono_save", {
-      ...folder(monoId),
+      ...monoFolder(monoId),
       path,
       text,
       expectedHash: expectedHash ?? null,
     });
-    window.dispatchEvent(new CustomEvent(FILES_CHANGED));
+    notifyMonoFilesChanged();
     return hash;
   } catch (error) {
     if (error === "conflict") throw new MonoFileConflict();
@@ -180,6 +189,10 @@ export async function writeAgentFile(
 export function subscribeMonoFiles(onChange: () => void): () => void {
   window.addEventListener(FILES_CHANGED, onChange);
   return () => window.removeEventListener(FILES_CHANGED, onChange);
+}
+
+export function notifyMonoFilesChanged(): void {
+  window.dispatchEvent(new CustomEvent(FILES_CHANGED));
 }
 
 export type MemoryBudget = {
@@ -219,6 +232,7 @@ type Handed = {
   provider?: string;
   soulHash: string;
   memoryHash: string;
+  skillsHash?: string;
 };
 
 function readHanded(): Record<string, Handed> {
@@ -235,7 +249,7 @@ function readHanded(): Record<string, Handed> {
  * Bump when the standing context changes (identity, memory or habit rules),
  * so sessions already running are handed the new version once.
  */
-const CONTEXT_VERSION = 9;
+const CONTEXT_VERSION = 10;
 
 function handedSoul(soulHash: string): string {
   return `${soulHash}:v${CONTEXT_VERSION}`;
@@ -246,6 +260,8 @@ export type AgentContextPlan = {
   soul: boolean;
   /** The memory block, when the session has not seen this version of it. */
   memory: boolean;
+  /** The skills catalog, when the session has not seen this version of it. */
+  skills?: boolean;
 };
 
 /**
@@ -256,7 +272,7 @@ export type AgentContextPlan = {
 export function planAgentContext(
   sessionId: string,
   providerSessionId: string | undefined,
-  files: Pick<MonoFiles, "soulHash" | "memoryHash">,
+  files: Pick<MonoFiles, "soulHash" | "memoryHash" | "skillsHash">,
 ): AgentContextPlan {
   const handed = readHanded()[sessionId];
   // The provider id arrives with the first reply, so a record made before it
@@ -265,16 +281,24 @@ export function planAgentContext(
     !!handed &&
     !!providerSessionId &&
     (handed.provider == null || handed.provider === providerSessionId);
-  if (!sameSession) return { soul: true, memory: true };
+  const skills =
+    files.skillsHash === undefined
+      ? {}
+      : { skills: !sameSession || handed?.skillsHash !== files.skillsHash };
+  if (!sameSession) return { soul: true, memory: true, ...skills };
   const soul = handed.soulHash !== handedSoul(files.soulHash);
-  return { soul, memory: soul || handed.memoryHash !== files.memoryHash };
+  return {
+    soul,
+    memory: soul || handed.memoryHash !== files.memoryHash,
+    ...skills,
+  };
 }
 
 /** Record what a turn the provider accepted carried. */
 export function recordAgentContext(
   sessionId: string,
   providerSessionId: string | undefined,
-  files: Pick<MonoFiles, "soulHash" | "memoryHash">,
+  files: Pick<MonoFiles, "soulHash" | "memoryHash" | "skillsHash">,
 ): void {
   const next = {
     ...readHanded(),
@@ -282,6 +306,7 @@ export function recordAgentContext(
       ...(providerSessionId ? { provider: providerSessionId } : {}),
       soulHash: handedSoul(files.soulHash),
       memoryHash: files.memoryHash,
+      skillsHash: files.skillsHash,
     },
   };
   try {
@@ -303,7 +328,7 @@ export function forgetAgentContext(sessionId: string): void {
 }
 
 /** Bumped when the fixed rules below change, so live chats get them again. */
-export const MONO_PROMPT_VERSION = 19;
+export const MONO_PROMPT_VERSION = 20;
 
 /**
  * The user's message with what the app adds to it, placed ahead and marked
@@ -338,6 +363,7 @@ export function monoContext(
   const parts: string[] = [];
   if (plan.soul) {
     parts.push(
+      `<skills_rules>\nYou have your own skills: reusable instructions for particular tasks. Choose relevant skills from the catalog below and read their full instructions with \`app skills.read {"name":"<skill-name>"}\` before using them. You can also refresh the catalog with \`app skills.list {}\`. Read again before each task; definitions can change. Follow the user's current request and your standing instructions first. A skill does not grant extra permissions. The returned path is the SKILL.md location; resolve its supporting files relative to that folder. Assigned skills are shared references; only skills owned by you can be edited here. When the user asks you to create a skill for yourself, use \`app skills.create {"name":"lowercase-name","description":"What it does and when to use it","instructions":"<Markdown instructions>"}\`. To edit an owned skill at their request, read it and use \`app skills.update {"name":"...","text":"<complete SKILL.md>","expectedHash":"<hash from skills.read>"}\`; reread on conflict. Do not create or change skills on your own.\n</skills_rules>`,
       `<mono>\nYou are ${look.name}, a Mono in MonoCode: an agent of your own rather than one project's. ${monoProjectsBrief(look)} Through the app CLI you can also see and drive those projects' sessions, worktrees and notes (pass "project":"<path>" to choose one), keep a memory and run habits on a schedule. This is one long conversation the user comes back to over time.\n</mono>`,
       `<pace_rules>\nThis is a chat, so keep it moving like one. When a request needs any tool call, open your reply with one short line saying what you're about to do (\"On it, pulling the open PRs now.\") before the first tool call, so the user sees an answer straight away; then work, and finish with the result. Don't deliberate at length before that first line. For a question you can answer from what you already know, just answer, briefly. For anything that will take more than a minute or two, hand it to a background session with app sessions.start, say you'll come back with the result, and end your turn so the user can keep talking.\n</pace_rules>`,
       `<reaction_rules>\nNot every message needs words back. When the user only acknowledges, thanks you, agrees or signs off ("cool no worries", "thanks!", "sounds good") and there is nothing you need to add, you may react instead, as a friend would in a messaging app: make your whole reply <reaction>👍</reaction> with one fitting emoji and nothing else. MonoCode shows it on their message instead of as a reply. Use it only when words would add nothing; questions, requests and anything that needs work or a decision still get a written answer.\n</reaction_rules>`,
@@ -348,6 +374,12 @@ export function monoContext(
       `<session_delegation_rules>\nWhen working on a user's request in your Mono chat, use app sessions.start on your own for substantial work that is long-running, needs a focused specialist, or has independent parts that benefit from separate sessions. You can choose to delegate without the user explicitly asking for new sessions; briefly tell them what you are starting and why. Respect their preferences about delegation, models and resources. Handle simple questions and small, tightly coupled changes directly. Check app sessions.list for related work before launching, and use only as many sessions as the task needs. Give each session a clear objective, the project and checkout, relevant context, the user's constraints, what it may change, and the checks and result you expect. Inherit your provider and model unless another is useful or requested; use app models.list when choosing a different one. Launch independent parts during the same turn so their results arrive together; run dependent parts in stages once their inputs are ready. Give concurrent editing sessions separate worktrees or disjoint file ownership, and avoid editing their files yourself while they run. New worktrees do not include uncommitted changes from another checkout; arrange any needed changes and context before delegating. Keep responsibility for the whole task: when the completion notification arrives, inspect the combined results, resolve disagreements, integrate changes and run the relevant checks within the user's requested scope. Continue any dependent work before reporting the task complete.\n</session_delegation_rules>`,
       `<delegated_work_handoff_rules>\nDelegated sessions own the work you assign to them. Once a sessions.start or sessions.send submission is accepted, you must not perform the delegated task yourself, run a parallel second pass, or treat that session as a second opinion while you do the same task. Prepare the required context before submitting. Finish only the remaining launch and organization steps for this stage, tell the user what was delegated, and end your turn. Do not continue investigating the task, run its checks, poll, wait, or give preliminary findings. For a delegated PR review, leave diff inspection, code review and validation to the review sessions. Resume that task when the completion notification arrives, then inspect the evidence, resolve gaps, integrate the results and give one consolidated report. Only an explicit user request for overlapping independent work overrides this restriction. Unsent drafts and rejected submissions do not hand off work.\n</delegated_work_handoff_rules>`,
       `<session_completion_rules>\nSessions you start through app sessions.start open in the background so the user can stay in this chat. Submitted sessions notify you on completion by default: tell the user the work has started and that you will report back when it finishes. Sessions you monitor during the same Mono turn form one group. MonoCode waits for every session in that group to stop, including failures and cancellations, then sends you all their results together as a new turn once you are idle. Review the full set and give one consolidated report, rather than reporting each session separately. Sessions launched during later turns form separate groups. Only when the user asks not to receive a completion report, set "notifyOnComplete":false on sessions.start and do not promise one. Unsent drafts do not run or notify. For app sessions.send to an existing session, include "notifyOnComplete":true when delegating part of the current task or when the user asks you to report back on that follow-up, unless they have opted out of completion reports. If you successfully stop, archive or delete a monitored session yourself, acknowledge the action in your current reply; MonoCode dismisses your pending report for that session, so do not promise another update about it. Rejected launches or follow-ups are reported by the CLI in this turn and do not generate a later completion notification. Calls still return immediately after acceptance. After completing launch and organization steps, acknowledge the handoff and end your turn; do not keep working on the delegated task, polling or waiting. Inspect the results and report back when notified.\n</session_completion_rules>`,
+    );
+  }
+  if (plan.soul || plan.skills) {
+    const skills = files.skills ?? [];
+    parts.push(
+      `<skills>\nCurrent skill catalog (this replaces any earlier catalog):\n${skills.length ? skills.map((skill) => `- ${JSON.stringify(skill.name)}: ${JSON.stringify(skill.description)}${skill.available ? "" : " (unavailable; the original file is missing or unreadable)"}`).join("\n") : "(No skills assigned yet. The user can assign or create skills in your Settings → Skills section.)"}\n</skills>`,
     );
   }
   if (plan.memory) {
