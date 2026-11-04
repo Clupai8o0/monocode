@@ -51,6 +51,7 @@ import { sessionEditPaths } from "../model/checkpointEdits";
 import { PromptOutline } from "./PromptOutline";
 import {
   canCompactHarnessContext,
+  stopHarnessBackgroundJob,
   type ApprovalDecision,
   type UserQuestionReply,
 } from "../../../integrations/harness";
@@ -737,6 +738,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
       cwd={workCwd}
       onOpenFile={onOpenFile}
       onOpenDiff={onOpenDiff}
+      onStopJob={
+        remote
+          ? undefined
+          : (jobId) => stopHarnessBackgroundJob(session.harness, session.id, jobId)
+      }
     />
     {/* Fork: teaches queue and steer the first time it applies */}
     <FollowUpCoachMark show={!!session.busy && !agent && !remote && draftTyped} />

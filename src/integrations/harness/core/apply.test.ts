@@ -112,6 +112,38 @@ describe("background work", () => {
     session = stopStreaming(session);
     expect(session.backgroundTasks).toBeUndefined();
   });
+
+  it("lists background jobs across turns and clears them on stop", () => {
+    let session = appendUser(newSession("claude", "/tmp"), "hi");
+    const job = {
+      id: "t1",
+      title: "npm test",
+      command: "npm test",
+      startedAt: 1_000,
+    };
+    session = applyHarnessEvent(session, {
+      type: "background.jobs",
+      jobs: [job],
+    });
+    expect(session.backgroundJobs).toEqual([job]);
+    session = applyHarnessEvent(session, { type: "background.jobs", jobs: [] });
+    expect(session.backgroundJobs).toBeUndefined();
+    session = applyHarnessEvent(session, {
+      type: "background.jobs",
+      jobs: [job],
+    });
+    session = stopStreaming(session);
+    expect(session.backgroundJobs).toBeUndefined();
+  });
+
+  it("marks a woken session busy until idle settles it", () => {
+    let session = newSession("claude", "/tmp");
+    expect(session.busy).toBeFalsy();
+    session = applyHarnessEvent(session, { type: "session.woke" });
+    expect(session.busy).toBe(true);
+    session = applyHarnessEvent(session, { type: "session.idle" });
+    expect(session.busy).toBe(false);
+  });
 });
 
 describe("turn duration", () => {
