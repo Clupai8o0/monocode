@@ -466,6 +466,55 @@ it("Undo puts sessions back in the shared list, so the count returns", async () 
   expect(ids).toEqual(expect.arrayContaining(["a1", "b1"]));
 });
 
+it("a later project's read does not undo an Undo", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  const flush = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  let holdAlpha = true;
+  let holdBeta = false;
+  let finishAlpha = () => {};
+  let finishBeta = () => {};
+  listSessionsByProject.mockImplementation((cwd: string) => {
+    if (holdAlpha) {
+      holdAlpha = false;
+      return new Promise((resolve) => {
+        finishAlpha = () => resolve(projects["/p/alpha"]);
+      });
+    }
+    if (holdBeta && cwd === "/p/beta") {
+      return new Promise((resolve) => {
+        finishBeta = () => resolve(projects["/p/beta"]);
+      });
+    }
+    return Promise.resolve(projects[cwd]);
+  });
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await flush();
+  holdBeta = true;
+  projects["/p/alpha"] = [
+    session("a1", "/p/alpha", { archived: true }),
+    session("a2", "/p/alpha"),
+  ];
+  await act(async () => {
+    finishAlpha();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await click(buttonNamed(/^Undo$/));
+  await flush();
+  expect(rowBox("a1")).toBeDefined();
+  holdBeta = false;
+  await act(async () => {
+    finishBeta();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeDefined();
+});
+
 it("Undo brings back a session a slow read saw as archived", async () => {
   await mount();
   act(() => root.unmount());

@@ -141,12 +141,11 @@ export function SessionCleanup({
     // One project at a time: each read runs git and holds the session store.
     void (async () => {
       const paths = pathsKey ? pathsKey.split("\n") : [];
-      const found = new Map(paths.map((path) => [path, cachedCleanupRows([path])]));
       let failed = 0;
       for (const path of paths) {
         let read = false;
         try {
-          found.set(path, [...(await readCleanupProject(path))]);
+          await readCleanupProject(path);
           read = true;
         } catch {
           failed += 1;
@@ -155,7 +154,8 @@ export function SessionCleanup({
           return;
         }
         if (read) {
-          setRows([...found.values()].flat());
+          // From the shared list, which any archive or Undo since has updated.
+          setRows(cachedCleanupRows(paths));
         }
       }
       setFailedProjects(failed);
