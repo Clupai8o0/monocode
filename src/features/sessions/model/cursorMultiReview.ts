@@ -4,6 +4,7 @@ import {
   HARNESS_TITLE,
   type Block,
   type HarnessId,
+  type QueuedMessage,
   type SecondOpinionMeta,
 } from "./session";
 import {
@@ -23,8 +24,7 @@ export const CURSOR_MULTI_REVIEW_TITLE_PREFIX = "Review · ";
 const USER_LIMIT = 400;
 const REPORT_LIMIT = 900;
 const PROMPT_LIMIT = 1_800;
-/** Reserved for Task 4 fan-in child report truncation. */
-const CHILD_REPORT_LIMIT = 3_000;
+export const CHILD_REPORT_LIMIT = 3_000;
 
 export type CursorMultiReviewRole = "claude" | "peer";
 
@@ -177,4 +177,133 @@ export function shouldStartCursorMultiReview(input: {
   return true;
 }
 
-export { CHILD_REPORT_LIMIT, HARNESS_TITLE };
+export type CursorMultiReviewChildResult = {
+  status: "completed" | "failed" | "cancelled";
+  harness: HarnessId;
+  title: string;
+  text: string;
+  error?: string;
+};
+
+type Pair = {
+  pairId: string;
+  sourceSessionId: string;
+  turnId: string;
+  children: Map<
+    string,
+    { settled: boolean; result?: CursorMultiReviewChildResult }
+  >;
+};
+
+export function truncateReviewReport(text: string): string {
+  const trimmed = text.replace(/\r\n?/g, "\n").trim();
+  return trimmed.length <= CHILD_REPORT_LIMIT
+    ? trimmed
+    : trimmed.slice(0, CHILD_REPORT_LIMIT);
+}
+
+export function buildCursorMultiReviewFanInText(
+  results: CursorMultiReviewChildResult[],
+): string {
+  const parts = [
+    "Multi-review of your last turn is ready (read-only).",
+    "Consensus and disagreements below. Apply fixes you agree with; do not redo the whole task.",
+  ];
+  for (const result of results) {
+    const title = HARNESS_TITLE[result.harness];
+    const body =
+      truncateReviewReport(result.text) ||
+      (result.error
+        ? `(${result.status}: ${result.error})`
+        : `(${result.status}; no written report)`);
+    parts.push(`## ${title}\n${body}`);
+  }
+  return parts.join("\n\n");
+}
+
+export function buildCursorMultiReviewQueueMessage(
+  pairId: string,
+  results: CursorMultiReviewChildResult[],
+): QueuedMessage {
+  return {
+    id: `${CURSOR_MULTI_REVIEW_APP_PREFIX}${pairId}`,
+    text: buildCursorMultiReviewFanInText(results),
+    attachments: [],
+  };
+}
+
+export class CursorMultiReviewPairs {
+  private pairs = new Map<string, Pair>();
+  private byChild = new Map<string, string>();
+
+  constructor(
+    private onReady: (
+      pair: Pair & { results: CursorMultiReviewChildResult[] },
+    ) => void,
+  ) {}
+
+  begin(input: {
+    sourceSessionId: string;
+    turnId: string;
+    childSessionIds: string[];
+  }): string {
+    const pairId = crypto.randomUUID();
+    const children = new Map(
+      input.childSessionIds.map((id) => [id, { settled: false }]),
+    );
+    const pair: Pair = {
+      pairId,
+      sourceSessionId: input.sourceSessionId,
+      turnId: input.turnId,
+      children,
+    };
+    this.pairs.set(pairId, pair);
+    for (const id of input.childSessionIds) this.byChild.set(id, pairId);
+    return pairId;
+  }
+
+  hasInFlight(sourceSessionId: string, turnId: string): boolean {
+    for (const pair of this.pairs.values()) {
+      if (
+        pair.sourceSessionId === sourceSessionId &&
+        pair.turnId === turnId &&
+        [...pair.children.values()].some((c) => !c.settled)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** True if this session id is a registered review child. */
+  isChild(sessionId: string): boolean {
+    return this.byChild.has(sessionId);
+  }
+
+  settleChild(sessionId: string, result: CursorMultiReviewChildResult) {
+    const pairId = this.byChild.get(sessionId);
+    if (!pairId) return;
+    const pair = this.pairs.get(pairId);
+    if (!pair) return;
+    const child = pair.children.get(sessionId);
+    if (!child || child.settled) return;
+    child.settled = true;
+    child.result = result;
+    if ([...pair.children.values()].some((c) => !c.settled)) return;
+    const results = [...pair.children.values()].map((c) => c.result!);
+    this.pairs.delete(pairId);
+    for (const id of pair.children.keys()) this.byChild.delete(id);
+    this.onReady({ ...pair, results });
+  }
+
+  /** Drop fan-in if the Cursor source was removed. */
+  dropSource(sourceSessionId: string) {
+    for (const [pairId, pair] of [...this.pairs]) {
+      if (pair.sourceSessionId !== sourceSessionId) continue;
+      this.pairs.delete(pairId);
+      for (const id of pair.children.keys()) this.byChild.delete(id);
+    }
+  }
+}
+
+export { HARNESS_TITLE };

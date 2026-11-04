@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Block, HarnessId } from "./session";
 import {
+  buildCursorMultiReviewFanInText,
   buildCursorMultiReviewPrompt,
+  buildCursorMultiReviewQueueMessage,
   buildCursorMultiReviewRequest,
+  CursorMultiReviewPairs,
   CURSOR_MULTI_REVIEW_APP_PREFIX,
   isFrontendReviewPath,
   pathsLookFrontend,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
+  truncateReviewReport,
 } from "./cursorMultiReview";
 
 function user(id: string, text: string, extra: Partial<Block> = {}): Block {
@@ -234,5 +238,117 @@ describe("shouldStartCursorMultiReview", () => {
         ],
       }),
     ).toBe(false);
+  });
+});
+
+describe("truncateReviewReport", () => {
+  it("caps at 3000 characters", () => {
+    expect(truncateReviewReport("x".repeat(4000)).length).toBe(3000);
+  });
+});
+
+describe("CursorMultiReviewPairs", () => {
+  it("fires onReady once when all children settle", () => {
+    const ready: string[] = [];
+    const pairs = new CursorMultiReviewPairs((pair) => {
+      ready.push(pair.pairId);
+    });
+    const pairId = pairs.begin({
+      sourceSessionId: "cursor-1",
+      turnId: "u1",
+      childSessionIds: ["r-claude", "r-codex"],
+    });
+    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(true);
+    expect(pairs.isChild("r-claude")).toBe(true);
+    expect(pairs.isChild("r-codex")).toBe(true);
+    expect(pairs.isChild("other")).toBe(false);
+
+    pairs.settleChild("r-claude", {
+      status: "completed",
+      harness: "claude",
+      title: "Review · Claude",
+      text: "Looks fine.",
+    });
+    expect(ready).toEqual([]);
+    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(true);
+
+    pairs.settleChild("r-codex", {
+      status: "failed",
+      harness: "codex",
+      title: "Review · Codex",
+      text: "",
+      error: "usage limited",
+    });
+    expect(ready).toEqual([pairId]);
+    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(false);
+    expect(pairs.isChild("r-claude")).toBe(false);
+  });
+
+  it("dropSource clears without onReady", () => {
+    let readyCount = 0;
+    const pairs = new CursorMultiReviewPairs(() => {
+      readyCount += 1;
+    });
+    pairs.begin({
+      sourceSessionId: "cursor-1",
+      turnId: "u1",
+      childSessionIds: ["r-claude", "r-codex"],
+    });
+    pairs.dropSource("cursor-1");
+    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(false);
+    expect(pairs.isChild("r-claude")).toBe(false);
+    pairs.settleChild("r-claude", {
+      status: "completed",
+      harness: "claude",
+      title: "Review · Claude",
+      text: "late",
+    });
+    pairs.settleChild("r-codex", {
+      status: "completed",
+      harness: "codex",
+      title: "Review · Codex",
+      text: "late",
+    });
+    expect(readyCount).toBe(0);
+  });
+});
+
+describe("buildCursorMultiReviewFanInText", () => {
+  it("includes both sections and read-only guidance", () => {
+    const text = buildCursorMultiReviewFanInText([
+      {
+        status: "completed",
+        harness: "claude",
+        title: "Review · Claude",
+        text: "Missing aria-label.",
+      },
+      {
+        status: "completed",
+        harness: "codex",
+        title: "Review · Codex",
+        text: "Off-by-one in the pager.",
+      },
+    ]);
+    expect(text).toMatch(/read-only/i);
+    expect(text).toContain("## Claude");
+    expect(text).toContain("## Codex");
+    expect(text).toContain("Missing aria-label");
+  });
+});
+
+describe("buildCursorMultiReviewQueueMessage", () => {
+  it("uses app prefix + pairId and fan-in text", () => {
+    const results = [
+      {
+        status: "completed" as const,
+        harness: "claude" as const,
+        title: "Review · Claude",
+        text: "Missing aria-label.",
+      },
+    ];
+    const message = buildCursorMultiReviewQueueMessage("pair-abc", results);
+    expect(message.id).toBe(`${CURSOR_MULTI_REVIEW_APP_PREFIX}pair-abc`);
+    expect(message.text).toBe(buildCursorMultiReviewFanInText(results));
+    expect(message.attachments).toEqual([]);
   });
 });
