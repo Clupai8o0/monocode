@@ -44,6 +44,25 @@ describe("project bots", () => {
     expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
+  it("offers the jar as a pick in the roster, with its eyes on holes", () => {
+    const jar = PROJECT_MASCOTS.find((mascot) => mascot.name === "jar");
+    expect(jar).toBeDefined();
+    for (const rows of [jar!.rest, jar!.talk]) {
+      expect(rows).toHaveLength(8);
+      for (const row of rows) expect(row).toMatch(/^[#.]{8}$/);
+      // The lid sits lifted off the jar.
+      expect(rows[2]).toBe("........");
+    }
+    const { eyes } = PROJECT_BOT_SPRITES.jar;
+    for (const [x, y] of eyes.rest) expect(jar!.rest[y][x]).toBe(".");
+    for (const [x, y] of eyes.talk) expect(jar!.talk[y][x]).toBe(".");
+    // Talking opens a mouth under the eyes and changes nothing else.
+    expect(jar!.rest[5][3]).toBe("#");
+    expect(jar!.talk[5][3]).toBe(".");
+    expect(jar!.talk.filter((row, y) => row !== jar!.rest[y])).toHaveLength(1);
+    expect(projectBotFor("/Users/sam/Documents/projects/coin-jar")).toBeNull();
+  });
+
   it("keeps bots out of the hashed default", () => {
     for (const project of ["alpha", "beta", "gamma", "delta", "x/y", "zz"]) {
       expect(PROJECT_BOT_NAMES.has(projectMascot(project).name)).toBe(false);
