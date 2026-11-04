@@ -665,6 +665,7 @@ import { monoSessionRefs } from "../fork/messageLog/monoSessions"; // Fork
 import { NotificationPopups } from "../fork/notifications/NotificationPopups"; // Fork
 import { applyProjectBots } from "../fork/projectBots/applyProjectBots";
 import { seedStylistMono } from "../fork/stylist/stylistMono";
+import { isStylistMono, STYLIST_RULES } from "../fork/stylist/stylistId";
 import { seedStarterMonos, starterMonoId } from "../fork/starterMonos/starterMono"; // Fork
 import { monoShowsIn } from "../fork/starterMonos/monoShowsIn"; // Fork
 import { STARTER_MONOS } from "../fork/starterMonos/allStarterMonos"; // Fork
@@ -8029,7 +8030,10 @@ function Workspace({
                 ? steerable
                   ? "steer"
                   : "queue"
-                : (options?.followUpBehavior ?? loadFollowUpBehavior());
+                : (options?.followUpBehavior ??
+                  // Fork: a harness that cannot steer keeps the message for
+                  // after the turn rather than refusing it.
+                  (steerable ? loadFollowUpBehavior() : "queue"));
         if (!mono) recordFeatureUse("queue"); // Fork
         if (followUpBehavior === "queue") {
           setSessions((prev) =>
@@ -9008,6 +9012,13 @@ function Workspace({
             appContext.push(
               `<monocode_app>\n${handAgent ? "App access is always enabled in this thread." : "The user's Operator command enables app access in this thread, including later turns without the command."} You can start sessions, list and create project worktrees, choose a new session's checkout, read, continue, stop, archive or delete other project sessions, save unsent drafts, organize session folders, and read or write saved notes through its local CLI. Run \`${cli} --help\` when you need the exact commands and JSON fields. When reading another session, start with its latest two or three user/assistant exchanges. Request older exchanges with nextBefore or a larger excerpt only if needed. The CLI uses a session credential already in your environment; never print it. New sessions inherit this session's permission mode unless runtimeMode is set explicitly. For a new session with a draft, call sessions.start with its prompt and draft:true; do not submit a seed prompt. Sessions you start appear in the user's sidebar under this session without opening; the user opens them when they want. Only set placement right or down, or reveal:true, when the user asks to see a session open or side by side. The returned ID can be used as besideSessionId to split its pane again or moved into a folder immediately. A normal sessions.start submits its prompt but returns after acceptance, so do not wait for that agent to finish before organizing it.\n</monocode_app>`,
             );
+          }
+          // Fork: the app block above offers sessions; the Stylist gets none.
+          if (
+            (operatorCommand.matched || handAgent) &&
+            isStylistMono(monoRecord?.id)
+          ) {
+            appContext.push(STYLIST_RULES);
           }
           // A Mono reads who it is ahead of the message, so it never takes it
           // for something the user pasted. A command must stay first.

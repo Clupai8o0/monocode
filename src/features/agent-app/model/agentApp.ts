@@ -3,7 +3,11 @@ import { handleAgentMonos } from "./agentAppMonos";
 // Fork: agents use the same project logo storage as the manual picker.
 import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { projectLook, setProjectLook } from "../../../fork/stylist/agentProjectLook";
-import { isStylistMono, STYLIST_NO_SESSIONS } from "../../../fork/stylist/stylistId";
+import {
+  isStylistMono,
+  STYLIST_BLOCKED_ACTIONS,
+  STYLIST_NO_SESSIONS,
+} from "../../../fork/stylist/stylistId";
 import { createAgentProject } from "../../../fork/starterMonos/agentProjectCreate";
 import { handleMonoMaker } from "../../../fork/starterMonos/agentMonoMaker";
 import { looksLikeProject } from "../../projects/model/recents";
@@ -1112,6 +1116,13 @@ export async function handleAgentApp(
   host: AgentAppHost,
 ): Promise<unknown> {
   fields(action, input);
+  // Fork: the Stylist only changes looks. A session or habit run is a coding
+  // agent that can change project files (src/fork/stylist).
+  if (
+    STYLIST_BLOCKED_ACTIONS.has(action) &&
+    isStylistMono(host.monoOf?.(source.id)?.id)
+  )
+    throw new Error(STYLIST_NO_SESSIONS);
   if (action === "monos.all" || action === "monos.make")
     return handleMonoMaker(source, action, input, host);
   if (action.startsWith("monos."))
@@ -1205,9 +1216,6 @@ export async function handleAgentApp(
       return host.readConversation ? host.readConversation(target, options) : sessionConversationPage(target, options);
     }
     case "sessions.send": {
-      // Fork: the Stylist only changes looks (src/fork/stylist).
-      if (isStylistMono(host.monoOf?.(source.id)?.id))
-        throw new Error(STYLIST_NO_SESSIONS);
       const id = requiredString(input.sessionId, "sessionId", 256);
       const prompt = agentPrompt(input.prompt);
       const notifyMonoId = completionRecipient(source, input, host);
@@ -1235,9 +1243,6 @@ export async function handleAgentApp(
       };
     }
     case "sessions.draft": {
-      // Fork: the Stylist only changes looks (src/fork/stylist).
-      if (isStylistMono(host.monoOf?.(source.id)?.id))
-        throw new Error(STYLIST_NO_SESSIONS);
       const id = requiredString(input.sessionId, "sessionId", 256);
       const prompt = agentPrompt(input.prompt);
       if (id === source.id)
@@ -1255,9 +1260,6 @@ export async function handleAgentApp(
     case "sessions.stop":
     case "sessions.archive":
     case "sessions.delete": {
-      // Fork: the Stylist only changes looks (src/fork/stylist).
-      if (isStylistMono(host.monoOf?.(source.id)?.id))
-        throw new Error(STYLIST_NO_SESSIONS);
       const id = requiredString(input.sessionId, "sessionId", 256);
       if (id === source.id)
         throw new Error("Cannot stop, archive or delete the calling session");
@@ -1286,9 +1288,6 @@ export async function handleAgentApp(
       };
     }
     case "sessions.start": {
-      // Fork: the Stylist only changes looks (src/fork/stylist).
-      if (isStylistMono(host.monoOf?.(source.id)?.id))
-        throw new Error(STYLIST_NO_SESSIONS);
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
         throw new Error(
           "request ID must use letters, digits, underscores or hyphens",

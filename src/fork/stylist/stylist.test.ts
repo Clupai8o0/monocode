@@ -181,9 +181,12 @@ describe("the Stylist does its look work itself", () => {
     expect(stylist).toContain("<stylist_rules>");
     expect(stylist).not.toContain("<session_delegation_rules>");
     expect(stylist).not.toContain("hand it to a background session");
+    expect(stylist).not.toContain("<habits_rules>");
+    expect(stylist).not.toContain("drive those projects' sessions");
     const other = monoContext(look, files("someone-else"), { soul: true, memory: false });
     expect(other).toContain("<session_delegation_rules>");
     expect(other).not.toContain("<stylist_rules>");
+    expect(other).toContain("<habits_rules>");
   });
 
   it("refuses every session action that starts or changes one", async () => {
@@ -197,6 +200,9 @@ describe("the Stylist does its look work itself", () => {
       ["sessions.stop", { sessionId: "other" }],
       ["sessions.archive", { sessionId: "other" }],
       ["sessions.delete", { sessionId: "other" }],
+      ["habits.add", { name: "Looks", instructions: "do all projects" }],
+      ["habits.update", { id: "h1", instructions: "do all projects" }],
+      ["habits.run", { id: "h1" }],
     ] as const) {
       await expect(handleAgentApp(source, "req1", action, input, host)).rejects.toThrow(STYLIST_NO_SESSIONS);
     }
