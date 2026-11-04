@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { PROJECT_MASCOTS, projectMascot } from "../../features/projects/model/projectMascots";
 import { loadTabGroupMascots, saveTabGroupMascot } from "../../features/workspace/model/tabGroups";
 import { applyProjectBots } from "./applyProjectBots";
-import { PROJECT_BOT_NAMES, projectBotFor } from "./projectBots";
+import { PROJECT_BOT_NAMES, PROJECT_BOT_SPRITES, projectBotFor } from "./projectBots";
 
 const MORGUE = "/Users/sam/Documents/projects/morgue";
 const PANOPTIC = "/Users/sam/Documents/projects/upwork/panoptic";
@@ -20,6 +20,28 @@ describe("project bots", () => {
     expect(projectBotFor(`${PANOPTIC}/`)).toBe("eye");
     expect(projectBotFor("/Users/sam/Documents/projects/panoptic")).toBeNull();
     expect(projectBotFor("/Users/sam/notmorgue")).toBeNull();
+  });
+
+  it("offers the flower as a pick in the roster, as an 8×8 two-frame sprite", () => {
+    const flower = PROJECT_MASCOTS.find((mascot) => mascot.name === "flower");
+    expect(flower).toBeDefined();
+    for (const rows of [flower!.rest, flower!.talk]) {
+      expect(rows).toHaveLength(8);
+      for (const row of rows) expect(row).toMatch(/^[#.]{8}$/);
+    }
+    expect(flower!.talk).not.toEqual(flower!.rest);
+    const { eyes } = PROJECT_BOT_SPRITES.flower;
+    for (const [x, y] of eyes.rest) expect(flower!.rest[y][x]).toBe(".");
+    for (const [x, y] of eyes.talk) expect(flower!.talk[y][x]).toBe(".");
+    // The stem runs straight down the bloom's middle column, with one leaf.
+    for (const rows of [flower!.rest, flower!.talk]) {
+      expect(rows.slice(5)).toEqual(["...#....", "..##....", "...#...."]);
+    }
+    // Talking opens a mouth under the eyes and changes nothing else.
+    expect(flower!.rest[3][3]).toBe("#");
+    expect(flower!.talk[3][3]).toBe(".");
+    expect(flower!.talk.filter((row, y) => row !== flower!.rest[y])).toHaveLength(1);
+    expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
   it("keeps bots out of the hashed default", () => {

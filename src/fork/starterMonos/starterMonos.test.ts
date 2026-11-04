@@ -89,7 +89,7 @@ describe("starter Monos", () => {
     const dojo = findMono(starterMonoId(DOJO_MONO)!)!;
     expect(dojo).toMatchObject({ name: "Dojo", mascot: "belt", projects: [] });
     expect(dojo.instructions).toMatch(/You are Dojo/);
-    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom", "belt"]));
+    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom", "belt", "flower"]));
   });
 
   it.each(["Graft", "Auditor"])("seeds %s with a valid look and soul, and keeps user edits and deletion", async (name) => {
