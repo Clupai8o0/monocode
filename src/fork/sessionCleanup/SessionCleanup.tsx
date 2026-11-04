@@ -39,6 +39,7 @@ import {
   cachedCleanupRows,
   forgetCleanupRows,
   readCleanupProject,
+  restoreCleanupRows,
 } from "./cleanupRows";
 
 const EMPTY: Record<CleanupFilter, string> = {
@@ -346,6 +347,7 @@ export function SessionCleanup({
       }
       return next;
     });
+    restoreCleanupRows(archived.filter((row) => restored.includes(row.id)));
     setOverrides(new Map());
     setProgress(null);
     const failed = archived.length - restored.length;

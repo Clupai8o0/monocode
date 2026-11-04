@@ -451,3 +451,17 @@ it("takes archived sessions out of the shared list, so the count falls", async (
   expect(left).not.toContain("b1");
   expect(left).toContain("a2");
 });
+
+it("Undo puts sessions back in the shared list, so the count returns", async () => {
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await click(buttonNamed(/^Undo$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const ids = cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id);
+  expect(ids).toEqual(expect.arrayContaining(["a1", "b1"]));
+});

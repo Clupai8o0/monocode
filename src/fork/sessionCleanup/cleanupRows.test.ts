@@ -11,6 +11,7 @@ const {
   forgetCleanupRows,
   requestCleanupScan,
   resetCleanupRows,
+  restoreCleanupRows,
 } = await import("./cleanupRows");
 
 const row = (id: string) => ({ id }) as never;
@@ -91,4 +92,32 @@ it("forgets removed sessions straight away", async () => {
   await settle();
   forgetCleanupRows(["/a#1"]);
   expect(cachedCleanupRows(["/a", "/b"]).map((r) => r.id)).toEqual(["/b#1"]);
+});
+
+it("a read that began before a removal does not bring the session back", async () => {
+  requestCleanupScan(["/a"]);
+  await settle();
+  let finish = () => {};
+  listSessionsByProject.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve([row("/a#1")]);
+      }),
+  );
+  requestCleanupScan(["/a"], { now: true });
+  await settle();
+  forgetCleanupRows(["/a#1"]);
+  finish();
+  await settle();
+  expect(cachedCleanupRows(["/a"])).toEqual([]);
+});
+
+it("puts a restored session back, once", async () => {
+  requestCleanupScan(["/a"]);
+  await settle();
+  const restored = { id: "/a#1", cwd: "/a" } as never;
+  forgetCleanupRows(["/a#1"]);
+  restoreCleanupRows([restored]);
+  restoreCleanupRows([restored]);
+  expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["/a#1"]);
 });

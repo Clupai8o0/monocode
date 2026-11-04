@@ -14,6 +14,8 @@ export const SCAN_GAP_MS = 60_000;
 
 let byProject = new Map<string, readonly SessionSummary[]>();
 let version = 0;
+/** Counts removals and restores, so a read that began before one is not kept. */
+let changes = 0;
 const listeners = new Set<() => void>();
 
 let scanning = false;
@@ -48,9 +50,13 @@ export function cachedCleanupRows(paths: readonly string[]): SessionSummary[] {
 export async function readCleanupProject(
   path: string,
 ): Promise<readonly SessionSummary[]> {
+  const startedAt = changes;
   const rows = await listSessionsByProject(path);
-  byProject.set(path, rows);
-  emit();
+  // Read before a session was removed or restored: it would undo that change.
+  if (startedAt === changes) {
+    byProject.set(path, rows);
+    emit();
+  }
   return rows;
 }
 
@@ -59,12 +65,28 @@ export function forgetCleanupRows(sessionIds: readonly string[]) {
   if (sessionIds.length === 0) {
     return;
   }
+  changes += 1;
   const gone = new Set(sessionIds);
   for (const [path, rows] of byProject) {
     byProject.set(
       path,
       rows.filter((row) => !gone.has(row.id)),
     );
+  }
+  emit();
+}
+
+/** Puts back sessions just restored, under the projects they came from. */
+export function restoreCleanupRows(restored: readonly SessionSummary[]) {
+  if (restored.length === 0) {
+    return;
+  }
+  changes += 1;
+  for (const row of restored) {
+    const rows = byProject.get(row.cwd);
+    if (rows && !rows.some((known) => known.id === row.id)) {
+      byProject.set(row.cwd, [row, ...rows]);
+    }
   }
   emit();
 }
