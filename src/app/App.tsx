@@ -8289,6 +8289,7 @@ function Workspace({
       }
 
       dismissNoticesForContinuedSession(sessionId);
+      let cursorReviewTurnId: string | undefined;
       const commitSubmittedTurn = () => {
         setSessions((prev) =>
           prev.map((s) => {
@@ -8411,6 +8412,10 @@ function Workspace({
                 );
           }),
         );
+        // This run's own turn, so a late cancel can't settle a newer one.
+        cursorReviewTurnId = latestUserBlockId(
+          sessionsRef.current.find((s) => s.id === sessionId)?.blocks ?? [],
+        );
       };
       if (!options?.resendEdited) {
         flushSync(commitSubmittedTurn);
@@ -8519,10 +8524,6 @@ function Workspace({
       let nativeProposalText = "";
       let completedProposal: OrchestrationProposal | undefined;
       const settleCursorMultiReview = (outcome: ControlOutcome) => {
-        // Read now: a queued message or send-on can start the next turn first.
-        const endedTurnId = latestUserBlockId(
-          sessionsRef.current.find((s) => s.id === sessionId)?.blocks ?? [],
-        );
         window.setTimeout(() => {
           const finished = sessionsRef.current.find((s) => s.id === sessionId);
           if (!finished) return;
@@ -8549,7 +8550,7 @@ function Workspace({
           // A turn that only asked for more effort edited nothing, so the edit
           // gate skips it. One that did edit is reviewed now: its send-on may
           // edit nothing more, and would never be reviewed.
-          const turn = userTurnById(finished.blocks, endedTurnId);
+          const turn = userTurnById(finished.blocks, cursorReviewTurnId);
           if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
         }, 0);
       };
