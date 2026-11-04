@@ -123,6 +123,23 @@ describe("fetchCodexRateLimits", () => {
     expect(limits.error).toBe("Codex not signed in");
   });
 
+  it("treats a 401 on the usage read as signed out, in either word order", async () => {
+    for (const text of [
+      "GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized",
+      "workspace routing discovery unauthorized (401)",
+    ]) {
+      jsonRpc.requestError = new Error(text);
+      const limits = await fetchCodexRateLimits("account-plus");
+      expect(limits.status).toBe("unavailable");
+    }
+  });
+
+  it("keeps vague token errors as a failed read", async () => {
+    jsonRpc.requestError = new Error("Usage could not be refreshed");
+    const limits = await fetchCodexRateLimits("account-plus");
+    expect(limits.status).toBe("error");
+  });
+
   it("runs usage probes for different accounts one at a time", async () => {
     const results = await Promise.all([
       fetchCodexRateLimits("default"),

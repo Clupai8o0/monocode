@@ -72,6 +72,16 @@ describe("harness login", () => {
     expect(isHarnessAuthError("Codex usage probe timed out")).toBe(false);
   });
 
+  it("does not treat a bare 401 or vague token error in a session as signed out", () => {
+    for (const text of [
+      "unexpected status 401 Unauthorized",
+      "The file could not be refreshed",
+      "Missing authentication token for the MCP server",
+    ]) {
+      expect(isHarnessAuthError(text)).toBe(false);
+    }
+  });
+
   it("recognizes Claude Code's own sign-in failures", () => {
     for (const text of [
       CLAUDE_EXPIRED,

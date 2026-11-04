@@ -153,25 +153,7 @@ pub fn fetch_for(
     }
     let value = catalog::codex_request(profile, "account/rateLimits/read", serde_json::json!({}))
         .map_err(|message| {
-        let lower = message.to_lowercase();
-        // Codex often returns the ChatGPT HTTP failure ("401 Unauthorized",
-        // "invalid_jwt", "authentication token") when the refresh token is dead,
-        // instead of a plain "not signed in" string.
-        if [
-            "not installed",
-            "not signed in",
-            "not authenticated",
-            "authentication required",
-            "authentication token",
-            "invalid_jwt",
-            "401 unauthorized",
-            "refresh token has expired",
-            "could not be refreshed",
-            "signing in again",
-        ]
-        .iter()
-        .any(|s| lower.contains(s))
-        {
+        if codex_usage_needs_login(&message) {
             FetchError::unavailable("Sign in with codex login, then refresh usage.")
         } else {
             FetchError::failed(message)
@@ -184,6 +166,24 @@ pub fn fetch_for(
         ));
     }
     Ok(snapshot)
+}
+
+/// Codex often returns the ChatGPT HTTP failure (a 401, "invalid_jwt") when the
+/// refresh token is dead, instead of a plain "not signed in" string. Anything
+/// vaguer stays a failed read, so the last good usage reading is kept.
+fn codex_usage_needs_login(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "not installed",
+        "not signed in",
+        "not authenticated",
+        "authentication required",
+        "invalid_jwt",
+        "refresh token has expired",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+        || (lower.contains("401") && lower.contains("unauthorized"))
 }
 
 fn fetch_devin() -> Result<Snapshot, FetchError> {
@@ -514,6 +514,25 @@ fn parse_reset_credits(value: &Value) -> Option<ResetCredits> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn codex_usage_login_check_keeps_vague_errors_as_failures() {
+        for message in [
+            "GET wham/usage failed: 401 Unauthorized",
+            "workspace routing discovery unauthorized (401)",
+            r#"{"code":"invalid_jwt"}"#,
+            "your refresh token has expired",
+        ] {
+            assert!(codex_usage_needs_login(message), "{message}");
+        }
+        for message in [
+            "usage could not be refreshed",
+            "missing authentication token for the proxy",
+            "429 Too Many Requests",
+        ] {
+            assert!(!codex_usage_needs_login(message), "{message}");
+        }
+    }
 
     #[test]
     fn explicit_codex_windows_win_before_positional_fallbacks() {

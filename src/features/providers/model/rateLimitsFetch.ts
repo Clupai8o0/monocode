@@ -203,7 +203,7 @@ export async function fetchCodexRateLimits(
     return parsed;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (isHarnessAuthError(message)) {
+    if (isCodexUsageAuthError(message)) {
       return unavailableRateLimits("codex", "Codex not signed in");
     }
     if (/ENOENT|not found|could not run/i.test(message)) {
@@ -211,6 +211,14 @@ export async function fetchCodexRateLimits(
     }
     return errorRateLimits("codex", message);
   }
+}
+
+/** A 401 on the usage read itself means this account's login is no good. */
+function isCodexUsageAuthError(message: string): boolean {
+  return (
+    isHarnessAuthError(message) ||
+    (/\b401\b/.test(message) && /\bunauthori[sz]ed\b/i.test(message))
+  );
 }
 
 export async function consumeCodexRateLimitResetCredit(
