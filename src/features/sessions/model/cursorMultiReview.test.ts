@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Block, HarnessId } from "./session";
 import {
   buildCursorMultiReviewFanInText,
@@ -14,6 +14,8 @@ import {
   shouldStartCursorMultiReview,
   cursorMultiReviewChildResult,
   cursorMultiReviewEmptyStatus,
+  CHILD_SETTLE_GRACE_MS,
+  settleCursorMultiReviewChildAfterGrace,
   truncateReviewReport,
 } from "./cursorMultiReview";
 
@@ -288,6 +290,57 @@ describe("shouldStartCursorMultiReview", () => {
         ],
       }),
     ).toBe(false);
+  });
+});
+
+describe("settleCursorMultiReviewChildAfterGrace", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const child = {
+    busy: false,
+    harness: "claude" as const,
+    title: "Review · Claude",
+    blocks: [user("u1", "review"), assistant("a1", "Partial")],
+  };
+
+  it("settles a reviewer that stays idle", () => {
+    const settled: string[] = [];
+    settleCursorMultiReviewChildAfterGrace({
+      getChild: () => child,
+      outcome: { status: "cancelled" },
+      settle: (result) => settled.push(result.status),
+    });
+    vi.advanceTimersByTime(CHILD_SETTLE_GRACE_MS - 1);
+    expect(settled).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(settled).toEqual(["cancelled"]);
+  });
+
+  it("leaves a reviewer sent on for its later turn to settle", () => {
+    const settled: string[] = [];
+    settleCursorMultiReviewChildAfterGrace({
+      getChild: () => ({ ...child, busy: true }),
+      outcome: { status: "cancelled" },
+      settle: (result) => settled.push(result.status),
+    });
+    vi.advanceTimersByTime(CHILD_SETTLE_GRACE_MS);
+    expect(settled).toEqual([]);
+  });
+
+  it("does nothing once the reviewer is gone", () => {
+    const settled: string[] = [];
+    settleCursorMultiReviewChildAfterGrace({
+      getChild: () => undefined,
+      outcome: { status: "completed" },
+      settle: (result) => settled.push(result.status),
+    });
+    vi.advanceTimersByTime(CHILD_SETTLE_GRACE_MS);
+    expect(settled).toEqual([]);
   });
 });
 

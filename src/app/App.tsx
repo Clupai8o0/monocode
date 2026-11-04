@@ -820,6 +820,7 @@ import {
   cursorMultiReviewChildResult,
   cursorMultiReviewEmptyStatus,
   latestUserTurn,
+  settleCursorMultiReviewChildAfterGrace,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
   type CursorMultiReviewer,
@@ -5967,6 +5968,7 @@ function Workspace({
       }
       invalidateLoadedSession(sessionId);
       pendingPersist.current.delete(sessionId);
+      let lastBlocks = open?.blocks ?? [];
       try {
         const remover = createSessionRemover({
           mode,
@@ -5988,6 +5990,7 @@ function Workspace({
             }),
             apply: (change) => {
               if (change.type === "stopped") {
+                lastBlocks = change.session.blocks;
                 const next = sessionsRef.current.map((session) =>
                   session.id === sessionId ? change.session : session,
                 );
@@ -6112,7 +6115,7 @@ function Workspace({
                 {
                   harness: seed.harness,
                   title: seed.title,
-                  blocks: open?.blocks ?? [],
+                  blocks: lastBlocks,
                 },
                 { status: "cancelled" },
               ),
@@ -8447,8 +8450,21 @@ function Workspace({
         window.setTimeout(() => {
           const finished = sessionsRef.current.find((s) => s.id === sessionId);
           if (!finished || finished.busy) return;
+
+          if (cursorMultiReviewPairs.current.isChild(sessionId)) {
+            settleCursorMultiReviewChildAfterGrace({
+              getChild: () =>
+                sessionsRef.current.find((s) => s.id === sessionId),
+              outcome,
+              settle: (result) =>
+                cursorMultiReviewPairs.current.settleChild(sessionId, result),
+            });
+            return;
+          }
+
+          if (finished.harness !== "cursor") return;
           // Fork: this turn only asked for more effort. Its send-on is the
-          // real turn, and settles here when it ends.
+          // real turn, and is reviewed when it ends.
           if (
             outcome.status === "completed" &&
             effortAutoFor(finished.id, finished.ephemeral) &&
@@ -8456,16 +8472,6 @@ function Workspace({
           ) {
             return;
           }
-
-          if (cursorMultiReviewPairs.current.isChild(sessionId)) {
-            cursorMultiReviewPairs.current.settleChild(
-              sessionId,
-              cursorMultiReviewChildResult(finished, outcome),
-            );
-            return;
-          }
-
-          if (finished.harness !== "cursor") return;
           const turn = latestUserTurn(finished.blocks);
           if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
         }, 0);

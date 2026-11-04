@@ -27,6 +27,7 @@ const REPORT_LIMIT = 900;
 const PROMPT_LIMIT = 4_500;
 const NOTE_REQUEST_LIMIT = 120;
 export const CHILD_REPORT_LIMIT = 3_000;
+export const CHILD_SETTLE_GRACE_MS = 5_000;
 
 export type CursorMultiReviewRole = "claude" | "peer";
 
@@ -227,6 +228,27 @@ export function cursorMultiReviewChildResult(
     text: reply?.text ?? "",
     error: outcome.error,
   };
+}
+
+/**
+ * A reviewer's turn can end only for MonoCode to raise its effort and send it
+ * on, which is the turn that holds the review. Wait for that first. If it
+ * never comes (a Stop, or it could not start), this settles what is there, so
+ * the note isn't held back forever.
+ */
+export function settleCursorMultiReviewChildAfterGrace(input: {
+  getChild: () =>
+    | { busy?: boolean; harness: HarnessId; title: string; blocks: Block[] }
+    | undefined;
+  outcome: { status: string; error?: string };
+  settle: (result: CursorMultiReviewChildResult) => void;
+}) {
+  setTimeout(() => {
+    const child = input.getChild();
+    // Busy again means a later turn settles it. Gone means removal did.
+    if (!child || child.busy) return;
+    input.settle(cursorMultiReviewChildResult(child, input.outcome));
+  }, CHILD_SETTLE_GRACE_MS);
 }
 
 export function truncateReviewReport(text: string): string {
