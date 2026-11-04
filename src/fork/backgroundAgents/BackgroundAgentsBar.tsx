@@ -309,8 +309,8 @@ function JobRow({
       {onStop ? (
         <button
           type="button"
-          title="Stop this job"
-          aria-label={`Stop ${job.title}`}
+          title={stopping ? "Stopping this job" : "Stop this job"}
+          aria-label={`${stopping ? "Stopping" : "Stop"} ${job.title}`}
           disabled={stopping}
           onClick={onStop}
           className="flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-content/6 px-2 font-sans text-[12px] text-content/70 transition-colors duration-200 hover:bg-red-500/10 hover:text-red-500 disabled:bg-transparent disabled:text-content/50 dark:hover:text-red-400"

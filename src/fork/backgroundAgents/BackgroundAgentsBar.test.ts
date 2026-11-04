@@ -84,6 +84,7 @@ it("lists Claude background jobs with a stop button above the composer", () => {
   act(() => stop.click());
   expect(onStopJob).toHaveBeenCalledWith("job-1");
   expect(stop.textContent).toBe("Stopping…");
+  expect(stop.getAttribute("aria-label")).toBe("Stopping Dev server");
   expect(stop.disabled).toBe(true);
 });
 

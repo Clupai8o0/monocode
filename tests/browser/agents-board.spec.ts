@@ -216,7 +216,7 @@ for (const theme of ["dark", "light"] as const) {
     const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
     await page.goto(`/tests/browser/agents-board.html?scene=jobs&theme=${theme}`);
     await expect(page.locator(strip)).toContainText("3 jobs running");
-    const stops = page.getByRole("button", { name: /^Stop / });
+    const stops = page.getByRole("button", { name: /^Stop(ping)? / });
     await expect(stops).toHaveCount(3);
     await expect(stops.first()).toHaveText("Stop");
     await page.screenshot({ path: `${dir}/jobs-${theme}.png` });
