@@ -21,9 +21,15 @@ test("sends only on the click, says what happened, and keeps the text if any fai
   await expect(bar.locator('[data-fork-broadcast-session="other"]')).toBeVisible();
   await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toHaveCount(0);
 
+  // Across every project, only sessions mid-turn: idle ones are left out.
   await bar.getByRole("radio", { name: "All projects" }).click();
-  await expect(send).toHaveText("Send to 4 sessions");
-  await bar.locator('[data-fork-broadcast-session="other"] input').uncheck();
+  await expect(send).toHaveText("Send to 1 session");
+  await expect(bar).toContainText("not running");
+  await expect(bar.locator('[data-fork-broadcast-session="busy"]')).toBeVisible();
+  await expect(bar.locator('[data-fork-broadcast-session="idle"]')).toHaveCount(0);
+  await expect(bar.locator('[data-fork-broadcast-session="other"]')).toHaveCount(0);
+
+  await bar.getByRole("radio", { name: "This project" }).click();
   await expect(send).toHaveText("Send to 3 sessions");
 
   const message = bar.getByLabel("Message", { exact: true });
