@@ -332,6 +332,22 @@ describe("settleCursorMultiReviewChildAfterGrace", () => {
     expect(settled).toEqual([]);
   });
 
+  it("leaves a send-on that already finished to settle itself", () => {
+    const settled: string[] = [];
+    let current = child;
+    settleCursorMultiReviewChildAfterGrace({
+      getChild: () => current,
+      outcome: { status: "cancelled" },
+      settle: (result) => settled.push(result.status),
+    });
+    current = {
+      ...child,
+      blocks: [...child.blocks, user("u2", "Continue"), assistant("a2", "Fine")],
+    };
+    vi.advanceTimersByTime(CHILD_SETTLE_GRACE_MS);
+    expect(settled).toEqual([]);
+  });
+
   it("does nothing once the reviewer is gone", () => {
     const settled: string[] = [];
     settleCursorMultiReviewChildAfterGrace({

@@ -230,6 +230,10 @@ export function cursorMultiReviewChildResult(
   };
 }
 
+function latestUserBlockId(blocks: Block[]): string | undefined {
+  return latestUserTurn(blocks)?.find((b) => b.role === "user")?.id;
+}
+
 /**
  * A reviewer's turn can end only for MonoCode to raise its effort and send it
  * on, which is the turn that holds the review. Wait for that first. If it
@@ -243,10 +247,14 @@ export function settleCursorMultiReviewChildAfterGrace(input: {
   outcome: { status: string; error?: string };
   settle: (result: CursorMultiReviewChildResult) => void;
 }) {
+  const started = input.getChild();
+  const turnId = started && latestUserBlockId(started.blocks);
   setTimeout(() => {
     const child = input.getChild();
     // Busy again means a later turn settles it. Gone means removal did.
     if (!child || child.busy) return;
+    // A send-on that already finished settles itself, with its own outcome.
+    if (latestUserBlockId(child.blocks) !== turnId) return;
     input.settle(cursorMultiReviewChildResult(child, input.outcome));
   }, CHILD_SETTLE_GRACE_MS);
 }
