@@ -18,6 +18,9 @@ let version = 0;
 let changes = 0;
 /** The project list each removed session was on, for putting it back. */
 const removedFrom = new Map<string, string>();
+/** The newest read begun for each project, so a slower older one can't win. */
+const latestRead = new Map<string, number>();
+let readTurn = 0;
 const listeners = new Set<() => void>();
 
 let scanning = false;
@@ -53,15 +56,22 @@ export async function readCleanupProject(
   path: string,
 ): Promise<readonly SessionSummary[]> {
   let startedAt: number;
+  let turn: number;
   let rows: readonly SessionSummary[];
   // A read that began before a session was removed or restored would undo that
   // change, for the cache and for whoever is waiting on it, so read again.
   do {
     startedAt = changes;
+    readTurn += 1;
+    turn = readTurn;
+    latestRead.set(path, turn);
     rows = await listSessionsByProject(path);
   } while (startedAt !== changes);
-  byProject.set(path, rows);
-  emit();
+  // A newer read of this project began meanwhile, and its answer wins.
+  if (latestRead.get(path) === turn) {
+    byProject.set(path, rows);
+    emit();
+  }
   return rows;
 }
 

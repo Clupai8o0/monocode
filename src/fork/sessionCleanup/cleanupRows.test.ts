@@ -134,6 +134,22 @@ it("reads again after a change, so the caller never gets the old list", async ()
   expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["/a#2"]);
 });
 
+it("an older read of a project landing late does not replace a newer one", async () => {
+  let finishOlder = () => {};
+  listSessionsByProject.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOlder = () => resolve([row("older")]);
+      }),
+  );
+  const older = readCleanupProject("/a");
+  listSessionsByProject.mockResolvedValueOnce([row("newer")]);
+  await readCleanupProject("/a");
+  finishOlder();
+  await older;
+  expect(cachedCleanupRows(["/a"]).map((r) => r.id)).toEqual(["newer"]);
+});
+
 it("restoring replaces a row a later read saw as archived", async () => {
   requestCleanupScan(["/a"]);
   await settle();
