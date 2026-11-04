@@ -51,12 +51,8 @@ import { sessionEditPaths } from "../model/checkpointEdits";
 import { PromptOutline } from "./PromptOutline";
 import {
   canCompactHarnessContext,
-<<<<<<< HEAD
-  supportsHarnessLogin,
-||||||| 5c3ae575
-=======
   stopHarnessBackgroundJob,
->>>>>>> mc/show-claude-working-status-87addc
+  supportsHarnessLogin,
   type ApprovalDecision,
   type UserQuestionReply,
 } from "../../../integrations/harness";
