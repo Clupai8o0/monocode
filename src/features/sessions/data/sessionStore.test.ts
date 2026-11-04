@@ -2,9 +2,10 @@ import {
   appendUser,
   applyHarnessEvents,
 } from "../../../integrations/harness/core/apply";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mapCodexNotification } from "../../../integrations/harness/providers/codex/codexProtocol";
 import { toolCallLabel } from "../model/transcriptActivity";
+import { lastTurnRetry } from "../model/editLastTurn";
 import {
   newSession,
   type Block,
@@ -19,6 +20,30 @@ import {
   sanitizeSessionForPersist,
   shouldPersistSession,
 } from "./sessionStore";
+
+it("preserves an appended build's plan link when persisted", () => {
+  const session = appendUser(
+    {
+      ...newSession("codex", "/tmp"),
+      blocks: [
+        {
+          id: "plan",
+          role: "plan",
+          text: "# Approved plan",
+          plan: { status: "ready" },
+        },
+      ],
+    },
+    "Build approved plan",
+    [],
+    { buildPlanBlockId: "plan" },
+  );
+  const persisted = sanitizeSessionForPersist(session);
+  expect(persisted.blocks.at(-1)?.buildPlanBlockId).toBe("plan");
+  expect(
+    lastTurnRetry({ ...session, blocks: persisted.blocks })?.planBlockId,
+  ).toBe("plan");
+});
 
 it("persists sidebar visibility without making the session ephemeral", () => {
   const session = newSession("codex", "/tmp");
@@ -945,11 +970,60 @@ describe("persistFingerprint", () => {
     );
   });
 
+  it("changes when the latest block is replaced or removed", () => {
+    const before = base([user, answer]);
+    const original = persistFingerprint(before);
+    const replaced = persistFingerprint({
+      ...before,
+      blocks: [user, { ...answer, text: "changed" }],
+    });
+    const removed = persistFingerprint({ ...before, blocks: [user] });
+    expect(replaced).not.toBe(original);
+    expect(removed).not.toBe(original);
+    expect(removed).not.toBe(replaced);
+  });
+
   it("changes when a persisted field changes", () => {
     const before = base();
     expect(persistFingerprint({ ...before, title: "Renamed" })).not.toBe(
       persistFingerprint(before),
     );
+  });
+
+  it("keeps fingerprints stable through edits, truncation and cache eviction", () => {
+    const original = base([user, answer]);
+    const first = persistFingerprint(original);
+    const variants = [
+      [],
+      [user],
+      [answer],
+      [user, { ...answer, text: "replaced" }],
+      [user, answer, { ...answer, id: "extra" }],
+      [answer, user],
+    ];
+    for (const blocks of variants) {
+      expect(persistFingerprint({ ...original, blocks })).not.toBe(first);
+      expect(persistFingerprint(original)).toBe(first);
+    }
+    for (let index = 0; index < 70; index++) {
+      persistFingerprint({ ...original, id: `eviction-${index}` });
+    }
+    expect(persistFingerprint(original)).toBe(first);
+  });
+
+  it("still detects edits when the webview has no WeakRef support", () => {
+    vi.stubGlobal("WeakRef", undefined);
+    try {
+      const original = base([user, answer]);
+      const first = persistFingerprint(original);
+      expect(persistFingerprint(original)).toBe(first);
+      expect(persistFingerprint({
+        ...original,
+        blocks: [user, { ...answer, text: "updated" }],
+      })).not.toBe(first);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("ignores state that is never written", () => {
