@@ -44,23 +44,23 @@ describe("project bots", () => {
     expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
-  it("offers the pig as a pick in the roster, with its one eye on a hole", () => {
+  it("offers the pig as a pick in the roster, with its eyes on holes", () => {
     const pig = PROJECT_MASCOTS.find((mascot) => mascot.name === "pig");
     expect(pig).toBeDefined();
     for (const rows of [pig!.rest, pig!.talk]) {
       expect(rows).toHaveLength(8);
       for (const row of rows) expect(row).toMatch(/^[#.]{8}$/);
+      // The nostrils are holes in the snout, not eyes.
+      expect(rows[5]).toBe("#.#..#.#");
     }
     const { eyes } = PROJECT_BOT_SPRITES.pig;
-    expect(eyes.rest).toEqual([[5, 3]]);
-    expect(eyes.talk).toEqual([[5, 3]]);
-    expect(pig!.rest[3][5]).toBe(".");
-    expect(pig!.talk[3][5]).toBe(".");
-    // The slot is a hole in its back, and nothing floats above the body.
-    expect(pig!.rest[1][3]).toBe(".");
-    expect(pig!.rest[0]).toBe(".....#..");
-    // Talking only pokes a coin up out of the slot; everything else stays put.
-    expect(pig!.talk[0]).toBe("...#.#..");
+    expect(eyes.rest).toEqual([[2, 2], [5, 2]]);
+    expect(eyes.talk).toEqual([[2, 2], [5, 2]]);
+    for (const [x, y] of eyes.rest) expect(pig!.rest[y][x]).toBe(".");
+    for (const [x, y] of eyes.talk) expect(pig!.talk[y][x]).toBe(".");
+    // Talking only flicks the ears out; everything else stays put.
+    expect(pig!.rest[0]).toBe("..#..#..");
+    expect(pig!.talk[0]).toBe(".#....#.");
     expect(pig!.talk.slice(1)).toEqual(pig!.rest.slice(1));
     expect(projectBotFor("/Users/sam/Documents/projects/coin-jar")).toBeNull();
   });
