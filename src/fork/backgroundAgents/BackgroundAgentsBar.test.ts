@@ -79,8 +79,12 @@ it("lists Claude background jobs with a stop button above the composer", () => {
   const stop = container.querySelector<HTMLButtonElement>(
     '[aria-label="Stop Dev server"]',
   )!;
+  // The action is spelled out, not left to a bare square.
+  expect(stop.textContent).toBe("Stop");
   act(() => stop.click());
   expect(onStopJob).toHaveBeenCalledWith("job-1");
+  expect(stop.textContent).toBe("Stopping…");
+  expect(stop.disabled).toBe(true);
 });
 
 it("opens a running command to show all of it", () => {

@@ -210,3 +210,28 @@ test("the toggle does not leak between sessions", async ({ page }) => {
   // A remounted tray opens for its own work; the prior collapse stays behind.
   await expect(page.locator(board)).toBeVisible();
 });
+
+for (const theme of ["dark", "light"] as const) {
+  test(`a job's stop control says what it does, ${theme}`, async ({ page }, testInfo) => {
+    const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
+    await page.goto(`/tests/browser/agents-board.html?scene=jobs&theme=${theme}`);
+    await expect(page.locator(strip)).toContainText("3 jobs running");
+    const stops = page.getByRole("button", { name: /^Stop / });
+    await expect(stops).toHaveCount(3);
+    await expect(stops.first()).toHaveText("Stop");
+    await page.screenshot({ path: `${dir}/jobs-${theme}.png` });
+
+    await stops.first().click();
+    await expect(stops.first()).toHaveText("Stopping…");
+    await expect(stops.first()).toBeDisabled();
+    await expect(stops.nth(1)).toBeEnabled();
+    await stops.nth(1).hover();
+    await page.screenshot({ path: `${dir}/jobs-stopping-${theme}.png` });
+
+    // Squeezed, the command gives way; the button keeps its word.
+    await page.goto(`/tests/browser/agents-board.html?scene=jobs&theme=${theme}&width=420`);
+    await expect(stops.first()).toHaveText("Stop");
+    await expect(stops.first()).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: `${dir}/jobs-narrow-${theme}.png` });
+  });
+}

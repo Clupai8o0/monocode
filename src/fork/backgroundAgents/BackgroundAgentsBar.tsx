@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Bot, ChevronRight, Square, Terminal } from "../../shared/ui/icons";
+import { Bot, ChevronRight, Loader, Terminal } from "../../shared/ui/icons";
 import type {
   BackgroundJob,
   Block,
@@ -289,9 +289,7 @@ function JobRow({
 }) {
   return (
     <div
-      className={`-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px] ${
-        stopping ? "opacity-50" : ""
-      }`}
+      className="-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
       title={job.command ? `${job.title}\n${job.command}` : job.title}
     >
       <Terminal
@@ -311,13 +309,20 @@ function JobRow({
       {onStop ? (
         <button
           type="button"
-          title="Stop"
+          title="Stop this job"
           aria-label={`Stop ${job.title}`}
           disabled={stopping}
           onClick={onStop}
-          className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content disabled:opacity-30"
+          className="flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-content/6 px-2 font-sans text-[12px] text-content/70 transition-colors duration-200 hover:bg-red-500/10 hover:text-red-500 disabled:bg-transparent disabled:text-content/50 dark:hover:text-red-400"
         >
-          <Square className="size-2.5 fill-current" strokeWidth={0} />
+          {stopping ? (
+            <>
+              <Loader className="size-3 animate-spin" aria-hidden="true" />
+              Stopping…
+            </>
+          ) : (
+            "Stop"
+          )}
         </button>
       ) : null}
     </div>
