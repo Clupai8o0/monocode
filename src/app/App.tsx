@@ -468,6 +468,8 @@ import {
   nativeModelId,
   preferredModelSettings,
   defaultModelId,
+  isPickerProviderVisible,
+  preferredModelId,
   resolveModel,
   saveLastModelSettings,
   saveRecentModelChoice,
@@ -809,6 +811,15 @@ import {
   turnEditedFiles,
   turnUserRequest,
 } from "../features/sessions/model/secondOpinion";
+import {
+  CURSOR_MULTI_REVIEW_TITLE_PREFIX,
+  CursorMultiReviewPairs,
+  buildCursorMultiReviewQueueMessage,
+  buildCursorMultiReviewRequest,
+  pickCursorMultiReviewers,
+  shouldStartCursorMultiReview,
+  type CursorMultiReviewer,
+} from "../features/sessions/model/cursorMultiReview";
 
 import { PaneTree } from "../features/workspace/ui/PaneTree";
 import { SessionPane } from "../features/sessions/ui/SessionPane";
@@ -877,6 +888,7 @@ import {
   loadAutosave,
   loadCollapsedProjectRailMode,
   loadFileTabMode,
+  loadCursorMultiReview,
   loadLiveAgentsEnabled,
   loadNotesEnabled,
   loadMonosEnabled,
@@ -10383,6 +10395,7 @@ function Workspace({
       session: Session,
       cwd: string,
       focusComposer = false,
+      focusNew = true,
     ) => {
       const nextSessions = [...sessionsRef.current, session];
       sessionsRef.current = nextSessions;
@@ -10397,18 +10410,21 @@ function Workspace({
             ? {
                 ...entry,
                 layout: splitPane(entry.layout, sourceId, "right", session.id),
-                focusedId: session.id,
+                focusedId: focusNew ? session.id : sourceId,
                 diffFocused: false,
               }
             : entry,
         );
         tabsRef.current = nextTabs;
         setTabs(nextTabs);
+        // Keep source tab active when already focused; otherwise activate it so
+        // the split opens in place beside the source.
         if (tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
       } else {
         const nextTab = newTab(session.id);
         appendTab(nextTab, cwd);
-        setActiveTabId(nextTab.id);
+        // Do not steal the active tab when launching background review panes.
+        if (focusNew) setActiveTabId(nextTab.id);
       }
 
       setProjectTerminalFocused(false);
@@ -10416,6 +10432,121 @@ function Workspace({
     },
     [appendTab],
   );
+
+  const cursorMultiReviewPairs = useRef(
+    new CursorMultiReviewPairs((pair) => {
+      const source = sessionsRef.current.find(
+        (s) => s.id === pair.sourceSessionId,
+      );
+      if (!source || removingSessionIds.current.has(source.id)) return;
+      const message = buildCursorMultiReviewQueueMessage(
+        pair.pairId,
+        pair.results,
+      );
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.id !== source.id) return session;
+          if (
+            session.queuedMessages?.some((m) => m.id === message.id) ||
+            session.blocks.some((b) => b.appRequestId === message.id)
+          ) {
+            return session;
+          }
+          return {
+            ...session,
+            queuedMessages: [...(session.queuedMessages ?? []), message],
+            queueStatus: session.queueStatus ?? "active",
+          };
+        }),
+      );
+    }),
+  );
+
+  const launchCursorMultiReview = useCallback(
+    (sourceId: string, turn: Block[]) => {
+      const source = sessionsRef.current.find((s) => s.id === sourceId);
+      if (!source) return;
+      const turnId = turn.find((b) => b.role === "user")?.id;
+      if (!turnId) return;
+      if (
+        !shouldStartCursorMultiReview({
+          enabled: loadCursorMultiReview(),
+          harness: source.harness,
+          turn,
+          turnUserBlockId: turnId,
+          hasInFlightPair: cursorMultiReviewPairs.current.hasInFlight(
+            sourceId,
+            turnId,
+          ),
+          worktreeRemoved: !!source.worktreeRemoved,
+          // Desktop-only v1 — skip remote projects.
+          isRemote: !!remoteProjectFor(source.cwd),
+        })
+      ) {
+        return;
+      }
+      const reviewers = pickCursorMultiReviewers({
+        isLive: (id) => isLiveHarness(id) && isHarnessAvailable(id),
+        isVisible: (id) => isPickerProviderVisible(id),
+        usedPercent: (id) => harnessUsedPercent(id, source.cwd),
+      });
+      if (reviewers.length === 0) return;
+
+      const cwd = sessionWorkCwd(source);
+      const from = harnessForTurn(source.blocks, turn, source.harness);
+      const childIds: string[] = [];
+      const pending: { session: Session; reviewer: CursorMultiReviewer }[] =
+        [];
+
+      for (const reviewer of reviewers) {
+        const session = {
+          ...newSession(
+            reviewer.harness,
+            source.cwd,
+            preferredModelId(reviewer.harness),
+            reviewer.harness === "codex" ? "full-access" : source.runtimeMode,
+          ),
+          worktreeCwd: source.worktreeCwd,
+          branch: source.branch,
+          title: formatSessionTitle(
+            reviewer.harness,
+            `${CURSOR_MULTI_REVIEW_TITLE_PREFIX}${HARNESS_TITLE[reviewer.harness]}`,
+          ),
+        };
+        childIds.push(session.id);
+        pending.push({ session, reviewer });
+      }
+
+      const pairId = cursorMultiReviewPairs.current.begin({
+        sourceSessionId: sourceId,
+        turnId,
+        childSessionIds: childIds,
+      });
+
+      for (const { session, reviewer } of pending) {
+        openSessionBeside(sourceId, session, source.cwd, false, false);
+        const request = buildCursorMultiReviewRequest({
+          from,
+          to: reviewer.harness,
+          role: reviewer.role,
+          turn,
+          cwd,
+          pairId,
+          sourceSessionId: sourceId,
+          turnId,
+        });
+        // Prefer only secondOpinion; do not pass cursorMultiReview into SubmitOptions.
+        onSubmit(session.id, request.prompt, [], {
+          secondOpinion: request.options.secondOpinion,
+        });
+      }
+    },
+    [onSubmit, openSessionBeside],
+  );
+
+  // Task 7: call launch / settleChild on turn end
+  const launchCursorMultiReviewRef = useRef(launchCursorMultiReview);
+  launchCursorMultiReviewRef.current = launchCursorMultiReview;
 
   const onSecondOpinion = useCallback(
     (sourceId: string, target: ModelTarget, turn: Block[]) => {
