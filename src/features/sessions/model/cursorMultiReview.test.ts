@@ -546,6 +546,28 @@ describe("CursorMultiReviewPairs", () => {
     expect(pairs.isChild("r-claude")).toBe(false);
   });
 
+  it("remembers a reviewer's last outcome until its pair is done", () => {
+    const pairs = new CursorMultiReviewPairs(() => {});
+    pairs.begin({
+      sourceSessionId: "cursor-1",
+      turnId: "u1",
+      childSessionIds: ["r-claude"],
+    });
+    expect(pairs.childOutcome("r-claude")).toBeUndefined();
+    pairs.noteChildOutcome("r-claude", { status: "cancelled" });
+    pairs.noteChildOutcome("r-claude", { status: "completed" });
+    expect(pairs.childOutcome("r-claude")).toEqual({ status: "completed" });
+    pairs.noteChildOutcome("other", { status: "failed" });
+    expect(pairs.childOutcome("other")).toBeUndefined();
+    pairs.settleChild("r-claude", {
+      status: "completed",
+      harness: "claude",
+      title: "Claude Code",
+      text: "Fine",
+    });
+    expect(pairs.childOutcome("r-claude")).toBeUndefined();
+  });
+
   it("dropSource clears without onReady", () => {
     let readyCount = 0;
     const pairs = new CursorMultiReviewPairs(() => {

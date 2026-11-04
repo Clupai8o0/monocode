@@ -205,7 +205,11 @@ type Pair = {
   userRequest?: string;
   children: Map<
     string,
-    { settled: boolean; result?: CursorMultiReviewChildResult }
+    {
+      settled: boolean;
+      result?: CursorMultiReviewChildResult;
+      lastOutcome?: { status: string; error?: string };
+    }
   >;
 };
 
@@ -370,6 +374,25 @@ export class CursorMultiReviewPairs {
   /** True if this session id is a registered review child. */
   isChild(sessionId: string): boolean {
     return this.byChild.has(sessionId);
+  }
+
+  /** Remembers how a reviewer's turn ended, while its grace period runs. */
+  noteChildOutcome(
+    sessionId: string,
+    outcome: { status: string; error?: string },
+  ) {
+    const child = this.childRecord(sessionId);
+    if (child) child.lastOutcome = outcome;
+  }
+
+  /** How an idle reviewer last ended, for when it is removed before settling. */
+  childOutcome(sessionId: string) {
+    return this.childRecord(sessionId)?.lastOutcome;
+  }
+
+  private childRecord(sessionId: string) {
+    const pairId = this.byChild.get(sessionId);
+    return pairId ? this.pairs.get(pairId)?.children.get(sessionId) : undefined;
   }
 
   settleChild(sessionId: string, result: CursorMultiReviewChildResult) {
