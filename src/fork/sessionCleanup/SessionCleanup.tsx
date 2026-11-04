@@ -3,6 +3,7 @@ import {
   listSessionsByProject,
   type SessionSummary,
 } from "../../features/sessions/data/sessionStore";
+import { ExternalLink } from "../../shared/ui/icons";
 import { sessionDisplayTitle } from "../../features/sessions/model/session";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
 import { prettyCwd, projectName } from "../../shared/lib/paths";
@@ -25,13 +26,16 @@ import {
   cleanupResult,
   deleteCautions,
   deleteQuestion,
+  firstFilledFilter,
   groupByProject,
+  handoverLocation,
   inCleanupFilter,
   isHeld,
   tickedByDefault,
   type CleanupFilter,
   type CleanupMode,
 } from "./cleanupModel";
+import { cachedCleanupRows, readCleanupProject } from "./cleanupRows";
 
 const EMPTY: Record<CleanupFilter, string> = {
   safe: "No session says it is safe to close.",
@@ -62,6 +66,7 @@ export function SessionCleanup({
   openSessionIds,
   onArchive,
   onDelete,
+  onOpenSession,
   onClose,
 }: {
   projectPaths: readonly string[];
@@ -76,12 +81,37 @@ export function SessionCleanup({
   ) => void | Promise<boolean>;
   /** Removes the session for good, with no prompt of its own. */
   onDelete?: (row: SessionSummary) => Promise<boolean>;
+  /** Goes to a session, in whichever project it belongs to. */
+  onOpenSession?: (sessionId: string) => void;
   onClose: () => void;
 }) {
-  const [rows, setRows] = useState<SessionSummary[]>([]);
+  // Starts from the last look, so it opens filled while it reads afresh.
+  const [rows, setRows] = useState<SessionSummary[]>(() =>
+    cachedCleanupRows(projectPaths),
+  );
   const [loading, setLoading] = useState(true);
   const [failedProjects, setFailedProjects] = useState(0);
-  const [filter, setFilter] = useState<CleanupFilter>("safe");
+  const [now] = useState(Date.now);
+  const [filter, setFilter] = useState<CleanupFilter>(() => {
+    const known = cleanupCandidates(rows, {
+      activeSessionId,
+      busy: busySessionIds,
+      approval: approvalSessionIds,
+    });
+    return firstFilledFilter(
+      (choice) =>
+        known.filter((row) =>
+          inCleanupFilter(
+            row.updatedAt,
+            cachedCloseState(row.id, row.updatedAt)?.kind,
+            choice,
+            now,
+          ),
+        ).length,
+    );
+  });
+  // Once the user has chosen or ticked anything, the tab stays where it is.
+  const tabChosen = useRef(false);
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
@@ -93,7 +123,6 @@ export function SessionCleanup({
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
     null,
   );
-  const [now] = useState(Date.now);
   useSyncExternalStore(
     subscribeCloseStates,
     closeStatesVersion,
@@ -106,20 +135,22 @@ export function SessionCleanup({
     // One project at a time: each read runs git and holds the session store.
     void (async () => {
       const paths = pathsKey ? pathsKey.split("\n") : [];
-      const found = new Map<string, SessionSummary>();
+      const found = new Map(paths.map((path) => [path, cachedCleanupRows([path])]));
       let failed = 0;
       for (const path of paths) {
+        let read = false;
         try {
-          for (const row of await listSessionsByProject(path)) {
-            found.set(row.id, row);
-          }
+          found.set(path, [...(await readCleanupProject(path))]);
+          read = true;
         } catch {
           failed += 1;
         }
         if (cancelled) {
           return;
         }
-        setRows([...found.values()]);
+        if (read) {
+          setRows([...found.values()].flat());
+        }
       }
       setFailedProjects(failed);
       setLoading(false);
@@ -165,6 +196,20 @@ export function SessionCleanup({
   const working = progress !== null;
   const locked = working || pendingDelete !== null;
 
+  // Nothing known yet at opening: settle on a tab once it has all been read.
+  const settled = !loading && checking === 0;
+  useEffect(() => {
+    if (settled && !tabChosen.current) {
+      tabChosen.current = true;
+      setFilter(
+        firstFilledFilter(
+          (choice) => candidates.filter((row) => inFilter(row, choice)).length,
+        ),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on settling
+  }, [settled]);
+
   // Backing out of the question hands focus back to the button that asked it.
   const deleteButton = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
@@ -176,6 +221,7 @@ export function SessionCleanup({
   }, [pendingDelete, working]);
 
   const setTicks = (targets: readonly SessionSummary[], ticked: boolean) => {
+    tabChosen.current = true;
     setResult(null);
     setOverrides((current) => {
       const next = new Map(current);
@@ -341,6 +387,7 @@ export function SessionCleanup({
               aria-pressed={filter === choice.id}
               disabled={locked}
               onClick={() => {
+                tabChosen.current = true;
                 setFilter(choice.id);
                 setOverrides(new Map());
                 setResult(null);
@@ -402,43 +449,77 @@ export function SessionCleanup({
                   onChange={(ticked) => setTicks(group.rows, ticked)}
                 />
               </div>
-              {group.rows.map((row) => (
-                <label
-                  key={row.id}
-                  className="flex h-7 min-w-0 items-center gap-2 rounded-md px-1.5 transition-colors duration-150 hover:bg-content/6"
-                >
-                  <input
-                    type="checkbox"
-                    checked={isTicked(row)}
-                    disabled={locked}
-                    onChange={(event) => setTicks([row], event.target.checked)}
-                    className="shrink-0 accent-accent"
-                  />
-                  <HarnessIcon
-                    harness={row.harness}
-                    className="size-3.5 shrink-0"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-content/85">
-                    {sessionDisplayTitle(row.title, row.harness)}
-                  </span>
-                  {open.has(row.id) ? (
-                    <span
-                      className="shrink-0 text-[10px] text-content/45"
-                      title="Open in a tab. Archiving or deleting closes the tab."
-                    >
-                      Open
-                    </span>
-                  ) : null}
-                  <CloseBadge
-                    sessionId={row.id}
-                    updatedAt={row.updatedAt}
-                    idle
-                  />
-                  <span className="w-7 shrink-0 text-right text-[11px] tabular-nums text-content/40">
-                    {cleanupAge(now - row.updatedAt)}
-                  </span>
-                </label>
-              ))}
+              {group.rows.map((row) => {
+                const state = cachedCloseState(row.id, row.updatedAt);
+                const title = sessionDisplayTitle(row.title, row.harness);
+                return (
+                  <div
+                    key={row.id}
+                    className="flex min-w-0 items-center rounded-md transition-colors duration-150 hover:bg-content/6"
+                  >
+                    <label className="flex min-h-7 min-w-0 flex-1 items-center gap-2 py-1 pl-1.5">
+                      <input
+                        type="checkbox"
+                        checked={isTicked(row)}
+                        disabled={locked}
+                        onChange={(event) =>
+                          setTicks([row], event.target.checked)
+                        }
+                        className="shrink-0 accent-accent"
+                      />
+                      <HarnessIcon
+                        harness={row.harness}
+                        className="size-3.5 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-content/85">
+                          {title}
+                        </span>
+                        {state?.kind === "handover" && state.detail ? (
+                          <span
+                            data-fork-handover-path=""
+                            className="block truncate text-[11px] text-content/50"
+                            title={state.detail}
+                          >
+                            {handoverLocation(state.detail, row.cwd)}
+                          </span>
+                        ) : null}
+                      </span>
+                      {open.has(row.id) ? (
+                        <span
+                          className="shrink-0 text-[10px] text-content/45"
+                          title="Open in a tab. Archiving or deleting closes the tab."
+                        >
+                          In a tab
+                        </span>
+                      ) : null}
+                      <CloseBadge
+                        sessionId={row.id}
+                        updatedAt={row.updatedAt}
+                        idle
+                      />
+                      <span className="w-7 shrink-0 text-right text-[11px] tabular-nums text-content/40">
+                        {cleanupAge(now - row.updatedAt)}
+                      </span>
+                    </label>
+                    {onOpenSession ? (
+                      <button
+                        type="button"
+                        aria-label={`Go to ${title}`}
+                        title="Go to this session"
+                        disabled={locked}
+                        onClick={() => {
+                          onClose();
+                          onOpenSession(row.id);
+                        }}
+                        className="ml-0.5 grid size-6 shrink-0 place-items-center rounded-md text-content/35 transition-colors duration-150 hover:bg-content/10 hover:text-content focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"
+                      >
+                        <ExternalLink className="size-3" strokeWidth={1.75} />
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
             </section>
           ))}
         </div>

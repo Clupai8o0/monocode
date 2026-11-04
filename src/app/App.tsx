@@ -681,6 +681,7 @@ import {
   referencedSessionIds,
   withRunningLeads,
 } from "../fork/sessionClose/sessionClose"; // Fork
+import { CleanUpSessionsButton } from "../fork/sessionCleanup/CleanUpSessionsButton"; // Fork
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
 import {
   adjacentItemId,
@@ -6314,6 +6315,15 @@ function Workspace({
   const cleanupBusySessionIds = useMemo(
     () => withRunningLeads(busySessionIds, orchestrationRuns),
     [busySessionIds, orchestrationRuns],
+  );
+
+  // Fork: the cleanup covers every project this computer can read.
+  const cleanupProjectPaths = useMemo(
+    () =>
+      projectRailItems(recents, sidebarCwd)
+        .map((project) => project.path)
+        .filter((path) => !isRemoteProjectPath(path)),
+    [recents, sidebarCwd],
   );
 
   // Fork: the cleanup panel has asked already. Worktrees are left alone: one
@@ -14842,6 +14852,18 @@ function Workspace({
       sessionSidebarOpen={sessionSidebarOpen}
       compactRail={!insetLayout && compactTitleNavigation}
       inset={insetLayout}
+      sessionCleanupControl={
+        <CleanUpSessionsButton
+          projectPaths={cleanupProjectPaths}
+          activeSessionId={activeSessionId}
+          busySessionIds={cleanupBusySessionIds}
+          approvalSessionIds={approvalSessionIds}
+          openSessionIds={allOpenSessionIds}
+          onArchive={onArchiveHistorySession}
+          onDelete={onDeleteCleanupSession}
+          onOpenSession={onOpenApprovalSession}
+        />
+      }
       worktreeControl={
         insetLayout && !settingsOpen && !monoCovers && !activeAppView && isLocalProject(sidebarCwd) ? (
           <SidebarWorktreeSwitcher
@@ -14958,7 +14980,6 @@ function Workspace({
       onArchiveSession={onArchiveHistorySession}
       onArchiveSessions={onArchiveHistorySessions}
       closableSessionIds={closableSessionIds}
-      allOpenSessionIds={allOpenSessionIds}
       onCloseSessions={onCloseSessionsForMemory}
       idleClosableCount={idleClosableCount}
       onCloseIdleSessions={onCloseIdleSessions}
@@ -14970,8 +14991,6 @@ function Workspace({
       onCancelReminders={sessionReminders.cancel}
       onDeleteSession={onDeleteHistorySession}
       onDeleteSessions={onDeleteHistorySessions}
-      cleanupBusySessionIds={cleanupBusySessionIds}
-      onDeleteCleanupSession={onDeleteCleanupSession}
       onOpenFile={onOpenFile}
       onOpenTerminal={onOpenTerminal}
       onFileMoved={onFileMoved}

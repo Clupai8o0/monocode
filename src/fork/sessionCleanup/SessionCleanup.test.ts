@@ -16,6 +16,7 @@ vi.mock("../sessionRead", () => ({
 
 const { SessionCleanup } = await import("./SessionCleanup");
 const { setCloseState } = await import("../closeBadges/closeState");
+const { resetCleanupRows } = await import("./cleanupRows");
 
 type Row = {
   id: string;
@@ -39,6 +40,7 @@ let root: Root;
 let onArchive: ReturnType<typeof vi.fn>;
 let onDelete: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn>;
+let onOpenSession: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -52,6 +54,7 @@ beforeEach(() => {
     "/p/alpha": [session("a1", "/p/alpha"), session("a2", "/p/alpha")],
     "/p/beta": [session("b1", "/p/beta")],
   };
+  resetCleanupRows();
   sessionHeldElsewhere.mockReset();
   sessionHeldElsewhere.mockResolvedValue(false);
   listSessionsByProject.mockReset();
@@ -62,6 +65,7 @@ beforeEach(() => {
   onArchive = vi.fn(async () => true);
   onDelete = vi.fn(async () => true);
   onClose = vi.fn();
+  onOpenSession = vi.fn();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -90,6 +94,7 @@ async function mount(
         openSessionIds: extra.openSessionIds ?? [],
         onArchive: onArchive as never,
         onDelete: onDelete as never,
+        onOpenSession: onOpenSession as never,
         onClose: onClose as never,
       }),
     );
@@ -156,7 +161,7 @@ it("marks an open session and does not tick it", async () => {
   await mount({ openSessionIds: ["a1"] });
   expect(rowBox("a1")?.checked).toBe(false);
   expect(rowBox("b1")?.checked).toBe(true);
-  expect(document.body.textContent).toContain("Open");
+  expect(document.body.textContent).toContain("In a tab");
 });
 
 it("Everything starts with nothing ticked, and shows not-safe rows", async () => {
@@ -354,4 +359,66 @@ it("closes on Cancel", async () => {
   await mount();
   await click(buttonNamed(/^Cancel$/));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("opens on the first tab with something in it", async () => {
+  setCloseState("a1", SAVED, { kind: "handover", detail: "" });
+  setCloseState("b1", SAVED, null);
+  await mount();
+  expect(buttonNamed(/^Handover/).getAttribute("aria-pressed")).toBe("true");
+  expect(rowBox("a1")?.checked).toBe(true);
+});
+
+it("stays on a tab once something was ticked", async () => {
+  setCloseState("a1", SAVED, null);
+  setCloseState("b1", SAVED, null);
+  await mount();
+  await click(buttonNamed(/^Safe to close/));
+  expect(buttonNamed(/^Safe to close/).getAttribute("aria-pressed")).toBe("true");
+});
+
+it("opens filled from the last look, before the new read answers", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  listSessionsByProject.mockImplementation(() => new Promise(() => {}));
+  await mount();
+  expect(rowBox("a1")).toBeDefined();
+  expect(rowBox("b1")?.checked).toBe(true);
+});
+
+it("keeps a project's rows when reading it again fails", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  listSessionsByProject.mockImplementation(async (cwd: string) => {
+    if (cwd === "/p/beta") {
+      throw new Error("no");
+    }
+    return projects[cwd];
+  });
+  await mount();
+  expect(rowBox("b1")).toBeDefined();
+  expect(document.body.textContent).toContain("Could not read 1 project");
+});
+
+it("shows where a handover is, from the project", async () => {
+  setCloseState("a1", SAVED, {
+    kind: "handover",
+    detail: "/p/alpha/.claude/handoff.md",
+  });
+  await mount();
+  await click(buttonNamed(/^Handover/));
+  const path = document.body.querySelector("[data-fork-handover-path]");
+  expect(path?.textContent).toBe(".claude/handoff.md");
+});
+
+it("goes to a session and closes the panel without ticking it", async () => {
+  await mount();
+  const before = rowBox("a1")?.checked;
+  const go = document.body.querySelector('button[aria-label="Go to a1"]');
+  await click(go!);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(onOpenSession).toHaveBeenCalledWith("a1");
+  expect(rowBox("a1")?.checked).toBe(before);
 });
