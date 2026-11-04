@@ -8,7 +8,26 @@ import {
   usageLimitFromError,
   resumeUsageLimitedSession,
   withUsageLimitAccount,
+  cancelledAccountTransferSession,
 } from "./usageLimit";
+
+describe("cancelled account transfer binding", () => {
+  it.each(["claude", "codex"] as const)("keeps the %s conversation when its settings change during copying", (harness) => {
+    const original = { ...newSession(harness, "/repo"), providerSessionId: "conversation", providerAccountId: "default" };
+    const latest = { ...original, modelSettings: { effort: "high" }, usageLimit: undefined };
+    const restored = cancelledAccountTransferSession(original, latest);
+    expect(restored).toBe(latest);
+    expect(restored?.providerSessionId).toBe("conversation");
+    expect(restored?.providerAccountId).toBe("default");
+    expect(restored?.modelSettings).toEqual({ effort: "high" });
+  });
+  it("never restores over a different provider, account, thread or deleted session", () => {
+    const original = { ...newSession("codex", "/repo"), providerSessionId: "conversation", providerAccountId: "default" };
+    for (const latest of [undefined, { ...original, id: "different-session" }, { ...original, harness: "claude" as const }, { ...original, providerAccountId: "second" }, { ...original, providerSessionId: "different-thread" }]) {
+      expect(cancelledAccountTransferSession(original, latest)).toBeUndefined();
+    }
+  });
+});
 
 function limited(patch: Partial<Session> = {}): Session {
   return {

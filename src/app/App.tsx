@@ -533,6 +533,7 @@ import {
 import { createSessionRemover } from "../features/sessions/model/sessionRemoval";
 import { shouldGenerateSessionTitle } from "../features/sessions/model/sessionTitle";
 import "../fork/accounts/autoResolver"; // Fork: resolves the Auto account choice at spawn.
+import { useAutoAccountSwitch } from "../fork/accounts/useAutoAccountSwitch";
 import {
   AUTO_PROVIDER_ACCOUNT_ID, // Fork
   DEFAULT_PROVIDER_ACCOUNT_ID,
@@ -588,6 +589,8 @@ import {
   resumeUsageLimitedSession,
   usageLimitResumeDue,
   withUsageLimitAccount,
+  usageLimitContinuationIntent,
+  cancelledAccountTransferSession,
 } from "../features/sessions/model/usageLimit";
 import {
   fetchClaudeRateLimits,
@@ -7615,7 +7618,7 @@ function Workspace({
       if (
         removingSessionIds.current.has(sessionId) ||
         switchingWorktrees.current.has(sessionId) ||
-        workspaceNavigation.isSwitching(sessionId)
+        workspaceNavigation.isSwitching(sessionId) || accountSwitching.current.has(sessionId)
       )
         return false;
       const storedCurrent = sessionsRef.current.find((s) => s.id === sessionId);
@@ -10174,9 +10177,16 @@ function Workspace({
         );
         return true;
       }
+      if (session.queuedMessages?.length) {
+        updateSessionState(sessionsRef, setSessions, (prev) =>
+          prev.map((entry) => entry.id === sessionId ? resumeUsageLimitedSession(entry) : entry),
+        );
+        return true;
+      }
       onUsageLimitDismiss(sessionId);
       try {
-        if (await submitSession(sessionId, CONTINUE_PROMPT)) {
+        const intent = usageLimitContinuationIntent(session);
+        if (await submitSession(sessionId, CONTINUE_PROMPT, [], { intent })) {
           leaveArchive(sessionId); // Fork
           return true;
         }
@@ -10185,7 +10195,7 @@ function Workspace({
       // that one-attempt scheduler behavior, but retain a manual retry notice.
       updateSessionState(sessionsRef, setSessions, (prev) => prev.map((entry) =>
         entry.id === sessionId && !entry.busy && !entry.usageLimit
-          ? { ...entry, usageLimit: { ...session.usageLimit!, resumeAtReset: false } } : entry));
+          ? { ...entry, usageLimit: { recoveryFailed: true } } : entry));
       return false;
     },
     [leaveArchive, submitSession, onUsageLimitDismiss],
@@ -10200,6 +10210,7 @@ function Workspace({
    */
   const onSessionAccountChange = useCallback(
     async (sessionId: string, accountId: string) => {
+      const generation = turnGen.current.get(sessionId);
       const session = sessionsRef.current.find(
         (entry) => entry.id === sessionId,
       );
@@ -10250,6 +10261,10 @@ function Workspace({
         // The user moved on while the transcript was copied.
         if (
           !latest ||
+          turnGen.current.get(sessionId) !== generation ||
+          latest.harness !== session.harness || latest.model !== session.model ||
+          latest.runtimeMode !== session.runtimeMode || latest.modelSettings !== session.modelSettings ||
+          sessionWorkCwd(latest) !== sessionWorkCwd(session) ||
           !!latest.usageLimit !== limited ||
           latest.busy ||
           latest.providerSessionId !== session.providerSessionId ||
@@ -10257,8 +10272,14 @@ function Workspace({
             latest.providerAccountId,
             session.providerAccountId,
           )
-        )
+        ) {
+          const restore = cancelledAccountTransferSession(session, latest);
+          if (restore) {
+            bindHarnessSession(restore.harness, restore.id, restore.providerSessionId!,
+              sessionWorkCwd(restore), restore.providerAccountId, restore.blocks);
+          }
           return;
+        }
       }
       if (mono) {
         updateSessionState(sessionsRef, setSessions, (sessions) =>
@@ -10273,7 +10294,7 @@ function Workspace({
       updateSessionState(sessionsRef, setSessions, (sessions) =>
         sessions.map((entry) =>
           entry.id === sessionId
-            ? withUsageLimitAccount({ ...entry, runtimeMode: entry.harness === "codex" ? "full-access" : entry.runtimeMode }, accountId, carried)
+            ? withUsageLimitAccount(entry, accountId, carried)
             : entry,
         ),
       );
@@ -10282,6 +10303,17 @@ function Workspace({
     [onUsageLimitResume],
   );
   sessionAccountChangeRef.current = onSessionAccountChange;
+
+  useAutoAccountSwitch(
+    sessions,
+    () => sessionsRef.current,
+    onSessionAccountChange,
+    (session) => !remoteProjectFor(session.cwd) && isLiveHarness(session.harness) &&
+      !pendingAccountMovesRef.current.has(session.id) && !removingSessionIds.current.has(session.id) &&
+      !switchingWorktrees.current.has(session.id) && !workspaceNavigation.isSwitching(session.id) &&
+      !isPreparingHandoff(session) && !isMoveLocked(session.id) && !orchestrator.submissionError(session.id, false),
+    (id) => turnGen.current.get(id) ?? 0,
+  );
 
   useEffect(() => {
     const pending = pendingAccountMovesRef.current;
@@ -10353,7 +10385,7 @@ function Workspace({
   useEffect(() => {
     for (const session of sessions) {
       const limit = session.usageLimit;
-      if (!limit || limit.resetsAt != null) continue;
+      if (!limit || limit.recoveryFailed || limit.resetsAt != null) continue;
       if (usageResetLookups.current.has(limit)) continue;
       const fetchLimits =
         session.harness === "claude"
@@ -11257,7 +11289,7 @@ function Workspace({
       if (current && remoteProjectFor(current.cwd))
         return remoteSessionActions(sessionId)?.compact() ?? false;
       if (!current || current.busy || current.worktreeRemoved) return false;
-      if (isMoveLocked(sessionId)) return false; // Fork: stopped for a move, or moved.
+      if (isMoveLocked(sessionId) || accountSwitching.current.has(sessionId)) return false; // Fork: a move or account copy owns the conversation.
       if (!canCompactHarnessContext(current.harness)) {
         const unsupported = sessionsRef.current.map((session) =>
           session.id === sessionId
