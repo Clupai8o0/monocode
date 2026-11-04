@@ -817,6 +817,7 @@ import {
   CursorMultiReviewPairs,
   buildCursorMultiReviewQueueMessage,
   buildCursorMultiReviewRequest,
+  cursorMultiReviewChildResult,
   latestUserTurn,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
@@ -5925,7 +5926,6 @@ function Workspace({
         ? sessionDisplayTitle(seed.title, seed.harness)
         : "this session";
       removingSessionIds.current.add(sessionId);
-      cursorMultiReviewPairs.current.dropSource(sessionId);
       let deleteWorktreePath: string | undefined;
       if (mode === "delete" && !skipDeleteConfirm) {
         deleteConfirmationPending.current = true;
@@ -5966,6 +5966,17 @@ function Workspace({
       }
       invalidateLoadedSession(sessionId);
       pendingPersist.current.delete(sessionId);
+      cursorMultiReviewPairs.current.dropSource(sessionId);
+      // A reviewer removed mid-review must not hold back the other's report.
+      if (seed) {
+        cursorMultiReviewPairs.current.settleChild(
+          sessionId,
+          cursorMultiReviewChildResult(
+            { harness: seed.harness, title: seed.title, blocks: open?.blocks ?? [] },
+            { status: "cancelled" },
+          ),
+        );
+      }
       try {
         const remover = createSessionRemover({
           mode,
@@ -8429,28 +8440,21 @@ function Workspace({
         window.setTimeout(() => {
           const finished = sessionsRef.current.find((s) => s.id === sessionId);
           if (!finished || finished.busy) return;
+          // Fork: this turn only asked for more effort. Its send-on is the
+          // real turn, and settles here when it ends.
+          if (
+            outcome.status === "completed" &&
+            effortAutoFor(finished.id, finished.ephemeral) &&
+            endedForEffortRaise(finished)
+          ) {
+            return;
+          }
 
           if (cursorMultiReviewPairs.current.isChild(sessionId)) {
-            const last = latestUserTurn(finished.blocks) ?? [];
-            const report =
-              [...last]
-                .reverse()
-                .find(
-                  (b) => b.role === "assistant" && !b.tool && b.text.trim(),
-                )?.text ?? "";
-            const status =
-              outcome.status === "cancelled"
-                ? "cancelled"
-                : outcome.status === "failed"
-                  ? "failed"
-                  : "completed";
-            cursorMultiReviewPairs.current.settleChild(sessionId, {
-              status,
-              harness: finished.harness,
-              title: finished.title,
-              text: report,
-              error: outcome.error,
-            });
+            cursorMultiReviewPairs.current.settleChild(
+              sessionId,
+              cursorMultiReviewChildResult(finished, outcome),
+            );
             return;
           }
 
@@ -10453,16 +10457,15 @@ function Workspace({
             ? {
                 ...entry,
                 layout: splitPane(entry.layout, sourceId, "right", session.id),
-                focusedId: focusNew ? session.id : sourceId,
-                diffFocused: false,
+                focusedId: focusNew ? session.id : entry.focusedId,
+                diffFocused: focusNew ? false : entry.diffFocused,
               }
             : entry,
         );
         tabsRef.current = nextTabs;
         setTabs(nextTabs);
-        // Keep source tab active when already focused; otherwise activate it so
-        // the split opens in place beside the source.
-        if (tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
+        // A background pane opens where its source is; the user stays put.
+        if (focusNew && tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
       } else {
         const nextTab = newTab(session.id);
         appendTab(nextTab, cwd);
@@ -10470,8 +10473,10 @@ function Workspace({
         if (focusNew) setActiveTabId(nextTab.id);
       }
 
-      setProjectTerminalFocused(false);
-      setComposerFocused(focusComposer);
+      if (focusNew) {
+        setProjectTerminalFocused(false);
+        setComposerFocused(focusComposer);
+      }
     },
     [appendTab],
   );
@@ -10482,6 +10487,8 @@ function Workspace({
         (s) => s.id === pair.sourceSessionId,
       );
       if (!source || removingSessionIds.current.has(source.id)) return;
+      // Nothing to act on, so don't spend a Cursor turn on it.
+      if (!pair.results.some((result) => result.text.trim())) return;
       const message = buildCursorMultiReviewQueueMessage(
         pair.pairId,
         pair.results,
@@ -10505,6 +10512,38 @@ function Workspace({
     }),
   );
 
+  // Each editing turn opens new reviewers, so older finished ones leave the
+  // tab. Their sessions stay in the sidebar.
+  const cursorMultiReviewPanes = useRef(new Map<string, string[]>());
+  const retireCursorMultiReviewPanes = useCallback(
+    (sourceId: string): string[] => {
+      const kept: string[] = [];
+      for (const id of cursorMultiReviewPanes.current.get(sourceId) ?? []) {
+        const tab = tabsRef.current.find((entry) =>
+          leafIds(entry.layout).includes(id),
+        );
+        const session = sessionsRef.current.find((entry) => entry.id === id);
+        if (!tab || !session) continue;
+        if (session.busy || tab.focusedId === id) {
+          kept.push(id);
+          continue;
+        }
+        const closed = closeLeaf(tab, id);
+        if (!closed) continue;
+        persistSession(session);
+        const nextTabs = tabsRef.current.map((entry) =>
+          entry.id === tab.id
+            ? { ...entry, layout: closed.layout, focusedId: closed.focusedId }
+            : entry,
+        );
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+      }
+      return kept;
+    },
+    [persistSession],
+  );
+
   const launchCursorMultiReview = useCallback(
     (sourceId: string, turn: Block[]) => {
       const source = sessionsRef.current.find((s) => s.id === sourceId);
@@ -10517,11 +10556,19 @@ function Workspace({
           harness: source.harness,
           turn,
           turnUserBlockId: turnId,
-          hasInFlightPair: cursorMultiReviewPairs.current.hasInFlight(
+          alreadyReviewed: cursorMultiReviewPairs.current.hasStarted(
             sourceId,
             turnId,
           ),
           worktreeRemoved: !!source.worktreeRemoved,
+          // No pane to review beside, and a fan-in turn would report back to
+          // whatever is running them a second time.
+          backgroundRun:
+            !!source.ephemeral ||
+            !!source.inboxAsk ||
+            !!source.orchestrationLeadId ||
+            isMonoSession(source.id) ||
+            isHabitRun(source.id),
           // Desktop-only v1 — skip remote projects.
           isRemote: !!remoteProjectFor(source.cwd),
         })
@@ -10565,6 +10612,10 @@ function Workspace({
         turnId,
         childSessionIds: childIds,
       });
+      cursorMultiReviewPanes.current.set(sourceId, [
+        ...retireCursorMultiReviewPanes(sourceId),
+        ...childIds,
+      ]);
 
       for (const { session, reviewer } of pending) {
         openSessionBeside(sourceId, session, source.cwd, false, false);
@@ -10578,13 +10629,29 @@ function Workspace({
           sourceSessionId: sourceId,
           turnId,
         });
+        const settleFailure = (outcome: Pick<ControlOutcome, "status" | "error">) => {
+          cursorMultiReviewPairs.current.settleChild(
+            session.id,
+            cursorMultiReviewChildResult(
+              sessionsRef.current.find((s) => s.id === session.id) ?? session,
+              outcome,
+            ),
+          );
+        };
         // Prefer only secondOpinion; do not pass cursorMultiReview into SubmitOptions.
-        onSubmit(session.id, request.prompt, [], {
+        const accepted = onSubmit(session.id, request.prompt, [], {
           secondOpinion: request.options.secondOpinion,
+          // A reviewer that never starts must not hold back the other's report.
+          onSettled: (outcome) => {
+            if (outcome.status === "failed") settleFailure(outcome);
+          },
         });
+        if (!accepted) {
+          settleFailure({ status: "failed", error: "The review could not start" });
+        }
       }
     },
-    [onSubmit, openSessionBeside],
+    [onSubmit, openSessionBeside, retireCursorMultiReviewPanes],
   );
 
   const launchCursorMultiReviewRef = useRef(launchCursorMultiReview);

@@ -12,6 +12,7 @@ import {
   pathsLookFrontend,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
+  cursorMultiReviewChildResult,
   truncateReviewReport,
 } from "./cursorMultiReview";
 
@@ -126,6 +127,23 @@ describe("buildCursorMultiReviewPrompt", () => {
     expect(prompt).toMatch(/UI\/UX|a11y|layout/i);
   });
 
+  it("keeps the frontend focus when the file list overflows the limit", () => {
+    const prompt = buildCursorMultiReviewPrompt({
+      from: "cursor",
+      to: "claude",
+      role: "claude",
+      userRequest: "x",
+      report: "y",
+      files: Array.from(
+        { length: 40 },
+        (_, i) => `src/features/settings/ui/components/File${i}.tsx`,
+      ),
+      frontendFocus: true,
+    });
+    expect(prompt).toContain("[truncated]");
+    expect(prompt).toContain("## Frontend focus");
+  });
+
   it("keeps peer prompt general", () => {
     const prompt = buildCursorMultiReviewPrompt({
       from: "cursor",
@@ -173,9 +191,10 @@ describe("shouldStartCursorMultiReview", () => {
     harness: "cursor" as const,
     turn,
     turnUserBlockId: "u1",
-    hasInFlightPair: false,
+    alreadyReviewed: false,
     worktreeRemoved: false,
     isRemote: false,
+    backgroundRun: false,
   };
 
   it("requires setting, cursor harness, edits, and no in-flight pair", () => {
@@ -200,9 +219,15 @@ describe("shouldStartCursorMultiReview", () => {
     ).toBe(false);
   });
 
-  it("rejects when a pair is already in flight", () => {
+  it("rejects a turn already reviewed", () => {
     expect(
-      shouldStartCursorMultiReview({ ...base, hasInFlightPair: true }),
+      shouldStartCursorMultiReview({ ...base, alreadyReviewed: true }),
+    ).toBe(false);
+  });
+
+  it("rejects background runs", () => {
+    expect(
+      shouldStartCursorMultiReview({ ...base, backgroundRun: true }),
     ).toBe(false);
   });
 
@@ -251,6 +276,37 @@ describe("shouldStartCursorMultiReview", () => {
   });
 });
 
+describe("cursorMultiReviewChildResult", () => {
+  const child = (blocks: Block[]) => ({
+    harness: "claude" as const,
+    title: "Review · Claude",
+    blocks,
+  });
+
+  it("takes the last written reply of the latest turn", () => {
+    const result = cursorMultiReviewChildResult(
+      child([
+        user("u1", "review"),
+        assistant("a1", "Looking."),
+        edit("e1", "src/x.ts"),
+        assistant("a2", "Missing aria-label."),
+      ]),
+      { status: "completed" },
+    );
+    expect(result.status).toBe("completed");
+    expect(result.text).toBe("Missing aria-label.");
+  });
+
+  it("keeps failure details when nothing was written", () => {
+    expect(
+      cursorMultiReviewChildResult(child([]), {
+        status: "failed",
+        error: "usage limited",
+      }),
+    ).toMatchObject({ status: "failed", text: "", error: "usage limited" });
+  });
+});
+
 describe("truncateReviewReport", () => {
   it("caps at 3000 characters", () => {
     expect(truncateReviewReport("x".repeat(4000)).length).toBe(3000);
@@ -268,7 +324,7 @@ describe("CursorMultiReviewPairs", () => {
       turnId: "u1",
       childSessionIds: ["r-claude", "r-codex"],
     });
-    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(true);
+    expect(pairs.hasStarted("cursor-1", "u1")).toBe(true);
     expect(pairs.isChild("r-claude")).toBe(true);
     expect(pairs.isChild("r-codex")).toBe(true);
     expect(pairs.isChild("other")).toBe(false);
@@ -280,7 +336,7 @@ describe("CursorMultiReviewPairs", () => {
       text: "Looks fine.",
     });
     expect(ready).toEqual([]);
-    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(true);
+    expect(pairs.hasStarted("cursor-1", "u1")).toBe(true);
 
     pairs.settleChild("r-codex", {
       status: "failed",
@@ -290,7 +346,8 @@ describe("CursorMultiReviewPairs", () => {
       error: "usage limited",
     });
     expect(ready).toEqual([pairId]);
-    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(false);
+    // Stays reviewed, so a later settle of the same turn can't re-fire.
+    expect(pairs.hasStarted("cursor-1", "u1")).toBe(true);
     expect(pairs.isChild("r-claude")).toBe(false);
   });
 
@@ -305,7 +362,6 @@ describe("CursorMultiReviewPairs", () => {
       childSessionIds: ["r-claude", "r-codex"],
     });
     pairs.dropSource("cursor-1");
-    expect(pairs.hasInFlight("cursor-1", "u1")).toBe(false);
     expect(pairs.isChild("r-claude")).toBe(false);
     pairs.settleChild("r-claude", {
       status: "completed",

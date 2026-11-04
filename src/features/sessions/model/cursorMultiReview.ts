@@ -96,6 +96,12 @@ export function buildCursorMultiReviewPrompt(input: {
   const sections = [
     `Give a read-only second opinion on work ${fromTitle} just finished in this same working copy. The files are already on disk.`,
     "Report what is wrong, what is missing, and what you would have done differently. Do not modify files, do not run formatters that write, and do not commit. If you would leave the work as-is, say so briefly.",
+    // Ahead of the file list, which can run past the prompt limit.
+    ...(input.role === "claude" && input.frontendFocus
+      ? [
+          "## Frontend focus\nPrioritize UI/UX, accessibility, layout, visual regressions, and component structure.",
+        ]
+      : []),
     `## User request\n${input.userRequest.trim() ? limitSection(input.userRequest, USER_LIMIT) : "(no user message on this turn)"}`,
     input.report.trim()
       ? `## What ${fromTitle} reported\n${limitSection(input.report, REPORT_LIMIT)}`
@@ -104,11 +110,6 @@ export function buildCursorMultiReviewPrompt(input: {
       ? `## Files it edited\n${input.files.map((p) => `- ${p}`).join("\n")}`
       : "## Files it edited\n(none recorded on this turn)",
   ];
-  if (input.role === "claude" && input.frontendFocus) {
-    sections.push(
-      "## Frontend focus\nPrioritize UI/UX, accessibility, layout, visual regressions, and component structure.",
-    );
-  }
   return limitSection(sections.join("\n\n"), PROMPT_LIMIT);
 }
 
@@ -167,14 +168,17 @@ export function shouldStartCursorMultiReview(input: {
   harness: HarnessId;
   turn: Block[];
   turnUserBlockId: string;
-  hasInFlightPair: boolean;
+  alreadyReviewed: boolean;
   worktreeRemoved: boolean;
   isRemote: boolean;
+  backgroundRun: boolean;
 }): boolean {
   if (!input.enabled) return false;
   if (input.harness !== "cursor") return false;
-  if (input.worktreeRemoved || input.isRemote) return false;
-  if (input.hasInFlightPair) return false;
+  if (input.worktreeRemoved || input.isRemote || input.backgroundRun) {
+    return false;
+  }
+  if (input.alreadyReviewed) return false;
   const user = input.turn.find((b) => b.role === "user");
   if (!user || user.id !== input.turnUserBlockId) return false;
   if (user.appRequestId?.startsWith(CURSOR_MULTI_REVIEW_APP_PREFIX))
@@ -201,6 +205,27 @@ type Pair = {
     { settled: boolean; result?: CursorMultiReviewChildResult }
   >;
 };
+
+/** What one finished reviewer sends back: its last written reply. */
+export function cursorMultiReviewChildResult(
+  child: { harness: HarnessId; title: string; blocks: Block[] },
+  outcome: { status: string; error?: string },
+): CursorMultiReviewChildResult {
+  const turn = latestUserTurn(child.blocks) ?? [];
+  const reply = [...turn]
+    .reverse()
+    .find((b) => b.role === "assistant" && !b.tool && b.text.trim());
+  return {
+    status:
+      outcome.status === "cancelled" || outcome.status === "failed"
+        ? outcome.status
+        : "completed",
+    harness: child.harness,
+    title: child.title,
+    text: reply?.text ?? "",
+    error: outcome.error,
+  };
+}
 
 export function truncateReviewReport(text: string): string {
   const trimmed = text.replace(/\r\n?/g, "\n").trim();
@@ -239,9 +264,15 @@ export function buildCursorMultiReviewQueueMessage(
   };
 }
 
+function startedKey(sourceSessionId: string, turnId: string): string {
+  return `${sourceSessionId}\u0000${turnId}`;
+}
+
 export class CursorMultiReviewPairs {
   private pairs = new Map<string, Pair>();
   private byChild = new Map<string, string>();
+  /** Turns already reviewed, so a later settle of the same turn can't re-fire. */
+  private started = new Set<string>();
 
   constructor(
     private onReady: (
@@ -265,21 +296,13 @@ export class CursorMultiReviewPairs {
       children,
     };
     this.pairs.set(pairId, pair);
+    this.started.add(startedKey(input.sourceSessionId, input.turnId));
     for (const id of input.childSessionIds) this.byChild.set(id, pairId);
     return pairId;
   }
 
-  hasInFlight(sourceSessionId: string, turnId: string): boolean {
-    for (const pair of this.pairs.values()) {
-      if (
-        pair.sourceSessionId === sourceSessionId &&
-        pair.turnId === turnId &&
-        [...pair.children.values()].some((c) => !c.settled)
-      ) {
-        return true;
-      }
-    }
-    return false;
+  hasStarted(sourceSessionId: string, turnId: string): boolean {
+    return this.started.has(startedKey(sourceSessionId, turnId));
   }
 
   /** True if this session id is a registered review child. */
