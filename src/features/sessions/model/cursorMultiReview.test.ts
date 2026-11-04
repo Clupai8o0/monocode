@@ -276,6 +276,32 @@ describe("shouldStartCursorMultiReview", () => {
   });
 });
 
+describe("buildCursorMultiReviewFanInText status", () => {
+  it("marks a partial report from a reviewer that stopped early", () => {
+    const text = buildCursorMultiReviewFanInText([
+      {
+        status: "cancelled",
+        harness: "claude",
+        title: "Review · Claude",
+        text: "First finding.",
+      },
+    ]);
+    expect(text).toMatch(/## Claude[^\n]*\n\(cancelled\)\nFirst finding\./);
+  });
+
+  it("leaves a finished report unmarked", () => {
+    const text = buildCursorMultiReviewFanInText([
+      {
+        status: "completed",
+        harness: "claude",
+        title: "Review · Claude",
+        text: "Fine.",
+      },
+    ]);
+    expect(text).toMatch(/## Claude[^\n]*\nFine\./);
+  });
+});
+
 describe("cursorMultiReviewChildResult", () => {
   const child = (blocks: Block[]) => ({
     harness: "claude" as const,

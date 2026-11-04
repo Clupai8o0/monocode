@@ -5966,17 +5966,6 @@ function Workspace({
       }
       invalidateLoadedSession(sessionId);
       pendingPersist.current.delete(sessionId);
-      cursorMultiReviewPairs.current.dropSource(sessionId);
-      // A reviewer removed mid-review must not hold back the other's report.
-      if (seed) {
-        cursorMultiReviewPairs.current.settleChild(
-          sessionId,
-          cursorMultiReviewChildResult(
-            { harness: seed.harness, title: seed.title, blocks: open?.blocks ?? [] },
-            { status: "cancelled" },
-          ),
-        );
-      }
       try {
         const remover = createSessionRemover({
           mode,
@@ -6112,6 +6101,23 @@ function Workspace({
           stop: stopSessionForRemoval,
         });
         const removed = await remover.remove(sessionId);
+        if (removed) {
+          cursorMultiReviewPairs.current.dropSource(sessionId);
+          // A reviewer removed mid-review must not hold back the other's report.
+          if (seed) {
+            cursorMultiReviewPairs.current.settleChild(
+              sessionId,
+              cursorMultiReviewChildResult(
+                {
+                  harness: seed.harness,
+                  title: seed.title,
+                  blocks: open?.blocks ?? [],
+                },
+                { status: "cancelled" },
+              ),
+            );
+          }
+        }
         if (removed && deleteWorktreePath && seed) {
           try {
             await onRemoveWorktree(seed.cwd, deleteWorktreePath, false);
@@ -10146,6 +10152,10 @@ function Workspace({
         noteCard: message.noteCard,
         handoffCard: message.handoffCard,
         intent: message.intent,
+        // Keeps the marker that stops a review note being reviewed again.
+        ...(message.id.startsWith(CURSOR_MULTI_REVIEW_APP_PREFIX)
+          ? { appRequestId: message.id, followsUp: true }
+          : {}),
       });
     },
     [onSubmit, enqueueHarnessEvent, flushHarnessEvents],
@@ -10594,7 +10604,9 @@ function Workspace({
             reviewer.harness,
             source.cwd,
             preferredModelId(reviewer.harness),
-            reviewer.harness === "codex" ? "full-access" : source.runtimeMode,
+            // Reviewers report only, so hold them to it: Codex gets a read-only
+            // sandbox, and every provider asks before writes and commands.
+            "supervised",
           ),
           worktreeCwd: source.worktreeCwd,
           branch: source.branch,

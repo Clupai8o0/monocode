@@ -95,7 +95,7 @@ export function buildCursorMultiReviewPrompt(input: {
   const fromTitle = HARNESS_TITLE[input.from];
   const sections = [
     `Give a read-only second opinion on work ${fromTitle} just finished in this same working copy. The files are already on disk.`,
-    "Report what is wrong, what is missing, and what you would have done differently. Do not modify files, do not run formatters that write, and do not commit. If you would leave the work as-is, say so briefly.",
+    "Report what is wrong, what is missing, and what you would have done differently. Do not modify files, do not run formatters that write, and do not commit. Read the files directly where you can, because commands may need approval. If you would leave the work as-is, say so briefly.",
     // Ahead of the file list, which can run past the prompt limit.
     ...(input.role === "claude" && input.frontendFocus
       ? [
@@ -243,11 +243,17 @@ export function buildCursorMultiReviewFanInText(
   ];
   for (const result of results) {
     const title = HARNESS_TITLE[result.harness];
+    const report = truncateReviewReport(result.text);
+    // A reviewer that stopped early must not read as a finished review.
+    const status =
+      result.status === "completed"
+        ? ""
+        : result.error
+          ? `(${result.status}: ${result.error})`
+          : `(${result.status})`;
     const body =
-      truncateReviewReport(result.text) ||
-      (result.error
-        ? `(${result.status}: ${result.error})`
-        : `(${result.status}; no written report)`);
+      [status, report].filter(Boolean).join("\n") ||
+      "(completed; no written report)";
     parts.push(`## ${title}\n${body}`);
   }
   return parts.join("\n\n");
