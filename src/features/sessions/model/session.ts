@@ -172,8 +172,8 @@ export type SecondOpinionMeta = {
   to: HarnessId;
   request?: string;
   files?: number;
-  /** Split-pane continue. Default is a second-opinion review. */
-  kind?: "handoff";
+  /** Split-pane continue, or auto Cursor multi-review. Default is second-opinion. */
+  kind?: "handoff" | "cursor-multi-review";
 };
 
 /** A mid-turn interjection the harness asked to surface, e.g. OMP advisor notes. */

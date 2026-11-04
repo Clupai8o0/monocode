@@ -485,6 +485,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "unified editor review changes working tree",
   },
   {
+    id: "cursor-multi-review",
+    section: "chat",
+    label: "Review Cursor turns with other models",
+    keywords: "cursor review claude second opinion multi model auto-review",
+  },
+  {
     id: "empty-session-games",
     section: "chat",
     label: "Empty session games",
@@ -1116,6 +1122,18 @@ export function loadFormatOnSave(): boolean {
 
 export function saveFormatOnSave(value: boolean) {
   writeFlag(FORMAT_ON_SAVE_KEY, value);
+}
+
+const CURSOR_MULTI_REVIEW_KEY = "monocode.cursorMultiReview";
+
+export const CURSOR_MULTI_REVIEW_DEFAULT = true;
+
+export function loadCursorMultiReview(): boolean {
+  return readFlag(CURSOR_MULTI_REVIEW_KEY) ?? CURSOR_MULTI_REVIEW_DEFAULT;
+}
+
+export function saveCursorMultiReview(value: boolean) {
+  writeFlag(CURSOR_MULTI_REVIEW_KEY, value);
 }
 
 const AUTOSAVE_KEY = "monocode.autosave";

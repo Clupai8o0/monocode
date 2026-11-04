@@ -818,6 +818,31 @@ describe("sanitizeSessionForPersist", () => {
     });
   });
 
+  it("keeps a cursor-multi-review card kind on the user turn", () => {
+    const session = newSession("claude", "/tmp/project");
+    session.blocks = [
+      {
+        id: "u1",
+        role: "user",
+        text: "Auto-review",
+        secondOpinion: {
+          from: "cursor",
+          to: "claude",
+          kind: "cursor-multi-review",
+        },
+      },
+    ];
+    expect(sanitizeSessionForPersist(session).blocks[0]).toMatchObject({
+      role: "user",
+      text: "Auto-review",
+      secondOpinion: {
+        from: "cursor",
+        to: "claude",
+        kind: "cursor-multi-review",
+      },
+    });
+  });
+
   it("keeps a note card on the user turn without the note body", () => {
     const session = newSession("codex", "/tmp/project");
     session.blocks = [

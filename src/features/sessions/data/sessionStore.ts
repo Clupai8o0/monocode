@@ -1695,7 +1695,9 @@ function sanitizeSecondOpinion(
     to: value.to,
     ...(request ? { request } : {}),
     ...(files > 0 ? { files } : {}),
-    ...(value.kind === "handoff" ? { kind: "handoff" as const } : {}),
+    ...(value.kind === "handoff" || value.kind === "cursor-multi-review"
+      ? { kind: value.kind }
+      : {}),
   };
 }
 

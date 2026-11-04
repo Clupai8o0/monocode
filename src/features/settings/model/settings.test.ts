@@ -11,6 +11,7 @@ import {
   MODEL_CONTROLS_DEFAULT,
   DIFF_VIEWER_DEFAULT,
   FORMAT_ON_SAVE_DEFAULT,
+  CURSOR_MULTI_REVIEW_DEFAULT,
   FILE_TAB_MODE_DEFAULT,
   FOLLOW_UP_BEHAVIOR_DEFAULT,
   GRID_ARCADE_ENABLED_DEFAULT,
@@ -24,6 +25,7 @@ import {
   loadDiffViewer,
   loadKeybindingOverrides,
   loadFormatOnSave,
+  loadCursorMultiReview,
   loadFileTabMode,
   loadFollowUpBehavior,
   loadGridArcadeEnabled,
@@ -40,6 +42,7 @@ import {
   saveModelControls,
   saveDiffViewer,
   saveFormatOnSave,
+  saveCursorMultiReview,
   saveFileTabMode,
   saveFollowUpBehavior,
   saveGridArcadeEnabled,
@@ -62,6 +65,7 @@ const LIVE_AGENTS_KEY = "monocode.liveAgentsEnabled";
 const GRID_ARCADE_KEY = "monocode.gridArcadeEnabled";
 const DIFF_VIEWER_KEY = "monocode.diffViewer";
 const FORMAT_ON_SAVE_KEY = "monocode.formatOnSave";
+const CURSOR_MULTI_REVIEW_KEY = "monocode.cursorMultiReview";
 const AUTOSAVE_KEY = "monocode.autosave";
 const FILE_TAB_MODE_KEY = "monocode.fileTabMode";
 const FOLLOW_UP_BEHAVIOR_KEY = "monocode.followUpBehavior";
@@ -502,6 +506,25 @@ describe("format on save setting", () => {
     expect(loadFormatOnSave()).toBe(false);
     saveFormatOnSave(true);
     expect(loadFormatOnSave()).toBe(true);
+  });
+});
+
+describe("Cursor multi-review setting", () => {
+  beforeEach(mockLocalStorage);
+  afterEach(() => {
+    localStorage.removeItem(CURSOR_MULTI_REVIEW_KEY);
+  });
+
+  it("defaults Cursor multi-review on", () => {
+    localStorage.removeItem(CURSOR_MULTI_REVIEW_KEY);
+    expect(CURSOR_MULTI_REVIEW_DEFAULT).toBe(true);
+    expect(loadCursorMultiReview()).toBe(true);
+  });
+
+  it("persists Cursor multi-review off", () => {
+    saveCursorMultiReview(false);
+    expect(localStorage.getItem(CURSOR_MULTI_REVIEW_KEY)).toBe("0");
+    expect(loadCursorMultiReview()).toBe(false);
   });
 });
 
