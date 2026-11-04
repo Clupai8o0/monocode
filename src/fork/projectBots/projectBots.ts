@@ -406,12 +406,13 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
     ]),
   },
   // Pig (pick only, no project maps to it): a piggy bank side on, facing right,
-  // with its one eye and snout. While it talks the coin drops into the slot.
+  // with an ear, one eye, a snout and a coin slot in its back. While it talks a
+  // coin pokes up out of the slot.
   pig: {
     rest: [
-      "...##...",
-      "........",
-      ".######.",
+      ".....#..",
+      ".##.###.",
+      "#######.",
       "#####.##",
       "########",
       "#######.",
@@ -419,9 +420,9 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       ".#...#..",
     ],
     talk: [
-      "........",
-      "...##...",
-      ".######.",
+      "...#.#..",
+      ".##.###.",
+      "#######.",
       "#####.##",
       "########",
       "#######.",

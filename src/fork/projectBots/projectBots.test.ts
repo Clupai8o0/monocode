@@ -56,10 +56,12 @@ describe("project bots", () => {
     expect(eyes.talk).toEqual([[5, 3]]);
     expect(pig!.rest[3][5]).toBe(".");
     expect(pig!.talk[3][5]).toBe(".");
-    // Talking only drops the coin one row, towards the slot; the body stays put.
-    expect(pig!.rest.slice(0, 2)).toEqual(["...##...", "........"]);
-    expect(pig!.talk.slice(0, 2)).toEqual(["........", "...##..."]);
-    expect(pig!.talk.slice(2)).toEqual(pig!.rest.slice(2));
+    // The slot is a hole in its back, and nothing floats above the body.
+    expect(pig!.rest[1][3]).toBe(".");
+    expect(pig!.rest[0]).toBe(".....#..");
+    // Talking only pokes a coin up out of the slot; everything else stays put.
+    expect(pig!.talk[0]).toBe("...#.#..");
+    expect(pig!.talk.slice(1)).toEqual(pig!.rest.slice(1));
     expect(projectBotFor("/Users/sam/Documents/projects/coin-jar")).toBeNull();
   });
 
