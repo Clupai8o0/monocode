@@ -376,6 +376,34 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 3],
     ]),
   },
+  // Flower (pick only, no project maps to it): a bloom with a face on a thin
+  // stem; it opens its mouth and lifts its leaf while it talks.
+  flower: {
+    rest: [
+      ".##.##..",
+      "#######.",
+      "##.#.##.",
+      "#######.",
+      ".#.#.#..",
+      "...#....",
+      "##.#....",
+      ".###....",
+    ],
+    talk: [
+      ".##.##..",
+      "#######.",
+      "##.#.##.",
+      "###.###.",
+      ".#.#.#..",
+      "##.#....",
+      ".###....",
+      "...#....",
+    ],
+    eyes: same([
+      [2, 2],
+      [4, 2],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(
