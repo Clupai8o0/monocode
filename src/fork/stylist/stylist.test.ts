@@ -186,7 +186,7 @@ describe("the Stylist does its look work itself", () => {
     expect(other).not.toContain("<stylist_rules>");
   });
 
-  it("refuses to start, message or draft sessions", async () => {
+  it("refuses every session action that starts or changes one", async () => {
     const id = ensureStylistMono([APP])!;
     const source = newSession("claude", APP);
     const host = { monoOf: () => ({ id, projects: [APP] }) } as unknown as AgentAppHost;
@@ -194,6 +194,9 @@ describe("the Stylist does its look work itself", () => {
       ["sessions.start", { prompt: "do all projects" }],
       ["sessions.send", { sessionId: "other", prompt: "hi" }],
       ["sessions.draft", { sessionId: "other", prompt: "hi" }],
+      ["sessions.stop", { sessionId: "other" }],
+      ["sessions.archive", { sessionId: "other" }],
+      ["sessions.delete", { sessionId: "other" }],
     ] as const) {
       await expect(handleAgentApp(source, "req1", action, input, host)).rejects.toThrow(STYLIST_NO_SESSIONS);
     }

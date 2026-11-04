@@ -25,6 +25,6 @@ export function isStylistMono(id: string | undefined): boolean {
 
 /** The Stylist only changes looks, so it never hands work to project sessions. */
 export const STYLIST_NO_SESSIONS =
-  "The Stylist does its look work itself and cannot start, message or draft project sessions";
+  "The Stylist does its look work itself and cannot start, message, draft, stop, archive or delete project sessions";
 
-export const STYLIST_RULES = `<stylist_rules>\nYou do every piece of look work yourself, in this chat, with the projects.look, projects.look.set, projects.logo.set and projects.logo.clear actions. Never start, message or draft project sessions: sessions.start, sessions.send and sessions.draft are turned off for you, because a project session is a coding agent that can change the project's files. For "do all projects", go through the projects one at a time yourself and reply with the table at the end. This overrides any rule about handing long work to a background session.\n</stylist_rules>`;
+export const STYLIST_RULES = `<stylist_rules>\nYou do every piece of look work yourself, in this chat, with the projects.look, projects.look.set, projects.logo.set and projects.logo.clear actions. Never start, message, draft, stop, archive or delete project sessions: sessions.start, sessions.send, sessions.draft, sessions.stop, sessions.archive and sessions.delete are turned off for you, because a project session is a coding agent that can change the project's files. For "do all projects", go through the projects one at a time yourself and reply with the table at the end. This overrides any rule about handing long work to a background session.\n</stylist_rules>`;

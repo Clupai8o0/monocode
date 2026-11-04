@@ -1255,6 +1255,9 @@ export async function handleAgentApp(
     case "sessions.stop":
     case "sessions.archive":
     case "sessions.delete": {
+      // Fork: the Stylist only changes looks (src/fork/stylist).
+      if (isStylistMono(host.monoOf?.(source.id)?.id))
+        throw new Error(STYLIST_NO_SESSIONS);
       const id = requiredString(input.sessionId, "sessionId", 256);
       if (id === source.id)
         throw new Error("Cannot stop, archive or delete the calling session");
