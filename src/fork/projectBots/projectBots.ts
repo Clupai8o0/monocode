@@ -376,32 +376,33 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 3],
     ]),
   },
-  // Flower (pick only, no project maps to it): a bloom with a face on a thin
-  // stem; it opens its mouth and lifts its leaf while it talks.
+  // Flower (pick only, no project maps to it): petals on top, at the sides and
+  // at the bottom corners around a face, on a straight stem with one small
+  // leaf. Seven cells wide so the stem sits exactly under the middle.
   flower: {
     rest: [
-      ".##.##..",
+      "..###...",
+      ".#.#.#..",
       "#######.",
       "##.#.##.",
       "#######.",
       ".#.#.#..",
+      "..##....",
       "...#....",
-      "##.#....",
-      ".###....",
     ],
     talk: [
-      ".##.##..",
+      "..###...",
+      ".#.#.#..",
       "#######.",
       "##.#.##.",
       "###.###.",
       ".#.#.#..",
-      "##.#....",
-      ".###....",
+      "..##....",
       "...#....",
     ],
     eyes: same([
-      [2, 2],
-      [4, 2],
+      [2, 3],
+      [4, 3],
     ]),
   },
 };

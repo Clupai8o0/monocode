@@ -33,6 +33,11 @@ describe("project bots", () => {
     const { eyes } = PROJECT_BOT_SPRITES.flower;
     for (const [x, y] of eyes.rest) expect(flower!.rest[y][x]).toBe(".");
     for (const [x, y] of eyes.talk) expect(flower!.talk[y][x]).toBe(".");
+    // The stem runs straight down the bloom's middle column, with no curl.
+    for (const rows of [flower!.rest, flower!.talk]) {
+      for (const y of [5, 6, 7]) expect(rows[y][3]).toBe("#");
+      expect(rows[7]).toBe("...#....");
+    }
     expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
