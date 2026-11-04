@@ -19,6 +19,7 @@ import {
   unwatchChild,
   watchChild,
 } from "../../../integrations/harness/core/child";
+import { isHarnessAuthError } from "../../../integrations/harness/core/authSupport";
 import { asRecord } from "../../../integrations/harness/providers/codex/codexProtocol";
 import { JsonRpcClient } from "../../../integrations/harness/core/jsonRpc";
 
@@ -202,11 +203,7 @@ export async function fetchCodexRateLimits(
     return parsed;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (
-      /not signed in|chatgpt authentication required|not authenticated/i.test(
-        message,
-      )
-    ) {
+    if (isHarnessAuthError(message)) {
       return unavailableRateLimits("codex", "Codex not signed in");
     }
     if (/ENOENT|not found|could not run/i.test(message)) {

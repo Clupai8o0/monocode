@@ -154,11 +154,20 @@ pub fn fetch_for(
     let value = catalog::codex_request(profile, "account/rateLimits/read", serde_json::json!({}))
         .map_err(|message| {
         let lower = message.to_lowercase();
+        // Codex often returns the ChatGPT HTTP failure ("401 Unauthorized",
+        // "invalid_jwt", "authentication token") when the refresh token is dead,
+        // instead of a plain "not signed in" string.
         if [
             "not installed",
             "not signed in",
             "not authenticated",
             "authentication required",
+            "authentication token",
+            "invalid_jwt",
+            "401 unauthorized",
+            "refresh token has expired",
+            "could not be refreshed",
+            "signing in again",
         ]
         .iter()
         .any(|s| lower.contains(s))

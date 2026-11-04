@@ -3,12 +3,66 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const invoke = vi.fn();
+const { invoke, loadRateLimits, loginHarness, cachedLimits } = vi.hoisted(
+  () => ({
+    invoke: vi.fn(),
+    loadRateLimits: vi.fn(() => Promise.resolve()),
+    loginHarness: vi.fn(() => Promise.resolve()),
+    cachedLimits: {
+      forAccount: (_provider: string, _accountId: string) => ({
+        provider: "claude",
+        status: "ok" as const,
+        session: {
+          usedPercent: 10,
+          windowMinutes: 300,
+          resetsAt: null as number | null,
+        },
+        weekly: null,
+        monthly: null,
+        resetCredits: null,
+        updatedAt: 0,
+        error: null as string | null,
+      }),
+    },
+  }),
+);
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-const loadRateLimits = vi.fn(() => Promise.resolve());
 vi.mock("../../features/providers/model/rateLimitsCache", () => ({
   loadRateLimits,
-  useCachedRateLimits: (provider: string, accountId: string) => ({
+  useCachedRateLimits: (provider: string, accountId: string) =>
+    cachedLimits.forAccount(provider, accountId),
+}));
+vi.mock("../../integrations/harness/core/auth", () => ({
+  loginHarness,
+}));
+
+import { AllUsagePanel } from "./AllUsage";
+import { saveProviderAccount } from "../../features/providers/model/providerAccounts";
+
+let container: HTMLDivElement;
+let root: Root;
+const memory = new Map<string, string>();
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  memory.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memory.set(key, value);
+    },
+    removeItem: (key: string) => {
+      memory.delete(key);
+    },
+    clear: () => memory.clear(),
+    key: (index: number) => [...memory.keys()][index] ?? null,
+    get length() {
+      return memory.size;
+    },
+  });
+  invoke.mockReset();
+  loadRateLimits.mockClear();
+  loginHarness.mockClear().mockResolvedValue(undefined);
+  cachedLimits.forAccount = (provider, accountId) => ({
     provider,
     status: "ok",
     session: {
@@ -20,20 +74,8 @@ vi.mock("../../features/providers/model/rateLimitsCache", () => ({
     monthly: null,
     resetCredits: null,
     updatedAt: 0,
-  }),
-}));
-
-const { AllUsagePanel } = await import("./AllUsage");
-const { saveProviderAccount } =
-  await import("../../features/providers/model/providerAccounts");
-
-let container: HTMLDivElement;
-let root: Root;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  localStorage.clear();
-  invoke.mockReset();
-  loadRateLimits.mockClear();
+    error: null,
+  });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -104,4 +146,60 @@ it("lists every Claude account and each other agent's usage", async () => {
   expect(container.textContent).toContain(
     "Grok Build doesn't report plan usage.",
   );
+});
+
+it("offers sign-in for a Codex account whose usage tokens expired", async () => {
+  saveProviderAccount({
+    id: "account-plus",
+    provider: "codex",
+    label: "limbusamaka@gmail.com",
+  });
+  cachedLimits.forAccount = (provider, accountId) =>
+    provider === "codex" && accountId === "account-plus"
+      ? {
+          provider: "codex",
+          status: "unavailable",
+          session: null,
+          weekly: null,
+          monthly: null,
+          resetCredits: null,
+          updatedAt: Date.now(),
+          error: "Codex not signed in",
+        }
+      : {
+          provider,
+          status: "ok",
+          session: {
+            usedPercent: 5,
+            windowMinutes: 300,
+            resetsAt: null,
+          },
+          weekly: null,
+          monthly: null,
+          resetCredits: null,
+          updatedAt: 0,
+          error: null,
+        };
+  invoke.mockResolvedValue({ status: "unavailable", message: "offline" });
+
+  await act(async () => {
+    root.render(createElement(AllUsagePanel));
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  const codex = container.querySelector('[aria-label="Codex"]')!;
+  expect(codex.textContent).toContain("Codex not signed in");
+  const signIn = Array.from(codex.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes("Sign in"),
+  );
+  expect(signIn).toBeTruthy();
+  await act(async () => {
+    signIn!.click();
+  });
+  await vi.waitFor(() =>
+    expect(loginHarness).toHaveBeenCalledWith("codex", "account-plus"),
+  );
+  expect(loadRateLimits).toHaveBeenCalledWith("codex", "account-plus", true);
 });

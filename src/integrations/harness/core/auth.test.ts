@@ -53,7 +53,18 @@ describe("harness login", () => {
       ),
     ).toBe(true);
     expect(isHarnessAuthError("Claude sign-in expired")).toBe(true);
+    expect(
+      isHarnessAuthError(
+        'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; body={"error":{"message":"Could not find the appropriate key in your authentication token. Please try signing in again.","code":"invalid_jwt"}}',
+      ),
+    ).toBe(true);
+    expect(
+      isHarnessAuthError(
+        "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.",
+      ),
+    ).toBe(true);
     expect(isHarnessAuthError("Provider request timed out")).toBe(false);
+    expect(isHarnessAuthError("Codex usage probe timed out")).toBe(false);
   });
 
   it("only carries an authentication failure through its current turn", () => {

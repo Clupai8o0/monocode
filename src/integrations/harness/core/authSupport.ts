@@ -31,8 +31,15 @@ export function isHarnessAuthError(message: string): boolean {
     /\bauthentication required\b/i,
     /\bnot (?:authenticated|signed in|logged in)\b/i,
     /\b(?:sign-in|login|session) (?:has )?expired\b/i,
-    /\bplease (?:sign|log) in\b/i,
+    /\bplease (?:try )?(?:sign(?:ing)?|log(?:ging)?) in\b/i,
     /\brun [`'"]?\S+ (?:auth )?login\b/i,
+    // Codex app-server: expired ChatGPT tokens fail usage/model reads with
+    // 401 invalid_jwt instead of a plain "not signed in" string.
+    /\b401\b.*\bunauthori[sz]ed\b/i,
+    /\binvalid_jwt\b/i,
+    /\brefresh token has expired\b/i,
+    /\bcould not be refreshed\b/i,
+    /\bauthentication token\b/i,
   ].some((pattern) => pattern.test(message));
 }
 
