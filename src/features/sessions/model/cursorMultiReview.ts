@@ -13,6 +13,7 @@ import {
   turnReport,
   turnUserRequest,
 } from "./secondOpinion";
+import { groupTurns } from "./transcriptActivity";
 
 const FRONTEND_EXT =
   /\.(tsx|jsx|css|scss|sass|less|vue|svelte|html)$/i;
@@ -153,6 +154,12 @@ export function buildCursorMultiReviewRequest(input: {
       },
     },
   };
+}
+
+/** Latest turn from transcript blocks, or null when empty. */
+export function latestUserTurn(blocks: Block[]): Block[] | null {
+  const turns = groupTurns(blocks);
+  return turns[turns.length - 1] ?? null;
 }
 
 export function shouldStartCursorMultiReview(input: {

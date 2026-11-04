@@ -8,6 +8,7 @@ import {
   CursorMultiReviewPairs,
   CURSOR_MULTI_REVIEW_APP_PREFIX,
   isFrontendReviewPath,
+  latestUserTurn,
   pathsLookFrontend,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
@@ -33,6 +34,15 @@ function edit(id: string, path: string): Block {
     },
   };
 }
+
+describe("latestUserTurn", () => {
+  it("returns the last turn or null", () => {
+    expect(latestUserTurn([])).toBeNull();
+    const first = [user("u1", "one"), assistant("a1", "ok")];
+    const second = [user("u2", "two"), edit("e2", "src/a.ts")];
+    expect(latestUserTurn([...first, ...second])).toEqual(second);
+  });
+});
 
 describe("isFrontendReviewPath", () => {
   it("matches UI extensions and path segments", () => {

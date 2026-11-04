@@ -812,10 +812,12 @@ import {
   turnUserRequest,
 } from "../features/sessions/model/secondOpinion";
 import {
+  CURSOR_MULTI_REVIEW_APP_PREFIX,
   CURSOR_MULTI_REVIEW_TITLE_PREFIX,
   CursorMultiReviewPairs,
   buildCursorMultiReviewQueueMessage,
   buildCursorMultiReviewRequest,
+  latestUserTurn,
   pickCursorMultiReviewers,
   shouldStartCursorMultiReview,
   type CursorMultiReviewer,
@@ -5923,6 +5925,7 @@ function Workspace({
         ? sessionDisplayTitle(seed.title, seed.harness)
         : "this session";
       removingSessionIds.current.add(sessionId);
+      cursorMultiReviewPairs.current.dropSource(sessionId);
       let deleteWorktreePath: string | undefined;
       if (mode === "delete" && !skipDeleteConfirm) {
         deleteConfirmationPending.current = true;
@@ -8422,6 +8425,40 @@ function Workspace({
       let proposalText = "";
       let nativeProposalText = "";
       let completedProposal: OrchestrationProposal | undefined;
+      const settleCursorMultiReview = (outcome: ControlOutcome) => {
+        window.setTimeout(() => {
+          const finished = sessionsRef.current.find((s) => s.id === sessionId);
+          if (!finished || finished.busy) return;
+
+          if (cursorMultiReviewPairs.current.isChild(sessionId)) {
+            const last = latestUserTurn(finished.blocks) ?? [];
+            const report =
+              [...last]
+                .reverse()
+                .find(
+                  (b) => b.role === "assistant" && !b.tool && b.text.trim(),
+                )?.text ?? "";
+            const status =
+              outcome.status === "cancelled"
+                ? "cancelled"
+                : outcome.status === "failed"
+                  ? "failed"
+                  : "completed";
+            cursorMultiReviewPairs.current.settleChild(sessionId, {
+              status,
+              harness: finished.harness,
+              title: finished.title,
+              text: report,
+              error: outcome.error,
+            });
+            return;
+          }
+
+          if (finished.harness !== "cursor") return;
+          const turn = latestUserTurn(finished.blocks);
+          if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
+        }, 0);
+      };
       void (async () => {
         let workCwd = initialWorkCwd;
         if (createDraftWorktree) {
@@ -9035,6 +9072,7 @@ function Workspace({
               void announceSessionFinished(finished, visible);
           }, 0);
           notifyReviewChanged(sessionId);
+          settleCursorMultiReview(controlOutcome);
           notifyAgentGitActivity();
           nudgeWorkspace(workCwd);
           nudgeWatchedFiles();
@@ -9073,16 +9111,20 @@ function Workspace({
                   : stopped;
               }),
             );
+            settleCursorMultiReview(controlOutcome);
           }
         })
         .finally(() => {
           editedResend?.reject();
           if (editedResend) editedResends.finish(sessionId);
-          options?.onSettled?.(
+          const settledOutcome: ControlOutcome =
             turnGen.current.get(sessionId) !== gen
               ? { status: "cancelled", text: controlText }
-              : controlOutcome,
-          );
+              : controlOutcome;
+          options?.onSettled?.(settledOutcome);
+          if (settledOutcome.status === "cancelled") {
+            settleCursorMultiReview(settledOutcome);
+          }
         });
       return true;
     },
@@ -9944,10 +9986,11 @@ function Workspace({
                 handoffCard: head.handoffCard,
                 intent: head.intent,
                 ...(head.monoSessionCompletion
-                  ? {
-                      monoSessionCompletion: head.monoSessionCompletion,
-                      appRequestId: head.id,
-                    }
+                  ? { monoSessionCompletion: head.monoSessionCompletion }
+                  : {}),
+                ...(head.monoSessionCompletion ||
+                head.id.startsWith(CURSOR_MULTI_REVIEW_APP_PREFIX)
+                  ? { appRequestId: head.id }
                   : {}),
               },
             );
@@ -10544,7 +10587,6 @@ function Workspace({
     [onSubmit, openSessionBeside],
   );
 
-  // Task 7: call launch / settleChild on turn end
   const launchCursorMultiReviewRef = useRef(launchCursorMultiReview);
   launchCursorMultiReviewRef.current = launchCursorMultiReview;
 
