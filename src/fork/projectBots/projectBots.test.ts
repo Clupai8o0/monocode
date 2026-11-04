@@ -33,11 +33,14 @@ describe("project bots", () => {
     const { eyes } = PROJECT_BOT_SPRITES.flower;
     for (const [x, y] of eyes.rest) expect(flower!.rest[y][x]).toBe(".");
     for (const [x, y] of eyes.talk) expect(flower!.talk[y][x]).toBe(".");
-    // The stem runs straight down the bloom's middle column, with no curl.
+    // The stem runs straight down the bloom's middle column, with one leaf.
     for (const rows of [flower!.rest, flower!.talk]) {
-      for (const y of [5, 6, 7]) expect(rows[y][3]).toBe("#");
-      expect(rows[7]).toBe("...#....");
+      expect(rows.slice(5)).toEqual(["...#....", "..##....", "...#...."]);
     }
+    // Talking opens a mouth under the eyes and changes nothing else.
+    expect(flower!.rest[3][3]).toBe("#");
+    expect(flower!.talk[3][3]).toBe(".");
+    expect(flower!.talk.filter((row, y) => row !== flower!.rest[y])).toHaveLength(1);
     expect(projectBotFor("/Users/sam/Documents/projects/yap")).toBeNull();
   });
 
