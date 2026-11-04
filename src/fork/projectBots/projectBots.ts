@@ -405,6 +405,34 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [4, 2],
     ]),
   },
+  // Jar (pick only, no project maps to it): a face on a jar with its lid
+  // lifted, like Coin Jar's logo. The gap under the lid is what makes it a jar.
+  jar: {
+    rest: [
+      ".#####..",
+      ".#####..",
+      "........",
+      ".#####..",
+      "##.#.##.",
+      "#######.",
+      "#######.",
+      ".#####..",
+    ],
+    talk: [
+      ".#####..",
+      ".#####..",
+      "........",
+      ".#####..",
+      "##.#.##.",
+      "###.###.",
+      "#######.",
+      ".#####..",
+    ],
+    eyes: same([
+      [2, 4],
+      [4, 4],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(

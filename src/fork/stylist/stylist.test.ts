@@ -57,6 +57,7 @@ describe("project look app actions", () => {
     expect(result.choices.mascots).toContain(STYLIST_MASCOT);
     expect(result.choices.mascots).toHaveLength(PROJECT_MASCOTS.length);
     expect(result.choices.mascots).toContain("flower");
+    expect(result.choices.mascots).toContain("jar");
     expect(result.choices.colors[0]).toEqual({ index: 0, value: expect.any(String) });
   });
 
