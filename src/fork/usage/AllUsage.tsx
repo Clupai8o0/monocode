@@ -45,12 +45,13 @@ const EXTRA: {
   { provider: "antigravity", name: "Antigravity", harness: "antigravity" },
   { provider: "muse", name: "Muse" },
   { provider: "deepseek", name: "DeepSeek", harness: "deepseek" },
+  { provider: "grok", name: "Grok", harness: "grok" },
 ];
 
 /**
  * Fork feature: one footer button that lists every account's usage at once:
  * each Claude and Codex account, Cursor Auto/API pools, Antigravity and Muse
- * windows, DeepSeek's balance, and a note for Grok, which reports no plan usage.
+ * windows, DeepSeek's balance, and Grok's shared plan credits.
  */
 export function AllUsageChip({ className }: { className: string }) {
   const [open, setOpen] = useState(false);
@@ -199,9 +200,6 @@ export function AllUsagePanel() {
           now={now}
         />
       ))}
-      <Section name="Grok" harness="grok">
-        <p className="text-content/45">Grok Build doesn't report plan usage.</p>
-      </Section>
         </>
       ) : null}
     </div>

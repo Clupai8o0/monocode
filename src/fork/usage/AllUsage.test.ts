@@ -50,9 +50,23 @@ it("lists every Claude account and each other agent's usage", async () => {
     provider: "claude",
     label: "Second",
   });
+  const grokReset = Date.now() + 3.5 * 60 * 60_000;
   invoke.mockImplementation((_command: string, args: { provider: string }) =>
     Promise.resolve(
-      args.provider === "deepseek"
+      args.provider === "grok"
+        ? {
+            status: "ok",
+            body: JSON.stringify({
+              config: {
+                creditUsagePercent: 24,
+                currentPeriod: {
+                  type: "USAGE_PERIOD_TYPE_WEEKLY",
+                  end: new Date(grokReset).toISOString(),
+                },
+              },
+            }),
+          }
+        : args.provider === "deepseek"
         ? {
             status: "ok",
             body: JSON.stringify({
@@ -101,7 +115,12 @@ it("lists every Claude account and each other agent's usage", async () => {
   expect(container.textContent).toContain("$1.95 left");
   expect(container.textContent).toContain("muse is not installed");
   expect(container.textContent).toContain("agy timed out");
-  expect(container.textContent).toContain(
+  expect(invoke).toHaveBeenCalledWith("fork_extra_usage", { provider: "grok" });
+  const grok = container.querySelector('[aria-label="Grok"]')!;
+  expect(grok.textContent).toContain("wk");
+  expect(grok.textContent).toContain("24% used");
+  expect(grok.textContent).toContain("3h");
+  expect(container.textContent).not.toContain(
     "Grok Build doesn't report plan usage.",
   );
 });
