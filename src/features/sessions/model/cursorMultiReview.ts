@@ -208,7 +208,10 @@ type Pair = {
     {
       settled: boolean;
       result?: CursorMultiReviewChildResult;
-      lastOutcome?: { status: string; error?: string };
+      lastOutcome?: {
+        turnId?: string;
+        outcome: { status: string; error?: string };
+      };
     }
   >;
 };
@@ -379,15 +382,23 @@ export class CursorMultiReviewPairs {
   /** Remembers how a reviewer's turn ended, while its grace period runs. */
   noteChildOutcome(
     sessionId: string,
+    blocks: Block[],
     outcome: { status: string; error?: string },
   ) {
     const child = this.childRecord(sessionId);
-    if (child) child.lastOutcome = outcome;
+    if (child) {
+      child.lastOutcome = { turnId: latestUserBlockId(blocks), outcome };
+    }
   }
 
-  /** How an idle reviewer last ended, for when it is removed before settling. */
-  childOutcome(sessionId: string) {
-    return this.childRecord(sessionId)?.lastOutcome;
+  /**
+   * How the turn in these blocks ended, for a reviewer removed before settling.
+   * Nothing if that turn never ended by itself, so the caller reports it cancelled.
+   */
+  childOutcome(sessionId: string, blocks: Block[]) {
+    const last = this.childRecord(sessionId)?.lastOutcome;
+    if (!last || last.turnId !== latestUserBlockId(blocks)) return undefined;
+    return last.outcome;
   }
 
   private childRecord(sessionId: string) {

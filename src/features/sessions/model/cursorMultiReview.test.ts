@@ -553,19 +553,28 @@ describe("CursorMultiReviewPairs", () => {
       turnId: "u1",
       childSessionIds: ["r-claude"],
     });
-    expect(pairs.childOutcome("r-claude")).toBeUndefined();
-    pairs.noteChildOutcome("r-claude", { status: "cancelled" });
-    pairs.noteChildOutcome("r-claude", { status: "completed" });
-    expect(pairs.childOutcome("r-claude")).toEqual({ status: "completed" });
-    pairs.noteChildOutcome("other", { status: "failed" });
-    expect(pairs.childOutcome("other")).toBeUndefined();
+    const first = [user("u1", "Review"), assistant("a1", "Partial")];
+    const second = [...first, user("u2", "Continue"), assistant("a2", "Fine")];
+    expect(pairs.childOutcome("r-claude", first)).toBeUndefined();
+    pairs.noteChildOutcome("r-claude", first, { status: "cancelled" });
+    expect(pairs.childOutcome("r-claude", first)).toEqual({
+      status: "cancelled",
+    });
+    // A newer turn that never ended by itself has no outcome yet.
+    expect(pairs.childOutcome("r-claude", second)).toBeUndefined();
+    pairs.noteChildOutcome("r-claude", second, { status: "completed" });
+    expect(pairs.childOutcome("r-claude", second)).toEqual({
+      status: "completed",
+    });
+    pairs.noteChildOutcome("other", second, { status: "failed" });
+    expect(pairs.childOutcome("other", second)).toBeUndefined();
     pairs.settleChild("r-claude", {
       status: "completed",
       harness: "claude",
       title: "Claude Code",
       text: "Fine",
     });
-    expect(pairs.childOutcome("r-claude")).toBeUndefined();
+    expect(pairs.childOutcome("r-claude", second)).toBeUndefined();
   });
 
   it("dropSource clears without onReady", () => {

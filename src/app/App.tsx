@@ -6134,11 +6134,11 @@ function Workspace({
                   title: seed.title,
                   blocks: lastBlocks,
                 },
-                // Idle means its turn already ended, so keep how it ended.
-                (!open?.busy &&
-                  cursorMultiReviewPairs.current.childOutcome(sessionId)) || {
-                  status: "cancelled",
-                },
+                // A turn that had already ended keeps how it ended.
+                cursorMultiReviewPairs.current.childOutcome(
+                  sessionId,
+                  lastBlocks,
+                ) ?? { status: "cancelled" },
               ),
             );
           }
@@ -8522,7 +8522,11 @@ function Workspace({
           if (!finished || finished.busy) return;
 
           if (cursorMultiReviewPairs.current.isChild(sessionId)) {
-            cursorMultiReviewPairs.current.noteChildOutcome(sessionId, outcome);
+            cursorMultiReviewPairs.current.noteChildOutcome(
+              sessionId,
+              finished.blocks,
+              outcome,
+            );
             settleCursorMultiReviewChildAfterGrace({
               getChild: () =>
                 sessionsRef.current.find((s) => s.id === sessionId),
