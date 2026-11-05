@@ -63,6 +63,24 @@ describe("project bots", () => {
     expect(projectBotFor("/Users/sam/Documents/projects/coin-jar")).toBeNull();
   });
 
+  it("offers the couple as a pick in the roster, with no eyes", () => {
+    const couple = PROJECT_MASCOTS.find((mascot) => mascot.name === "couple");
+    expect(couple).toBeDefined();
+    for (const rows of [couple!.rest, couple!.talk]) {
+      expect(rows).toHaveLength(8);
+      for (const row of rows) expect(row).toMatch(/^[#.]{8}$/);
+      // Two 2x2 heads and the joined hands.
+      expect(rows.slice(0, 2)).toEqual([".##..##.", ".##..##."]);
+      expect(rows[3]).toBe("########");
+    }
+    expect(PROJECT_BOT_SPRITES.couple.eyes).toEqual({ rest: [], talk: [] });
+    // Talking only kicks the legs out: row 7 changes and nothing else moves.
+    expect(couple!.rest[7]).toBe(".#....#.");
+    expect(couple!.talk[7]).toBe("#......#");
+    expect(couple!.talk.filter((row, y) => y !== 7)).toEqual(couple!.rest.filter((row, y) => y !== 7));
+    expect(projectBotFor("/Users/sam/Documents/projects/glow-up")).toBeNull();
+  });
+
   it("no longer offers the jar", () => {
     expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).not.toContain("jar");
   });
