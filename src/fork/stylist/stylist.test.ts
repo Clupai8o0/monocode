@@ -19,7 +19,6 @@ import {
   STYLIST_MASCOT,
   STYLIST_NAME,
 } from "./stylistMono";
-import { STYLIST_NO_SESSIONS } from "./stylistId";
 import { monoContext } from "../../features/monos/model/monoFiles";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -167,44 +166,27 @@ describe("Stylist Mono", () => {
   });
 });
 
-// Fork: a session it starts is a coding agent that can change project files.
-describe("the Stylist does its look work itself", () => {
+// Fork: like any Mono, the Stylist can hand code work to project sessions.
+describe("the Stylist can start project sessions", () => {
   const files = (id: string) => ({
     id, dir: "/data", soul: "Be brief.", soulHash: "s", memory: "", memoryHash: "m",
     memoryPath: "/data/MEMORY.md", topics: [],
   });
   const look = { name: "Stylist", mascot: "beret", color: "#fff", projects: [{ path: APP, name: "app" }] };
 
-  it("leaves the delegation rules out of its prompt only", () => {
+  it("gets the same delegation rules as other Monos", () => {
     const id = ensureStylistMono([APP])!;
     const stylist = monoContext(look, files(id), { soul: true, memory: false });
-    expect(stylist).toContain("<stylist_rules>");
-    expect(stylist).not.toContain("<session_delegation_rules>");
-    expect(stylist).not.toContain("hand it to a background session");
-    expect(stylist).not.toContain("<habits_rules>");
-    expect(stylist).not.toContain("drive those projects' sessions");
-    const other = monoContext(look, files("someone-else"), { soul: true, memory: false });
-    expect(other).toContain("<session_delegation_rules>");
-    expect(other).not.toContain("<stylist_rules>");
-    expect(other).toContain("<habits_rules>");
+    expect(stylist).toContain("<session_delegation_rules>");
+    expect(stylist).toContain("<habits_rules>");
+    expect(stylist).not.toContain("<stylist_rules>");
   });
 
-  it("refuses every session action that starts or changes one", async () => {
+  it("is not refused session or habit actions", async () => {
     const id = ensureStylistMono([APP])!;
     const source = newSession("claude", APP);
     const host = { monoOf: () => ({ id, projects: [APP] }) } as unknown as AgentAppHost;
-    for (const [action, input] of [
-      ["sessions.start", { prompt: "do all projects" }],
-      ["sessions.send", { sessionId: "other", prompt: "hi" }],
-      ["sessions.draft", { sessionId: "other", prompt: "hi" }],
-      ["sessions.stop", { sessionId: "other" }],
-      ["sessions.archive", { sessionId: "other" }],
-      ["sessions.delete", { sessionId: "other" }],
-      ["habits.add", { name: "Looks", instructions: "do all projects" }],
-      ["habits.update", { id: "h1", instructions: "do all projects" }],
-      ["habits.run", { id: "h1" }],
-    ] as const) {
-      await expect(handleAgentApp(source, "req1", action, input, host)).rejects.toThrow(STYLIST_NO_SESSIONS);
-    }
+    const result = handleAgentApp(source, "req1", "sessions.start", { prompt: "add a mascot" }, host);
+    await expect(result).rejects.not.toThrow(/Stylist/);
   });
 });

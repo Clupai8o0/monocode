@@ -3,11 +3,6 @@ import { handleAgentMonos } from "./agentAppMonos";
 // Fork: agents use the same project logo storage as the manual picker.
 import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { projectLook, setProjectLook } from "../../../fork/stylist/agentProjectLook";
-import {
-  isStylistMono,
-  STYLIST_BLOCKED_ACTIONS,
-  STYLIST_NO_SESSIONS,
-} from "../../../fork/stylist/stylistId";
 import { createAgentProject } from "../../../fork/starterMonos/agentProjectCreate";
 import { handleMonoMaker } from "../../../fork/starterMonos/agentMonoMaker";
 import { looksLikeProject } from "../../projects/model/recents";
@@ -1116,13 +1111,6 @@ export async function handleAgentApp(
   host: AgentAppHost,
 ): Promise<unknown> {
   fields(action, input);
-  // Fork: the Stylist only changes looks. A session or habit run is a coding
-  // agent that can change project files (src/fork/stylist).
-  if (
-    STYLIST_BLOCKED_ACTIONS.has(action) &&
-    isStylistMono(host.monoOf?.(source.id)?.id)
-  )
-    throw new Error(STYLIST_NO_SESSIONS);
   if (action === "monos.all" || action === "monos.make")
     return handleMonoMaker(source, action, input, host);
   if (action.startsWith("monos."))
