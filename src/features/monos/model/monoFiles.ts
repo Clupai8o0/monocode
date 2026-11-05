@@ -249,7 +249,7 @@ function readHanded(): Record<string, Handed> {
  * Bump when the standing context changes (identity, memory or habit rules),
  * so sessions already running are handed the new version once.
  */
-const CONTEXT_VERSION = 10;
+const CONTEXT_VERSION = 11;
 
 function handedSoul(soulHash: string): string {
   return `${soulHash}:v${CONTEXT_VERSION}`;
@@ -328,7 +328,7 @@ export function forgetAgentContext(sessionId: string): void {
 }
 
 /** Bumped when the fixed rules below change, so live chats get them again. */
-export const MONO_PROMPT_VERSION = 21;
+export const MONO_PROMPT_VERSION = 22;
 
 /**
  * The user's message with what the app adds to it, placed ahead and marked

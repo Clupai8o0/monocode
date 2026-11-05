@@ -135,12 +135,18 @@ export function ensureStylistMono(paths: readonly string[]): string | undefined 
 export function seedStylistMono(paths: readonly string[]): Promise<string | undefined> {
   return withMonoConfigurationLock(async () => {
     const id = ensureStylistMono(paths);
-    if (id) {
-      await upgradeStylistSoul(id).catch(() => undefined);
+    if (id && localStorage.getItem(SOUL_UPGRADE_KEY) !== id) {
+      const done = await upgradeStylistSoul(id).then(() => true, () => false);
+      if (done) {
+        localStorage.setItem(SOUL_UPGRADE_KEY, id);
+      }
     }
     return id;
   }).catch(() => undefined);
 }
+
+/** Set once a Stylist's soul lost the old no-sessions lines, so it runs once. */
+const SOUL_UPGRADE_KEY = `${STYLIST_STATE_KEY}.soulUpgraded`;
 
 /** Lines from older Stylist seeds that kept it out of project sessions. */
 const OLD_SOUL_LINES: readonly (readonly [string, string])[] = [

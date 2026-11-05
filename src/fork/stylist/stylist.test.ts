@@ -207,6 +207,25 @@ describe("the Stylist can start project sessions", () => {
     setHarnessAvailability(none);
   });
 
+  it("upgrades a saved soul once at launch", async () => {
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request: (_name: string, work: () => unknown) => Promise.resolve(work()) },
+    });
+    const old = "You never write code or change files inside a project; projects are read-only to you.\n- Prefer pink.\n";
+    mocks.invoke.mockImplementation(async (command: string) =>
+      command === "mono_read" ? { text: old, hash: "h1" } : command === "mono_save" ? "h2" : undefined);
+    await seedStylistMono([APP]);
+    const saves = mocks.invoke.mock.calls.filter(([command]) => command === "mono_save");
+    expect(saves).toHaveLength(1);
+    const saved = (saves[0][1] as { text: string }).text;
+    expect(saved).toContain("app sessions.start");
+    expect(saved).toContain("- Prefer pink.");
+    mocks.invoke.mockClear();
+    await seedStylistMono([APP]);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "mono_read")).toHaveLength(0);
+  });
+
   it("drops the old no-sessions lines from a saved soul and keeps the rest", () => {
     const old = "You are the Stylist. You never write code or change files inside a project; projects are read-only to you.\n\n"
       + "- Your projects are the user's local projects.\n"
