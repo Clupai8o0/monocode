@@ -405,34 +405,30 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [4, 2],
     ]),
   },
-  // Pig (pick only, no project maps to it): a pig's face from the front, with
-  // two ears, two eyes and a big snout with two nostrils. Its ears flick out
-  // while it talks. The nostrils are only holes in the grid, not eyes.
+  // Pig (pick only, no project maps to it): side on, facing right, with a curly
+  // tail, an ear, one eye and a snout. Its snout opens while it talks.
   pig: {
     rest: [
-      "..#..#..",
+      "......#.",
+      "#.#####.",
       ".######.",
-      "##.##.##",
-      "########",
-      "#......#",
-      "#.#..#.#",
-      "#......#",
+      ".####.##",
+      ".#######",
       ".######.",
+      ".##..##.",
+      "........",
     ],
     talk: [
-      ".#....#.",
+      "......#.",
+      "#.#####.",
       ".######.",
-      "##.##.##",
-      "########",
-      "#......#",
-      "#.#..#.#",
-      "#......#",
+      ".####.##",
       ".######.",
+      ".######.",
+      ".##..##.",
+      "........",
     ],
-    eyes: same([
-      [2, 2],
-      [5, 2],
-    ]),
+    eyes: same([[5, 3]]),
   },
 };
 
