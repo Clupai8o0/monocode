@@ -430,6 +430,32 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
     ],
     eyes: same([[5, 3]]),
   },
+  // Couple (pick only, no project maps to it; made for Glow Up): two people
+  // holding hands. The heads are 2x2 with no eye holes, so the eye list is
+  // empty. Their legs kick out while they talk.
+  couple: {
+    rest: [
+      ".##..##.",
+      ".##..##.",
+      "........",
+      "########",
+      ".##..##.",
+      ".##..##.",
+      ".#....#.",
+      ".#....#.",
+    ],
+    talk: [
+      ".##..##.",
+      ".##..##.",
+      "........",
+      "########",
+      ".##..##.",
+      ".##..##.",
+      ".#....#.",
+      "#......#",
+    ],
+    eyes: same([]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(
