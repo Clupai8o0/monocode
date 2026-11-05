@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleAgentApp, type AgentAppHost } from "../../features/agent-app/model/agentApp";
 import { newSession } from "../../features/sessions/model/session";
+import { resetHarnessModelOverlays, setHarnessModels } from "../../features/sessions/model/models";
+import { setHarnessAvailability, type HarnessAvailability } from "../../integrations/harness/core/availabilityState";
 import {
   loadTabGroupColors,
   loadTabGroupCustomColors,
@@ -18,6 +20,8 @@ import {
   STYLIST_COLOR,
   STYLIST_MASCOT,
   STYLIST_NAME,
+  STYLIST_SOUL,
+  withoutOldStylistLines,
 } from "./stylistMono";
 import { monoContext } from "../../features/monos/model/monoFiles";
 
@@ -182,11 +186,38 @@ describe("the Stylist can start project sessions", () => {
     expect(stylist).not.toContain("<stylist_rules>");
   });
 
-  it("is not refused session or habit actions", async () => {
+  it("can start a project session", async () => {
     const id = ensureStylistMono([APP])!;
-    const source = newSession("claude", APP);
-    const host = { monoOf: () => ({ id, projects: [APP] }) } as unknown as AgentAppHost;
-    const result = handleAgentApp(source, "req1", "sessions.start", { prompt: "add a mascot" }, host);
-    await expect(result).rejects.not.toThrow(/Stylist/);
+    const none = { claude: false, codex: false, cursor: false, grok: false, opencode: false, pi: false, omp: false,
+      fx: false, hermes: false, deepseek: false, antigravity: false, devin: false, vivobook: false } as HarnessAvailability;
+    setHarnessAvailability({ ...none, codex: true });
+    setHarnessModels("codex", [{ id: "codex:test", harness: "codex", name: "Test model", settings: [] }]);
+    const source = newSession("codex", APP, "codex:test");
+    const start = vi.fn(async () => {});
+    const host = {
+      start,
+      isMono: () => true,
+      monoOf: () => ({ id, projects: [APP] }),
+    } as unknown as AgentAppHost;
+    await handleAgentApp(source, "req1", "sessions.start", {
+      prompt: "add a mascot", draft: true,
+    }, host);
+    expect(start).toHaveBeenCalledOnce();
+    resetHarnessModelOverlays();
+    setHarnessAvailability(none);
+  });
+
+  it("drops the old no-sessions lines from a saved soul and keeps the rest", () => {
+    const old = "You are the Stylist. You never write code or change files inside a project; projects are read-only to you.\n\n"
+      + "- Your projects are the user's local projects.\n"
+      + "- Do all of this yourself. Never start or message project sessions; those are coding agents that can change files.\n"
+      + "- Prefer pink.\n";
+    const next = withoutOldStylistLines(old);
+    expect(next).not.toContain("Never start");
+    expect(next).not.toContain("read-only to you");
+    expect(next).toContain("app sessions.start");
+    expect(next).toContain("- Prefer pink.");
+    expect(withoutOldStylistLines(next)).toBe(next);
+    expect(withoutOldStylistLines(STYLIST_SOUL)).toBe(STYLIST_SOUL);
   });
 });
