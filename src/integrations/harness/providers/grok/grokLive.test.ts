@@ -744,4 +744,57 @@ describe("grok live turn sequence", () => {
     await expect(turn).rejects.toThrow(/exited/);
     expect(events.map((e) => e.type)).not.toContain("message.completed");
   });
+
+  it("keeps a fallback turn's size over the prompt result's", async () => {
+    const events: HarnessEvent[] = [];
+    const base = {
+      sessionId: "t14",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: (e) => events.push(e),
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const steer = steerGrokTurn({ ...base, text: "and bye", attachments: [] });
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    reply(parse().find((m) => m.method === "_x.ai/interject")!.id, {
+      result: { status: "queued" },
+    });
+    await steer;
+    const send = (method: string, params: Record<string, unknown>) =>
+      onLine!(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    send("_x.ai/queue/changed", {
+      sessionId: "S1",
+      runningPromptId: "interject-fallback-1",
+    });
+    reply(parse().find((m) => m.method === "session/prompt")!.id, {
+      stopReason: "end_turn",
+      _meta: { totalTokens: 181000 },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    send("session/update", {
+      sessionId: "S1",
+      update: {
+        sessionUpdate: "response_completed",
+        usage: { input_tokens: 45000, output_tokens: 0 },
+      },
+    });
+    send("_x.ai/queue/changed", { sessionId: "S1" });
+    await turn;
+    const sizes = events.flatMap((e) => (e.type === "context" ? [e.used] : []));
+    expect(sizes.at(-1)).toBe(45000);
+    await stopGrokSession("t14");
+  });
 });

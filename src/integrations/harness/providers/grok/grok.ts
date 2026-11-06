@@ -62,6 +62,8 @@ type Live = {
   interjecting: number;
   /** The latest context size came from an auto-compaction. */
   compactedLast: boolean;
+  /** Counts context sizes shown, to spot one newer than the prompt result. */
+  contextSeq: number;
   /** The Grok process exited. */
   exited: boolean;
   /** Grok's running prompt id, from `_x.ai/queue/changed`. */
@@ -504,6 +506,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       queueWaiters: new Set(),
       interjecting: 0,
       compactedLast: false,
+      contextSeq: 0,
       exited: false,
       fullAccess: wantFullAccess,
       planning: wantPlanning,
@@ -575,6 +578,8 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     const blocks = grokPromptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
     let result: unknown;
+    let useResultSize = false;
+    let seqAtResult = 0;
     live.prompting = true;
     live.interjectedAt = undefined;
     live.compactedLast = false;
@@ -590,6 +595,10 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
       // Marks the turn ready, which is what lets a queued follow-up steer it.
       input.onAccepted?.();
       result = await pending;
+      // The result's size is only a backstop: not over a compaction, and not
+      // over a size a fallback turn reports while we wait.
+      useResultSize = !live.compactedLast;
+      seqAtResult = live.contextSeq;
       await waitForFallbackTurns(live);
     } finally {
       live.prompting = false;
@@ -599,8 +608,7 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     }
     // Stopped or cancelled while waiting: the session is gone.
     if (live.cancelled || live.muteUpdates) return;
-    // Only a backstop: a later auto-compaction size must not be overwritten.
-    if (!live.compactedLast) {
+    if (useResultSize && live.contextSeq === seqAtResult) {
       for (const event of contextFromPromptResult(result)) {
         live.onEvent(withWindow(live, event));
       }
@@ -637,13 +645,15 @@ function handleNotification(live: Live, method: string, params: unknown) {
   if (!updateParams) return;
   const rec = asRecord(updateParams);
   const update = asRecord(rec?.update) ?? rec;
-  const updateKind = update?.sessionUpdate ?? update?.session_update;
+  const updateKind =
+    update?.sessionUpdate ?? update?.session_update ?? update?.type;
   for (const event of live.subagents.route(
     updateParams,
     eventsFromAcpUpdate(updateParams),
   )) {
     if (event.type === "context") {
       live.compactedLast = updateKind === "auto_compact_completed";
+      live.contextSeq += 1;
     }
     live.onEvent(withWindow(live, event));
   }
