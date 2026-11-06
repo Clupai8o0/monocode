@@ -76,6 +76,59 @@ function turnStartIndex(session: Pick<Session, "blocks" | "queuedMessages">) {
 }
 
 /**
+ * Index of the message the turn's latest effort line answers: the turn's start
+ * or a follow-up sent during it, or -1. The effort gate runs on every message,
+ * and the CLI runs a follow-up that missed the turn as a turn of its own, so a
+ * bare line after a follow-up is a stop for a raise even with work before it.
+ */
+function replyStartIndex(
+  session: Pick<Session, "blocks" | "queuedMessages">,
+): number {
+  const start = turnStartIndex(session);
+  if (start < 0) {
+    return -1;
+  }
+  let line = -1;
+  for (let i = session.blocks.length - 1; i > start; i--) {
+    if (isEffortLineBlock(session.blocks[i])) {
+      line = i;
+      break;
+    }
+  }
+  for (let i = line - 1; i > start; i--) {
+    const block = session.blocks[i];
+    if (
+      block.role === "user" &&
+      !block.draft &&
+      !session.queuedMessages?.some((message) => message.blockId === block.id)
+    ) {
+      return i;
+    }
+  }
+  return start;
+}
+
+/**
+ * What a session's turn has been read up to: its start and its latest effort
+ * line. A follow-up the CLI ran as its own turn brings a new line under the
+ * same start; compaction flips busy without one.
+ */
+function turnKey(session: Pick<Session, "blocks" | "queuedMessages">): string {
+  const start = turnStartIndex(session);
+  if (start < 0) {
+    return "";
+  }
+  let line = "";
+  for (let i = session.blocks.length - 1; i > start; i--) {
+    if (isEffortLineBlock(session.blocks[i])) {
+      line = session.blocks[i].id;
+      break;
+    }
+  }
+  return `${session.blocks[start].id}:${line}`;
+}
+
+/**
  * The latest <needed> of a turn. The line comes before any tool call, so with
  * tools in the turn it is on an earlier assistant block, not the last one. A
  * plan-mode reply has already been moved to a plan block by the time a turn ends.
@@ -327,7 +380,7 @@ export function resumeLevelFor(
   if (!eligible(session) || session.queuedMessages?.length) {
     return null;
   }
-  const start = turnStartIndex(session);
+  const start = replyStartIndex(session);
   if (start < 0) {
     return null;
   }
@@ -387,7 +440,7 @@ export function endedForEffortRaise(session: Session): boolean {
   if (session.queuedMessages?.length) {
     return false;
   }
-  const start = turnStartIndex(session);
+  const start = replyStartIndex(session);
   if (start < 0) {
     return false;
   }
@@ -521,8 +574,7 @@ export function effortChangesOfEndedTurns(
     if (known && !idle.has(session.id)) {
       continue;
     }
-    const start = turnStartIndex(session);
-    const turnId = start < 0 ? "" : session.blocks[start].id;
+    const turnId = turnKey(session);
     const ended = idle.has(session.id) && seen.get(session.id) !== turnId;
     // A Stop is for the turn that just went idle, whether it asked or not.
     const stopped = idle.has(session.id) && userStopped.delete(session.id);
@@ -646,7 +698,7 @@ export function useEffortAsks(
         if (!change) {
           continue;
         }
-        const turnId = session.blocks[turnStartIndex(session)]?.id ?? "";
+        const turnId = turnKey(session);
         // A turn already read when it ended is not running again: busy also
         // flips for compaction, which must not be stopped.
         if (
