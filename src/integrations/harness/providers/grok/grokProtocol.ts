@@ -1,11 +1,29 @@
-import { promptBlocks, type PromptContentBlock } from "../../../../features/sessions/model/attachments";
-import type { AgentModel, ModelSetting, ModelSettingChoice } from "../../../../features/sessions/model/models";
-import type { Attachment, RuntimeMode, ToolPreview } from "../../../../features/sessions/model/session";
+import {
+  attachmentPathText,
+  promptBlocks,
+  type PromptContentBlock,
+} from "../../../../features/sessions/model/attachments";
+import type {
+  AgentModel,
+  ModelSetting,
+  ModelSettingChoice,
+} from "../../../../features/sessions/model/models";
+import type {
+  Attachment,
+  RuntimeMode,
+  ToolPreview,
+} from "../../../../features/sessions/model/session";
 import { normalizeTaskListStatus } from "../../../../features/sessions/model/taskList";
 import { acpAgentInfo } from "../../core/acpSubagents";
 import type { ApprovalDecision, HarnessEvent } from "../../core/types";
-import type { UserQuestion, UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
-import { questionsFromUnknown, selectedAnswerLabels } from "../../../../features/sessions/model/userQuestion";
+import type {
+  UserQuestion,
+  UserQuestionReply,
+} from "../../../../features/sessions/model/userQuestion";
+import {
+  questionsFromUnknown,
+  selectedAnswerLabels,
+} from "../../../../features/sessions/model/userQuestion";
 import {
   composeToolTitle,
   extractSearchQuery,
@@ -78,12 +96,24 @@ export function askQuestionResponse(
   return { outcome: "accepted", answers };
 }
 
-/** Grok accepts ACP image blocks despite advertising image: false. */
+/**
+ * Grok accepts ACP image blocks despite advertising image: false. It inlines a
+ * resource_link only when the file is valid UTF-8 and silently drops anything
+ * else (a binary PDF never reaches the model), so every other file travels as
+ * a path its own tools can read, as it does for Claude and Codex.
+ */
 export function grokPromptBlocks(
   text: string,
   attachments: Attachment[] = [],
 ): PromptContentBlock[] {
-  return promptBlocks(text, attachments);
+  const blocks = promptBlocks(text, attachments);
+  // promptBlocks ends with one block per attachment, in order.
+  const offset = blocks.length - attachments.length;
+  return blocks.map((block, index) =>
+    block.type === "resource_link" && index >= offset
+      ? { type: "text", text: attachmentPathText(attachments[index - offset]) }
+      : block,
+  );
 }
 
 export function grokSpawnArgs(input: {
@@ -253,7 +283,7 @@ export function permissionRequestFromAcp(
     grok.kind ??
     stringField(tool, "kind") ??
     stringField(subject ?? {}, "kind");
-  const preview = extractToolPreview(tool, tool);
+  const preview = extractToolPreview(withKind(tool, grok.kind), tool);
   const command = grok.command ?? extractShellCommand(tool);
   const title =
     composeToolTitle({
@@ -362,7 +392,7 @@ export function eventsFromAcpUpdate(params: unknown): HarnessEvent[] {
       grok.kind ?? stringField(update, "kind") ?? stringField(tool, "kind");
     const status = stringField(update, "status") ?? stringField(tool, "status");
     const preview = mergePreview(
-      extractToolPreview(update, tool),
+      extractToolPreview(withKind(update, toolKind), tool),
       grok.path,
       grok.query,
       toolKind,
@@ -404,7 +434,7 @@ export function eventsFromAcpUpdate(params: unknown): HarnessEvent[] {
         title,
         kind: toolKind,
         status,
-        detail: cap(toolDetail(update, tool) ?? "") || undefined,
+        detail: cap(stripAnsi(toolDetail(update, tool) ?? "")) || undefined,
         preview,
         ...acpAgentInfo(update, tool, toolKind, title, grok.input),
       },
@@ -420,7 +450,81 @@ export function eventsFromAcpUpdate(params: unknown): HarnessEvent[] {
     return [];
   }
 
+  if (kind === "response_completed") return contextFromModelCall(update);
+  if (kind === "turn_completed") return metricsFromTurn(update);
+  if (kind === "auto_compact_completed") {
+    const used = numberField(update, "tokens_after");
+    return used != null ? [{ type: "context", used }] : [];
+  }
+
   return usageFromUpdate(update);
+}
+
+/**
+ * One model call finished. Its prompt plus reply is what the conversation now
+ * holds. Grok reports the prompt split into uncached, cache-read and
+ * cache-written parts, so all four add up to the context in use.
+ */
+function contextFromModelCall(update: Record<string, unknown>): HarnessEvent[] {
+  const usage = asRecord(update.usage);
+  if (!usage) return [];
+  const used = sumNumbers(usage, [
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "output_tokens",
+  ]);
+  return used != null ? [{ type: "context", used }] : [];
+}
+
+/**
+ * Turn totals across every model call. Grok's `inputTokens` here already
+ * includes the cached part, so it is split out to match Claude's meaning:
+ * uncached input, cache reads and cache writes as separate counts.
+ */
+function metricsFromTurn(update: Record<string, unknown>): HarnessEvent[] {
+  const usage = asRecord(update.usage);
+  if (!usage) return [];
+  const promptTokens =
+    numberField(usage, "inputTokens") ?? numberField(usage, "input_tokens");
+  const outputTokens =
+    numberField(usage, "outputTokens") ?? numberField(usage, "output_tokens");
+  const cacheReadTokens =
+    numberField(usage, "cachedReadTokens") ??
+    numberField(usage, "cacheReadTokens");
+  const cacheWriteTokens =
+    numberField(usage, "cacheCreationTokens") ??
+    numberField(usage, "cacheWriteTokens");
+  if (promptTokens == null && outputTokens == null) return [];
+  const inputTokens =
+    promptTokens != null
+      ? Math.max(
+          0,
+          promptTokens - (cacheReadTokens ?? 0) - (cacheWriteTokens ?? 0),
+        )
+      : undefined;
+  return [
+    {
+      type: "turn.metrics",
+      ...(inputTokens != null ? { inputTokens } : {}),
+      ...(outputTokens != null ? { outputTokens } : {}),
+      ...(cacheReadTokens != null ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),
+      ...(cacheReadTokens != null && promptTokens
+        ? { cacheHitPercent: (cacheReadTokens / promptTokens) * 100 }
+        : {}),
+    },
+  ];
+}
+
+/**
+ * session/prompt's result names the last model call's size, which is what the
+ * context holds when the turn ends. Backs up response_completed.
+ */
+export function contextFromPromptResult(result: unknown): HarnessEvent[] {
+  const meta = asRecord(asRecord(result)?._meta);
+  const used = meta ? numberField(meta, "totalTokens") : undefined;
+  return used != null && used > 0 ? [{ type: "context", used }] : [];
 }
 
 export function sessionIdFromResult(result: unknown): string | undefined {
@@ -667,6 +771,18 @@ function grokToolFields(
   };
 }
 
+/**
+ * Grok names a tool's kind only in `_meta`. Without it the shared preview
+ * guesses from the input, and a shell command full of slashes passes for a
+ * file path to read.
+ */
+function withKind(
+  rec: Record<string, unknown>,
+  kind?: string,
+): Record<string, unknown> {
+  return kind && !stringField(rec, "kind") ? { ...rec, kind } : rec;
+}
+
 function nestedMeta(
   rec: Record<string, unknown>,
   key: string,
@@ -743,9 +859,11 @@ function usageFromUpdate(update: Record<string, unknown>): HarnessEvent[] {
     numberField(usage, "outputTokens") ?? numberField(usage, "output_tokens");
   const cacheReadTokens =
     numberField(usage, "cacheReadTokens") ??
+    numberField(usage, "cachedReadTokens") ??
     numberField(usage, "cache_read_input_tokens");
   const cacheWriteTokens =
     numberField(usage, "cacheWriteTokens") ??
+    numberField(usage, "cacheCreationTokens") ??
     numberField(usage, "cache_creation_input_tokens");
   const cacheReported = cacheReadTokens != null || cacheWriteTokens != null;
   if (
@@ -835,6 +953,13 @@ function toolDetail(
   if (outputText.trim()) return cap(outputText);
   const concise = stringField(asRecord(output) ?? {}, "content_concise");
   return concise ? cap(concise) : undefined;
+}
+
+// Shell output keeps the colours the command printed; the card shows plain text.
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
+
+function stripAnsi(text: string): string {
+  return text.replace(ANSI, "");
 }
 
 function kindFromName(name?: string): string | undefined {

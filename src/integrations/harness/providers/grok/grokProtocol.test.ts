@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   askQuestionResponse,
   askQuestionsFromAcp,
+  contextFromPromptResult,
   eventsFromAcpUpdate,
   fallbackGrokModels,
   grokAuthMethodId,
@@ -202,24 +203,141 @@ describe("grok protocol", () => {
     });
   });
 
-  it("maps turn_completed usage onto the context meter", () => {
+  // Payloads below are from a real Grok Build 4.7 turn with four model calls.
+  it("sizes the context from each model call, cache included", () => {
     expect(
       eventsFromAcpUpdate({
-        sessionUpdate: "turn_completed",
-        usage: {
-          inputTokens: 19762,
-          outputTokens: 36,
-          totalTokens: 19798,
+        sessionId: "S1",
+        update: {
+          sessionUpdate: "response_completed",
+          usage: {
+            input_tokens: 797,
+            output_tokens: 238,
+            cache_read_input_tokens: 36224,
+            cache_creation_input_tokens: 0,
+            reasoning_tokens: 180,
+          },
+        },
+      }),
+    ).toEqual([{ type: "context", used: 37259 }]);
+  });
+
+  it("reports turn totals as metrics, not as the context size", () => {
+    expect(
+      eventsFromAcpUpdate({
+        sessionId: "S1",
+        update: {
+          sessionUpdate: "turn_completed",
+          stop_reason: "end_turn",
+          usage: {
+            inputTokens: 148189,
+            outputTokens: 605,
+            totalTokens: 148794,
+            cachedReadTokens: 111744,
+            cacheCreationTokens: 0,
+            reasoningTokens: 356,
+            modelCalls: 4,
+          },
         },
       }),
     ).toEqual([
-      { type: "context", used: 19798 },
       {
         type: "turn.metrics",
-        inputTokens: 19762,
-        outputTokens: 36,
+        // Grok's turn inputTokens include the cached part.
+        inputTokens: 36445,
+        outputTokens: 605,
+        cacheReadTokens: 111744,
+        cacheWriteTokens: 0,
+        cacheHitPercent: (111744 / 148189) * 100,
       },
     ]);
+  });
+
+  it("takes the context after auto-compaction", () => {
+    expect(
+      eventsFromAcpUpdate({
+        sessionUpdate: "auto_compact_completed",
+        tokens_before: 180000,
+        tokens_after: 42000,
+        summary_preview: null,
+      }),
+    ).toEqual([{ type: "context", used: 42000 }]);
+  });
+
+  it("backs the meter up with the prompt result's last call size", () => {
+    expect(
+      contextFromPromptResult({
+        stopReason: "end_turn",
+        _meta: {
+          totalTokens: 37563,
+          inputTokens: 37509,
+          usage: { totalTokens: 148794 },
+        },
+      }),
+    ).toEqual([{ type: "context", used: 37563 }]);
+    expect(contextFromPromptResult({ stopReason: "end_turn" })).toEqual([]);
+  });
+
+  it("sends files Grok cannot inline as paths", () => {
+    expect(
+      grokPromptBlocks("read it", [
+        {
+          id: "pdf-1",
+          name: "note.pdf",
+          mimeType: "application/pdf",
+          kind: "file",
+          size: 600,
+          path: "/tmp/note.pdf",
+        },
+      ]),
+    ).toEqual([
+      { type: "text", text: "read it" },
+      { type: "text", text: 'Attached file (read from disk): "/tmp/note.pdf"' },
+    ]);
+  });
+
+  it("does not mistake a shell command for a file to read", () => {
+    const [event] = eventsFromAcpUpdate({
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "call-9",
+        title: "run_terminal_command",
+        rawInput: {
+          command:
+            "command find . -name '*.pdf' -not -path './.git/*' 2>/dev/null | sort -nr | head -30",
+          description: "List PDFs",
+        },
+        _meta: {
+          "x.ai/tool": {
+            name: "run_terminal_command",
+            kind: "execute",
+            label: "Run Command",
+          },
+        },
+      },
+    });
+    expect(event).toMatchObject({ type: "tool.updated", kind: "execute" });
+    const preview = (event as { preview?: { kind: string; path?: string } })
+      .preview;
+    expect(preview?.kind).not.toBe("read");
+    expect(preview?.path ?? "").not.toContain("sort -nr");
+  });
+
+  it("strips terminal colours from tool output", () => {
+    const [event] = eventsFromAcpUpdate({
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-1",
+        status: "completed",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "\u001b[32mok\u001b[0m 3 passed" },
+          },
+        ],
+      },
+    });
+    expect(event).toMatchObject({ detail: "ok 3 passed" });
   });
 
   it("accepts Hermes-style ACP usage size as the context window", () => {

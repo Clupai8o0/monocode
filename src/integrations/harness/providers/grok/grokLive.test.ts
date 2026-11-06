@@ -23,12 +23,15 @@ vi.mock("../../core/child", () => ({
 }));
 
 const {
+  bindGrokSession,
   compactGrokContext,
+  forgetGrokSession,
   sendGrokTurn,
   respondGrokApproval,
+  steerGrokTurn,
   stopGrokSession,
 } = await import("./grok");
-import type { HarnessEvent } from "../../core/types";
+import { TurnNotReadyError, type HarnessEvent } from "../../core/types";
 
 function reply(id: number, result: unknown) {
   onLine!(JSON.stringify({ jsonrpc: "2.0", id, result }));
@@ -111,10 +114,20 @@ describe("grok live turn sequence", () => {
     });
     await handshake();
     await waitFor(
-      () => parse().some((m) => m.method === "session/set_mode"),
-      "set_mode",
+      () => parse().some((m) => m.method === "session/set_config_option"),
+      "set_config_option",
     );
-    reply(parse().find((m) => m.method === "session/set_mode")!.id, {});
+    const effort = parse().find(
+      (m) => m.method === "session/set_config_option",
+    )!;
+    // Grok's session modes are permission modes; effort is a config option.
+    expect(effort.params).toEqual({
+      sessionId: "S1",
+      configId: "reasoning_effort",
+      value: "high",
+    });
+    expect(parse().some((m) => m.method === "session/set_mode")).toBe(false);
+    reply(effort.id, {});
     await waitFor(
       () => parse().some((m) => m.method === "session/prompt"),
       "prompt",
@@ -276,5 +289,165 @@ describe("grok live turn sequence", () => {
     reply(request.id, {});
     await compact;
     await stopGrokSession("t4");
+  });
+
+  it("sends files Grok cannot inline as paths its tools can read", async () => {
+    const turn = sendGrokTurn({
+      sessionId: "t5",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised",
+      text: "what is in it?",
+      attachments: [
+        {
+          id: "pdf-1",
+          name: "note.pdf",
+          mimeType: "application/pdf",
+          kind: "file",
+          size: 600,
+          path: "/tmp/note.pdf",
+        },
+      ],
+      onEvent: () => undefined,
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const request = parse().find((m) => m.method === "session/prompt")!;
+    // A binary resource_link is dropped by Grok without a word.
+    expect(request.params.prompt).toEqual([
+      { type: "text", text: "what is in it?" },
+      { type: "text", text: 'Attached file (read from disk): "/tmp/note.pdf"' },
+    ]);
+    reply(request.id, { stopReason: "end_turn" });
+    await turn;
+    await stopGrokSession("t5");
+  });
+
+  it("resumes a saved session with the cwd Grok requires", async () => {
+    bindGrokSession("t6", "OLD", "/repo");
+    const turn = sendGrokTurn({
+      sessionId: "t6",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised",
+      text: "again",
+      attachments: [],
+      onEvent: () => undefined,
+    });
+    await waitFor(
+      () => parse().some((m) => m.method === "initialize"),
+      "initialize",
+    );
+    reply(parse().find((m) => m.method === "initialize")!.id, initResult);
+    await waitFor(
+      () => parse().some((m) => m.method === "authenticate"),
+      "authenticate",
+    );
+    reply(parse().find((m) => m.method === "authenticate")!.id, {});
+    await waitFor(
+      () => parse().some((m) => m.method === "session/resume"),
+      "session/resume",
+    );
+    const resume = parse().find((m) => m.method === "session/resume")!;
+    expect(resume.params).toEqual({
+      sessionId: "OLD",
+      cwd: "/repo",
+      mcpServers: [],
+    });
+    reply(resume.id, { models: { currentModelId: "grok-4.6" } });
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const request = parse().find((m) => m.method === "session/prompt")!;
+    expect(request.params.sessionId).toBe("OLD");
+    expect(parse().some((m) => m.method === "session/new")).toBe(false);
+    reply(request.id, { stopReason: "end_turn" });
+    await turn;
+    await forgetGrokSession("t6");
+  });
+
+  it("steers a running turn with Grok's interjection", async () => {
+    let accepted = false;
+    const base = {
+      sessionId: "t7",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    const turn = sendGrokTurn({
+      ...base,
+      text: "run the tests",
+      attachments: [],
+      onEvent: () => undefined,
+      onAccepted: () => {
+        accepted = true;
+      },
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    expect(accepted).toBe(true);
+    const promptId = parse().find((m) => m.method === "session/prompt")!.id;
+
+    const steer = steerGrokTurn({
+      ...base,
+      text: "only the unit tests",
+      attachments: [
+        {
+          id: "log-1",
+          name: "out.log",
+          mimeType: "text/plain",
+          kind: "file",
+          size: 10,
+          path: "/tmp/out.log",
+        },
+      ],
+    });
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    const interject = parse().find((m) => m.method === "_x.ai/interject")!;
+    expect(interject.params).toEqual({
+      sessionId: "S1",
+      text: 'only the unit tests\n\nAttached file (read from disk): "/tmp/out.log"',
+    });
+    reply(interject.id, { result: { status: "queued" } });
+    await steer;
+
+    // An image cannot ride an interjection; it waits for the next turn.
+    await expect(
+      steerGrokTurn({
+        ...base,
+        text: "look",
+        attachments: [
+          {
+            id: "image-1",
+            name: "shot.png",
+            mimeType: "image/png",
+            kind: "image",
+            size: 3,
+            data: "YWJj",
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(TurnNotReadyError);
+
+    reply(promptId, { stopReason: "end_turn" });
+    await turn;
+    // Once the turn is over the follow-up becomes the next turn instead.
+    await expect(
+      steerGrokTurn({ ...base, text: "late", attachments: [] }),
+    ).rejects.toBeInstanceOf(TurnNotReadyError);
+    expect(parse().filter((m) => m.method === "_x.ai/interject")).toHaveLength(
+      1,
+    );
+    await stopGrokSession("t7");
   });
 });

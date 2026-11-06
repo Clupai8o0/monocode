@@ -14,6 +14,7 @@ import {
   askQuestionResponse,
   askQuestionsFromAcp,
   asRecord,
+  contextFromPromptResult,
   contextWindowFromSetup,
   currentModelId,
   eventsFromAcpUpdate,
@@ -37,7 +38,11 @@ import type {
   SendTurnInput,
   SteerTurnInput,
 } from "../../core/types";
-import { questionPromptTitle, type UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
+import { TurnNotReadyError } from "../../core/types";
+import {
+  questionPromptTitle,
+  type UserQuestionReply,
+} from "../../../../features/sessions/model/userQuestion";
 
 type Live = {
   subagents: AcpSubagents;
@@ -48,6 +53,8 @@ type Live = {
   contextWindow?: number;
   muteUpdates: boolean;
   cancelled: boolean;
+  /** A session/prompt is in flight, so an interjection lands in this turn. */
+  prompting: boolean;
   fullAccess: boolean;
   planning: boolean;
   runtimeMode: RuntimeMode;
@@ -146,8 +153,30 @@ export async function compactGrokContext(
   await live.turns;
 }
 
-export async function steerGrokTurn(_input: SteerTurnInput): Promise<void> {
-  throw new Error("Grok Build does not support steering an in-flight turn");
+/**
+ * Mid-turn follow-up through Grok's own interjection, the TUI's Ctrl+Enter.
+ * Grok reads it before its next model call. It takes text only, so files go
+ * as paths; an image or a turn that already ended waits for the next turn.
+ */
+export async function steerGrokTurn(input: SteerTurnInput): Promise<void> {
+  const live = liveByThread.get(input.sessionId);
+  if (!live || !live.prompting || live.cancelled) {
+    throw new TurnNotReadyError("No Grok Build turn is running");
+  }
+  const blocks = grokPromptBlocks(input.text, input.attachments);
+  if (blocks.some((block) => block.type !== "text")) {
+    throw new TurnNotReadyError("Grok Build can only interject text");
+  }
+  const text = blocks
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("\n\n")
+    .trim();
+  if (!text) return;
+  await live.acp.request(
+    "_x.ai/interject",
+    { sessionId: live.acpSessionId, text },
+    CONTROL_TIMEOUT_MS,
+  );
 }
 
 export function respondGrokApproval(
@@ -339,7 +368,11 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       try {
         setup = await acp.request(
           "session/resume",
-          { sessionId: resume.acpSessionId },
+          {
+            sessionId: resume.acpSessionId,
+            cwd: input.cwd,
+            mcpServers: [],
+          },
           SESSION_TIMEOUT_MS,
         );
         acpSessionId = sessionIdFromResult(setup) ?? resume.acpSessionId;
@@ -393,6 +426,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
         contextWindowFromSetup(setup) ?? contextWindowFromSetup(init),
       muteUpdates: didLoad,
       cancelled: false,
+      prompting: false,
       fullAccess: wantFullAccess,
       planning: wantPlanning,
       runtimeMode: input.runtimeMode,
@@ -442,14 +476,19 @@ async function applyModelSelection(
 
   const effort = grokEffort(input.modelSettings);
   if (!effort) return;
+  // Grok's session modes are permission modes; reasoning is a config option.
   await live.acp
     .request(
-      "session/set_mode",
-      { sessionId: live.acpSessionId, modeId: effort },
+      "session/set_config_option",
+      {
+        sessionId: live.acpSessionId,
+        configId: "reasoning_effort",
+        value: effort,
+      },
       CONTROL_TIMEOUT_MS,
     )
     .catch((error: unknown) => {
-      ignoreUnsupportedControl("set_mode", error);
+      ignoreUnsupportedControl("set_config_option", error);
     });
 }
 
@@ -457,15 +496,27 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
   try {
     const blocks = grokPromptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
-    await live.acp.request(
-      "session/prompt",
-      {
-        sessionId: live.acpSessionId,
-        prompt: blocks,
-      },
-      PROMPT_TIMEOUT_MS,
-    );
+    let result: unknown;
+    live.prompting = true;
+    try {
+      const pending = live.acp.request(
+        "session/prompt",
+        {
+          sessionId: live.acpSessionId,
+          prompt: blocks,
+        },
+        PROMPT_TIMEOUT_MS,
+      );
+      // Marks the turn ready, which is what lets a queued follow-up steer it.
+      input.onAccepted?.();
+      result = await pending;
+    } finally {
+      live.prompting = false;
+    }
     if (live.cancelled) return;
+    for (const event of contextFromPromptResult(result)) {
+      live.onEvent(withWindow(live, event));
+    }
     live.onEvent({ type: "message.completed" });
     live.onEvent({ type: "reasoning.completed" });
   } catch (error) {
@@ -496,17 +547,18 @@ function handleNotification(live: Live, method: string, params: unknown) {
         ? unwrapSessionNotification(params)
         : null;
   if (!updateParams) return;
-  for (const event of live.subagents.route(updateParams, eventsFromAcpUpdate(updateParams))) {
-    if (
-      event.type === "context" &&
-      event.window == null &&
-      live.contextWindow
-    ) {
-      live.onEvent({ ...event, window: live.contextWindow });
-    } else {
-      live.onEvent(event);
-    }
+  for (const event of live.subagents.route(
+    updateParams,
+    eventsFromAcpUpdate(updateParams),
+  )) {
+    live.onEvent(withWindow(live, event));
   }
+}
+
+function withWindow(live: Live, event: HarnessEvent): HarnessEvent {
+  return event.type === "context" && event.window == null && live.contextWindow
+    ? { ...event, window: live.contextWindow }
+    : event;
 }
 
 function unwrapSessionNotification(params: unknown): unknown {

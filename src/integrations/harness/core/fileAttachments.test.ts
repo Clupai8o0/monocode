@@ -44,21 +44,36 @@ function claudeContent(text: string, attachments: Attachment[]) {
 }
 
 describe("native file attachment formats", () => {
-  it.each([
-    ["Cursor ACP", promptBlocks],
-    ["Grok ACP", grokPromptBlocks],
-  ] as const)("keeps %s documents as resource links", (_name, build) => {
-    expect(build("", [document])).toEqual([
+  it.each([["Cursor ACP", promptBlocks]] as const)(
+    "keeps %s documents as resource links",
+    (_name, build) => {
+      expect(build("", [document])).toEqual([
+        { type: "text", text: ATTACHMENT_ONLY_PROMPT },
+        {
+          type: "resource_link",
+          uri: "file:///tmp/report.pdf",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          size: 100,
+        },
+      ]);
+      expect(build("look", [image])[1]).toMatchObject({
+        type: "image",
+        mimeType: "image/png",
+        data: "YWJj",
+      });
+    },
+  );
+
+  it("gives Grok documents as paths, since it drops binary resource links", () => {
+    expect(grokPromptBlocks("", [document])).toEqual([
       { type: "text", text: ATTACHMENT_ONLY_PROMPT },
       {
-        type: "resource_link",
-        uri: "file:///tmp/report.pdf",
-        name: "report.pdf",
-        mimeType: "application/pdf",
-        size: 100,
+        type: "text",
+        text: 'Attached file (read from disk): "/tmp/report.pdf"',
       },
     ]);
-    expect(build("look", [image])[1]).toMatchObject({
+    expect(grokPromptBlocks("look", [image])[1]).toMatchObject({
       type: "image",
       mimeType: "image/png",
       data: "YWJj",
