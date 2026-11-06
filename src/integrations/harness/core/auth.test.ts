@@ -113,6 +113,15 @@ describe("harness login", () => {
     // Other providers never fall back to reading reply text.
     expect(latestTurnNeedsHarnessLogin([user, reply], "codex")).toBe(false);
     expect(latestTurnNeedsHarnessLogin([user, reply])).toBe(false);
+    // An info note (no-commits fallback) before the reply is not other work.
+    const note = {
+      role: "system" as const,
+      text: "Working in the main checkout.",
+      notice: "info" as const,
+    };
+    expect(latestTurnHarnessAuthFailure([user, note, reply], "claude")).toBe(
+      reply,
+    );
     // Still streaming, or one reply among other work, is not a failed turn.
     expect(
       latestTurnNeedsHarnessLogin(

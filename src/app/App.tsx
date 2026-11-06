@@ -202,6 +202,8 @@ import {
   createOrchestrationWorktree,
   createWorktree,
   detachSessionWorktree,
+  isNoCommitsError,
+  NO_COMMITS_FALLBACK_NOTE,
   checkWorktreeRemoval,
   listWorktrees,
   namedWorktreeBranch,
@@ -8569,16 +8571,48 @@ function Workspace({
       };
       void (async () => {
         let workCwd = initialWorkCwd;
-        if (createDraftWorktree) {
-          const tree = await createWorktree(
-            current.cwd,
-            // Fork: named after the request from the start, with a short id.
-            sessionWorktreeBranchName(
-              harnessText || attachments.map((file) => file.name).join(" "),
+        const tree = createDraftWorktree
+          ? await createWorktree(
+              current.cwd,
+              // Fork: named after the request from the start, with a short id.
+              sessionWorktreeBranchName(
+                harnessText || attachments.map((file) => file.name).join(" "),
+              ),
+              current.worktreeBase || "HEAD",
+              false,
+            ).catch((error: unknown) => {
+              // Fork: git can't branch off a repo with no commits, so the
+              // turn runs in the main checkout instead of failing.
+              if (isNoCommitsError(error)) return null;
+              throw error;
+            })
+          : null;
+        if (createDraftWorktree && !tree) {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    // Cleared like a made worktree, so the composer stops
+                    // offering the draft workspace pickers.
+                    workspaceMode: undefined,
+                    worktreeBase: undefined,
+                    worktreePreparing: undefined,
+                    blocks: [
+                      ...session.blocks,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "system",
+                        text: NO_COMMITS_FALLBACK_NOTE,
+                        notice: "info",
+                      },
+                    ],
+                  }
+                : session,
             ),
-            current.worktreeBase || "HEAD",
-            false,
           );
+        }
+        if (tree) {
           workCwd = tree.path;
           workspacePins.current.set(sessionId, currentWorkspace(current.cwd));
           if (proposalDraft)

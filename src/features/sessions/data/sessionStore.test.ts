@@ -750,6 +750,12 @@ describe("sanitizeSessionForPersist", () => {
         notice: "interrupt",
       },
       {
+        id: "n1",
+        role: "system",
+        text: "Working in the main checkout.",
+        notice: "info",
+      },
+      {
         id: "b1",
         role: "system",
         text: "Mystery",
@@ -766,8 +772,9 @@ describe("sanitizeSessionForPersist", () => {
     const persisted = sanitizeSessionForPersist(session).blocks;
     expect(persisted[0]?.notice).toBe("error");
     expect(persisted[1]?.notice).toBe("interrupt");
-    expect(persisted[2]?.notice).toBeUndefined();
+    expect(persisted[2]?.notice).toBe("info");
     expect(persisted[3]?.notice).toBeUndefined();
+    expect(persisted[4]?.notice).toBeUndefined();
   });
 
   it("keeps a second-opinion card on the user turn", () => {

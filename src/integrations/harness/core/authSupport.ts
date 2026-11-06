@@ -91,7 +91,10 @@ export function latestTurnHarnessAuthFailure<T extends AuthFailureBlock>(
     if (block.role === "assistant") {
       reply = block;
       replies += 1;
-    } else if (block.role !== "system" || block.notice) {
+    } else if (
+      block.role !== "system" ||
+      (block.notice && block.notice !== "info")
+    ) {
       otherOutput = true;
     }
   }

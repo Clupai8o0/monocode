@@ -5,6 +5,7 @@ import {
   sessionInWorktree,
   detachSessionWorktree,
   assertWorktreeFilesClosed,
+  isNoCommitsError,
   worktreeDeletedExternally,
   worktreeSessionIds,
   type Worktree,
@@ -236,5 +237,19 @@ describe("worktrees removed outside the app", () => {
     // An unmounted volume takes the parent with it; keep the session bound.
     dirs.delete("/repo-worktrees");
     expect(await worktreeDeletedExternally(tree.path)).toBe(false);
+  });
+});
+
+describe("isNoCommitsError", () => {
+  it("matches the host's empty-repo error, as a string or an Error", () => {
+    const text =
+      "This project's git repo has no commits yet, so there is nothing to copy into a new working copy. Make a first commit, or start the session in the main checkout.";
+    expect(isNoCommitsError(text)).toBe(true);
+    expect(isNoCommitsError(new Error(text))).toBe(true);
+  });
+
+  it("leaves other git errors alone", () => {
+    expect(isNoCommitsError("fatal: Needed a single revision")).toBe(false);
+    expect(isNoCommitsError(new Error("Choose an available base branch"))).toBe(false);
   });
 });

@@ -417,10 +417,11 @@ export type Block = {
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */
   interjection?: InterjectionMeta;
   /**
-   * A system row the reader must not miss — an error or an interruption —
-   * rather than turn chrome like a status ping. Never folds into the trail.
+   * A system row the reader must not miss — an error, an interruption, or
+   * a note about how the turn ran (`info`) — rather than turn chrome like a
+   * status ping. Never folds into the trail.
    */
-  notice?: "error" | "interrupt";
+  notice?: "error" | "interrupt" | "info";
   statusKey?: string;
   /** Posted to a Mono's chat by one of its habits, outside any turn. */
   monoHabit?: { id: string; name: string; at: number };
