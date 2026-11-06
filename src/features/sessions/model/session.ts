@@ -469,6 +469,23 @@ export const RUNTIME_MODE_HINT: Record<RuntimeMode, string> = {
     "Allow commands, edits, and supported MCP confirmations in non-plan turns without prompts.",
 };
 
+/**
+ * Where a harness does not honour a mode as described. Grok Build reads
+ * Claude's `~/.claude/settings.json` `defaultMode`, which beats every
+ * MonoCode-side override, so with Claude on auto it runs Grok's own
+ * Auto-review instead of asking for every command.
+ */
+export function runtimeModeHints(
+  harness: HarnessId | undefined,
+): Record<RuntimeMode, string> {
+  if (harness !== "grok") return RUNTIME_MODE_HINT;
+  return {
+    ...RUNTIME_MODE_HINT,
+    supervised:
+      "Grok uses its Auto-review here: it checks each command and asks only when it flags one.",
+  };
+}
+
 export type WorkspaceMode = "current" | "worktree";
 
 export type Session = {

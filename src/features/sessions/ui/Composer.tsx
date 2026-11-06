@@ -84,7 +84,11 @@ import type {
   WorkspaceMode,
   ComposerTurnOptions,
 } from "../model/session";
-import { HARNESS_TITLE, harnessSupportsAttachments } from "../model/session";
+import {
+  HARNESS_TITLE,
+  harnessSupportsAttachments,
+  runtimeModeHints,
+} from "../model/session";
 import type {
   UserQuestionPrompt,
   UserQuestionReply,
@@ -2533,6 +2537,7 @@ export function Composer({
                 {!compact && harness !== "fx" ? (
                   <AccessPicker
                     value={runtimeMode}
+                    hints={runtimeModeHints(harness)}
                     busy={busy}
                     onChange={onRuntimeModeChange}
                     onClose={() => ref.current?.focus()}
