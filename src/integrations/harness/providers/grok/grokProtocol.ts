@@ -100,8 +100,9 @@ export function askQuestionResponse(
 /**
  * Grok accepts ACP image blocks despite advertising image: false. It inlines a
  * resource_link only when the file is valid UTF-8 and silently drops anything
- * else (a binary PDF never reaches the model), so text files stay links and
- * every other file travels as a path its own tools can read.
+ * else (a binary PDF never reaches the model). A small text file goes as a
+ * link plus its path, in case it isn't UTF-8 after all; every other file
+ * travels as a path its own tools can read.
  */
 export function grokPromptBlocks(
   text: string,
@@ -110,13 +111,27 @@ export function grokPromptBlocks(
   const blocks = promptBlocks(text, attachments);
   // promptBlocks ends with one block per attachment, in order.
   const offset = blocks.length - attachments.length;
-  return blocks.map((block, index) => {
-    if (block.type !== "resource_link" || index < offset) return block;
+  return blocks.flatMap((block, index): PromptContentBlock[] => {
+    if (block.type !== "resource_link" || index < offset) return [block];
     const file = attachments[index - offset];
-    return isTextMime(file.mimeType)
-      ? block
-      : { type: "text", text: attachmentPathText(file) };
+    const path: PromptContentBlock = {
+      type: "text",
+      text: attachmentPathText(file),
+    };
+    return inlinableText(file) ? [block, path] : [path];
   });
+}
+
+/** Above this, Grok reads the file with its tools rather than inlining it. */
+const INLINE_TEXT_MAX_BYTES = 256 * 1024;
+
+function inlinableText(file: Attachment): boolean {
+  if (file.size > INLINE_TEXT_MAX_BYTES) return false;
+  const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i
+    .exec(file.mimeType ?? "")?.[1]
+    ?.toLowerCase();
+  if (charset && !/^(utf-?8|us-ascii|ascii)$/.test(charset)) return false;
+  return isTextMime(file.mimeType);
 }
 
 /**

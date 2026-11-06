@@ -60,8 +60,10 @@ type Live = {
   interjectedAt?: number;
   /** Interjections sent but not yet acknowledged. */
   interjecting: number;
-  /** This turn already put a size on the context meter. */
-  sawContext: boolean;
+  /** The latest context size came from an auto-compaction. */
+  compactedLast: boolean;
+  /** The Grok process exited. */
+  exited: boolean;
   /** Grok's running prompt id, from `_x.ai/queue/changed`. */
   queueRunning?: string;
   queueWaiters: Set<() => void>;
@@ -91,6 +93,12 @@ const FALLBACK_PREFIX = "interject-fallback-";
 const STEER_WAIT_MS = 60_000;
 /** Threads with a sendGrokTurn call still running, by count. */
 const startingTurns = new Map<string, number>();
+/** Counts stops and cancels per thread, so a waiting steer can see one. */
+const steerStops = new Map<string, number>();
+
+function noteSteerStop(sessionId: string): void {
+  steerStops.set(sessionId, (steerStops.get(sessionId) ?? 0) + 1);
+}
 
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -219,12 +227,15 @@ export async function steerGrokTurn(input: SteerTurnInput): Promise<void> {
 
 async function promptingLive(sessionId: string): Promise<Live | undefined> {
   const deadline = Date.now() + STEER_WAIT_MS;
+  const stops = steerStops.get(sessionId) ?? 0;
   for (;;) {
+    // Stop or cancel since the follow-up came in: don't hold it any longer.
+    if ((steerStops.get(sessionId) ?? 0) !== stops) return undefined;
     const live = liveByThread.get(sessionId);
     if (live?.prompting && !live.cancelled) return live;
     // Only wait for a turn that is on its way (starting Grok, resuming,
     // setting the model); with none running the follow-up is a new turn.
-    if (!startingTurns.has(sessionId) || live?.cancelled) return undefined;
+    if (!startingTurns.has(sessionId)) return undefined;
     if (Date.now() >= deadline) return undefined;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -247,6 +258,7 @@ export function respondGrokQuestion(
 }
 
 export async function cancelGrokTurn(sessionId: string): Promise<void> {
+  noteSteerStop(sessionId);
   const live = liveByThread.get(sessionId);
   if (!live) {
     cancelledThreads.add(sessionId);
@@ -266,6 +278,7 @@ export async function cancelGrokTurn(sessionId: string): Promise<void> {
 }
 
 export async function stopGrokSession(sessionId: string): Promise<void> {
+  noteSteerStop(sessionId);
   cancelledThreads.delete(sessionId);
   const live = liveByThread.get(sessionId);
   liveByThread.delete(sessionId);
@@ -359,6 +372,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     (code) => {
       if (liveRef.current) {
         liveRef.current.muteUpdates = true;
+        liveRef.current.exited = true;
         liveRef.current.queueRunning = undefined;
         wakeQueueWaiters(liveRef.current);
       }
@@ -489,7 +503,8 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       prompting: false,
       queueWaiters: new Set(),
       interjecting: 0,
-      sawContext: false,
+      compactedLast: false,
+      exited: false,
       fullAccess: wantFullAccess,
       planning: wantPlanning,
       runtimeMode: input.runtimeMode,
@@ -562,7 +577,7 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     let result: unknown;
     live.prompting = true;
     live.interjectedAt = undefined;
-    live.sawContext = false;
+    live.compactedLast = false;
     try {
       const pending = live.acp.request(
         "session/prompt",
@@ -579,10 +594,13 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     } finally {
       live.prompting = false;
     }
-    // Stopped, cancelled or exited while waiting: the session is gone.
+    if (live.exited && !live.cancelled) {
+      throw new Error("Grok Build exited before the turn finished");
+    }
+    // Stopped or cancelled while waiting: the session is gone.
     if (live.cancelled || live.muteUpdates) return;
     // Only a backstop: a later auto-compaction size must not be overwritten.
-    if (!live.sawContext) {
+    if (!live.compactedLast) {
       for (const event of contextFromPromptResult(result)) {
         live.onEvent(withWindow(live, event));
       }
@@ -617,11 +635,16 @@ function handleNotification(live: Live, method: string, params: unknown) {
         ? unwrapSessionNotification(params)
         : null;
   if (!updateParams) return;
+  const rec = asRecord(updateParams);
+  const update = asRecord(rec?.update) ?? rec;
+  const updateKind = update?.sessionUpdate ?? update?.session_update;
   for (const event of live.subagents.route(
     updateParams,
     eventsFromAcpUpdate(updateParams),
   )) {
-    if (event.type === "context") live.sawContext = true;
+    if (event.type === "context") {
+      live.compactedLast = updateKind === "auto_compact_completed";
+    }
     live.onEvent(withWindow(live, event));
   }
 }

@@ -677,4 +677,71 @@ describe("grok live turn sequence", () => {
     await turn;
     expect(events.map((e) => e.type)).not.toContain("message.completed");
   });
+
+  it("drops a follow-up held for a starting turn once the user stops", async () => {
+    const base = {
+      sessionId: "t12",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: () => undefined,
+    }).catch(() => undefined);
+    const steer = steerGrokTurn({ ...base, text: "and bye", attachments: [] });
+    await new Promise((r) => setTimeout(r, 20));
+    await stopGrokSession("t12");
+    const started = Date.now();
+    await expect(steer).rejects.toBeInstanceOf(TurnNotReadyError);
+    expect(Date.now() - started).toBeLessThan(500);
+    onExit?.(null);
+    await turn;
+  });
+
+  it("fails the turn when Grok exits during a fallback turn", async () => {
+    const events: HarnessEvent[] = [];
+    const base = {
+      sessionId: "t13",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: (e) => events.push(e),
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const steer = steerGrokTurn({ ...base, text: "and bye", attachments: [] });
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    reply(parse().find((m) => m.method === "_x.ai/interject")!.id, {
+      result: { status: "queued" },
+    });
+    await steer;
+    onLine!(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "_x.ai/queue/changed",
+        params: { sessionId: "S1", runningPromptId: "interject-fallback-1" },
+      }),
+    );
+    reply(parse().find((m) => m.method === "session/prompt")!.id, {
+      stopReason: "end_turn",
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    onExit!(1);
+    await expect(turn).rejects.toThrow(/exited/);
+    expect(events.map((e) => e.type)).not.toContain("message.completed");
+  });
 });
