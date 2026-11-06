@@ -450,4 +450,71 @@ describe("grok live turn sequence", () => {
     );
     await stopGrokSession("t7");
   });
+
+  it("stays busy while Grok answers a late interjection in its own turn", async () => {
+    const events: HarnessEvent[] = [];
+    const base = {
+      sessionId: "t8",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    let finished = false;
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: (e) => events.push(e),
+    }).then(() => {
+      finished = true;
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const promptId = parse().find((m) => m.method === "session/prompt")!.id;
+    const steer = steerGrokTurn({ ...base, text: "and bye", attachments: [] });
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    reply(parse().find((m) => m.method === "_x.ai/interject")!.id, {
+      result: { status: "queued" },
+    });
+    await steer;
+
+    // Our turn ends before Grok read the interjection, so Grok runs it.
+    const queue = (params: Record<string, unknown>) =>
+      onLine!(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "_x.ai/queue/changed",
+          params: { sessionId: "S1", entries: [], ...params },
+        }),
+      );
+    queue({ runningPromptId: "interject-fallback-1", runningText: "and bye" });
+    reply(promptId, { stopReason: "end_turn" });
+    onLine!(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "S1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "bye" },
+          },
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(finished).toBe(false);
+    expect(events).toContainEqual({ type: "message.delta", text: "bye" });
+
+    queue({});
+    await turn;
+    expect(finished).toBe(true);
+    await stopGrokSession("t8");
+  });
 });
