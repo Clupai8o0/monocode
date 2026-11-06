@@ -182,6 +182,7 @@ import {
   supportsBtwHarness,
 } from "../model/btw";
 import { COMPACT_COMMAND, isCompactCommand } from "../model/compact";
+import { isStageCommand, STAGE_COMMAND } from "../model/stageCommand";
 import {
   consumeSessionFolderCommand,
   isSessionFolderCommand,
@@ -600,6 +601,7 @@ export function Composer({
             PLAN_COMMAND,
             ...(canSaveDraft && onSaveDraft ? [DRAFT_COMMAND] : []),
             COMPACT_COMMAND,
+            STAGE_COMMAND,
             ...(supportsBtwHarness(harness) ? [BTW_COMMAND] : []),
             ...skills.filter(
               (skill) =>
@@ -609,6 +611,7 @@ export function Composer({
                 (skill.kind === "native" ||
                   (skill.name !== PLAN_COMMAND.name &&
                     skill.name !== COMPACT_COMMAND.name &&
+                    skill.name !== STAGE_COMMAND.name &&
                     skill.name !== SESSION_FOLDER_COMMAND.name &&
                     skill.name !== MCP_COMMAND.name &&
                     skill.name !== ORCHESTRATOR_COMMAND.name &&
@@ -1587,6 +1590,7 @@ export function Composer({
       e.key === "Enter" &&
       !e.shiftKey &&
       (isCompactCommand(e.currentTarget.value) ||
+        (!remote && isStageCommand(e.currentTarget.value)) ||
         isMcpCommand(e.currentTarget.value) ||
         isSessionFolderCommand(e.currentTarget.value))
     ) {

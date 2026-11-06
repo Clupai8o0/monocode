@@ -4617,7 +4617,7 @@ fn git_run(root: &Path, args: &[&str]) -> Option<String> {
     git_output(root, args).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
+pub(crate) fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let output = git_cmd_for_args(args)
         .arg("--no-pager")
         .arg("-C")
@@ -5928,7 +5928,7 @@ fn safe_attachment_name(name: &str) -> String {
     }
 }
 
-/// Read a reasonably sized UTF-8 file for the editor.
+/// Read a UTF-8 file for the editor.
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || read_text_file_sync(&path))
@@ -5941,12 +5941,6 @@ fn read_text_file_sync(path: &str) -> Result<String, String> {
     let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !meta.is_file() {
         return Err("Not a file".into());
-    }
-    if meta.len() > MAX_TEXT_FILE_BYTES {
-        return Err(format!(
-            "File is too large to edit (maximum {} MB).",
-            MAX_TEXT_FILE_BYTES / 1024 / 1024
-        ));
     }
 
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -5983,11 +5977,55 @@ pub fn mobile_list_dir(root: String, relative: String) -> Result<Vec<DirEntry>, 
         .collect())
 }
 
+// Match mobileWorkspace.ts's UTF-16 character budget, plus a sentinel so
+// its existing `truncated` flag remains accurate without reading the full file.
+const MOBILE_FILE_CHARS: usize = 1024 * 1024;
+
+fn read_mobile_text_file_sync(path: &str) -> Result<String, String> {
+    let path = expand_home(path);
+    if !std::fs::metadata(&path).map_err(|error| error.to_string())?.is_file() {
+        return Err("Not a file".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // A path swapped for a pipe after metadata must not block a worker.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).map_err(|error| error.to_string())?;
+    if !file.metadata().map_err(|error| error.to_string())?.is_file() {
+        return Err("Not a file".into());
+    }
+    let limit = 4 * (MOBILE_FILE_CHARS + 1);
+    let mut bytes = Vec::new();
+    file.take(limit as u64).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.contains(&0) {
+        return Err("Binary files cannot be edited.".into());
+    }
+    let valid = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        Err(error) if error.error_len().is_none() && bytes.len() == limit => {
+            std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap()
+        }
+        Err(_) => return Err("File is not valid UTF-8.".into()),
+    };
+    let mut units = 0;
+    for (offset, character) in valid.char_indices() {
+        units += character.len_utf16();
+        if units > MOBILE_FILE_CHARS {
+            return Ok(valid[..offset + character.len_utf8()].into());
+        }
+    }
+    Ok(valid.into())
+}
+
 /// A text file in a project's working copy, for the phone's file browser.
 #[tauri::command]
 pub async fn mobile_read_text_file(root: String, relative: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        read_text_file_sync(&path_to_js(&inside_root(&root, &relative)?))
+        read_mobile_text_file_sync(&path_to_js(&inside_root(&root, &relative)?))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -6002,13 +6040,6 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 }
 
 fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
-    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err(format!(
-            "File is too large to save (maximum {} MB).",
-            MAX_TEXT_FILE_BYTES / 1024 / 1024
-        ));
-    }
-
     let requested = expand_home(path);
     let destination = if requested.exists() {
         std::fs::canonicalize(&requested).map_err(|e| format!("{}: {e}", requested.display()))?
@@ -6759,6 +6790,42 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("example.rs")]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mobile_text_rejects_named_pipes_without_opening_them() {
+        let dir = tmp("mobile-text-pipe");
+        let path = dir.0.join("pipe");
+        assert!(Command::new("mkfifo").arg(&path).status().unwrap().success());
+        assert_eq!(read_mobile_text_file_sync(&path_to_js(&path)).unwrap_err(), "Not a file");
+    }
+
+    #[test]
+    fn mobile_text_reads_a_bounded_utf8_prefix_with_truncation_sentinel() {
+        let dir = tmp("mobile-text-prefix");
+        let path = path_to_js(&dir.0.join("large.html"));
+        let source = "😀".repeat(3 * 1024 * 1024);
+        std::fs::write(&path, &source).unwrap();
+        let prefix = read_mobile_text_file_sync(&path).unwrap();
+        assert_eq!(prefix.encode_utf16().count(), MOBILE_FILE_CHARS + 2);
+        assert!(source.starts_with(&prefix));
+        std::fs::write(&path, [b'a', 0, b'b']).unwrap();
+        assert!(read_mobile_text_file_sync(&path).unwrap_err().contains("Binary"));
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(read_mobile_text_file_sync(&path).unwrap_err().contains("UTF-8"));
+    }
+
+    #[test]
+    fn editor_round_trips_html_larger_than_eight_mb() {
+        let dir = tmp("large-editor-html");
+        let path = path_to_js(&dir.0.join("design.html"));
+        let source = format!("<!doctype html><p>{}</p>", "x".repeat(9 * 1024 * 1024));
+        std::fs::write(&path, &source).unwrap();
+        assert_eq!(read_text_file_sync(&path).unwrap(), source);
+        let edited = format!("{source}<!-- saved -->");
+        write_text_file_sync(&path, &edited).unwrap();
+        assert_eq!(read_text_file_sync(&path).unwrap(), edited);
     }
 
     #[test]

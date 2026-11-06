@@ -85,6 +85,12 @@ describe("parseEffortNeeded", () => {
     expect(parseEffortNeeded(`Some answer\n${LINE}`)).toBeNull();
   });
 
+  it("reads the first line of a long reply", () => {
+    expect(parseEffortNeeded(`${LINE}\n${"word ".repeat(20_000)}`)).toBe(
+      "xhigh",
+    );
+  });
+
   it("rejects lines that only look alike", () => {
     expect(parseEffortNeeded("Effort: high")).toBeNull();
     expect(parseEffortNeeded("The effort: high now, xhigh needed")).toBeNull();

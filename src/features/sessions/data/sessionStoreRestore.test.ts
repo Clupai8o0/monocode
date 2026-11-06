@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionRecord } from "./sessionStore";
+import { appendUser } from "../../../integrations/harness/core/apply";
+import { newSession } from "../model/session";
+import { lastTurnRetry } from "../model/editLastTurn";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-const { getSession, readSession, repairSession, applySessionRepair } =
-  await import("./sessionStore");
+const {
+  getSession,
+  readSession,
+  repairSession,
+  applySessionRepair,
+  sanitizeSessionForPersist,
+} = await import("./sessionStore");
 
 /** A saved Codex session holding the one row this PR repairs. */
 function codexRecord(): SessionRecord {
@@ -40,6 +48,34 @@ function codexRecord(): SessionRecord {
 
 describe("restoring a session whose repair cannot be persisted", () => {
   beforeEach(() => invoke.mockReset());
+
+  it("restores a persisted appended build with its retryable approved plan", async () => {
+    const session = appendUser(
+      {
+        ...newSession("codex", "/repo"),
+        blocks: [
+          {
+            id: "plan",
+            role: "plan",
+            text: "# Approved plan",
+            plan: { status: "ready" },
+          },
+        ],
+      },
+      "Build approved plan",
+      [],
+      { buildPlanBlockId: "plan" },
+    );
+    const record = JSON.parse(
+      JSON.stringify(sanitizeSessionForPersist(session)),
+    );
+    invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "session_get" ? record : null),
+    );
+    const restored = await getSession(session.id);
+    expect(restored?.blocks.at(-1)?.buildPlanBlockId).toBe("plan");
+    expect(restored && lastTurnRetry(restored)?.planBlockId).toBe("plan");
+  });
 
   it("restores sidebar visibility when a hidden session is opened by id", async () => {
     const record = codexRecord();

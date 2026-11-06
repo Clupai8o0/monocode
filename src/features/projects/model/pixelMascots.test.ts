@@ -33,8 +33,15 @@ it("falls back to the ghost for unknown names", () => {
   );
 });
 
+// Fork: the couple's heads are 2x2 with no eye holes, so it has no eyes.
+const EYELESS: ReadonlySet<string> = new Set(["couple"]);
+
 it("gives every mascot open and closed eyes", () => {
   for (const name of PIXEL_MASCOT_NAMES) {
+    if (EYELESS.has(name)) {
+      expect(pixelLayers(name, "hsl(211 92% 62%)").open).toEqual([]);
+      continue;
+    }
     const layers = pixelLayers(name, "hsl(211 92% 62%)");
     expect(layers.open.length).toBeGreaterThan(0);
     expect(layers.closed.length).toBeGreaterThan(0);

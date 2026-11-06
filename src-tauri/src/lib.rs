@@ -24,6 +24,7 @@ mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 mod fork_code_run; // Fork: sandboxed code drills for the Games panel's Code tab.
 mod fork_task_output; // Fork: bounded tails of local background-command output.
+mod fork_mono_contributions; // Fork: Mono's commit and pull request history.
 mod fork_leetcode; // Fork: LeetCode problems as Code tab drills.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
@@ -52,6 +53,7 @@ mod devin_config;
 mod devin_usage;
 mod external_editor;
 mod fs;
+mod git_watch;
 mod gitlab;
 mod harness;
 mod harness_updates;
@@ -69,6 +71,7 @@ mod menu;
 mod mobile_access;
 mod mobile_router;
 mod mono;
+mod mono_skills;
 #[cfg(target_os = "macos")]
 mod mono_chat;
 mod mono_transcript;
@@ -319,6 +322,7 @@ pub fn run() {
         })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
+        .manage(git_watch::GitWatchHost::default())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
         .manage(fork_html::HtmlPreviews::default())
@@ -365,6 +369,9 @@ pub fn run() {
             mobile_access::mobile_publish,
             mobile_access::mobile_reply,
             mobile_access::mobile_push,
+            git_watch::reset_git_watches,
+            git_watch::watch_git_changes,
+            git_watch::unwatch_git_changes,
             remote::remote_machines,
             remote::remote_connect,
             remote::remote_disconnect,
@@ -614,6 +621,8 @@ pub fn run() {
             mono::mono_load,
             mono::mono_read,
             mono::mono_save,
+            mono_skills::mono_skill_read,
+            mono_skills::mono_skill_remove,
             checkpoint::session_checkpoint_ensure,
             checkpoint::session_checkpoint_begin_turn,
             checkpoint::session_checkpoint_finish_turn,
@@ -728,6 +737,7 @@ pub fn run() {
             fork_html::fork_html_preview_remove, // Fork
             fork_code_run::fork_code_run,        // Fork
             fork_task_output::fork_task_output_tail, // Fork
+            fork_mono_contributions::fork_mono_contributions, // Fork
             fork_leetcode::fork_leetcode_fetch,  // Fork
             fork_leetcode::fork_leetcode_connect,  // Fork
             fork_leetcode::fork_leetcode_connect_paste,  // Fork
@@ -815,6 +825,9 @@ pub fn run() {
             control::window_closed(handle, &label);
             #[cfg(target_os = "macos")]
             mono_chat::window_closed(handle, &label);
+            handle
+                .state::<git_watch::GitWatchHost>()
+                .close_window(&label);
             if !other_window {
                 reap_harness_children(handle);
             }
@@ -837,6 +850,7 @@ pub fn run() {
             fork_update::on_quit(); // Fork
             #[cfg(unix)]
             fork_relay::stop(); // Fork
+            handle.state::<git_watch::GitWatchHost>().close_all();
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
         }

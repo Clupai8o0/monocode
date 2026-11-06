@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyHarnessEvent } from "../../core/apply";
 import { newSession } from "../../../../features/sessions/model/session";
+import { latestTurnNeedsHarnessLogin } from "../../core/authSupport";
 import {
   foldableWork,
   foldedBlocks,
   groupTurnItems,
   workSummaryLine,
+  groupMonoTurnItems,
 } from "../../../../features/sessions/model/transcriptActivity";
 
 const sent: string[] = [];
@@ -45,6 +47,7 @@ const {
   stopClaudeSession,
   __claudeTestReset,
 } = await import("./claude");
+const { sanitizeSessionForPersist } = await import("../../../../features/sessions/data/sessionStore");
 import type { HarnessEvent } from "../../core/types";
 import type { RuntimeMode, TurnIntent } from "../../../../features/sessions/model/session";
 
@@ -55,6 +58,139 @@ function parse() {
 function emit(rec: Record<string, unknown>) {
   onLine!(JSON.stringify(rec));
 }
+
+describe("file delivery", () => {
+  it("keeps delivery links separate from prose before and after the tool", async () => {
+    const { events, turn } = await startTurn("delivery-boundaries");
+    emit({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Here is the preview." },
+          {
+            type: "tool_use",
+            id: "delivery",
+            name: "SendUserFile",
+            input: { files: ["/tmp/preview.html"] },
+          },
+        ],
+      },
+    });
+    emit({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "delivery",
+            content: "1 file delivered to user.",
+          },
+        ],
+      },
+    });
+    emit({ type: "assistant", message: { content: [{
+      type: "tool_use", id: "after-delivery", name: "Bash", input: { command: "echo checking" },
+    }] } });
+    emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "after-delivery", content: "checking" }] } });
+    emit({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Try each version." },
+      },
+    });
+    emit({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Try each version." }] },
+    });
+    emit({ type: "result", subtype: "success" });
+    await turn;
+    const session = events.reduce(
+      applyHarnessEvent,
+      newSession("claude", "/repo"),
+    );
+    expect(
+      session.blocks
+        .filter((block) => block.role === "assistant")
+        .map((block) => block.text),
+    ).toEqual([
+      "Here is the preview.\n\n[preview.html](</tmp/preview.html>)",
+      "Try each version.",
+    ]);
+    const saved = sanitizeSessionForPersist(session);
+    expect(saved.blocks.some((block) => block.fileDelivery)).toBe(true);
+    for (const items of [groupTurnItems(saved.blocks), groupMonoTurnItems(saved.blocks, { live: true })]) {
+      expect(items.some((item) => item.type === "block" && item.block.fileDelivery)).toBe(true);
+      const fold = foldableWork(items);
+      expect(fold ? foldedBlocks(items, fold).some((block) => block.fileDelivery) : false).toBe(false);
+    }
+  });
+
+  it.each([false, true])(
+    "keeps successful deliveries visible (error=%s)",
+    async (isError) => {
+      const { events, turn } = await startTurn(`delivery-${isError}`);
+      emit({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "delivery",
+              name: "SendUserFile",
+              input: {
+                files: ["/tmp/flower plan.html"],
+                caption: "Four versions",
+              },
+            },
+          ],
+        },
+      });
+      const result = {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "delivery",
+              is_error: isError,
+              content: isError
+                ? "Delivery failed"
+                : "1 file delivered to user.",
+            },
+          ],
+        },
+      };
+      emit(result);
+      emit(result);
+      emit({ type: "result", subtype: "success" });
+      await turn;
+      const replies = events.filter((event) => event.type === "file.delivered");
+      expect(replies).toEqual(
+        isError
+          ? []
+          : [
+              {
+                type: "file.delivered",
+                text: "Four versions\n\n[flower plan.html](</tmp/flower%20plan.html>)",
+              },
+            ],
+      );
+      if (!isError) {
+        let session = newSession("claude", "/repo");
+        for (const event of events) session = applyHarnessEvent(session, event);
+        expect(
+          session.blocks.some(
+            (block) =>
+              block.role === "assistant" &&
+              block.text.includes("flower%20plan.html"),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+});
 
 const waitFor = async (pred: () => boolean, label: string) => {
   for (let i = 0; i < 200; i++) {
@@ -921,6 +1057,58 @@ describe("claude assistant message boundaries", () => {
       { type: "message.delta", text: progress },
       { type: "message.delta", text: update },
     ]);
+  });
+});
+
+describe("claude sign-in failures", () => {
+  it("reports an authentication_failed reply as a sign-in error", async () => {
+    const { events, turn } = await startTurn("s1");
+    const text =
+      "Failed to authenticate: OAuth session expired and could not be refreshed";
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      error: "authentication_failed",
+      message: { model: "<synthetic>", content: [{ type: "text", text }] },
+    });
+    emit({
+      type: "result",
+      subtype: "success",
+      session_id: "sess_1",
+      is_error: true,
+      result: text,
+    });
+    await turn;
+
+    expect(events.some((event) => event.type === "message.delta")).toBe(false);
+    expect(events.filter((event) => event.type === "session.error")).toEqual([
+      { type: "session.error", message: text },
+    ]);
+    const session = events.reduce(
+      applyHarnessEvent,
+      newSession("claude", "/repo"),
+    );
+    expect(latestTurnNeedsHarnessLogin(session.blocks)).toBe(true);
+  });
+
+  it("keeps Claude's wording recognizable when it does not name sign-in", async () => {
+    const { events, turn } = await startTurn("s1");
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      error: "authentication_failed",
+      message: {
+        model: "<synthetic>",
+        content: [{ type: "text", text: "API Error: 401" }],
+      },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+
+    expect(events).toContainEqual({
+      type: "session.error",
+      message: "Claude Code is not signed in.\n\nAPI Error: 401",
+    });
   });
 });
 

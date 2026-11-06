@@ -485,6 +485,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "unified editor review changes working tree",
   },
   {
+    id: "cursor-multi-review",
+    section: "chat",
+    label: "Review Cursor turns with other models",
+    keywords: "cursor review claude second opinion multi model auto-review",
+  },
+  {
     id: "empty-session-games",
     section: "chat",
     label: "Empty session games",
@@ -716,13 +722,25 @@ const COLLAPSED_PROJECT_RAIL_MODE_KEY = "monocode.collapsedProjectRailMode";
 
 export type FollowUpBehavior = "steer" | "queue";
 
-// Fork: follow-ups wait their turn. Upstream's tests still expect steer, and
-// fork/update.sh rolls back on a red suite, so tests keep upstream's default.
-export const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior =
-  import.meta.env.MODE === "test" ? "steer" : "queue";
+// Fork: a message sent mid-turn shows in the chat and reaches the agent at
+// once (owner, 4 Nov 2026), so steer is the default again.
+export const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior = "steer";
+
+// Fork: queue was the fork's default from 31 Oct to 4 Nov 2026. Clear a saved
+// queue once, so that default doesn't stick; a later choice is kept.
+const FOLLOW_UP_STEER_RESET_KEY = "monocode.fork.followUpSteerReset";
+
+function resetQueuedDefaultOnce() {
+  if (localStorage.getItem(FOLLOW_UP_STEER_RESET_KEY)) return;
+  localStorage.setItem(FOLLOW_UP_STEER_RESET_KEY, "1");
+  if (localStorage.getItem(FOLLOW_UP_BEHAVIOR_KEY) === "queue") {
+    localStorage.removeItem(FOLLOW_UP_BEHAVIOR_KEY);
+  }
+}
 
 export function loadFollowUpBehavior(): FollowUpBehavior {
   try {
+    resetQueuedDefaultOnce();
     const raw = localStorage.getItem(FOLLOW_UP_BEHAVIOR_KEY);
     return raw === "queue" || raw === "steer"
       ? raw
@@ -734,6 +752,7 @@ export function loadFollowUpBehavior(): FollowUpBehavior {
 
 export function saveFollowUpBehavior(value: FollowUpBehavior) {
   try {
+    localStorage.setItem(FOLLOW_UP_STEER_RESET_KEY, "1");
     localStorage.setItem(FOLLOW_UP_BEHAVIOR_KEY, value);
   } catch {
     // private mode / quota
@@ -1116,6 +1135,18 @@ export function loadFormatOnSave(): boolean {
 
 export function saveFormatOnSave(value: boolean) {
   writeFlag(FORMAT_ON_SAVE_KEY, value);
+}
+
+const CURSOR_MULTI_REVIEW_KEY = "monocode.cursorMultiReview";
+
+export const CURSOR_MULTI_REVIEW_DEFAULT = true;
+
+export function loadCursorMultiReview(): boolean {
+  return readFlag(CURSOR_MULTI_REVIEW_KEY) ?? CURSOR_MULTI_REVIEW_DEFAULT;
+}
+
+export function saveCursorMultiReview(value: boolean) {
+  writeFlag(CURSOR_MULTI_REVIEW_KEY, value);
 }
 
 const AUTOSAVE_KEY = "monocode.autosave";
