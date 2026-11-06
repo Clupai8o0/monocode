@@ -21,6 +21,7 @@ import {
   grokAuthError,
   grokAuthMethodId,
   grokEffort,
+  grokInterjectText,
   grokPromptBlocks,
   grokSessionNewParams,
   grokSpawnArgs,
@@ -57,6 +58,10 @@ type Live = {
   prompting: boolean;
   /** When this turn last interjected; Grok may answer it in a turn of its own. */
   interjectedAt?: number;
+  /** Interjections sent but not yet acknowledged. */
+  interjecting: number;
+  /** This turn already put a size on the context meter. */
+  sawContext: boolean;
   /** Grok's running prompt id, from `_x.ai/queue/changed`. */
   queueRunning?: string;
   queueWaiters: Set<() => void>;
@@ -82,6 +87,10 @@ const PROMPT_TIMEOUT_MS = 30 * 60_000;
 /** How long to look for Grok's own turn for an interjection that missed ours. */
 const FALLBACK_GRACE_MS = 750;
 const FALLBACK_PREFIX = "interject-fallback-";
+/** How long a follow-up waits for a starting turn to reach Grok. */
+const STEER_WAIT_MS = 60_000;
+/** Threads with a sendGrokTurn call still running, by count. */
+const startingTurns = new Map<string, number>();
 
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -97,6 +106,18 @@ const cancelledThreads = new Set<string>();
  * Grok accepts ACP image blocks despite advertising image: false.
  */
 export async function sendGrokTurn(input: SendTurnInput): Promise<void> {
+  const id = input.sessionId;
+  startingTurns.set(id, (startingTurns.get(id) ?? 0) + 1);
+  try {
+    await runGrokTurn(input);
+  } finally {
+    const left = (startingTurns.get(id) ?? 1) - 1;
+    if (left > 0) startingTurns.set(id, left);
+    else startingTurns.delete(id);
+  }
+}
+
+async function runGrokTurn(input: SendTurnInput): Promise<void> {
   let live: Live;
   try {
     live = await ensureLive(input);
@@ -163,30 +184,50 @@ export async function compactGrokContext(
 
 /**
  * Mid-turn follow-up through Grok's own interjection, the TUI's Ctrl+Enter.
- * Grok reads it before its next model call. It takes text only, so files go
- * as paths; an image or a turn that already ended waits for the next turn.
+ * Grok reads it before its next model call, or answers it in a turn of its
+ * own if it came too late (see waitForFallbackTurns). It takes text only, so
+ * files go as paths; a pasted image with no file waits for the next turn.
  */
 export async function steerGrokTurn(input: SteerTurnInput): Promise<void> {
-  const live = liveByThread.get(input.sessionId);
-  if (!live || !live.prompting || live.cancelled) {
-    throw new TurnNotReadyError("No Grok Build turn is running");
+  const text = grokInterjectText(input.text, input.attachments)?.trim();
+  if (text == null) {
+    throw new TurnNotReadyError(
+      "Grok Build can't take a pasted image mid-turn. Send it again after this turn.",
+    );
   }
-  const blocks = grokPromptBlocks(input.text, input.attachments);
-  if (blocks.some((block) => block.type !== "text")) {
-    throw new TurnNotReadyError("Grok Build can only interject text");
-  }
-  const text = blocks
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("\n\n")
-    .trim();
   if (!text) return;
-  await live.acp.request(
-    "_x.ai/interject",
-    { sessionId: live.acpSessionId, text },
-    CONTROL_TIMEOUT_MS,
-  );
+  // MonoCode marks the turn busy before Grok has started or resumed. Wait for
+  // the prompt to be in flight so the interjection lands in this turn.
+  const live = await promptingLive(input.sessionId);
+  if (!live) throw new TurnNotReadyError("No Grok Build turn is running");
+  // Mark before sending: the turn may end while the request is in flight,
+  // and Grok then answers it in a turn of its own that we must wait for.
   live.interjectedAt = Date.now();
-  wakeQueueWaiters(live);
+  live.interjecting += 1;
+  try {
+    await live.acp.request(
+      "_x.ai/interject",
+      { sessionId: live.acpSessionId, text },
+      CONTROL_TIMEOUT_MS,
+    );
+  } finally {
+    live.interjecting -= 1;
+    live.interjectedAt = Date.now();
+    wakeQueueWaiters(live);
+  }
+}
+
+async function promptingLive(sessionId: string): Promise<Live | undefined> {
+  const deadline = Date.now() + STEER_WAIT_MS;
+  for (;;) {
+    const live = liveByThread.get(sessionId);
+    if (live?.prompting && !live.cancelled) return live;
+    // Only wait for a turn that is on its way (starting Grok, resuming,
+    // setting the model); with none running the follow-up is a new turn.
+    if (!startingTurns.has(sessionId) || live?.cancelled) return undefined;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 export function respondGrokApproval(
@@ -317,6 +358,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     (line) => acp.pushLine(line),
     (code) => {
       if (liveRef.current) {
+        liveRef.current.muteUpdates = true;
         liveRef.current.queueRunning = undefined;
         wakeQueueWaiters(liveRef.current);
       }
@@ -446,6 +488,8 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       cancelled: false,
       prompting: false,
       queueWaiters: new Set(),
+      interjecting: 0,
+      sawContext: false,
       fullAccess: wantFullAccess,
       planning: wantPlanning,
       runtimeMode: input.runtimeMode,
@@ -518,6 +562,7 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     let result: unknown;
     live.prompting = true;
     live.interjectedAt = undefined;
+    live.sawContext = false;
     try {
       const pending = live.acp.request(
         "session/prompt",
@@ -534,9 +579,13 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     } finally {
       live.prompting = false;
     }
-    if (live.cancelled) return;
-    for (const event of contextFromPromptResult(result)) {
-      live.onEvent(withWindow(live, event));
+    // Stopped, cancelled or exited while waiting: the session is gone.
+    if (live.cancelled || live.muteUpdates) return;
+    // Only a backstop: a later auto-compaction size must not be overwritten.
+    if (!live.sawContext) {
+      for (const event of contextFromPromptResult(result)) {
+        live.onEvent(withWindow(live, event));
+      }
     }
     live.onEvent({ type: "message.completed" });
     live.onEvent({ type: "reasoning.completed" });
@@ -572,6 +621,7 @@ function handleNotification(live: Live, method: string, params: unknown) {
     updateParams,
     eventsFromAcpUpdate(updateParams),
   )) {
+    if (event.type === "context") live.sawContext = true;
     live.onEvent(withWindow(live, event));
   }
 }
@@ -602,15 +652,20 @@ async function waitForFallbackTurns(live: Live): Promise<void> {
   if (live.interjectedAt == null) return;
   const deadline = Date.now() + PROMPT_TIMEOUT_MS;
   let graceUntil = Date.now() + FALLBACK_GRACE_MS;
-  while (!live.cancelled) {
-    const running = live.queueRunning?.startsWith(FALLBACK_PREFIX) === true;
+  let wasRunning = false;
+  while (!live.cancelled && !live.muteUpdates) {
+    const running =
+      live.interjecting > 0 ||
+      live.queueRunning?.startsWith(FALLBACK_PREFIX) === true;
     const now = Date.now();
-    // A follow-up steered in while we wait gets its own grace.
+    // A follow-up steered in while we wait gets its own grace, and so does
+    // the moment a fallback turn ends, in case another one is queued.
     graceUntil = Math.max(
       graceUntil,
       (live.interjectedAt ?? 0) + FALLBACK_GRACE_MS,
-      running ? now + FALLBACK_GRACE_MS : 0,
+      wasRunning && !running ? now + FALLBACK_GRACE_MS : 0,
     );
+    wasRunning = running;
     if (!running && now >= graceUntil) return;
     if (now >= deadline) return;
     await new Promise<void>((resolve) => {

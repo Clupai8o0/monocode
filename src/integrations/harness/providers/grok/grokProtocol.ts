@@ -1,6 +1,7 @@
 import {
   attachmentPathText,
   promptBlocks,
+  promptText,
   type PromptContentBlock,
 } from "../../../../features/sessions/model/attachments";
 import type {
@@ -99,8 +100,8 @@ export function askQuestionResponse(
 /**
  * Grok accepts ACP image blocks despite advertising image: false. It inlines a
  * resource_link only when the file is valid UTF-8 and silently drops anything
- * else (a binary PDF never reaches the model), so every other file travels as
- * a path its own tools can read, as it does for Claude and Codex.
+ * else (a binary PDF never reaches the model), so text files stay links and
+ * every other file travels as a path its own tools can read.
  */
 export function grokPromptBlocks(
   text: string,
@@ -109,11 +110,39 @@ export function grokPromptBlocks(
   const blocks = promptBlocks(text, attachments);
   // promptBlocks ends with one block per attachment, in order.
   const offset = blocks.length - attachments.length;
-  return blocks.map((block, index) =>
-    block.type === "resource_link" && index >= offset
-      ? { type: "text", text: attachmentPathText(attachments[index - offset]) }
-      : block,
-  );
+  return blocks.map((block, index) => {
+    if (block.type !== "resource_link" || index < offset) return block;
+    const file = attachments[index - offset];
+    return isTextMime(file.mimeType)
+      ? block
+      : { type: "text", text: attachmentPathText(file) };
+  });
+}
+
+/**
+ * An interjection is plain text, so every file goes as its path. Returns null
+ * when an image has only pasted data and no path to point at.
+ */
+export function grokInterjectText(
+  text: string,
+  attachments: Attachment[] = [],
+): string | null {
+  const parts: string[] = [];
+  const body = promptText(text, attachments);
+  if (body) parts.push(body);
+  for (const file of attachments) {
+    if (!file.path?.trim()) return null;
+    parts.push(attachmentPathText(file));
+  }
+  return parts.join("\n\n");
+}
+
+const TEXT_APPLICATION =
+  /^application\/(json|ld\+json|xml|javascript|typescript|x-typescript|yaml|x-yaml|toml|x-toml|x-sh|x-shellscript|sql|graphql|x-httpd-php|x-python|x-ruby|x-perl|csv)$/i;
+
+function isTextMime(mimeType: string | undefined): boolean {
+  const mime = (mimeType ?? "").split(";")[0].trim().toLowerCase();
+  return mime.startsWith("text/") || TEXT_APPLICATION.test(mime);
 }
 
 export function grokSpawnArgs(input: {

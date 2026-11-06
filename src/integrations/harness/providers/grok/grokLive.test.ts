@@ -517,4 +517,164 @@ describe("grok live turn sequence", () => {
     expect(finished).toBe(true);
     await stopGrokSession("t8");
   });
+
+  it("holds a follow-up sent while Grok starts, and waits for one in flight", async () => {
+    const base = {
+      sessionId: "t9",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    let finished = false;
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: () => undefined,
+    }).then(() => {
+      finished = true;
+    });
+    // Steered before Grok has even started: it waits instead of failing.
+    const steer = steerGrokTurn({
+      ...base,
+      text: "read this",
+      attachments: [
+        {
+          id: "pdf-1",
+          name: "spec.pdf",
+          mimeType: "application/pdf",
+          kind: "file",
+          size: 10,
+          path: "/tmp/spec.pdf",
+        },
+      ],
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    const methods = parse().map((m) => m.method);
+    expect(methods.indexOf("session/prompt")).toBeLessThan(
+      methods.indexOf("_x.ai/interject"),
+    );
+    const interject = parse().find((m) => m.method === "_x.ai/interject")!;
+    expect(interject.params.text).toBe(
+      'read this\n\nAttached file (read from disk): "/tmp/spec.pdf"',
+    );
+
+    // The turn ends while the interjection is still in flight: stay busy.
+    const promptId = parse().find((m) => m.method === "session/prompt")!.id;
+    reply(promptId, { stopReason: "end_turn" });
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(finished).toBe(false);
+
+    reply(interject.id, { result: { status: "queued" } });
+    await steer;
+    await turn;
+    expect(finished).toBe(true);
+
+    // A pasted image with no file can't ride along, with a plain reason.
+    await expect(
+      steerGrokTurn({
+        ...base,
+        text: "look",
+        attachments: [
+          {
+            id: "image-1",
+            name: "shot.png",
+            mimeType: "image/png",
+            kind: "image",
+            size: 3,
+            data: "YWJj",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/pasted image/);
+    await stopGrokSession("t9");
+  });
+
+  it("keeps the auto-compacted size over the prompt result's", async () => {
+    const events: HarnessEvent[] = [];
+    const turn = sendGrokTurn({
+      sessionId: "t10",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised",
+      text: "go",
+      attachments: [],
+      onEvent: (e) => events.push(e),
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    onLine!(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "S1",
+          update: {
+            sessionUpdate: "auto_compact_completed",
+            tokens_before: 180000,
+            tokens_after: 42000,
+          },
+        },
+      }),
+    );
+    reply(parse().find((m) => m.method === "session/prompt")!.id, {
+      stopReason: "end_turn",
+      _meta: { totalTokens: 181000 },
+    });
+    await turn;
+    const sizes = events.flatMap((e) => (e.type === "context" ? [e.used] : []));
+    expect(sizes).toEqual([42000]);
+    await stopGrokSession("t10");
+  });
+
+  it("ends the wait quietly when the session stops during a fallback turn", async () => {
+    const events: HarnessEvent[] = [];
+    const base = {
+      sessionId: "t11",
+      cwd: "/repo",
+      model: "grok:grok-4.6",
+      runtimeMode: "supervised" as const,
+    };
+    const turn = sendGrokTurn({
+      ...base,
+      text: "say hi",
+      attachments: [],
+      onEvent: (e) => events.push(e),
+    });
+    await handshake();
+    await waitFor(
+      () => parse().some((m) => m.method === "session/prompt"),
+      "prompt",
+    );
+    const steer = steerGrokTurn({ ...base, text: "and bye", attachments: [] });
+    await waitFor(
+      () => parse().some((m) => m.method === "_x.ai/interject"),
+      "interject",
+    );
+    reply(parse().find((m) => m.method === "_x.ai/interject")!.id, {
+      result: { status: "queued" },
+    });
+    await steer;
+    onLine!(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "_x.ai/queue/changed",
+        params: { sessionId: "S1", runningPromptId: "interject-fallback-1" },
+      }),
+    );
+    reply(parse().find((m) => m.method === "session/prompt")!.id, {
+      stopReason: "end_turn",
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    await stopGrokSession("t11");
+    await turn;
+    expect(events.map((e) => e.type)).not.toContain("message.completed");
+  });
 });

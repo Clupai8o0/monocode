@@ -47,6 +47,32 @@ describe("grok protocol", () => {
     expect(grokPromptBlocks("   ")).toEqual([]);
   });
 
+  it("links text files for Grok to inline, and sends binaries as paths", () => {
+    const file = (name: string, mimeType: string) => ({
+      id: name,
+      name,
+      mimeType,
+      kind: "file" as const,
+      size: 10,
+      path: `/tmp/${name}`,
+    });
+    const blocks = grokPromptBlocks("check", [
+      file("app.ts", "text/plain; charset=utf-8"),
+      file("data.json", "application/json"),
+      file("spec.pdf", "application/pdf"),
+    ]);
+    expect(blocks.map((b) => b.type)).toEqual([
+      "text",
+      "resource_link",
+      "resource_link",
+      "text",
+    ]);
+    expect(blocks[3]).toEqual({
+      type: "text",
+      text: 'Attached file (read from disk): "/tmp/spec.pdf"',
+    });
+  });
+
   it("puts global flags before agent and stdio last", () => {
     expect(
       grokSpawnArgs({
