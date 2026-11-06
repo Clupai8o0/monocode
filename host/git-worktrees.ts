@@ -126,6 +126,25 @@ export async function hostWorktrees(cwd: string): Promise<HostWorktrees> {
   };
 }
 
+export const NO_COMMITS =
+  "This project's git repo has no commits yet, so there is nothing to copy into a new working copy. Make a first commit, or start the session in the main checkout.";
+
+/**
+ * Git's own error for an empty repo is "Needed a single revision". True when
+ * no ref has a commit; on any git failure assume commits exist, so git's own
+ * error is kept.
+ */
+async function hasNoCommits(cwd: string): Promise<boolean> {
+  return exec(
+    "git",
+    ["rev-list", "--all", "--max-count=1"],
+    options(cwd),
+  ).then(
+    ({ stdout }) => !stdout.trim(),
+    () => false,
+  );
+}
+
 export async function createHostWorktree(
   cwd: string,
   branch: unknown,
@@ -174,6 +193,7 @@ export async function createHostWorktree(
           (ref) =>
             ref === `refs/heads/${base}` || ref === `refs/remotes/${base}`,
         );
+  if (!refs.length && (await hasNoCommits(cwd))) throw new Error(NO_COMMITS);
   if (!source || (existing && !refs.includes(source)))
     throw new Error("Choose an available base branch");
   const commit = (
@@ -181,7 +201,10 @@ export async function createHostWorktree(
       "git",
       ["rev-parse", "--verify", "--end-of-options", `${source}^{commit}`],
       options(sourceCwd),
-    )
+    ).catch(async (error) => {
+      if (await hasNoCommits(sourceCwd)) throw new Error(NO_COMMITS);
+      throw error;
+    })
   ).stdout.trim();
   await mkdir(listed.defaultRoot, { recursive: true });
   if (existing)

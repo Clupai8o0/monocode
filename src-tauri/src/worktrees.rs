@@ -157,6 +157,18 @@ pub fn git_worktrees(cwd: String, store: State<'_, SessionStore>) -> Result<Work
     })
 }
 
+pub(crate) const NO_COMMITS: &str = "This project's git repo has no commits yet, so there is nothing to copy into a new working copy. Make a first commit, or start the session in the main checkout.";
+
+/// Git's own error for an empty repo is "Needed a single revision", which
+/// means nothing to most people. Say what is wrong when no ref in the repo
+/// has a commit; any other failure keeps git's own error.
+fn no_commits_message(root: &Path) -> Option<String> {
+    git(root, &["rev-list", "--all", "--max-count=1"])
+        .ok()
+        .filter(|out| out.trim().is_empty())
+        .map(|_| NO_COMMITS.to_owned())
+}
+
 fn create(root: &Path, branch: &str, base: &str, existing: bool) -> Result<Worktree, String> {
     let branch = branch.trim();
     if branch.starts_with('-') || branch.starts_with('@') || branch.is_empty() {
@@ -204,7 +216,8 @@ fn create(root: &Path, branch: &str, base: &str, existing: bool) -> Result<Workt
             "--end-of-options",
             &format!("{source}^{{commit}}"),
         ],
-    )?;
+    )
+    .map_err(|error| no_commits_message(root).unwrap_or(error))?;
     std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
     let path_str = path_to_js(&path);
     if existing {
@@ -809,6 +822,18 @@ mod tests {
         )
         .unwrap();
         Repo(dir)
+    }
+
+    #[test]
+    fn empty_repo_says_there_are_no_commits() {
+        let dir =
+            std::env::temp_dir().join(format!("monocode-worktree-test-{}", uuid::Uuid::new_v4()));
+        let repo = Repo(dir);
+        let root = repo.0.join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        git_checked(&root, &["init", "-b", "main"]).unwrap();
+        assert_eq!(create(&root, "feature", "HEAD", false).unwrap_err(), NO_COMMITS);
+        assert_eq!(create(&root, "feature", "main", false).unwrap_err(), NO_COMMITS);
     }
 
     #[test]
