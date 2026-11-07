@@ -161,6 +161,13 @@ type Live = {
   backgroundRows: Map<string, string>;
   /** A task finished after Claude yielded; its follow-up turn is on the way. */
   awaitingResume: ReturnType<typeof setTimeout> | null;
+  /**
+   * Follow-ups written into the running turn that Claude has not taken yet,
+   * by message uuid. One still queued when Claude yields runs as its own
+   * Claude turn, so the MonoCode turn stays open for it (Claude echoes each
+   * message, uuid kept, as it takes it, through `--replay-user-messages`).
+   */
+  pendingSteers: { uuid: string; text: string }[];
   /** Last background list sent to the UI, to skip repeats. */
   backgroundKey: string;
   /** Finished-subagent notes held until Claude picks the thread back up. */
@@ -314,7 +321,52 @@ export async function steerClaudeTurn(input: SteerTurnInput): Promise<void> {
   const content = (message.message as { content: unknown[] }).content;
   if (content.length === 0) return;
 
-  await writeJson(input.sessionId, message);
+  // Noted before the write, so an echo that comes back at once finds it.
+  const pending = { uuid: crypto.randomUUID(), text: steerKey(content) };
+  live.pendingSteers.push(pending);
+  if (live.turnResultSeen && live.awaitingResume) {
+    // Sent while the turn is held for an earlier one: the wait starts over.
+    clearAwaitingResume(live);
+    maybeFinishTurn(live);
+  }
+  try {
+    await writeJson(input.sessionId, { ...message, uuid: pending.uuid });
+  } catch (error) {
+    live.pendingSteers = live.pendingSteers.filter((item) => item !== pending);
+    throw error;
+  }
+}
+
+/** A message's text, to match Claude's echo of it to the follow-up sent. */
+function steerKey(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      const record = part as Record<string, unknown> | null;
+      return record?.type === "text" && typeof record.text === "string"
+        ? record.text
+        : "";
+    })
+    .join("\n")
+    .trim();
+}
+
+/** Claude took a message from stdin: a follow-up it took is no longer queued. */
+function noteUserMessageTaken(live: Live, rec: Record<string, unknown>): void {
+  if (live.pendingSteers.length === 0) return;
+  const uuid = stringField(rec, "uuid");
+  const message = rec.message as Record<string, unknown> | undefined;
+  // An echo without a uuid (an older Claude) is matched by its text.
+  const text = uuid ? undefined : steerKey(message?.content);
+  const at = live.pendingSteers.findIndex((item) =>
+    uuid ? item.uuid === uuid : item.text === text,
+  );
+  if (at < 0) return;
+  live.pendingSteers.splice(at, 1);
+  // Taken after Claude yielded: it is running the follow-up now, so that
+  // turn's own result ends the MonoCode turn, however long it takes to answer.
+  noteClaudeTurnStarted(live);
 }
 
 export function respondClaudeApproval(
@@ -525,6 +577,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     backgroundTasks: new Map(),
     backgroundRows: new Map(),
     awaitingResume: null,
+    pendingSteers: [],
     backgroundKey: "",
     taskNotes: [],
     claudeTasks,
@@ -673,6 +726,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.backgroundKey = "";
   live.taskNotes = [];
   live.turnResultSeen = false;
+  live.pendingSteers = [];
 
   const turnPromise = new Promise<void>((resolve, reject) => {
     live.turnDone = resolve;
@@ -785,6 +839,13 @@ function handleLine(sessionId: string, live: Live, line: string): void {
         // The session works without it; only other machines can't reach it.
       });
     }
+    return;
+  }
+
+  // Claude's echo of a message MonoCode wrote: the UI already shows it. A
+  // message from another session can carry the flag too, and stays.
+  if (type === "user" && rec.isReplay === true && !peerInterjection(rec)) {
+    noteUserMessageTaken(live, rec);
     return;
   }
 
@@ -1813,6 +1874,19 @@ function maybeFinishTurn(live: Live): void {
   if (live.agentTasks.size > 0 || live.backgroundTasks.size > 0) return;
   if (live.awaitingResume) return;
   if (!live.activeTurn && !live.turnDone) return;
+  if (live.pendingSteers.length > 0) {
+    // Claude yielded before taking a follow-up, so it runs that next, as a
+    // turn of its own. Ending here would leave that turn untracked: the idle
+    // park would later kill it mid-work and the session would stay busy.
+    live.awaitingResume = setTimeout(() => {
+      live.awaitingResume = null;
+      // Never taken after all: let the turn end.
+      live.pendingSteers = [];
+      maybeFinishTurn(live);
+      syncBackgroundWait(live);
+    }, RESUME_GRACE_MS);
+    return;
+  }
   finishActiveTurn(live, [
     { type: "message.completed" },
     { type: "reasoning.completed" },
@@ -1821,6 +1895,7 @@ function maybeFinishTurn(live: Live): void {
 
 function finishActiveTurn(live: Live, extraEvents: HarnessEvent[] = []): void {
   clearAwaitingResume(live);
+  live.pendingSteers = [];
   live.turnEndPending = false;
   live.activeTurn = false;
   for (const event of extraEvents) live.onEvent(event);

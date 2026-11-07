@@ -286,6 +286,9 @@ export function buildClaudeSpawnArgs(input: {
     args.push("--settings", JSON.stringify(settings));
     // Fork: headless Claude skips the Chrome extension unless asked.
     args.push("--chrome");
+    // Claude echoes each message as it takes it, so a follow-up sent during a
+    // turn is known to be taken mid-turn or still queued when Claude yields.
+    args.push("--replay-user-messages");
   }
   if (input.model) args.push("--model", input.model);
   if (input.effort) args.push("--effort", input.effort);
