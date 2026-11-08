@@ -730,11 +730,13 @@ function phaseCard(p)
 function miniRow(p)
 {
   const open = !!S.open["m" + p.id];
+  const chats = S.sessions.filter((s) => s.project === "yap" && s.phase === p.id);
   return `<div class="mrow ${p.status === "done" ? "done" : ""} ${open ? "open" : ""}" data-phase="${p.id}">
-    <div class="mrow-h"><button class="tog" data-mtoggle="${p.id}" aria-expanded="${open}"><span class="glyph sm g-${p.status}"></span><span class="ph-id" style="width:22px">${p.id}</span><span class="nm trunc">${p.name}</span></button>
+    <div class="mrow-h"><button class="tog" data-mtoggle="${p.id}" aria-expanded="${open}"><span class="glyph sm g-${p.status}"></span><span class="ph-id" style="width:22px">${p.id}</span><span class="nm trunc">${p.name}</span>${chats.length ? `<span class="idle-tag tab-num">${chats.length} chat${chats.length > 1 ? "s" : ""}</span>` : ""}</button>
       ${p.status === "done" ? statusBtn(p) : `<button class="btn ghost sm" data-start="${p.id}">Start</button>`}</div>
     <div class="mrow-d" ${open ? "" : "inert"}><div><div class="in"><p class="what">${p.what}</p>
-      <div class="checks">${p.checks.map((c) => `<div class="chk ${c[1] ? "on" : ""}"><span class="circ ${c[1] ? "on" : ""}"></span><span class="ct">${c[0]}</span></div>`).join("")}</div></div></div></div>
+      <div class="checks">${p.checks.map((c) => `<div class="chk ${c[1] ? "on" : ""}"><span class="circ ${c[1] ? "on" : ""}"></span><span class="ct">${c[0]}</span></div>`).join("")}</div>
+      ${chats.length ? `<div><div class="lbl">Chats · ${chats.length}</div><div class="chats">${chats.map((s) => `<button class="chat-row" data-chat="${s.id}" data-tip="${s.last}">${provIcon(s)}<span class="t trunc">${s.title}</span>${label(s)}</button>`).join("")}</div></div>` : ""}</div></div></div>
   </div>`;
 }
 
@@ -763,6 +765,8 @@ function renderChat(focusWait)
   const asks = S.waits.filter((w) => w.session === s.id);
   const strip = ph
     ? `<span class="glyph sm g-${ph.status}"></span><span class="trunc">${p.name} › <b>Phase ${ph.id} · ${ph.name}</b></span>`
+    : s.phase && p.phaseLabel
+    ? `<span class="glyph sm g-progress"></span><span class="trunc">${p.name} › <b>${p.phaseLabel}</b></span>`
     : `<span class="trunc">${p.name} › <b>${p.plan ? "Not on a phase" : "No plan yet"}</b></span>`;
   const model = s.prov === "claude" ? "Opus 5.5" : s.prov === "codex" ? "GPT-6.1 Sol" : "Grok 4.7";
   $("#v-chat").innerHTML = `<div class="chat">
@@ -859,6 +863,7 @@ function toast(msg, meta, withUndo)
       }
       gen++;
       undoGen++;
+      starting.clear();
       const view = S.view;
       S = back;
       S.view = view;
@@ -1051,6 +1056,7 @@ function simulate(kind)
   if (kind === "approve") {
     const s = sess("s4");
     if (s.state === "waiting") {
+      toast("Daily reminder already needs you", "Answer it from Needs you first");
       return;
     }
     act("Daily reminder needs you", "Run the reminder migration?", () => {
@@ -1075,10 +1081,13 @@ function simulate(kind)
     });
   } else if (kind === "reset") {
     gen++;
+    undoGen++;
     undoSnap = null;
+    starting.clear();
     $("#toasts").innerHTML = "";
     S = seed();
     render();
+    $$(".view").forEach((v) => (v.scrollTop = 0));
   }
 }
 
@@ -1127,7 +1136,7 @@ document.addEventListener("click", (e) => {
     closePop();
     act(`Put on Phase ${pid}`, sess(sid).title, () => {
       sess(sid).phase = pid;
-      S.open[pid] = true;
+      S.open[isActive(phase(pid)) ? pid : "m" + pid] = true;
     });
   } else if (d.linkmenu) {
     linkMenu(d.linkmenu, t);
