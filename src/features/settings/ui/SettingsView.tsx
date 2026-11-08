@@ -439,6 +439,7 @@ import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
 import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
 import { FeatureCoachPage } from "../../../fork/featureCoach/FeatureCoachPage"; // Fork
 import { McpAccessSection } from "../../../fork/mcpAccess/McpAccessSection"; // Fork
+import { IdleCompactSetting } from "../../../fork/idleCompact/IdleCompactSetting"; // Fork
 import {
   removeWorktree,
   type RemoveWorktree,
@@ -3898,6 +3899,8 @@ function ProviderAccountsSettings({ project }: { project?: string }) {
                 disabled={Boolean(working)}
               />
             ) : null}
+            {/* Fork: compact big idle Claude threads. */}
+            {provider === "claude" ? <IdleCompactSetting /> : null}
           </div>
         );
       })}

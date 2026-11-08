@@ -409,7 +409,6 @@ import {
   buildDeterministicHandoff,
   appendReadyHandoff,
   buildHandoffComposerCard,
-  chooseHandoffBrief,
   completeHandoff,
   HANDOFF_TITLE,
   handoffTurnCard,
@@ -419,12 +418,19 @@ import {
   planComposerSwitch,
   sessionChildHarnesses,
   sessionThroughTurn,
-  shouldAskOutgoingAgent,
   type HandoffComposerCard,
   userMessagesAfterHandoff,
   wrapHandoffPrompt,
 } from "../features/sessions/model/handoff";
-import { requestOutgoingHandoff } from "../features/sessions/model/handoffTurn";
+import { budgetedHandoff } from "../fork/handoffBudget/handoffSelection"; // Fork
+import {
+  markSendAfterCompact,
+  noteCompacted,
+  takeCompactBeforeSend,
+  takeSendAfterCompact,
+} from "../fork/idleCompact/idleCompact"; // Fork
+import { useIdleCompact } from "../fork/idleCompact/useIdleCompact"; // Fork
+import { closeEntry } from "../fork/closeBadges/closeState"; // Fork
 import { useAutoHandoff } from "../fork/autoHandoff/useAutoHandoff";
 import {
   applyBtwHarnessEvent,
@@ -1961,6 +1967,9 @@ function Workspace({
   );
   const submitAfterProjectSyncRef = useRef<Submit>(() => false);
   // Fork: stops a turn that ran past its effort raise (set after onStop).
+  // Fork (idleCompact): set beside onCompactContext, read by onSubmit.
+  const compactContextRef = useRef<(sessionId: string) => boolean>(() => false);
+  const skipIdleCompactRef = useRef<(session: Session) => boolean>(() => true);
   const effortStopRef = useRef<
     (sessionId: string) => Promise<unknown> | null
   >(() => null);
@@ -8491,28 +8500,10 @@ function Workspace({
             }
           : queuedHandoff;
         if (pendingSwitch) {
-          let agentText = "";
-          if (
-            shouldAskOutgoingAgent(current) &&
-            isLiveHarness(pendingSwitch.from)
-          ) {
-            try {
-              agentText = await requestOutgoingHandoff({
-                harness: pendingSwitch.from,
-                sessionId,
-                cwd: workCwd,
-                model: pendingSwitch.fromModel,
-                modelSettings: pendingSwitch.fromSettings,
-                providerAccountId: pendingSwitch.fromProviderAccountId,
-                userRequest: text,
-              });
-            } catch {
-              agentText = "";
-            }
-          }
-          if (turnGen.current.get(sessionId) !== gen) return;
+          // Fork (handoffBudget): saved messages picked by rule, instead of a
+          // recap turn that re-read the outgoing agent's whole context.
           const latest = sessionsRef.current.find((s) => s.id === sessionId);
-          const brief = chooseHandoffBrief(agentText, latest ?? current, text);
+          const brief = budgetedHandoff(latest ?? current, text, workCwd);
           await forgetHarnessSession(pendingSwitch.from, sessionId);
           if (turnGen.current.get(sessionId) !== gen) return;
           wrap = { from: pendingSwitch.from, to: current.harness, text: brief };
@@ -8682,7 +8673,7 @@ function Workspace({
             const from = wrap?.from ?? continuedOrigin(current.id)?.from ?? current.harness;
             const brief = await prepareHandoffContext(
               current,
-              wrap?.text ?? buildDeterministicHandoff(current),
+              wrap?.text ?? budgetedHandoff(current, undefined, workCwd), // Fork
               async (id) => sessionsRef.current.find((entry) => entry.id === id) ?? await peekSession(id),
             );
             if (turnGen.current.get(sessionId) !== gen) return;
@@ -9097,7 +9088,34 @@ function Workspace({
     (...args: Parameters<Submit>): boolean => {
       // Reject before async preparation can make the composer clear its draft.
       if (workspaceNavigation.isSwitching(args[0])) return false;
-      const result = submitSession(...args);
+      // Fork (idleCompact): the cache ran out on a big Claude thread, so it is
+      // summarised first and the message waits in the queue behind it.
+      const [submitId, submitText, submitAttachments, submitOptions] = args;
+      const target = sessionsRef.current.find((s) => s.id === submitId);
+      // Only a plain composer send: a queued entry keeps text, files and
+      // intent, and would drop plan builds, CI repairs, retries and callbacks.
+      const plainSend = Object.entries(submitOptions ?? {}).every(
+        ([key, value]) =>
+          value === undefined ||
+          (key === "intent" && (value === "default" || value === "plan")),
+      );
+      const compactFirst =
+        !!target &&
+        plainSend &&
+        !editedResends.isActive(submitId) &&
+        !orchestrator.submissionError(submitId, false) &&
+        !isPreparingHandoff(target) &&
+        !skipIdleCompactRef.current(target) &&
+        !isNativeCommandPrompt(submitText, target.harness) &&
+        takeCompactBeforeSend(target) &&
+        compactContextRef.current(submitId);
+      if (compactFirst) markSendAfterCompact(submitId);
+      const result = compactFirst
+        ? submitSession(submitId, submitText, submitAttachments, {
+            ...submitOptions,
+            followUpBehavior: "queue",
+          })
+        : submitSession(...args);
       const onAnswer = (accepted: boolean) => {
         if (accepted) leaveArchive(args[0]);
       };
@@ -11078,7 +11096,7 @@ function Workspace({
           from,
           to: harness,
           // Fork: says where the full transcript is.
-          brief: withTranscriptPointer(buildDeterministicHandoff(sliced), sourceId),
+          brief: withTranscriptPointer(budgetedHandoff(sliced), sourceId),
           userRequest,
           files,
           intent: turn.find((block) => block.role === "user")?.intent,
@@ -11315,6 +11333,7 @@ function Workspace({
             },
           });
           if (turnGen.current.get(sessionId) !== gen) return;
+          noteCompacted(sessionId, current.context?.used); // Fork (idleCompact)
           enqueueHarnessEvent(sessionId, {
             type: "status",
             text: "Compacted context",
@@ -11329,10 +11348,21 @@ function Workspace({
                 : `${current.harness} could not compact this context`,
           });
         } finally {
+          // Fork (idleCompact): a message sent behind this compaction still
+          // goes out if the compaction failed, with the full history.
+          const resumeSend = takeSendAfterCompact(sessionId);
           if (turnGen.current.get(sessionId) !== gen) return;
           flushHarnessEvents();
           const finished = sessionsRef.current.map((session) =>
-            session.id === sessionId ? { ...session, busy: false } : session,
+            session.id === sessionId
+              ? {
+                  ...session,
+                  busy: false,
+                  ...(resumeSend && session.queueStatus === "paused"
+                    ? { queueStatus: "active" as const }
+                    : {}),
+                }
+              : session,
           );
           sessionsRef.current = finished;
           syncDockBadge(finished);
@@ -11343,6 +11373,27 @@ function Workspace({
     },
     [enqueueHarnessEvent, flushHarnessEvents],
   );
+
+  // Fork (idleCompact): onSubmit, above, reaches these through refs.
+  compactContextRef.current = onCompactContext;
+  skipIdleCompactRef.current = (session: Session) =>
+    !!remoteProjectFor(session.cwd) ||
+    isMonoSession(session.id) ||
+    isHabitRun(session.id) ||
+    !!session.orchestrationLeadId ||
+    orchestrator.run(session.id)?.status === "active" ||
+    session.ephemeral === true ||
+    isMoveLocked(session.id) ||
+    !!session.queuedMessages?.length ||
+    !!session.backgroundTasks?.length;
+  useIdleCompact(sessions, {
+    sessionsRef,
+    compact: onCompactContext,
+    // A thread marked safe to close is finished; summarising it would be waste.
+    skip: (session) =>
+      skipIdleCompactRef.current(session) ||
+      closeEntry(session.id)?.state?.kind === "safe",
+  });
 
   const onStop = useCallback(
     (sessionId: string, managed = false) => {

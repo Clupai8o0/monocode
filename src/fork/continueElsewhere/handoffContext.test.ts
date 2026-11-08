@@ -46,7 +46,7 @@ it("restores unabridged original instructions for an already continued thread", 
   );
   expect(write.mock.calls[0][0]).toContain(source.blocks[0].text);
   expect(result).toContain("/private/handoff.md");
-  expect(result).toContain("Before continuing");
+  expect(result).toContain("Do not read the whole file");
   expect(result).not.toContain("ask the user");
   expect(load).toHaveBeenCalledWith("source");
   const recorded = recordHandoffContext(target, "claude", result);

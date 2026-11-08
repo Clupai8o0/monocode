@@ -250,6 +250,8 @@ type Props = {
   toolbarExtra?: ReactNode;
   /** Fork: shown beside the context ring (token count, compactions). */
   contextLabel?: ReactNode;
+  /** Fork: just before Send (the idle-thread Compact chip). */
+  sendExtra?: ReactNode;
   quoteRequest?: QuoteRequest;
   initialDraft?: string;
   draftResetToken?: number;
@@ -382,6 +384,7 @@ export function Composer({
   context,
   compactSupported = false,
   toolbarExtra,
+  sendExtra,
   contextLabel,
   quoteRequest,
   initialDraft,
@@ -2552,6 +2555,7 @@ export function Composer({
               </button>
             ) : null}
             <div className="flex shrink-0 items-center gap-1">
+              {busy ? null : sendExtra /* Fork */}
               <ComposerAction
                 busy={busy}
                 disabled={disabled}

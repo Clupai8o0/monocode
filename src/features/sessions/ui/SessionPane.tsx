@@ -1,4 +1,5 @@
 // Fork: auto worktrees, Merge back, the follow-up coach mark, Continue in Codex.
+import { IdleCompactChip } from "../../../fork/idleCompact/IdleCompactChip"; // Fork
 import { DevicePanel } from "../../../fork/device/DevicePanel";
 import {
   ContinuedFromCard,
@@ -916,6 +917,12 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }}
       onEditingLastTurnChange={setEditingLastTurn}
       toolbarExtra={status ? <StatusExtras status={status} /> : null}
+      sendExtra={
+        // Fork: the app never compacts Monos, workers or remote threads.
+        !remote && !monoForSession(session.id) && !session.orchestrationLeadId ? (
+          <IdleCompactChip session={session} />
+        ) : null
+      }
       contextLabel={
         <ContextLabel
           usage={context}

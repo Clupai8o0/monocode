@@ -504,6 +504,14 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords:
       "account sign in login rename remove delete credentials profile usage limit quota exhausted",
   },
+  // Fork: src/fork/idleCompact.
+  {
+    id: "idle-compact",
+    section: "providers",
+    label: "Compact idle threads",
+    keywords:
+      "claude compact summarise summarize cache expire idle tokens context save usage",
+  },
   {
     id: "show-remaining-usage",
     section: "providers",
