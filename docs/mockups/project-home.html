@@ -732,19 +732,19 @@ function applyAsk(a)
 function tickAsk(id, input)
 {
   const a = S.asks.find((x) => x.id === id);
+  if (!a || !input.checked) {
+    return;
+  }
+  /* The state changes now; only the leaving animation waits. Undo is the way back. */
+  const snap = snapshot();
+  applyAsk(a);
+  gen++;
+  input.disabled = true;
   const li = input.closest(".ask");
   li.classList.add("ticked");
-  const snap = snapshot();
-  const g = gen;
+  toast(`Done: ${a.text.toLowerCase()}`, snap);
   setTimeout(() => li.classList.add("leaving"), 260);
-  setTimeout(() => {
-    if (g !== gen || !S.asks.includes(a)) {
-      return;
-    }
-    applyAsk(a);
-    render();
-    toast(`Done: ${a.text.toLowerCase()}`, snap);
-  }, 540);
+  setTimeout(render, 540);
 }
 
 function finishPhase(id)
@@ -764,8 +764,13 @@ function finishPhase(id)
       }
     });
     S.asks = S.asks.filter((a) => a.phase !== id);
-    setTimeout(() => setOpen(id, false), 1400);
   });
+  const g = gen;
+  setTimeout(() => {
+    if (g === gen) {
+      setOpen(id, false);
+    }
+  }, 1400);
 }
 
 function startPhase(id, btn)
