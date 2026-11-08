@@ -44,6 +44,7 @@ const {
   respondClaudeQuestion,
   restoreClaudeTaskLists,
   sendClaudeTurn,
+  steerClaudeTurn,
   stopClaudeSession,
   __claudeTestReset,
 } = await import("./claude");
@@ -415,6 +416,188 @@ beforeEach(() => {
 afterEach(async () => {
   await stopClaudeSession("s1");
   __claudeTestReset();
+});
+
+describe("claude follow-ups sent during a turn", () => {
+  async function steer(sessionId: string, text: string) {
+    await steerClaudeTurn({
+      sessionId,
+      text,
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      attachments: [],
+      modelSettings: {},
+    });
+  }
+
+  /** Claude's echo of a message it took from stdin, uuid kept. */
+  function emitTaken(text: string) {
+    const sentMessage = parse()
+      .filter((m) => m.type === "user")
+      .reverse()
+      .find((m) => {
+        const content = (m.message as { content: { text?: string }[] })
+          .content;
+        return content.some((part) => part.text === text);
+      });
+    emit({
+      type: "user",
+      isReplay: true,
+      ...(sentMessage?.uuid ? { uuid: sentMessage.uuid } : {}),
+      session_id: "sess_1",
+      message: { role: "user", content: [{ type: "text", text }] },
+    });
+  }
+
+  function watch(turn: Promise<void>) {
+    const state = { settled: false };
+    void turn.then(() => {
+      state.settled = true;
+    });
+    return state;
+  }
+
+  const flush = () => new Promise((r) => setTimeout(r, 10));
+
+  it("asks Claude to echo the messages it takes", async () => {
+    const { turn } = await startTurn("s1");
+    expect(spawned.at(-1)).toContain("--replay-user-messages");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("ends at the result when Claude took the follow-up mid-turn", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "also do this");
+    emitTaken("also do this");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(true);
+  });
+
+  it("stays open for a follow-up Claude runs as its own turn", async () => {
+    const { events, turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "Setup project");
+    // Claude yields before taking it, then runs it next.
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(false);
+
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emitTaken("Setup project");
+    emitFollowUpTurn("Setting up now.");
+    await flush();
+    expect(state.settled).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "message.delta" && event.text === "Setting up now.",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not show Claude's echo as a message", async () => {
+    const { events, turn } = await startTurn("s1");
+    const before = events.length;
+    emitTaken("explore the codebase");
+    expect(events.length).toBe(before);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("still shows a message from another session marked as a replay", async () => {
+    const { events, turn } = await startTurn("s1");
+    emit({
+      type: "user",
+      isReplay: true,
+      session_id: "sess_1",
+      origin: { kind: "peer", name: "Other", body: "hello there" },
+      message: { role: "user", content: [{ type: "text", text: "hello there" }] },
+    });
+    expect(events.some((event) => event.type === "interjection")).toBe(true);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("matches the echo by uuid, not by text", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    // Same text as the prompt: the prompt's own echo must not count for it.
+    await steer("s1", "explore the codebase");
+    emit({
+      type: "user",
+      isReplay: true,
+      session_id: "sess_1",
+      uuid: "prompt-uuid",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "explore the codebase" }],
+      },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(false);
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emitTaken("explore the codebase");
+    emitFollowUpTurn("Done.");
+    await flush();
+    expect(state.settled).toBe(true);
+  });
+
+  it("keeps the turn open past the wait once Claude took the follow-up", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "slow one");
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      emitTaken("slow one");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state.settled).toBe(false);
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits again for a follow-up sent while the turn is held", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "first");
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await steer("s1", "second");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the turn go if Claude never takes the follow-up", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "lost");
+
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("claude ultracode", () => {
