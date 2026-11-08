@@ -88,6 +88,7 @@
   .tab .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab .pi { opacity: .55; }
   .tab.on .pi { opacity: 1; }
+  .mob-all { display: none; }
   .tab-add { width: 26px; height: 26px; border-radius: 6px; background: rgb(var(--c) / .1); color: rgb(var(--c) / .7); display: grid; place-items: center; margin-left: 4px; }
   .tab-add:hover { background: rgb(var(--c) / .15); }
   .claude { color: #d97757; font-size: 14px; line-height: 1; width: 14px; text-align: center; }
@@ -180,8 +181,9 @@
   .suggest .why { color: rgb(var(--c) / .45); font-size: 11px; }
   @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
   .pactions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .start { opacity: 0; transition: opacity 120ms ease; }
-  .phase-head:hover .start, .phase-head:focus-within .start { opacity: 1; }
+  .phase-head .start { opacity: 0; visibility: hidden; transition: opacity 120ms ease, visibility 0s 120ms; }
+  .phase-head:hover .start, .phase-head:focus-within .start { opacity: 1; visibility: visible; transition: opacity 120ms ease; }
+  @media (hover: none) { .phase-head .start { opacity: 1; visibility: visible; } }
   .phase.flash { animation: flash 1300ms var(--ease); }
   @keyframes flash { 0%, 35% { box-shadow: inset 0 0 0 1px rgb(var(--c) / .35); } 100% { box-shadow: inset 0 0 0 1px transparent; } }
   .phase.changed .glyph { animation: pop 380ms var(--ease); }
@@ -239,13 +241,13 @@
   .effort i.on { background: rgb(var(--c) / .8); }
   .send { width: 26px; height: 26px; border-radius: 6px; background: #fff; color: #000; display: grid; place-items: center; margin-left: auto; transition: background-color 120ms ease, transform 100ms var(--ease); }
   .send:active { transform: scale(.94); }
-  .footer { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgb(var(--c) / .55); padding: 2px 4px 0; }
+  .footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: rgb(var(--c) / .55); padding: 2px 4px 0; }
   .footer .wp { height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; border-radius: 6px; }
-  .footer .br { font: 10px var(--mono); }
+  .footer .br { font: 10px var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .footer .r { margin-left: auto; font-variant-numeric: tabular-nums; }
 
   /* ---------- popover / menu / toast ---------- */
-  .pop { position: fixed; z-index: 40; background: color-mix(in srgb, var(--bg) 95%, transparent); backdrop-filter: blur(24px); border: 1px solid rgb(var(--c) / .1); border-radius: 12px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / .4), 0 8px 10px -6px rgb(0 0 0 / .4); padding: 4px; min-width: 200px; opacity: 0; transform: scale(.97); transform-origin: var(--o, top left); transition: opacity 120ms ease, transform 160ms var(--ease); pointer-events: none; }
+  .pop { max-height: min(420px, calc(100vh - 16px)); overflow: auto; position: fixed; z-index: 40; background: color-mix(in srgb, var(--bg) 95%, transparent); backdrop-filter: blur(24px); border: 1px solid rgb(var(--c) / .1); border-radius: 12px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / .4), 0 8px 10px -6px rgb(0 0 0 / .4); padding: 4px; min-width: 200px; opacity: 0; transform: scale(.97); transform-origin: var(--o, top left); transition: opacity 120ms ease, transform 160ms var(--ease); pointer-events: none; }
   .pop.show { opacity: 1; transform: none; pointer-events: auto; }
   .pop .ml { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: rgb(var(--c) / .4); padding: 6px 8px 4px; }
   .pop .mi { height: 28px; display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 0 8px; font-size: 12px; width: 100%; }
@@ -277,6 +279,8 @@
     .pcontent { padding-left: 12px; }
     
     .row .go { display: none; }
+    .mob-all { display: flex; }
+    .phase-head .start { opacity: 1; visibility: visible; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
@@ -325,7 +329,7 @@
   </main>
 </div>
 
-<div class="pop" id="pop"></div>
+<div class="pop" id="pop" inert></div>
 <div class="tip" id="tip"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
@@ -391,6 +395,8 @@ function seed()
 }
 
 let S = seed();
+let tipTimer = null;
+const starting = new Set();
 let undoSnap = null;
 let gen = 0;
 const $ = (s, r = document) => r.querySelector(s);
@@ -400,6 +406,7 @@ const proj = (id) => S.projects.find((p) => p.id === id);
 const sess = (id) => S.sessions.find((s) => s.id === id);
 const phase = (id) => S.phases.find((p) => p.id === id);
 const icon = (id, cls = "i") => `<svg class="${cls}"><use href="#${id}"/></svg>`;
+const esc = (t) => String(t).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const logo = (p, extra = "") => `<span class="logo ${extra}" style="background:${p.color}">${p.letter}</span>`;
 
 function waitsFor(project)
@@ -436,13 +443,17 @@ function renderSide()
 function renderTabs()
 {
   const v = S.view;
-  const tabs = [];
+  const tabs = v.kind === "all" ? [] : [`<button class="tab mob-all" data-nav="all" aria-label="All projects">${icon("grid", "i i-14 pi")}</button>`];
   if (v.kind === "all") {
     tabs.push(`<button class="tab on">${icon("grid", "i i-14 pi")}<span class="t">All projects</span></button>`);
   } else {
     const p = proj(v.project);
     tabs.push(`<button class="tab ${v.kind === "home" ? "on" : ""}" data-home="${p.id}">${icon("grid", "i i-14 pi")}<span class="t">${p.name}</span></button>`);
-    S.sessions.filter((s) => s.project === p.id && (s.state !== "done" || (v.kind === "chat" && v.session === s.id))).slice(0, 3).forEach((s) => {
+    const open = S.sessions.filter((s) => s.project === p.id && s.state !== "done").slice(0, 3);
+    if (v.kind === "chat" && !open.some((s) => s.id === v.session)) {
+      open.push(sess(v.session));
+    }
+    open.forEach((s) => {
       tabs.push(`<button class="tab ${v.kind === "chat" && v.session === s.id ? "on" : ""}" data-chat="${s.id}"><span class="claude pi">✳</span><span class="t">${s.title}</span></button>`);
     });
   }
@@ -520,7 +531,7 @@ function renderHome()
   const loose = S.sessions.filter((s) => s.project === "yap" && !s.phase);
   $("#v-home").innerHTML = `<div class="page">
     <div class="ph-header">${logo(p)}<div><h1>${p.name}</h1>
-      <div class="subline"><span>Now: Phase ${cur.id} · ${cur.name}</span><span>·</span><span>${done} of ${S.phases.length} done</span><span>·</span><span>${S.sessions.filter((s) => s.project === "yap" && s.state === "working").length} chats working</span><span>·</span><span>$${p.spend.toFixed(2)} today</span></div></div>
+      <div class="subline"><span>${cur ? `Now: Phase ${cur.id} · ${cur.name}` : "All phases done"}</span><span>·</span><span>${done} of ${S.phases.length} done</span><span>·</span><span>${S.sessions.filter((s) => s.project === "yap" && s.state === "working").length} chats working</span><span>·</span><span>$${p.spend.toFixed(2)} today</span></div></div>
       <span class="grow"></span><button class="btn2" data-toast="Opens docs/plan.md in the file viewer">${icon("file", "i i-14")}<span class="mono">plan.md</span></button></div>
     <div class="handoff"><span class="k">Handoff</span><span class="txt">${p.handoff.text}</span><span class="age" title="From .claude/handoff.md, written by “${p.handoff.by}”">${p.handoff.age}</span></div>
     <section><div class="h2">Waiting on you ${waits.length ? `<span class="pill amber">${waits.length}</span>` : ""}</div>
@@ -560,9 +571,9 @@ function phaseRow(p)
       ${live.length ? `<span class="pchats">${live.map((s) => `<span class="st ${s.state}"></span>`).join("")}</span>` : ""}
       ${p.status === "todo" ? `<button class="btn2 start" data-start="${p.id}">Start</button>` : ""}
       <button class="pstatus" data-statusmenu="${p.id}" data-tip="${p.set ? "Set by " + p.set + ". Click to change." : "Click to set status"}">${STATUS[p.status]}</button>
-      <button data-toggle="${p.id}" aria-label="Expand" style="display:grid;place-items:center;width:20px;height:20px">${icon("chev", "i i-14 chev")}</button>
+      <button data-toggle="${p.id}" aria-label="${open ? "Collapse" : "Expand"}" style="display:grid;place-items:center;width:20px;height:20px">${icon("chev", "i i-14 chev")}</button>
     </div>
-    <div class="pbody"><div class="pinner"><div class="pcontent">
+    <div class="pbody" ${open ? "" : "inert"}><div class="pinner"><div class="pcontent">
       <p class="what">${p.what}</p>
       ${newest ? `<div class="quote">“${newest.last}”<small>${newest.title} · ${newest.tm}</small></div>` : ""}
       ${sugHtml}
@@ -627,6 +638,8 @@ function renderChat(focusWait)
 function render(opts = {})
 {
   const v = S.view;
+  clearTimeout(tipTimer);
+  $("#tip").classList.remove("show");
   $("#v-all").hidden = v.kind !== "all";
   $("#v-home").hidden = v.kind !== "home";
   $("#v-chat").hidden = v.kind !== "chat";
@@ -663,7 +676,12 @@ function toast(msg, meta, withUndo)
   };
   if (withUndo) {
     const back = undoSnap;
+    const g = gen;
     $("button", el).onclick = () => {
+      if (g !== gen) {
+        kill();
+        return;
+      }
       gen++;
       S = back;
       S.view = structuredClone(S.view);
@@ -690,13 +708,16 @@ function showPop(html, anchor, align)
   closePop();
   const el = $("#pop");
   el.innerHTML = html;
+  el.inert = false;
   const r = anchor.getBoundingClientRect();
   el.classList.add("show");
   const w = el.offsetWidth;
   const left = align === "right" ? r.right - w : r.left;
   el.style.left = Math.max(8, Math.min(left, innerWidth - w - 8)) + "px";
-  el.style.top = r.bottom + 4 + "px";
-  el.style.setProperty("--o", align === "right" ? "top right" : "top left");
+  const h = el.offsetHeight;
+  const below = r.bottom + 4 + h <= innerHeight - 8;
+  el.style.top = (below ? r.bottom + 4 : Math.max(8, r.top - 4 - h)) + "px";
+  el.style.setProperty("--o", (below ? "top " : "bottom ") + (align === "right" ? "right" : "left"));
   pop = anchor;
   anchor.setAttribute("aria-expanded", "true");
   const first = $(".mi", el);
@@ -711,6 +732,7 @@ function closePop()
     return;
   }
   $("#pop").classList.remove("show");
+  $("#pop").inert = true;
   pop.setAttribute("aria-expanded", "false");
   pop = null;
 }
@@ -764,6 +786,12 @@ function setStatus(id, k)
           c[2] = "Sam";
         }
       });
+      S.waits.filter((w) => w.project === "yap" && w.phase === id).forEach((w) => {
+        const ws = sess(w.session);
+        if (ws.state === "waiting") {
+          ws.state = "idle";
+        }
+      });
       S.waits = S.waits.filter((w) => !(w.project === "yap" && w.phase === id));
       S.openTouched[id] = false;
     }
@@ -777,10 +805,15 @@ function setStatus(id, k)
 
 function startPhase(id, btn)
 {
+  if (starting.has(id)) {
+    return;
+  }
+  starting.add(id);
   btn.disabled = true;
   btn.textContent = "Starting…";
   const g = gen;
   setTimeout(() => {
+    starting.delete(id);
     if (g !== gen) {
       return;
     }
@@ -809,14 +842,10 @@ function resolveWait(wid, how)
   S.waits = S.waits.filter((x) => x.id !== wid);
   s.state = "working";
   s.tm = "now";
-  if (wid === "w1") {
-    phase("1").checks[2][1] = 1;
-    phase("1").checks[2][2] = "Sam";
-    s.last = "Thanks. Nothing was lost after the kill test. Ready to merge.";
-  } else if (wid === "w2") {
-    s.last = "Committing on step-2-full-markdown and opening the merge…";
+  if (wid === "w1" && !how) {
+    s.last = "Thanks for journalling on it. Running the kill test before the merge.";
   } else {
-    s.last = how ? `On it: “${how}”` : "On it.";
+    s.last = how ? `On it: “${esc(how)}”` : "On it.";
   }
   render({ keepScroll: true });
   toast(how ? "Reply sent" : "Ticked off", `${s.title} is working again`, true);
@@ -851,6 +880,8 @@ function simulate(kind)
     });
   } else if (kind === "reset") {
     gen++;
+    undoSnap = null;
+    $("#toasts").innerHTML = "";
     S = seed();
     render();
   }
@@ -902,7 +933,9 @@ document.addEventListener("click", (e) => {
     S.openTouched[p.id] = now;
     const row = $(`.phase[data-phase="${p.id}"]`);
     row.classList.toggle("open", now);
+    $(".pbody", row).inert = !now;
     $$("[aria-expanded]", row).forEach((b) => b.setAttribute("aria-expanded", now));
+    $('[aria-label="Expand"], [aria-label="Collapse"]', row).setAttribute("aria-label", now ? "Collapse" : "Expand");
   } else if (d.start) {
     startPhase(d.start, t);
   } else if (d.gophase) {
@@ -943,9 +976,14 @@ function sendReply()
   if (w) {
     resolveWait(w.id, text);
   } else {
-    toast("Sent", s.title);
-    ta.value = "";
+    undoSnap = snap();
+    s.state = "working";
+    s.tm = "now";
+    s.last = `On it: “${esc(text)}”`;
+    render({ keepScroll: true });
+    toast("Sent", s.title, true);
   }
+  $("#ta").focus();
 }
 
 document.addEventListener("keydown", (e) => {
@@ -960,7 +998,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* hover tooltips (provenance, last line) */
-let tipTimer = null;
 document.addEventListener("mouseover", (e) => {
   const el = e.target.closest("[data-tip]");
   clearTimeout(tipTimer);
@@ -970,6 +1007,9 @@ document.addEventListener("mouseover", (e) => {
     return;
   }
   tipTimer = setTimeout(() => {
+    if (!el.isConnected) {
+      return;
+    }
     tip.textContent = el.dataset.tip;
     const r = el.getBoundingClientRect();
     tip.classList.add("show");
@@ -977,6 +1017,12 @@ document.addEventListener("mouseover", (e) => {
     tip.style.top = r.bottom + 6 + "px";
   }, tip.classList.contains("show") ? 0 : 350);
 });
+
+document.addEventListener("scroll", (e) => {
+  if (pop && !$("#pop").contains(e.target)) {
+    closePop();
+  }
+}, true);
 
 if (matchMedia("(max-width: 760px)").matches) {
   S.view = { kind: "all" };
