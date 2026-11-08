@@ -383,7 +383,7 @@
       <div id="projList"></div>
     </div>
     <div class="scard" id="scard"></div>
-    <div class="demo"><button id="demoBtn" aria-haspopup="menu" aria-expanded="false"><svg class="i i14"><use href="#flask"/></svg>Demo controls<svg class="i i12" style="margin-left:auto"><use href="#down"/></svg></button></div>
+    <div class="demo"><button id="demoBtn" data-demo="1" aria-haspopup="menu" aria-expanded="false"><svg class="i i14"><use href="#flask"/></svg>Demo controls<svg class="i i12" style="margin-left:auto"><use href="#down"/></svg></button></div>
   </aside>
 
   <main class="main">
@@ -458,6 +458,7 @@ function seed()
 let S = seed();
 let undoSnap = null;
 let gen = 0;
+let undoGen = 0;
 let tipTimer = null;
 let pop = null;
 let frame = 0;
@@ -567,7 +568,7 @@ function renderTabs()
       tabs.push(`<button class="tab ${v.kind === "chat" && v.session === s.id ? "on" : ""}" data-chat="${s.id}">${provIcon(s)}<span class="t">${s.title}</span></button>`);
     });
   }
-  $("#tabs").innerHTML = tabs.join("") + `<button class="tab-add" aria-label="New tab">${icon("plus", "i i14")}</button>`;
+  $("#tabs").innerHTML = tabs.join("") + `<button class="tab-add" aria-label="New tab">${icon("plus", "i i14")}</button><span style="flex:1"></span><button class="tab mob" data-demo="1" aria-haspopup="menu" aria-expanded="false" aria-label="Demo controls">${icon("flask", "i i14")}</button>`;
 }
 
 /* ---------- shared pieces ---------- */
@@ -667,7 +668,7 @@ function renderHome()
   const doneCount = S.phases.filter((x) => x.status === "done").length;
   $("#v-home").innerHTML = `<div class="page">
     <header class="head">${logo(p)}<div class="txt"><h1>${p.name}</h1><div class="now">${now ? `Now: <b>Phase ${now.id} · ${now.name}</b>` : "<b>All phases done</b>"}</div></div>
-      <div class="btns"><button class="btn ghost" data-toast="Opens docs/plan.md in the file viewer">${icon("file", "i i14")}<span class="lbl-txt">plan.md</span></button><button class="btn solid" data-toast="Opens a new chat in Yap">${icon("plus", "i i14")}<span class="lbl-txt">New chat</span></button></div></header>
+      <div class="btns"><button class="btn ghost" aria-label="Open plan.md" data-toast="Opens docs/plan.md in the file viewer">${icon("file", "i i14")}<span class="lbl-txt">plan.md</span></button><button class="btn solid" aria-label="New chat" data-toast="Opens a new chat in Yap">${icon("plus", "i i14")}<span class="lbl-txt">New chat</span></button></div></header>
     <div class="stats">
       <div class="stat"><div class="k">Phases done</div><div class="v">${doneCount}<small>of ${S.phases.length}</small></div></div>
       <div class="stat ${waits.length ? "amber" : ""}"><div class="k">Needs you</div><div class="v">${waits.length}</div></div>
@@ -680,8 +681,8 @@ function renderHome()
       ${active.length ? `<div class="sub-h">Active <span class="tab-num">${active.length}</span></div><div class="phases">${active.map(phaseCard).join("")}</div>` : ""}
       ${next.length ? `<div class="sub-h">Up next <span class="tab-num">${next.length}</span></div><div class="card mini">${next.map(miniRow).join("")}</div>` : ""}
       ${done.length ? `<div class="sub-h">Done <span class="tab-num">${done.length}</span></div>${S.doneOpen
-        ? `<div class="card mini">${done.map(miniRow).join("")}<button class="hide-done" data-donetoggle="1">Hide done phases</button></div>`
-        : `<button class="done-line" data-donetoggle="1"><span class="glyph sm g-done"></span><span class="trunc">${done.map((x) => x.name).join(", ")}</span>${icon("chev", "i i14 chev")}</button>`}` : ""}
+        ? `<div class="card mini">${done.map(miniRow).join("")}<button class="hide-done" data-donetoggle="1" aria-expanded="true">Hide done phases</button></div>`
+        : `<button class="done-line" data-donetoggle="1" aria-expanded="false"><span class="glyph sm g-done"></span><span class="trunc">${done.map((x) => x.name).join(", ")}</span>${icon("chev", "i i14 chev")}</button>`}` : ""}
     </section>
     ${loose.length ? `<section><div class="sec-h"><h2>Chats not on a phase</h2><span class="count">${loose.length}</span><span class="sp"></span><span class="meta">click one to put it on a phase</span></div>
       <div class="chips">${loose.map((s) => `<button class="chip" data-linkmenu="${s.id}" data-tip="${s.last}">${provIcon(s)}${s.title}${label(s)}</button>`).join("")}</div></section>` : ""}
@@ -742,7 +743,7 @@ function renderNoPlan(p)
   const chats = S.sessions.filter((s) => s.project === p.id);
   $("#v-home").innerHTML = `<div class="page">
     <header class="head">${logo(p)}<div class="txt"><h1>${p.name}</h1><div class="now">No plan yet · ${chats.length} chats</div></div>
-      <div class="btns"><button class="btn ghost" data-toast="Opens a new chat in ${p.name}">${icon("plus", "i i14")}<span class="lbl-txt">New chat</span></button></div></header>
+      <div class="btns"><button class="btn ghost" aria-label="New chat" data-toast="Opens a new chat in ${p.name}">${icon("plus", "i i14")}<span class="lbl-txt">New chat</span></button></div></header>
     ${handoffCard(p)}
     ${needsSection(waitsFor(p.id), false, "Nothing needs you here.")}
     <section class="card pad draft"><div class="txt"><div class="t">No roadmap yet</div><div class="d">A chat can read the handoff and these ${chats.length} chats, then show you a phase table to approve. It's saved as docs/plan.md.</div></div>
@@ -765,7 +766,7 @@ function renderChat(focusWait)
     : `<span class="trunc">${p.name} › <b>${p.plan ? "Not on a phase" : "No plan yet"}</b></span>`;
   const model = s.prov === "claude" ? "Opus 5.5" : s.prov === "codex" ? "GPT-6.1 Sol" : "Grok 4.7";
   $("#v-chat").innerHTML = `<div class="chat">
-    <div class="pane-h"><button class="strip" id="strip" aria-expanded="false">${strip}${asks.length ? '<span class="needs-pill">Needs you</span>' : ""}${icon("down", "i i12")}</button>${NEW}<span style="flex:1"></span><button class="ibtn" aria-label="Close">${icon("x", "i i14")}</button></div>
+    <div class="pane-h"><button class="strip" id="strip" aria-expanded="false">${strip}${asks.length ? '<span class="needs-pill">Needs you</span>' : ""}${icon("down", "i i12")}</button>${NEW}<span style="flex:1"></span><button class="ibtn" data-home="${p.id}" aria-label="Close chat">${icon("x", "i i14")}</button></div>
     <div class="transcript"><div class="tx">
       <div class="u">${s.id === "s1" ? "Build Phase 1 from plan.md." : "Carry on with " + (ph ? "Phase " + ph.id : "this") + "."}</div>
       <div class="worked">${icon("check", "i i14")}Worked for 14m 32s</div>
@@ -850,13 +851,20 @@ function toast(msg, meta, withUndo)
   if (withUndo) {
     const back = undoSnap;
     const g = gen;
+    const u = undoGen;
     $("button", el).onclick = () => {
-      if (g !== gen) {
+      if (g !== gen || u !== undoGen) {
         kill();
         return;
       }
       gen++;
+      undoGen++;
+      const view = S.view;
       S = back;
+      S.view = view;
+      if (S.view.kind === "chat" && !sess(S.view.session)) {
+        S.view = { kind: "home", project: S.view.project };
+      }
       render({ keepScroll: true });
       kill();
     };
@@ -864,9 +872,16 @@ function toast(msg, meta, withUndo)
   setTimeout(kill, 5000);
 }
 
+function takeSnap()
+{
+  /* Only the newest action can be undone; older Undo buttons go dead. */
+  undoGen++;
+  undoSnap = snap();
+}
+
 function act(msg, meta, fn)
 {
-  undoSnap = snap();
+  takeSnap();
   fn();
   render({ keepScroll: true });
   toast(msg, meta, true);
@@ -993,7 +1008,7 @@ function startPhase(id, btn)
       return;
     }
     const p = phase(id);
-    undoSnap = snap();
+    takeSnap();
     S.sessions.push({ id: "n" + Date.now(), project: "yap", phase: id, prov: "claude", title: p.name, state: "working", tm: "now", last: `Reading the Phase ${id} brief and done-when from plan.md…` });
     if (p.status === "todo") {
       p.status = "progress";
@@ -1016,7 +1031,7 @@ function resolveWait(wid, how)
   if (!w) {
     return;
   }
-  undoSnap = snap();
+  takeSnap();
   const s = sess(w.session);
   S.waits = S.waits.filter((x) => x.id !== wid);
   s.state = "working";
@@ -1080,7 +1095,7 @@ function sendReply()
   if (w) {
     resolveWait(w.id, text);
   } else {
-    undoSnap = snap();
+    takeSnap();
     s.state = "working";
     s.tm = "now";
     s.last = `On it: “${esc(text)}”`;
@@ -1155,6 +1170,7 @@ document.addEventListener("click", (e) => {
   } else if (d.donetoggle) {
     S.doneOpen = !S.doneOpen;
     render({ keepScroll: true });
+    $("[data-donetoggle]").focus({ preventScroll: true });
   } else if (d.start) {
     startPhase(d.start, t);
   } else if (d.gophase) {
@@ -1177,7 +1193,7 @@ document.addEventListener("click", (e) => {
     toast(d.toast);
   } else if (d.sim) {
     simulate(d.sim);
-  } else if (t.id === "demoBtn") {
+  } else if (d.demo) {
     if (pop === t) {
       closePop();
     } else {
