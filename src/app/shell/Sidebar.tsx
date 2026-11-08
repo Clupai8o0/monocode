@@ -190,7 +190,6 @@ import {
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
 import { FreeMemoryButton } from "../../fork/sessionClose/FreeMemoryButton"; // Fork
-import { SessionCleanup } from "../../fork/sessionCleanup/SessionCleanup"; // Fork
 import { SplitHandle } from "../../fork/sidebarSplit/SplitHandle"; // Fork
 import {
   loadStoredSize,
@@ -302,7 +301,6 @@ function sectionSplitMax(pane: HTMLElement): number {
   return own + list.getBoundingClientRect().height - SESSIONS_MIN_HEIGHT;
 }
 const NO_SESSION_IDS: ReadonlySet<string> = new Set();
-const NO_OPEN_SESSION_IDS: readonly string[] = [];
 const CLOSE_SESSION_LABEL = "Close to free memory";
 
 type SidebarTab = SidebarTabId;
@@ -375,8 +373,6 @@ type Props = {
   ) => void;
   /** Fork: loaded sessions that can close to free memory. */
   closableSessionIds?: ReadonlySet<string>;
-  /** Fork: every loaded session in any project, for the cleanup panel. */
-  allOpenSessionIds?: readonly string[];
   /** Fork: closes sessions to free memory, keeping them in the list. */
   onCloseSessions?: (sessionIds: readonly string[]) => void;
   /** Fork: how many closable sessions are off screen. */
@@ -393,10 +389,6 @@ type Props = {
   onCancelReminders?: (sessionIds: readonly string[]) => void;
   onDeleteSession?: (sessionId: string) => void;
   onDeleteSessions?: (sessionIds: readonly string[]) => void;
-  /** Fork: what the cleanup panel must leave alone: busy, or leading a run. */
-  cleanupBusySessionIds?: ReadonlySet<string>;
-  /** Fork: the cleanup panel's delete, which has already asked. */
-  onDeleteCleanupSession?: (row: SessionSummary) => Promise<boolean>;
   onOpenFile: OpenFileFn;
   onOpenTerminal?: (cwd: string) => void;
   onFileMoved?: (from: string, to: string) => void;
@@ -503,7 +495,6 @@ function SidebarComponent({
   onArchiveSession: onArchiveLocalSession,
   onArchiveSessions: onArchiveLocalSessions,
   closableSessionIds = NO_SESSION_IDS,
-  allOpenSessionIds = NO_OPEN_SESSION_IDS,
   onCloseSessions,
   idleClosableCount = 0,
   onCloseIdleSessions,
@@ -515,8 +506,6 @@ function SidebarComponent({
   onCancelReminders,
   onDeleteSession: onDeleteLocalSession,
   onDeleteSessions: onDeleteLocalSessions,
-  cleanupBusySessionIds,
-  onDeleteCleanupSession,
   onOpenFile,
   onOpenTerminal,
   onFileMoved,
@@ -1097,7 +1086,6 @@ function SidebarComponent({
   // open the sidebar temporarily until the user clicks away.
   const drawerMode = compactRailVisible && !open;
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [cleanupOpen, setCleanupOpen] = useState(false); // Fork
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerVisible = drawerMode && drawerOpen && sidebarAvailable;
   // A dismissed drawer stays mounted while it slides shut. Anything that takes
@@ -2732,9 +2720,6 @@ function SidebarComponent({
             recents={recents}
             onSelectProject={onSelectProject}
             onOpenProject={onOpenProject}
-            onCleanUpSessions={
-              onArchiveLocalSession ? () => setCleanupOpen(true) : undefined
-            }
             onProjectContextMenu={headerProjectMenu.open}
             sectionRef={projectsSplit.setPaneRef}
             capped={projectsSplit.capped}
@@ -2749,21 +2734,6 @@ function SidebarComponent({
         </>
       ) : null}
       {headerProjectMenu.element}
-      {/* Fork: archive sessions from every project in one place. */}
-      {cleanupOpen && onArchiveLocalSession ? (
-        <SessionCleanup
-          projectPaths={projectRailItems(recents, cwd)
-            .map((project) => project.path)
-            .filter((path) => !isRemoteProjectPath(path))}
-          activeSessionId={activeSessionId}
-          busySessionIds={cleanupBusySessionIds ?? busySessionIds}
-          approvalSessionIds={approvalSessionIds}
-          openSessionIds={allOpenSessionIds}
-          onArchive={onArchiveLocalSession}
-          onDelete={onDeleteCleanupSession}
-          onClose={() => setCleanupOpen(false)}
-        />
-      ) : null}
       {/* Inset project selection lives in Projects and worktrees in the title bar. */}
       {railVisible || inset ? (
         <>

@@ -84,7 +84,11 @@ import type {
   WorkspaceMode,
   ComposerTurnOptions,
 } from "../model/session";
-import { HARNESS_TITLE, harnessSupportsAttachments } from "../model/session";
+import {
+  HARNESS_TITLE,
+  harnessSupportsAttachments,
+  runtimeModeHints,
+} from "../model/session";
 import type {
   UserQuestionPrompt,
   UserQuestionReply,
@@ -182,6 +186,7 @@ import {
   supportsBtwHarness,
 } from "../model/btw";
 import { COMPACT_COMMAND, isCompactCommand } from "../model/compact";
+import { isStageCommand, STAGE_COMMAND } from "../model/stageCommand";
 import {
   consumeSessionFolderCommand,
   isSessionFolderCommand,
@@ -250,6 +255,8 @@ type Props = {
   toolbarExtra?: ReactNode;
   /** Fork: shown beside the context ring (token count, compactions). */
   contextLabel?: ReactNode;
+  /** Fork: just before Send (the idle-thread Compact chip). */
+  sendExtra?: ReactNode;
   quoteRequest?: QuoteRequest;
   initialDraft?: string;
   draftResetToken?: number;
@@ -382,6 +389,7 @@ export function Composer({
   context,
   compactSupported = false,
   toolbarExtra,
+  sendExtra,
   contextLabel,
   quoteRequest,
   initialDraft,
@@ -600,6 +608,7 @@ export function Composer({
             PLAN_COMMAND,
             ...(canSaveDraft && onSaveDraft ? [DRAFT_COMMAND] : []),
             COMPACT_COMMAND,
+            STAGE_COMMAND,
             ...(supportsBtwHarness(harness) ? [BTW_COMMAND] : []),
             ...skills.filter(
               (skill) =>
@@ -609,6 +618,7 @@ export function Composer({
                 (skill.kind === "native" ||
                   (skill.name !== PLAN_COMMAND.name &&
                     skill.name !== COMPACT_COMMAND.name &&
+                    skill.name !== STAGE_COMMAND.name &&
                     skill.name !== SESSION_FOLDER_COMMAND.name &&
                     skill.name !== MCP_COMMAND.name &&
                     skill.name !== ORCHESTRATOR_COMMAND.name &&
@@ -1587,6 +1597,7 @@ export function Composer({
       e.key === "Enter" &&
       !e.shiftKey &&
       (isCompactCommand(e.currentTarget.value) ||
+        (!remote && isStageCommand(e.currentTarget.value)) ||
         isMcpCommand(e.currentTarget.value) ||
         isSessionFolderCommand(e.currentTarget.value))
     ) {
@@ -2529,6 +2540,7 @@ export function Composer({
                 {!compact && harness !== "fx" ? (
                   <AccessPicker
                     value={runtimeMode}
+                    hints={runtimeModeHints(harness)}
                     busy={busy}
                     onChange={onRuntimeModeChange}
                     onClose={() => ref.current?.focus()}
@@ -2552,6 +2564,7 @@ export function Composer({
               </button>
             ) : null}
             <div className="flex shrink-0 items-center gap-1">
+              {busy ? null : sendExtra /* Fork */}
               <ComposerAction
                 busy={busy}
                 disabled={disabled}

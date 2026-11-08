@@ -241,7 +241,7 @@ export function providerAccountChoice(
 ): string {
   const selections = readRecord<StoredSelections>(SELECTIONS_KEY);
   const id = selections[selectionKey(project)]?.[provider];
-  if (id === AUTO_ACCOUNT_ID && supportsAutoAccount(provider)) return id;
+  if ((id == null || id === AUTO_ACCOUNT_ID) && supportsAutoAccount(provider)) return AUTO_ACCOUNT_ID;
   return selectedProviderAccountId(provider, project);
 }
 
@@ -253,7 +253,7 @@ export function selectedProviderAccountId(
   const selections = readRecord<StoredSelections>(SELECTIONS_KEY);
   const id = selections[selectionKey(project)]?.[provider];
   // Fork: resolve Auto to a real account before anything spawns with it.
-  if (id === AUTO_ACCOUNT_ID && supportsAutoAccount(provider)) {
+  if ((id == null || id === AUTO_ACCOUNT_ID) && supportsAutoAccount(provider)) {
     const picked = autoResolver?.(provider);
     return picked && providerAccounts(provider).some((account) => account.id === picked)
       ? picked

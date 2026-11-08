@@ -1,7 +1,7 @@
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/styles/index.css";
-import type { AgentStep, Block } from "../../src/features/sessions/model/session";
+import type { AgentStep, BackgroundJob, Block } from "../../src/features/sessions/model/session";
 import { BackgroundAgentsBar } from "../../src/fork/backgroundAgents/BackgroundAgentsBar";
 import { recordBoardTimings } from "../../src/fork/backgroundAgents/agentBoard";
 
@@ -84,7 +84,17 @@ lab.__TAURI_INTERNALS__ = {
   invoke: async () => (printed ? { text: printed, truncated: cut, size: printed.length } : null),
 };
 
-function session(scene: string): { busy: boolean; blocks: Block[] } {
+const review = "python3 ~/Documents/Obsidian/brain/skills/_core/token-economy/scripts/second_opinion.py review.md --cwd . --review";
+const jobs: BackgroundJob[] = [
+  { id: "j1", title: "Run the Grok review of the redesign", command: review, startedAt: Date.now() - 25 * MIN },
+  { id: "j2", title: "Run the DeepSeek review of the redesign", command: review, startedAt: Date.now() - 25 * MIN },
+  { id: "j3", title: "Retry the Codex review after the second login resets at 8:52 PM", command: "target=$(date -j -v20H -v52M -v0S +%s); now=$(date +%s); wait", startedAt: Date.now() - 24 * MIN },
+];
+
+function session(scene: string): { busy: boolean; blocks: Block[]; backgroundJobs?: BackgroundJob[] } {
+  if (scene === "jobs") {
+    return { busy: false, blocks: [], backgroundJobs: jobs };
+  }
   if (scene === "sequential") {
     return { busy: true, blocks: [user, runs[0].block, runs[4].block] };
   }
@@ -160,7 +170,13 @@ function App() {
         Switch session
       </button>
       <div style={{ width: width ? `${width}px` : "760px", maxWidth: "100%" }}>
-        <BackgroundAgentsBar key={other ? "other" : "main"} session={current} cwd="/repo" />
+        <BackgroundAgentsBar
+          key={other ? "other" : "main"}
+          session={current}
+          cwd="/repo"
+          // Never settles, so the scene can be seen mid-stop.
+          onStopJob={() => new Promise<void>(() => {})}
+        />
         <div className="rounded-xl bg-content/[0.06] px-3 py-3 text-[13px] text-content/40">Reply to Claude…</div>
       </div>
     </div>

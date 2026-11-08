@@ -31,10 +31,7 @@ import {
   mobileSessionAccountId,
 } from "../../features/mobile/model/mobileProviderAccounts";
 import { newSession } from "../../features/sessions/model/session";
-import {
-  exhaustedSwitchFor,
-  installAutoAccountResolver,
-} from "./autoResolver";
+import { exhaustedSwitchFor, installAutoAccountResolver } from "./autoResolver";
 
 const PROJECT = "/Users/me/projects/app";
 
@@ -99,7 +96,9 @@ describe("Auto account choice", () => {
     setCachedRateLimits("claude", "account-cx", usage(20));
     expect(selectedProviderAccountId("claude", PROJECT)).toBe("account-cx");
     setCachedRateLimits("claude", "account-cx", usage(60));
-    expect(selectedProviderAccountId("claude", PROJECT)).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
+    expect(selectedProviderAccountId("claude", PROJECT)).toBe(
+      DEFAULT_PROVIDER_ACCOUNT_ID,
+    );
   });
 
   it("re-picks for each new session as usage changes", () => {
@@ -125,13 +124,47 @@ describe("Auto account choice", () => {
     selectProviderAccount("claude", PROJECT, "account-cx");
     expect(providerAccountChoice("claude", PROJECT)).toBe("account-cx");
     expect(selectedProviderAccountId("claude", PROJECT)).toBe("account-cx");
-    selectProviderAccount("codex", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
-    expect(providerAccountChoice("codex", PROJECT)).toBe("default");
-    expect(selectedProviderAccountId("codex", PROJECT)).toBe("default");
+    selectProviderAccount("grok", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+    expect(providerAccountChoice("grok", PROJECT)).toBe("default");
+    expect(selectedProviderAccountId("grok", PROJECT)).toBe("default");
   });
+
+  it.each(["claude", "codex"] as const)(
+    "defaults new %s sessions to Auto and respects explicit picks",
+    (provider) => {
+      saveProviderAccount({ id: "second", provider, label: "Second" });
+      setCachedRateLimits(provider, "default", { ...usage(100), provider });
+      setCachedRateLimits(provider, "second", { ...usage(20), provider });
+      expect(providerAccountChoice(provider, PROJECT)).toBe("auto");
+      expect(selectedProviderAccountId(provider, PROJECT)).toBe("second");
+      selectProviderAccount(provider, PROJECT, "default");
+      expect(selectedProviderAccountId(provider, PROJECT)).toBe("default");
+      selectProviderAccount(provider, PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+      expect(selectedProviderAccountId(provider, PROJECT)).toBe("second");
+    },
+  );
 });
 
 describe("exhaustedSwitchFor", () => {
+  it("keeps saved usage available while a refresh is in progress", () => {
+    setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(100));
+    setCachedRateLimits("claude", "account-cx", {
+      ...usage(10),
+      status: "fetching",
+    });
+    expect(exhaustedSwitchFor("claude", "default")).toBe("account-cx");
+    selectProviderAccount("claude", PROJECT, AUTO_PROVIDER_ACCOUNT_ID);
+    expect(selectedProviderAccountId("claude", PROJECT)).toBe("account-cx");
+  });
+  it("does not treat retained usage windows from a failed probe as available", () => {
+    setCachedRateLimits("claude", "account-cx", usage(100));
+    setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, {
+      ...usage(10),
+      status: "error",
+      error: "offline",
+    });
+    expect(exhaustedSwitchFor("claude", "account-cx")).toBeNull();
+  });
   it("suggests main when the session's cx account is exhausted", () => {
     setCachedRateLimits("claude", "account-cx", usage(100));
     setCachedRateLimits("claude", DEFAULT_PROVIDER_ACCOUNT_ID, usage(50));
@@ -160,14 +193,19 @@ describe("sessionProviderAccountId", () => {
     setCachedRateLimits("claude", "account-cx", usage(30));
     const base = { cwd: PROJECT };
     // New: Auto picks cx.
-    expect(sessionProviderAccountId("claude", { ...base, blocks: [] })).toBe("account-cx");
-    // Only an unsent draft: still new.
-    expect(sessionProviderAccountId("claude", { ...base, blocks: [user(true)] })).toBe(
+    expect(sessionProviderAccountId("claude", { ...base, blocks: [] })).toBe(
       "account-cx",
     );
+    // Only an unsent draft: still new.
+    expect(
+      sessionProviderAccountId("claude", { ...base, blocks: [user(true)] }),
+    ).toBe("account-cx");
     // Sent turns but no id: a legacy session, which ran on default.
     expect(
-      sessionProviderAccountId("claude", { ...base, blocks: [user(true), user()] }),
+      sessionProviderAccountId("claude", {
+        ...base,
+        blocks: [user(true), user()],
+      }),
     ).toBe(DEFAULT_PROVIDER_ACCOUNT_ID);
     // Its own id always wins.
     expect(

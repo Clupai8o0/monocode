@@ -130,6 +130,19 @@ export function mcpPickerServers(
     );
 }
 
+/** Separate the context `mcpContextText` added, so commands in the body still parse. */
+export function splitMcpContext(text: string): {
+  context: string;
+  body: string;
+} {
+  const match = text.match(
+    /^MCP context: Use the configured servers? [^\n]* when relevant to this request\.\n\n/,
+  );
+  return match
+    ? { context: match[0], body: text.slice(match[0].length) }
+    : { context: "", body: text };
+}
+
 export function mcpContextText(servers: McpConnection[], text: string): string {
   if (servers.length === 0) return text;
   const names = servers

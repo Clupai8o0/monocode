@@ -122,9 +122,10 @@ describe("pickAutoAccount", () => {
     ).toBe("cx");
   });
 
-  it("is offered for Claude only", () => {
+  it("is offered for both providers with isolated account profiles", () => {
     expect(supportsAutoAccount("claude")).toBe(true);
-    expect(supportsAutoAccount("codex")).toBe(false);
+    expect(supportsAutoAccount("codex")).toBe(true);
+    expect(supportsAutoAccount("grok")).toBe(false);
   });
 });
 

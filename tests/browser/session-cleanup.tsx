@@ -55,7 +55,8 @@ const archivedCalls: [string, boolean][] = [];
 for (const cwd of Object.keys(PROJECTS)) {
   for (const row of rowsOf(cwd)) {
     const kind = PROJECTS[cwd][Number(row.id.split("#")[1])][3];
-    setCloseState(row.id, row.updatedAt, kind ? { kind, detail: "" } : null);
+    const detail = kind === "handover" ? `${cwd}/.claude/handoff.md` : "";
+    setCloseState(row.id, row.updatedAt, kind ? { kind, detail } : null);
   }
 }
 
@@ -77,6 +78,9 @@ function Fixture() {
       onDelete={async (row) => {
         deletedCalls.push(row.id);
         return true;
+      }}
+      onOpenSession={(id) => {
+        (window as unknown as { __opened: string }).__opened = id;
       }}
       onClose={() => setOpen(false)}
     />

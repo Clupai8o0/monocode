@@ -202,6 +202,8 @@ import {
   createOrchestrationWorktree,
   createWorktree,
   detachSessionWorktree,
+  isNoCommitsError,
+  NO_COMMITS_FALLBACK_NOTE,
   checkWorktreeRemoval,
   listWorktrees,
   namedWorktreeBranch,
@@ -409,7 +411,6 @@ import {
   buildDeterministicHandoff,
   appendReadyHandoff,
   buildHandoffComposerCard,
-  chooseHandoffBrief,
   completeHandoff,
   HANDOFF_TITLE,
   handoffTurnCard,
@@ -419,12 +420,19 @@ import {
   planComposerSwitch,
   sessionChildHarnesses,
   sessionThroughTurn,
-  shouldAskOutgoingAgent,
   type HandoffComposerCard,
   userMessagesAfterHandoff,
   wrapHandoffPrompt,
 } from "../features/sessions/model/handoff";
-import { requestOutgoingHandoff } from "../features/sessions/model/handoffTurn";
+import { budgetedHandoff } from "../fork/handoffBudget/handoffSelection"; // Fork
+import {
+  markSendAfterCompact,
+  noteCompacted,
+  takeCompactBeforeSend,
+  takeSendAfterCompact,
+} from "../fork/idleCompact/idleCompact"; // Fork
+import { useIdleCompact } from "../fork/idleCompact/useIdleCompact"; // Fork
+import { closeEntry } from "../fork/closeBadges/closeState"; // Fork
 import { useAutoHandoff } from "../fork/autoHandoff/useAutoHandoff";
 import {
   applyBtwHarnessEvent,
@@ -468,6 +476,8 @@ import {
   nativeModelId,
   preferredModelSettings,
   defaultModelId,
+  isPickerProviderVisible,
+  preferredModelId,
   resolveModel,
   saveLastModelSettings,
   saveRecentModelChoice,
@@ -533,6 +543,7 @@ import {
 import { createSessionRemover } from "../features/sessions/model/sessionRemoval";
 import { shouldGenerateSessionTitle } from "../features/sessions/model/sessionTitle";
 import "../fork/accounts/autoResolver"; // Fork: resolves the Auto account choice at spawn.
+import { useAutoAccountSwitch } from "../fork/accounts/useAutoAccountSwitch";
 import {
   AUTO_PROVIDER_ACCOUNT_ID, // Fork
   DEFAULT_PROVIDER_ACCOUNT_ID,
@@ -588,6 +599,8 @@ import {
   resumeUsageLimitedSession,
   usageLimitResumeDue,
   withUsageLimitAccount,
+  usageLimitContinuationIntent,
+  cancelledAccountTransferSession,
 } from "../features/sessions/model/usageLimit";
 import {
   fetchClaudeRateLimits,
@@ -681,6 +694,7 @@ import {
   referencedSessionIds,
   withRunningLeads,
 } from "../fork/sessionClose/sessionClose"; // Fork
+import { CleanUpSessionsButton } from "../fork/sessionCleanup/CleanUpSessionsButton"; // Fork
 import { archiveFocusedSession } from "../features/sessions/model/archiveShortcut";
 import {
   adjacentItemId,
@@ -708,6 +722,12 @@ import {
   operatorEnabledInThread,
 } from "../features/sessions/model/operatorCommand";
 import {
+  canStageInTurn,
+  parseStageSubmission,
+  sessionChangedFiles,
+  stageTurnPrompt,
+} from "../features/sessions/model/stageCommand";
+import {
   createMono,
   findMono,
   isMonoSession,
@@ -733,6 +753,11 @@ import {
   writeAgentFile,
 } from "../features/monos/model/monoFiles";
 import { useMonoHabits } from "./hooks/useMonoHabits";
+import {
+  createMonoSkill,
+  readMonoSkill,
+  updateMonoSkill,
+} from "../features/monos/model/monoSkills";
 import { useFloatingMono } from "./hooks/useFloatingMono";
 import {
   dropRelays,
@@ -809,6 +834,22 @@ import {
   turnEditedFiles,
   turnUserRequest,
 } from "../features/sessions/model/secondOpinion";
+import {
+  CURSOR_MULTI_REVIEW_APP_PREFIX,
+  CURSOR_MULTI_REVIEW_TITLE_PREFIX,
+  CursorMultiReviewPairs,
+  buildCursorMultiReviewQueueMessage,
+  buildCursorMultiReviewRequest,
+  cursorMultiReviewChildResult,
+  cursorMultiReviewEmptyStatus,
+  latestUserBlockId,
+  settleCursorMultiReviewChildAfterGrace,
+  pickCursorMultiReviewers,
+  shouldStartCursorMultiReview,
+  cursorReviewRunBlocks,
+  type CursorMultiReviewer,
+} from "../features/sessions/model/cursorMultiReview";
+import { isProviderHidden } from "../features/sessions/model/projectProviders";
 
 import { PaneTree } from "../features/workspace/ui/PaneTree";
 import { SessionPane } from "../features/sessions/ui/SessionPane";
@@ -877,6 +918,7 @@ import {
   loadAutosave,
   loadCollapsedProjectRailMode,
   loadFileTabMode,
+  loadCursorMultiReview,
   loadLiveAgentsEnabled,
   loadNotesEnabled,
   loadMonosEnabled,
@@ -1269,7 +1311,7 @@ function Workspace({
   // A Mono opens with its overview beside the chat until it is hidden.
   const [monoOverviewOpen, setMonoOverviewOpen] = useState(true);
   const [monoOverviewTab, setMonoOverviewTab] =
-    useState<MonoOverviewTab>("sessions");
+    useState<MonoOverviewTab>("dashboard"); // Fork: opens on the dashboard
   const monoOverviewOpenRef = useRef(monoOverviewOpen);
   monoOverviewOpenRef.current = monoOverviewOpen;
   const monoOverviewTabRef = useRef(monoOverviewTab);
@@ -1586,7 +1628,7 @@ function Workspace({
       sessions.flatMap((session) => {
         if (
           !supportsHarnessLogin(session.harness) ||
-          !latestTurnNeedsHarnessLogin(session.blocks)
+          !latestTurnNeedsHarnessLogin(session.blocks, session.harness)
         ) {
           return [];
         }
@@ -1961,6 +2003,9 @@ function Workspace({
   );
   const submitAfterProjectSyncRef = useRef<Submit>(() => false);
   // Fork: stops a turn that ran past its effort raise (set after onStop).
+  // Fork (idleCompact): set beside onCompactContext, read by onSubmit.
+  const compactContextRef = useRef<(sessionId: string) => boolean>(() => false);
+  const skipIdleCompactRef = useRef<(session: Session) => boolean>(() => true);
   const effortStopRef = useRef<
     (sessionId: string) => Promise<unknown> | null
   >(() => null);
@@ -2391,7 +2436,10 @@ function Workspace({
       id: usageSource.id,
       harness: usageSource.harness,
       model: usageSource.model,
-      authRequired: latestTurnNeedsHarnessLogin(usageSource.blocks),
+      authRequired: latestTurnNeedsHarnessLogin(
+        usageSource.blocks,
+        usageSource.harness,
+      ),
       providerAccountId:
         usageSource.providerAccountId ??
         (usageSource.blocks.some((block) => block.role === "user")
@@ -2408,8 +2456,10 @@ function Workspace({
   const activeProviderSignInRequest = useMemo(() => {
     if (
       !active ||
+      // A local conversation offers sign-in under the failed turn instead.
+      (!isMonoSession(active.id) && !remoteProjectFor(active.cwd)) ||
       !supportsHarnessLogin(active.harness) ||
-      !latestTurnNeedsHarnessLogin(active.blocks)
+      !latestTurnNeedsHarnessLogin(active.blocks, active.harness)
     ) {
       return null;
     }
@@ -5951,6 +6001,7 @@ function Workspace({
       }
       invalidateLoadedSession(sessionId);
       pendingPersist.current.delete(sessionId);
+      let lastBlocks = open?.blocks ?? [];
       try {
         const remover = createSessionRemover({
           mode,
@@ -5972,6 +6023,7 @@ function Workspace({
             }),
             apply: (change) => {
               if (change.type === "stopped") {
+                lastBlocks = change.session.blocks;
                 const next = sessionsRef.current.map((session) =>
                   session.id === sessionId ? change.session : session,
                 );
@@ -6086,6 +6138,27 @@ function Workspace({
           stop: stopSessionForRemoval,
         });
         const removed = await remover.remove(sessionId);
+        if (removed) {
+          cursorMultiReviewPairs.current.dropSource(sessionId);
+          // A reviewer removed mid-review must not hold back the other's report.
+          if (seed) {
+            cursorMultiReviewPairs.current.settleChild(
+              sessionId,
+              cursorMultiReviewChildResult(
+                {
+                  harness: seed.harness,
+                  title: seed.title,
+                  blocks: lastBlocks,
+                },
+                // A turn that had already ended keeps how it ended.
+                cursorMultiReviewPairs.current.childOutcome(
+                  sessionId,
+                  lastBlocks,
+                ) ?? { status: "cancelled" },
+              ),
+            );
+          }
+        }
         if (removed && deleteWorktreePath && seed) {
           try {
             await onRemoveWorktree(seed.cwd, deleteWorktreePath, false);
@@ -6314,6 +6387,15 @@ function Workspace({
   const cleanupBusySessionIds = useMemo(
     () => withRunningLeads(busySessionIds, orchestrationRuns),
     [busySessionIds, orchestrationRuns],
+  );
+
+  // Fork: the cleanup covers every project this computer can read.
+  const cleanupProjectPaths = useMemo(
+    () =>
+      projectRailItems(recents, sidebarCwd)
+        .map((project) => project.path)
+        .filter((path) => !isRemoteProjectPath(path)),
+    [recents, sidebarCwd],
   );
 
   // Fork: the cleanup panel has asked already. Worktrees are left alone: one
@@ -7615,7 +7697,7 @@ function Workspace({
       if (
         removingSessionIds.current.has(sessionId) ||
         switchingWorktrees.current.has(sessionId) ||
-        workspaceNavigation.isSwitching(sessionId)
+        workspaceNavigation.isSwitching(sessionId) || accountSwitching.current.has(sessionId)
       )
         return false;
       const storedCurrent = sessionsRef.current.find((s) => s.id === sessionId);
@@ -7770,13 +7852,50 @@ function Workspace({
         ? operatorCommand.text.trim() ||
           "Explain what you can do in MonoCode with the app CLI."
         : submittedText;
+      // `/stage` is a MonoCode command, so expand it before native slash routing.
+      const stageCommand = operatorCommand.matched
+        ? { text: promptText, matched: false, mcpContext: "" }
+        : parseStageSubmission(submittedText);
+      if (
+        stageCommand.matched &&
+        !canStageInTurn({
+          intent,
+          orchestrating: Boolean(
+            current.orchestrationLeadId ||
+              current.inboxAsk ||
+              orchestrator.run(sessionId),
+          ),
+        })
+      ) {
+        enqueueHarnessEvent(sessionId, {
+          type: "status",
+          text: "Use /stage from a regular session turn, outside Plan or Orchestrator mode.",
+        });
+        flushHarnessEvents();
+        return false;
+      }
       const rawCommand =
         !operatorCommand.matched &&
+        !stageCommand.matched &&
         isNativeCommandPrompt(submittedText, current.harness);
       const ciContext = options?.ciRepair?.prompt ?? options?.ciContext;
       const harnessText =
         options?.ciRepair?.prompt ??
-        (rawCommand ? submittedText : composeNoteMessage(noteCard, promptText));
+        (rawCommand
+          ? submittedText
+          : composeNoteMessage(
+              noteCard,
+              stageCommand.matched
+                ? stageCommand.mcpContext +
+                    stageTurnPrompt(
+                      stageCommand.text,
+                      sessionChangedFiles(
+                        current.blocks,
+                        sessionWorkCwd(current),
+                      ),
+                    )
+                : promptText,
+            ));
 
       const pendingSwitch = pendingComposerSwitch(current);
 
@@ -7921,7 +8040,10 @@ function Workspace({
                 ? steerable
                   ? "steer"
                   : "queue"
-                : (options?.followUpBehavior ?? loadFollowUpBehavior());
+                : (options?.followUpBehavior ??
+                  // Fork: a harness that cannot steer keeps the message for
+                  // after the turn rather than refusing it.
+                  (steerable ? loadFollowUpBehavior() : "queue"));
         if (!mono) recordFeatureUse("queue"); // Fork
         if (followUpBehavior === "queue") {
           setSessions((prev) =>
@@ -8161,6 +8283,9 @@ function Workspace({
         ...(ciContext ? { ciContext } : {}),
         ...(operatorCommand.matched ? { monocode: true } : {}),
         ...(intent === "plan" || intent === "orchestrate" ? { intent } : {}),
+        ...(intent === "build" && approvedPlan
+          ? { buildPlanBlockId: approvedPlan.id }
+          : {}),
         ...(options?.appRequestId
           ? { appRequestId: options.appRequestId }
           : {}),
@@ -8181,6 +8306,7 @@ function Workspace({
       }
 
       dismissNoticesForContinuedSession(sessionId);
+      let cursorReviewTurnId: string | undefined;
       const commitSubmittedTurn = () => {
         setSessions((prev) =>
           prev.map((s) => {
@@ -8303,6 +8429,13 @@ function Workspace({
                 );
           }),
         );
+        // This run's own turn, so a late cancel can't settle a newer one.
+        cursorReviewTurnId = latestUserBlockId(
+          sessionsRef.current.find((s) => s.id === sessionId)?.blocks ?? [],
+        );
+        if (cursorReviewTurnId) {
+          cursorMultiReviewRunStarts.current.set(sessionId, cursorReviewTurnId);
+        }
       };
       if (!options?.resendEdited) {
         flushSync(commitSubmittedTurn);
@@ -8410,18 +8543,85 @@ function Workspace({
       let proposalText = "";
       let nativeProposalText = "";
       let completedProposal: OrchestrationProposal | undefined;
+      const settleCursorMultiReview = (outcome: ControlOutcome) => {
+        window.setTimeout(() => {
+          const finished = sessionsRef.current.find((s) => s.id === sessionId);
+          if (!finished) return;
+
+          if (cursorMultiReviewPairs.current.isChild(sessionId)) {
+            // A later turn settles it instead.
+            if (finished.busy) return;
+            cursorMultiReviewPairs.current.noteChildOutcome(
+              sessionId,
+              finished.blocks,
+              outcome,
+            );
+            settleCursorMultiReviewChildAfterGrace({
+              getChild: () =>
+                sessionsRef.current.find((s) => s.id === sessionId),
+              outcome,
+              settle: (result) =>
+                cursorMultiReviewPairs.current.settleChild(sessionId, result),
+            });
+            return;
+          }
+
+          if (finished.harness !== "cursor") return;
+          // A turn that only asked for more effort edited nothing, so the edit
+          // gate skips it. One that did edit is reviewed now: its send-on may
+          // edit nothing more, and would never be reviewed.
+          const turn = cursorReviewRunBlocks(
+            finished.blocks,
+            cursorReviewTurnId,
+            cursorMultiReviewRunStarts.current.get(sessionId),
+          );
+          if (turn) launchCursorMultiReviewRef.current(finished.id, turn);
+        }, 0);
+      };
       void (async () => {
         let workCwd = initialWorkCwd;
-        if (createDraftWorktree) {
-          const tree = await createWorktree(
-            current.cwd,
-            // Fork: named after the request from the start, with a short id.
-            sessionWorktreeBranchName(
-              harnessText || attachments.map((file) => file.name).join(" "),
+        const tree = createDraftWorktree
+          ? await createWorktree(
+              current.cwd,
+              // Fork: named after the request from the start, with a short id.
+              sessionWorktreeBranchName(
+                harnessText || attachments.map((file) => file.name).join(" "),
+              ),
+              current.worktreeBase || "HEAD",
+              false,
+            ).catch((error: unknown) => {
+              // Fork: git can't branch off a repo with no commits, so the
+              // turn runs in the main checkout instead of failing.
+              if (isNoCommitsError(error)) return null;
+              throw error;
+            })
+          : null;
+        if (createDraftWorktree && !tree) {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    // Cleared like a made worktree, so the composer stops
+                    // offering the draft workspace pickers.
+                    workspaceMode: undefined,
+                    worktreeBase: undefined,
+                    worktreePreparing: undefined,
+                    blocks: [
+                      ...session.blocks,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "system",
+                        text: NO_COMMITS_FALLBACK_NOTE,
+                        notice: "info",
+                      },
+                    ],
+                  }
+                : session,
             ),
-            current.worktreeBase || "HEAD",
-            false,
           );
+        }
+        if (tree) {
           workCwd = tree.path;
           workspacePins.current.set(sessionId, currentWorkspace(current.cwd));
           if (proposalDraft)
@@ -8491,28 +8691,10 @@ function Workspace({
             }
           : queuedHandoff;
         if (pendingSwitch) {
-          let agentText = "";
-          if (
-            shouldAskOutgoingAgent(current) &&
-            isLiveHarness(pendingSwitch.from)
-          ) {
-            try {
-              agentText = await requestOutgoingHandoff({
-                harness: pendingSwitch.from,
-                sessionId,
-                cwd: workCwd,
-                model: pendingSwitch.fromModel,
-                modelSettings: pendingSwitch.fromSettings,
-                providerAccountId: pendingSwitch.fromProviderAccountId,
-                userRequest: text,
-              });
-            } catch {
-              agentText = "";
-            }
-          }
-          if (turnGen.current.get(sessionId) !== gen) return;
+          // Fork (handoffBudget): saved messages picked by rule, instead of a
+          // recap turn that re-read the outgoing agent's whole context.
           const latest = sessionsRef.current.find((s) => s.id === sessionId);
-          const brief = chooseHandoffBrief(agentText, latest ?? current, text);
+          const brief = budgetedHandoff(latest ?? current, text, workCwd);
           await forgetHarnessSession(pendingSwitch.from, sessionId);
           if (turnGen.current.get(sessionId) !== gen) return;
           wrap = { from: pendingSwitch.from, to: current.harness, text: brief };
@@ -8682,7 +8864,7 @@ function Workspace({
             const from = wrap?.from ?? continuedOrigin(current.id)?.from ?? current.harness;
             const brief = await prepareHandoffContext(
               current,
-              wrap?.text ?? buildDeterministicHandoff(current),
+              wrap?.text ?? budgetedHandoff(current, undefined, workCwd), // Fork
               async (id) => sessionsRef.current.find((entry) => entry.id === id) ?? await peekSession(id),
             );
             if (turnGen.current.get(sessionId) !== gen) return;
@@ -8845,7 +9027,7 @@ function Workspace({
             agentFiles &&
             agentLook &&
             agentPlan &&
-            (agentPlan.soul || agentPlan.memory)
+            (agentPlan.soul || agentPlan.memory || agentPlan.skills)
           ) {
             appContext.push(monoContext(agentLook, agentFiles, agentPlan));
           }
@@ -9023,6 +9205,7 @@ function Workspace({
               void announceSessionFinished(finished, visible);
           }, 0);
           notifyReviewChanged(sessionId);
+          settleCursorMultiReview(controlOutcome);
           notifyAgentGitActivity();
           nudgeWorkspace(workCwd);
           nudgeWatchedFiles();
@@ -9061,16 +9244,20 @@ function Workspace({
                   : stopped;
               }),
             );
+            settleCursorMultiReview(controlOutcome);
           }
         })
         .finally(() => {
           editedResend?.reject();
           if (editedResend) editedResends.finish(sessionId);
-          options?.onSettled?.(
+          const settledOutcome: ControlOutcome =
             turnGen.current.get(sessionId) !== gen
               ? { status: "cancelled", text: controlText }
-              : controlOutcome,
-          );
+              : controlOutcome;
+          options?.onSettled?.(settledOutcome);
+          if (settledOutcome.status === "cancelled") {
+            settleCursorMultiReview(settledOutcome);
+          }
         });
       return true;
     },
@@ -9097,7 +9284,34 @@ function Workspace({
     (...args: Parameters<Submit>): boolean => {
       // Reject before async preparation can make the composer clear its draft.
       if (workspaceNavigation.isSwitching(args[0])) return false;
-      const result = submitSession(...args);
+      // Fork (idleCompact): the cache ran out on a big Claude thread, so it is
+      // summarised first and the message waits in the queue behind it.
+      const [submitId, submitText, submitAttachments, submitOptions] = args;
+      const target = sessionsRef.current.find((s) => s.id === submitId);
+      // Only a plain composer send: a queued entry keeps text, files and
+      // intent, and would drop plan builds, CI repairs, retries and callbacks.
+      const plainSend = Object.entries(submitOptions ?? {}).every(
+        ([key, value]) =>
+          value === undefined ||
+          (key === "intent" && (value === "default" || value === "plan")),
+      );
+      const compactFirst =
+        !!target &&
+        plainSend &&
+        !editedResends.isActive(submitId) &&
+        !orchestrator.submissionError(submitId, false) &&
+        !isPreparingHandoff(target) &&
+        !skipIdleCompactRef.current(target) &&
+        !isNativeCommandPrompt(submitText, target.harness) &&
+        takeCompactBeforeSend(target) &&
+        compactContextRef.current(submitId);
+      if (compactFirst) markSendAfterCompact(submitId);
+      const result = compactFirst
+        ? submitSession(submitId, submitText, submitAttachments, {
+            ...submitOptions,
+            followUpBehavior: "queue",
+          })
+        : submitSession(...args);
       const onAnswer = (accepted: boolean) => {
         if (accepted) leaveArchive(args[0]);
       };
@@ -9932,10 +10146,11 @@ function Workspace({
                 handoffCard: head.handoffCard,
                 intent: head.intent,
                 ...(head.monoSessionCompletion
-                  ? {
-                      monoSessionCompletion: head.monoSessionCompletion,
-                      appRequestId: head.id,
-                    }
+                  ? { monoSessionCompletion: head.monoSessionCompletion }
+                  : {}),
+                ...(head.monoSessionCompletion ||
+                head.id.startsWith(CURSOR_MULTI_REVIEW_APP_PREFIX)
+                  ? { appRequestId: head.id }
                   : {}),
               },
             );
@@ -10087,6 +10302,10 @@ function Workspace({
         noteCard: message.noteCard,
         handoffCard: message.handoffCard,
         intent: message.intent,
+        // Keeps the marker that stops a review note being reviewed again.
+        ...(message.id.startsWith(CURSOR_MULTI_REVIEW_APP_PREFIX)
+          ? { appRequestId: message.id, followsUp: true }
+          : {}),
       });
     },
     [onSubmit, enqueueHarnessEvent, flushHarnessEvents],
@@ -10174,9 +10393,16 @@ function Workspace({
         );
         return true;
       }
+      if (session.queuedMessages?.length) {
+        updateSessionState(sessionsRef, setSessions, (prev) =>
+          prev.map((entry) => entry.id === sessionId ? resumeUsageLimitedSession(entry) : entry),
+        );
+        return true;
+      }
       onUsageLimitDismiss(sessionId);
       try {
-        if (await submitSession(sessionId, CONTINUE_PROMPT)) {
+        const intent = usageLimitContinuationIntent(session);
+        if (await submitSession(sessionId, CONTINUE_PROMPT, [], { intent })) {
           leaveArchive(sessionId); // Fork
           return true;
         }
@@ -10185,7 +10411,7 @@ function Workspace({
       // that one-attempt scheduler behavior, but retain a manual retry notice.
       updateSessionState(sessionsRef, setSessions, (prev) => prev.map((entry) =>
         entry.id === sessionId && !entry.busy && !entry.usageLimit
-          ? { ...entry, usageLimit: { ...session.usageLimit!, resumeAtReset: false } } : entry));
+          ? { ...entry, usageLimit: { recoveryFailed: true } } : entry));
       return false;
     },
     [leaveArchive, submitSession, onUsageLimitDismiss],
@@ -10200,6 +10426,7 @@ function Workspace({
    */
   const onSessionAccountChange = useCallback(
     async (sessionId: string, accountId: string) => {
+      const generation = turnGen.current.get(sessionId);
       const session = sessionsRef.current.find(
         (entry) => entry.id === sessionId,
       );
@@ -10250,6 +10477,10 @@ function Workspace({
         // The user moved on while the transcript was copied.
         if (
           !latest ||
+          turnGen.current.get(sessionId) !== generation ||
+          latest.harness !== session.harness || latest.model !== session.model ||
+          latest.runtimeMode !== session.runtimeMode || latest.modelSettings !== session.modelSettings ||
+          sessionWorkCwd(latest) !== sessionWorkCwd(session) ||
           !!latest.usageLimit !== limited ||
           latest.busy ||
           latest.providerSessionId !== session.providerSessionId ||
@@ -10257,8 +10488,14 @@ function Workspace({
             latest.providerAccountId,
             session.providerAccountId,
           )
-        )
+        ) {
+          const restore = cancelledAccountTransferSession(session, latest);
+          if (restore) {
+            bindHarnessSession(restore.harness, restore.id, restore.providerSessionId!,
+              sessionWorkCwd(restore), restore.providerAccountId, restore.blocks);
+          }
           return;
+        }
       }
       if (mono) {
         updateSessionState(sessionsRef, setSessions, (sessions) =>
@@ -10273,7 +10510,7 @@ function Workspace({
       updateSessionState(sessionsRef, setSessions, (sessions) =>
         sessions.map((entry) =>
           entry.id === sessionId
-            ? withUsageLimitAccount({ ...entry, runtimeMode: entry.harness === "codex" ? "full-access" : entry.runtimeMode }, accountId, carried)
+            ? withUsageLimitAccount(entry, accountId, carried)
             : entry,
         ),
       );
@@ -10282,6 +10519,17 @@ function Workspace({
     [onUsageLimitResume],
   );
   sessionAccountChangeRef.current = onSessionAccountChange;
+
+  useAutoAccountSwitch(
+    sessions,
+    () => sessionsRef.current,
+    onSessionAccountChange,
+    (session) => !remoteProjectFor(session.cwd) && isLiveHarness(session.harness) &&
+      !pendingAccountMovesRef.current.has(session.id) && !removingSessionIds.current.has(session.id) &&
+      !switchingWorktrees.current.has(session.id) && !workspaceNavigation.isSwitching(session.id) &&
+      !isPreparingHandoff(session) && !isMoveLocked(session.id) && !orchestrator.submissionError(session.id, false),
+    (id) => turnGen.current.get(id) ?? 0,
+  );
 
   useEffect(() => {
     const pending = pendingAccountMovesRef.current;
@@ -10353,7 +10601,7 @@ function Workspace({
   useEffect(() => {
     for (const session of sessions) {
       const limit = session.usageLimit;
-      if (!limit || limit.resetsAt != null) continue;
+      if (!limit || limit.recoveryFailed || limit.resetsAt != null) continue;
       if (usageResetLookups.current.has(limit)) continue;
       const fetchLimits =
         session.harness === "claude"
@@ -10383,6 +10631,7 @@ function Workspace({
       session: Session,
       cwd: string,
       focusComposer = false,
+      focusNew = true,
     ) => {
       const nextSessions = [...sessionsRef.current, session];
       sessionsRef.current = nextSessions;
@@ -10397,25 +10646,219 @@ function Workspace({
             ? {
                 ...entry,
                 layout: splitPane(entry.layout, sourceId, "right", session.id),
-                focusedId: session.id,
-                diffFocused: false,
+                focusedId: focusNew ? session.id : entry.focusedId,
+                diffFocused: focusNew ? false : entry.diffFocused,
               }
             : entry,
         );
         tabsRef.current = nextTabs;
         setTabs(nextTabs);
-        if (tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
-      } else {
+        // A background pane opens where its source is; the user stays put.
+        if (focusNew && tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
+      } else if (focusNew) {
         const nextTab = newTab(session.id);
         appendTab(nextTab, cwd);
         setActiveTabId(nextTab.id);
       }
+      // A background session with no pane to sit beside stays in the sidebar.
 
-      setProjectTerminalFocused(false);
-      setComposerFocused(focusComposer);
+      if (focusNew) {
+        setProjectTerminalFocused(false);
+        setComposerFocused(focusComposer);
+      }
     },
     [appendTab],
   );
+
+  const cursorMultiReviewPairs = useRef(
+    new CursorMultiReviewPairs((pair) => {
+      const source = sessionsRef.current.find(
+        (s) => s.id === pair.sourceSessionId,
+      );
+      if (!source || removingSessionIds.current.has(source.id)) return;
+      // Nothing to act on, so say so without spending a Cursor turn on it.
+      if (!pair.results.some((result) => result.text.trim())) {
+        enqueueHarnessEvent(source.id, {
+          type: "status",
+          text: cursorMultiReviewEmptyStatus(pair.results),
+        });
+        flushHarnessEvents();
+        return;
+      }
+      const message = buildCursorMultiReviewQueueMessage(
+        pair.pairId,
+        pair.results,
+        pair.userRequest,
+      );
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.id !== source.id) return session;
+          if (
+            session.queuedMessages?.some((m) => m.id === message.id) ||
+            session.blocks.some((b) => b.appRequestId === message.id)
+          ) {
+            return session;
+          }
+          return {
+            ...session,
+            queuedMessages: [...(session.queuedMessages ?? []), message],
+            queueStatus: session.queueStatus ?? "active",
+          };
+        }),
+      );
+    }),
+  );
+
+  // Each editing turn opens new reviewers, so older finished ones leave the
+  // tab. Their sessions stay in the sidebar.
+  const cursorMultiReviewPanes = useRef(new Map<string, string[]>());
+  /** Each session's latest run start, so an older run's review stops there. */
+  const cursorMultiReviewRunStarts = useRef(new Map<string, string>());
+  const retireCursorMultiReviewPanes = useCallback(
+    (sourceId: string): string[] => {
+      const kept: string[] = [];
+      for (const id of cursorMultiReviewPanes.current.get(sourceId) ?? []) {
+        const tab = tabsRef.current.find((entry) =>
+          leafIds(entry.layout).includes(id),
+        );
+        const session = sessionsRef.current.find((entry) => entry.id === id);
+        if (!tab || !session) continue;
+        if (session.busy || tab.focusedId === id) {
+          kept.push(id);
+          continue;
+        }
+        const closed = closeLeaf(tab, id);
+        if (!closed) continue;
+        persistSession(session);
+        const nextTabs = tabsRef.current.map((entry) =>
+          entry.id === tab.id
+            ? { ...entry, layout: closed.layout, focusedId: closed.focusedId }
+            : entry,
+        );
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+      }
+      return kept;
+    },
+    [persistSession],
+  );
+
+  const launchCursorMultiReview = useCallback(
+    (sourceId: string, turn: Block[]) => {
+      const source = sessionsRef.current.find((s) => s.id === sourceId);
+      if (!source) return;
+      const turnId = turn.find((b) => b.role === "user")?.id;
+      if (!turnId) return;
+      if (
+        !shouldStartCursorMultiReview({
+          enabled: loadCursorMultiReview(),
+          harness: source.harness,
+          turn,
+          turnUserBlockId: turnId,
+          alreadyReviewed: cursorMultiReviewPairs.current.hasStarted(
+            sourceId,
+            turnId,
+          ),
+          worktreeRemoved: !!source.worktreeRemoved,
+          // No pane to review beside, and a fan-in turn would report back to
+          // whatever is running them a second time.
+          backgroundRun:
+            !!source.ephemeral ||
+            !!source.inboxAsk ||
+            !!source.orchestrationLeadId ||
+            isMonoSession(source.id) ||
+            isHabitRun(source.id),
+          // Desktop-only v1 — skip remote projects.
+          isRemote: !!remoteProjectFor(source.cwd),
+        })
+      ) {
+        return;
+      }
+      const reviewers = pickCursorMultiReviewers({
+        isLive: (id) => isLiveHarness(id) && isHarnessAvailable(id),
+        isVisible: (id) =>
+          isPickerProviderVisible(id) && !isProviderHidden(source.cwd, id),
+        usedPercent: (id) => harnessUsedPercent(id, source.cwd),
+      });
+      if (reviewers.length === 0) return;
+
+      const cwd = sessionWorkCwd(source);
+      const from = harnessForTurn(source.blocks, turn, source.harness);
+      const childIds: string[] = [];
+      const pending: { session: Session; reviewer: CursorMultiReviewer }[] =
+        [];
+
+      for (const reviewer of reviewers) {
+        const session = {
+          ...newSession(
+            reviewer.harness,
+            source.cwd,
+            preferredModelId(reviewer.harness),
+            // Reviewers report only, so hold them to it: Codex gets a read-only
+            // sandbox, and every provider asks before writes and commands.
+            "supervised",
+          ),
+          worktreeCwd: source.worktreeCwd,
+          branch: source.branch,
+          title: formatSessionTitle(
+            reviewer.harness,
+            `${CURSOR_MULTI_REVIEW_TITLE_PREFIX}${HARNESS_TITLE[reviewer.harness]}`,
+          ),
+        };
+        childIds.push(session.id);
+        pending.push({ session, reviewer });
+      }
+
+      const pairId = cursorMultiReviewPairs.current.begin({
+        sourceSessionId: sourceId,
+        turnId,
+        childSessionIds: childIds,
+        userRequest: turnUserRequest(turn),
+      });
+      cursorMultiReviewPanes.current.set(sourceId, [
+        ...retireCursorMultiReviewPanes(sourceId),
+        ...childIds,
+      ]);
+
+      for (const { session, reviewer } of pending) {
+        openSessionBeside(sourceId, session, source.cwd, false, false);
+        const request = buildCursorMultiReviewRequest({
+          from,
+          to: reviewer.harness,
+          role: reviewer.role,
+          turn,
+          cwd,
+          pairId,
+          sourceSessionId: sourceId,
+          turnId,
+        });
+        const settleFailure = (outcome: Pick<ControlOutcome, "status" | "error">) => {
+          cursorMultiReviewPairs.current.settleChild(
+            session.id,
+            cursorMultiReviewChildResult(
+              sessionsRef.current.find((s) => s.id === session.id) ?? session,
+              outcome,
+            ),
+          );
+        };
+        // Prefer only secondOpinion; do not pass cursorMultiReview into SubmitOptions.
+        const accepted = onSubmit(session.id, request.prompt, [], {
+          secondOpinion: request.options.secondOpinion,
+          // A reviewer that never starts must not hold back the other's report.
+          onSettled: (outcome) => {
+            if (outcome.status === "failed") settleFailure(outcome);
+          },
+        });
+        if (!accepted) {
+          settleFailure({ status: "failed", error: "The review could not start" });
+        }
+      }
+    },
+    [onSubmit, openSessionBeside, retireCursorMultiReviewPanes],
+  );
+
+  const launchCursorMultiReviewRef = useRef(launchCursorMultiReview);
+  launchCursorMultiReviewRef.current = launchCursorMultiReview;
 
   const onSecondOpinion = useCallback(
     (sourceId: string, target: ModelTarget, turn: Block[]) => {
@@ -11078,7 +11521,7 @@ function Workspace({
           from,
           to: harness,
           // Fork: says where the full transcript is.
-          brief: withTranscriptPointer(buildDeterministicHandoff(sliced), sourceId),
+          brief: withTranscriptPointer(budgetedHandoff(sliced), sourceId),
           userRequest,
           files,
           intent: turn.find((block) => block.role === "user")?.intent,
@@ -11257,7 +11700,7 @@ function Workspace({
       if (current && remoteProjectFor(current.cwd))
         return remoteSessionActions(sessionId)?.compact() ?? false;
       if (!current || current.busy || current.worktreeRemoved) return false;
-      if (isMoveLocked(sessionId)) return false; // Fork: stopped for a move, or moved.
+      if (isMoveLocked(sessionId) || accountSwitching.current.has(sessionId)) return false; // Fork: a move or account copy owns the conversation.
       if (!canCompactHarnessContext(current.harness)) {
         const unsupported = sessionsRef.current.map((session) =>
           session.id === sessionId
@@ -11315,6 +11758,7 @@ function Workspace({
             },
           });
           if (turnGen.current.get(sessionId) !== gen) return;
+          noteCompacted(sessionId, current.context?.used); // Fork (idleCompact)
           enqueueHarnessEvent(sessionId, {
             type: "status",
             text: "Compacted context",
@@ -11329,10 +11773,21 @@ function Workspace({
                 : `${current.harness} could not compact this context`,
           });
         } finally {
+          // Fork (idleCompact): a message sent behind this compaction still
+          // goes out if the compaction failed, with the full history.
+          const resumeSend = takeSendAfterCompact(sessionId);
           if (turnGen.current.get(sessionId) !== gen) return;
           flushHarnessEvents();
           const finished = sessionsRef.current.map((session) =>
-            session.id === sessionId ? { ...session, busy: false } : session,
+            session.id === sessionId
+              ? {
+                  ...session,
+                  busy: false,
+                  ...(resumeSend && session.queueStatus === "paused"
+                    ? { queueStatus: "active" as const }
+                    : {}),
+                }
+              : session,
           );
           sessionsRef.current = finished;
           syncDockBadge(finished);
@@ -11343,6 +11798,27 @@ function Workspace({
     },
     [enqueueHarnessEvent, flushHarnessEvents],
   );
+
+  // Fork (idleCompact): onSubmit, above, reaches these through refs.
+  compactContextRef.current = onCompactContext;
+  skipIdleCompactRef.current = (session: Session) =>
+    !!remoteProjectFor(session.cwd) ||
+    isMonoSession(session.id) ||
+    isHabitRun(session.id) ||
+    !!session.orchestrationLeadId ||
+    orchestrator.run(session.id)?.status === "active" ||
+    session.ephemeral === true ||
+    isMoveLocked(session.id) ||
+    !!session.queuedMessages?.length ||
+    !!session.backgroundTasks?.length;
+  useIdleCompact(sessions, {
+    sessionsRef,
+    compact: onCompactContext,
+    // A thread marked safe to close is finished; summarising it would be waste.
+    skip: (session) =>
+      skipIdleCompactRef.current(session) ||
+      closeEntry(session.id)?.state?.kind === "safe",
+  });
 
   const onStop = useCallback(
     (sessionId: string, managed = false) => {
@@ -12439,6 +12915,11 @@ function Workspace({
             // Fork: projects.create puts the new folder on the rail.
             addProject: (path) => setRecents(rememberProject(path)),
             habits: { load: loadHabits, update: updateHabits },
+            skills: {
+              read: readMonoSkill,
+              create: createMonoSkill,
+              update: updateMonoSkill,
+            },
             agentFiles: (monoId) => loadMonoFiles(monoId),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>
@@ -14842,6 +15323,18 @@ function Workspace({
       sessionSidebarOpen={sessionSidebarOpen}
       compactRail={!insetLayout && compactTitleNavigation}
       inset={insetLayout}
+      sessionCleanupControl={
+        <CleanUpSessionsButton
+          projectPaths={cleanupProjectPaths}
+          activeSessionId={activeSessionId}
+          busySessionIds={cleanupBusySessionIds}
+          approvalSessionIds={approvalSessionIds}
+          openSessionIds={allOpenSessionIds}
+          onArchive={onArchiveHistorySession}
+          onDelete={onDeleteCleanupSession}
+          onOpenSession={onOpenApprovalSession}
+        />
+      }
       worktreeControl={
         insetLayout && !settingsOpen && !monoCovers && !activeAppView && isLocalProject(sidebarCwd) ? (
           <SidebarWorktreeSwitcher
@@ -14958,7 +15451,6 @@ function Workspace({
       onArchiveSession={onArchiveHistorySession}
       onArchiveSessions={onArchiveHistorySessions}
       closableSessionIds={closableSessionIds}
-      allOpenSessionIds={allOpenSessionIds}
       onCloseSessions={onCloseSessionsForMemory}
       idleClosableCount={idleClosableCount}
       onCloseIdleSessions={onCloseIdleSessions}
@@ -14970,8 +15462,6 @@ function Workspace({
       onCancelReminders={sessionReminders.cancel}
       onDeleteSession={onDeleteHistorySession}
       onDeleteSessions={onDeleteHistorySessions}
-      cleanupBusySessionIds={cleanupBusySessionIds}
-      onDeleteCleanupSession={onDeleteCleanupSession}
       onOpenFile={onOpenFile}
       onOpenTerminal={onOpenTerminal}
       onFileMoved={onFileMoved}

@@ -24,6 +24,8 @@ import { barClass } from "../../features/providers/ui/ProviderAccountUsage";
 import { useShowRemainingUsage } from "../../features/settings/model/displayPrefs";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
+import { loginHarness } from "../../integrations/harness/core/auth";
+import { isHarnessAuthError } from "../../integrations/harness/core/authSupport";
 import { Gauge, RefreshCw } from "../../shared/ui/icons";
 import { Popover, type PopoverDismissReason } from "../../shared/ui/Popover";
 import { footerAccountLabel } from "./FooterUsage";
@@ -45,12 +47,13 @@ const EXTRA: {
   { provider: "antigravity", name: "Antigravity", harness: "antigravity" },
   { provider: "muse", name: "Muse" },
   { provider: "deepseek", name: "DeepSeek", harness: "deepseek" },
+  { provider: "grok", name: "Grok", harness: "grok" },
 ];
 
 /**
  * Fork feature: one footer button that lists every account's usage at once:
  * each Claude and Codex account, Cursor Auto/API pools, Antigravity and Muse
- * windows, DeepSeek's balance, and a note for Grok, which reports no plan usage.
+ * windows, DeepSeek's balance, and Grok's shared plan credits.
  */
 export function AllUsageChip({ className }: { className: string }) {
   const [open, setOpen] = useState(false);
@@ -199,9 +202,6 @@ export function AllUsagePanel() {
           now={now}
         />
       ))}
-      <Section name="Grok" harness="grok">
-        <p className="text-content/45">Grok Build doesn't report plan usage.</p>
-      </Section>
         </>
       ) : null}
     </div>
@@ -257,10 +257,45 @@ function PlanRow({
 }) {
   const limits = useCachedRateLimits(provider, account.id);
   const bars = windowsOf(limits);
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const needsLogin =
+    bars.length === 0 &&
+    ((limits.status === "unavailable" &&
+      /not signed in/i.test(limits.error ?? "")) ||
+      (limits.status === "error" &&
+        !!limits.error &&
+        isHarnessAuthError(limits.error)));
+  const signIn = async () => {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      await loginHarness(provider, account.id);
+      await loadRateLimits(provider, account.id, true);
+    } catch (error) {
+      setSignInError(
+        error instanceof Error ? error.message : "Could not complete sign-in",
+      );
+    } finally {
+      setSigningIn(false);
+    }
+  };
   return (
     <Row label={footerAccountLabel(account)}>
       {bars.length > 0 ? (
         <Bars bars={bars} now={now} />
+      ) : needsLogin ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <Note>{signInError ?? limits.error ?? "Not signed in"}</Note>
+          <button
+            type="button"
+            disabled={signingIn}
+            onClick={() => void signIn()}
+            className="shrink-0 rounded-md bg-content/10 px-2 py-0.5 text-[10px] font-medium text-content/80 transition-colors hover:bg-content/15 hover:text-content disabled:opacity-60"
+          >
+            {signingIn ? "Waiting for browser…" : "Sign in"}
+          </button>
+        </span>
       ) : (
         <Note>
           {limits.status === "idle" || limits.status === "fetching"
