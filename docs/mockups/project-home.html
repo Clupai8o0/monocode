@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MonoCode · Project Home mockup</title>
+<style>
+  :root {
+    --bg: #141414;
+    --panel: #1b1b1b;
+    --raised: #232323;
+    --raised-2: #2b2b2b;
+    --ink: #ececec;
+    --muted: rgba(236, 236, 236, .62);
+    --faint: rgba(236, 236, 236, .36);
+    --ghost: rgba(236, 236, 236, .08);
+    --stroke: rgba(236, 236, 236, .07);
+    --accent: hsl(211 92% 62%);
+    --green: #3ec28f;
+    --violet: #a78bfa;
+    --amber: #f0b43c;
+    --ease-out: cubic-bezier(.23, 1, .32, 1);
+    --ease-in-out: cubic-bezier(.77, 0, .175, 1);
+    --r: 10px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+  body { font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible, label:focus-within { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; border-radius: 8px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+  /* ---------- shell ---------- */
+  .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100vh; }
+  .side { background: var(--panel); padding: 14px 10px; display: flex; flex-direction: column; gap: 18px; overflow: auto; }
+  .side h6 { margin: 0 8px 6px; font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+  .proj { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 8px; text-align: left; transition: background-color 120ms ease; }
+  .proj:hover { background: var(--ghost); }
+  .proj.sel { background: rgba(236, 236, 236, .1); }
+  .proj .logo { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+  .proj .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ring { flex: none; }
+  .ring circle { fill: none; stroke-width: 2.5; }
+  .ring .bgc { stroke: var(--ghost); }
+  .ring .fg { stroke: var(--green); stroke-linecap: round; transition: stroke-dashoffset 600ms var(--ease-out); transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .sess { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 14px; border-radius: 8px; color: var(--muted); font-size: 13px; width: 100%; text-align: left; }
+  .sess:hover { background: var(--ghost); color: var(--ink); }
+  .sess .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 10px 18px; }
+  .seg-ctl { display: inline-flex; background: var(--panel); border-radius: 9px; padding: 3px; }
+  .seg-ctl button { padding: 5px 12px; border-radius: 7px; color: var(--muted); font-size: 13px; transition: background-color 150ms ease, color 150ms ease; }
+  .seg-ctl button[aria-pressed="true"] { background: var(--raised-2); color: var(--ink); }
+  .seg-ctl button:active { transform: scale(.97); }
+  .topbar .label { color: var(--faint); font-size: 12px; }
+  .view { flex: 1; overflow: auto; overflow-x: hidden; }
+  .view[hidden] { display: none; }
+
+  /* ---------- project home ---------- */
+  .home { max-width: 1180px; margin: 0 auto; padding: 18px 28px 120px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 36px; }
+  .home header { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 16px; }
+  .title-row { display: flex; align-items: center; gap: 14px; }
+  .big-logo { width: 40px; height: 40px; border-radius: 11px; background: linear-gradient(140deg, #f6c177, #eb6f92); color: #1b1b1b; display: grid; place-items: center; font-weight: 800; font-size: 18px; flex: none; }
+  .title-row h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sub .count { color: var(--ink); font-variant-numeric: tabular-nums; display: inline-block; }
+  .sub .count.bump { animation: bump 420ms var(--ease-out); }
+  @keyframes bump { 0% { transform: translateY(6px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+  .title-row .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 8px; font-size: 13px; background: var(--raised); color: var(--ink); transition: background-color 120ms ease, transform 120ms var(--ease-out); white-space: nowrap; }
+  .btn:hover { background: var(--raised-2); }
+  .btn:active { transform: scale(.97); }
+  .btn.primary { background: var(--ink); color: #141414; font-weight: 600; }
+  .btn.primary:hover { background: #fff; }
+  .btn.ghost { background: transparent; color: var(--muted); }
+  .btn.ghost:hover { background: var(--ghost); color: var(--ink); }
+  .btn[disabled] { opacity: .7; cursor: default; }
+  .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(20,20,20,.25); border-top-color: #141414; animation: spin 600ms linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* segmented roadmap bar */
+  .bar { display: flex; gap: 4px; align-items: center; height: 18px; }
+  .seg { flex: 1; height: 6px; border-radius: 3px; background: var(--ghost); position: relative; cursor: pointer; transition: transform 160ms var(--ease-out); }
+  .seg:hover { transform: scaleY(1.6); }
+  .seg .fill { position: absolute; inset: 0; border-radius: inherit; transform-origin: left; transform: scaleX(var(--f, 0)); transition: transform 520ms var(--ease-out), background-color 300ms ease; }
+  .seg.st-done .fill { background: var(--green); }
+  .seg.st-built .fill { background: var(--violet); }
+  .seg.st-progress .fill { background: var(--accent); }
+  .seg.st-todo .fill { background: transparent; }
+  .seg.needs::before { content: ""; position: absolute; top: -7px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--amber); }
+  .seg.celebrate { animation: segglow 900ms var(--ease-out); }
+  @keyframes segglow { 0% { box-shadow: 0 0 0 0 rgba(62,194,143,.0); } 30% { box-shadow: 0 0 14px 2px rgba(62,194,143,.55); } 100% { box-shadow: 0 0 0 0 rgba(62,194,143,0); } }
+  .seg-tip { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%) translateY(4px); background: var(--raised-2); color: var(--ink); font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 120ms ease, transform 160ms var(--ease-out); z-index: 5; }
+  .seg:hover .seg-tip { opacity: 1; transform: translateX(-50%) translateY(0) scaleY(.625); }
+  .seg:first-child .seg-tip { left: 0; transform: translateY(4px); }
+  .seg:first-child:hover .seg-tip { transform: scaleY(.625); transform-origin: bottom left; }
+  .seg:last-child .seg-tip { left: auto; right: 0; transform: translateY(4px); }
+  .seg:last-child:hover .seg-tip { transform: scaleY(.625); transform-origin: bottom right; }
+  .legend { display: flex; gap: 16px; color: var(--faint); font-size: 12px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+  section h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  section h2 .n { background: var(--amber); color: #1a1a1a; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; line-height: 17px; }
+  .col { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
+
+  /* waiting on you */
+  .asks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .ask { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 260ms var(--ease-out), opacity 200ms ease, margin 260ms var(--ease-out); }
+  .ask > div { min-height: 0; overflow: hidden; }
+  .ask .row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; background: color-mix(in srgb, var(--amber) 7%, var(--panel)); border-radius: var(--r); }
+  .ask .txt { flex: 1; min-width: 0; }
+  .ask .txt b { font-weight: 550; display: block; transition: color 180ms ease; }
+  .ask .txt small { color: var(--faint); font-size: 12px; }
+  .ask.leaving { grid-template-rows: 0fr; opacity: 0; margin-top: -6px; }
+  .ask.ticked .txt b { color: var(--faint); text-decoration: line-through; }
+  .empty { color: var(--faint); font-size: 13px; padding: 10px 2px; animation: bump 300ms var(--ease-out); }
+
+  /* checkbox */
+  .cb { position: relative; width: 18px; height: 18px; flex: none; }
+  .cb input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .cb .box { position: absolute; inset: 0; border-radius: 5px; border: 1.5px solid var(--faint); transition: background-color 140ms ease, border-color 140ms ease, transform 120ms var(--ease-out); pointer-events: none; }
+  .cb .box svg { position: absolute; inset: 2px; stroke: #141414; stroke-width: 2.4; fill: none; stroke-dasharray: 14; stroke-dashoffset: 14; transition: stroke-dashoffset 220ms var(--ease-out) 40ms; }
+  .cb input:checked + .box { background: var(--green); border-color: var(--green); }
+  .cb input:checked + .box svg { stroke-dashoffset: 0; }
+  .cb input:active + .box { transform: scale(.88); }
+  .cb input:focus-visible + .box { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* roadmap */
+  .phases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .phase { border-radius: var(--r); transition: background-color 160ms ease, box-shadow 160ms ease; }
+  .phase.open { background: var(--panel); }
+  .phase.drop-ok { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .phase.drop-hover { box-shadow: inset 0 0 0 1.5px var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .phase.celebrate { animation: rowglow 1100ms var(--ease-out); }
+  .phase.flash { animation: rowflash 1200ms var(--ease-out); }
+  @keyframes rowglow { 0% { background: color-mix(in srgb, var(--green) 0%, transparent); } 25% { background: color-mix(in srgb, var(--green) 16%, transparent); } 100% { background: transparent; } }
+  @keyframes rowflash { 0%, 30% { box-shadow: inset 0 0 0 1.5px var(--accent); } 100% { box-shadow: inset 0 0 0 1.5px transparent; } }
+  .ph-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; text-align: left; border-radius: var(--r); transition: background-color 120ms ease; }
+  .phase:not(.open) .ph-head:hover { background: var(--ghost); }
+  .ph-num { color: var(--faint); font-variant-numeric: tabular-nums; width: 26px; flex: none; font-size: 13px; }
+  .ph-name { font-weight: 550; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phase.st-done:not(.open) .ph-name { color: var(--muted); font-weight: 450; }
+  .phase.st-todo:not(.open) .ph-name { color: var(--muted); font-weight: 450; }
+  .ph-meta { display: flex; align-items: center; gap: 8px; }
+  .ph-status { font-size: 12px; color: var(--muted); white-space: nowrap; width: 128px; text-align: right; }
+  .phase.st-done .ph-status { color: var(--green); }
+  .phase.st-built .ph-status { color: var(--violet); }
+  .phase.st-progress .ph-status { color: var(--accent); }
+  .needs-pill { font-size: 11px; font-weight: 600; color: var(--amber); background: color-mix(in srgb, var(--amber) 13%, transparent); padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .chev { width: 14px; height: 14px; color: var(--faint); transition: transform 220ms var(--ease-out); flex: none; }
+  .phase.open .chev { transform: rotate(90deg); }
+  .mini-dots { display: inline-flex; gap: 3px; }
+
+  .ph-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 260ms var(--ease-out); }
+  .phase.open .ph-body { grid-template-rows: 1fr; }
+  .ph-inner { min-height: 0; overflow: hidden; }
+  .ph-content { padding: 2px 16px 16px 50px; display: flex; flex-direction: column; gap: 14px; opacity: 0; transform: translateY(-4px); transition: opacity 200ms ease, transform 260ms var(--ease-out); }
+  .phase.open .ph-content { opacity: 1; transform: none; }
+  .what { color: var(--muted); margin: 0; }
+  .k { font-size: 11px; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
+  .checks { display: flex; flex-direction: column; gap: 6px; }
+  .check { display: flex; align-items: center; gap: 10px; cursor: pointer; width: fit-content; padding: 2px 4px 2px 0; }
+  .check span.t { transition: color 160ms ease; }
+  .check.on span.t { color: var(--faint); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--raised); font-size: 13px; transition: background-color 120ms ease, transform 120ms var(--ease-out); max-width: 100%; }
+  .chip:hover { background: var(--raised-2); }
+  .chip:active { transform: scale(.97); }
+  .chip .ago { color: var(--faint); font-size: 12px; }
+  .chip.new { animation: pop 380ms var(--ease-out); }
+  @keyframes pop { 0% { transform: scale(.9); opacity: 0; } 100% { transform: none; opacity: 1; } }
+  .chip[data-last]::after { content: attr(data-last); position: absolute; left: 0; top: calc(100% + 6px); width: max-content; max-width: 300px; background: var(--raised-2); color: var(--muted); font-size: 12px; padding: 7px 9px; border-radius: 8px; opacity: 0; transform: translateY(-3px); pointer-events: none; transition: opacity 120ms ease, transform 160ms var(--ease-out); z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.4); white-space: normal; }
+  .chip[data-last]:hover::after { opacity: 1; transform: none; transition-delay: 350ms; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meta-line { display: flex; gap: 14px; align-items: center; color: var(--faint); font-size: 12px; flex-wrap: wrap; }
+  .stale { opacity: .75; display: inline-flex; gap: 5px; align-items: center; }
+  .finish-cta { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, var(--green) 10%, transparent); animation: pop 320ms var(--ease-out); }
+  .finish-cta span { flex: 1; color: var(--green); font-size: 13px; }
+
+  /* status glyph */
+  .glyph { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--faint); position: relative; flex: none; transition: background-color 300ms ease, border-color 300ms ease; }
+  .g-done { background: var(--green); border-color: var(--green); }
+  .g-done::after { content: ""; position: absolute; left: 3.5px; top: 1.5px; width: 3px; height: 6px; border: solid #141414; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
+  .g-built { border-color: var(--violet); background: linear-gradient(90deg, var(--violet) 50%, transparent 50%); }
+  .g-progress { border-color: var(--accent); }
+  .g-progress::after { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--accent); animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
+
+  /* live dots */
+  .dot { width: 7px; height: 7px; border-radius: 50%; position: relative; flex: none; background: var(--faint); }
+  .dot.working { background: var(--accent); color: var(--accent); }
+  .dot.working::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: pulse 1.8s var(--ease-out) infinite; }
+  .dot.waiting { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent); }
+  .dot.done { background: var(--green); }
+  @keyframes pulse { from { transform: scale(1); opacity: .55; } to { transform: scale(2.8); opacity: 0; } }
+
+  /* side column */
+  .aside { display: flex; flex-direction: column; gap: 30px; }
+  .live { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .live li button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 8px; text-align: left; transition: background-color 120ms ease; }
+  .live li button:hover { background: var(--ghost); }
+  .live .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live .ph { color: var(--faint); font-size: 12px; }
+  .tray { display: flex; flex-direction: column; gap: 6px; }
+  .tray .chip { cursor: grab; justify-content: flex-start; }
+  .tray .chip.dragging { opacity: .4; }
+  .tray .hint { color: var(--faint); font-size: 12px; }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 10px); opacity: 0; background: var(--raised-2); color: var(--ink); padding: 10px 10px 10px 14px; border-radius: 10px; display: flex; gap: 14px; align-items: center; box-shadow: 0 12px 32px rgba(0,0,0,.45); transition: opacity 180ms ease, transform 220ms var(--ease-out); pointer-events: none; z-index: 50; font-size: 13px; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  .toast .undo { color: var(--accent); font-weight: 600; padding: 3px 8px; border-radius: 6px; }
+  .toast .undo:hover { background: var(--ghost); }
+
+  /* menu / popover */
+  .pop { position: fixed; z-index: 40; background: var(--raised); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.5), 0 0 0 1px var(--stroke); padding: 6px; min-width: 220px; opacity: 0; transform: scale(.96); transform-origin: var(--origin, top left); transition: opacity 150ms ease, transform 180ms var(--ease-out); pointer-events: none; }
+  .pop.show { opacity: 1; transform: none; pointer-events: auto; }
+  .pop .mi { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px; border-radius: 7px; text-align: left; font-size: 13px; }
+  .pop .mi:hover, .pop .mi:focus-visible { background: var(--ghost); outline: none; }
+  .pop .mi .s { margin-left: auto; color: var(--faint); font-size: 12px; }
+  .pop .hd { padding: 6px 9px 8px; color: var(--faint); font-size: 12px; display: flex; justify-content: space-between; gap: 12px; }
+
+  /* ---------- chat view (layout B) ---------- */
+  .chat { display: flex; flex-direction: column; height: 100%; }
+  .tabs { display: flex; gap: 4px; padding: 6px 14px 0; }
+  .tab { padding: 8px 14px; border-radius: 9px 9px 0 0; color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 8px; max-width: 260px; }
+  .tab.on { background: var(--panel); color: var(--ink); }
+  .tab .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strip { display: flex; align-items: center; gap: 12px; padding: 7px 16px; background: var(--panel); font-size: 12.5px; color: var(--muted); }
+  .strip-btn { display: flex; align-items: center; gap: 10px; padding: 4px 8px; margin-left: -8px; border-radius: 7px; transition: background-color 120ms ease; }
+  .strip-btn:hover { background: var(--ghost); color: var(--ink); }
+  .strip-btn b { color: var(--ink); font-weight: 550; }
+  .mini-bar { display: flex; gap: 2px; }
+  .mini-bar i { width: 12px; height: 4px; border-radius: 2px; background: var(--ghost); transition: background-color 300ms ease; }
+  .mini-bar i.st-done { background: var(--green); }
+  .mini-bar i.st-built { background: var(--violet); }
+  .mini-bar i.st-progress { background: var(--accent); }
+  .mini-bar i.cur { box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 2.5px var(--accent); }
+  .strip .needs-pill { cursor: pointer; }
+  .chat-body { flex: 1; overflow: auto; padding: 26px 0; }
+  .msgs { max-width: 760px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 18px; }
+  .msg.user { align-self: flex-end; background: var(--raised); padding: 10px 14px; border-radius: 14px; max-width: 80%; }
+  .msg.bot { color: var(--ink); }
+  .msg.bot p { margin: 0 0 8px; }
+  .msg.bot code { background: var(--raised); padding: 1px 5px; border-radius: 5px; }
+  .composer { max-width: 760px; margin: 0 auto 18px; width: calc(100% - 48px); background: var(--panel); border-radius: 14px; padding: 14px 16px; color: var(--faint); }
+  .pop.road { width: 360px; }
+  .pop.road .mi .glyph { width: 12px; height: 12px; }
+  .pop.road .mi.cur { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .pop.road .ft { padding: 8px 9px 4px; color: var(--faint); font-size: 12px; display: flex; justify-content: space-between; }
+  kbd { font-family: inherit; font-size: 11px; background: var(--ghost); padding: 1px 5px; border-radius: 4px; color: var(--muted); }
+
+  /* ---------- mock controls ---------- */
+  .sim { position: fixed; right: 16px; bottom: 16px; background: #0f0f0f; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 4px; width: 210px; box-shadow: 0 0 0 1px var(--stroke), 0 12px 32px rgba(0,0,0,.5); z-index: 30; }
+  .sim .k { margin: 2px 4px 4px; }
+  .sim button { text-align: left; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; color: var(--muted); }
+  .sim button:hover { background: var(--ghost); color: var(--ink); }
+  .sim.min > button:not(.sim-toggle) { display: none; }
+  .sim-toggle { position: absolute; top: 8px; right: 8px; padding: 2px 6px !important; }
+  .kb-hint { color: var(--faint); font-size: 12px; margin-top: 10px; }
+
+  @media (max-width: 1080px) {
+    .home { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .side { display: none; }
+    .home { padding: 14px 14px 140px; }
+    .ph-status, .title-row .btn, .ask .btn, .topbar .label { display: none; }
+    .ph-head { gap: 10px; }
+    .ph-content { padding-left: 16px; }
+    .ph-meta .mini-dots { display: none; }
+    .sim { left: 12px; right: 12px; width: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition-duration: 1ms !important; transition-delay: 0ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" aria-label="Projects">
+    <div>
+      <h6>Projects</h6>
+      <div id="projList"></div>
+    </div>
+    <div>
+      <h6>Yap chats</h6>
+      <div id="sideSessions"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <span class="label">Mockup view</span>
+      <div class="seg-ctl" role="group" aria-label="Mockup view">
+        <button data-view="home" aria-pressed="true">A · Project home</button>
+        <button data-view="chat" aria-pressed="false">B · Strip in a chat</button>
+      </div>
+    </div>
+
+    <!-- Layout A -->
+    <div class="view" id="view-home">
+      <div class="home">
+        <header>
+          <div class="title-row">
+            <div class="big-logo">Y</div>
+            <div>
+              <h1>Yap</h1>
+              <div class="sub">
+                <span><span class="count" id="count">3</span> of <span id="total">10</span> phases done</span>
+                <span>·</span>
+                <span id="liveSum"></span>
+                <span>·</span>
+                <span class="mono">docs/plan.md</span>
+              </div>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn ghost" title="Opens docs/plan.md in the file viewer">Edit plan.md</button>
+          </div>
+          <div class="bar" id="bar" aria-label="Roadmap progress"></div>
+          <div class="legend">
+            <span><i style="background:var(--green)"></i>Done</span>
+            <span><i style="background:var(--violet)"></i>Built, not merged</span>
+            <span><i style="background:var(--accent)"></i>In progress</span>
+            <span><i style="background:var(--ghost)"></i>Not started</span>
+            <span><i style="background:var(--amber);border-radius:50%"></i>Needs you</span>
+          </div>
+        </header>
+
+        <div class="col">
+          <section>
+            <h2>Waiting on you <span class="n" id="askN">2</span></h2>
+            <ul class="asks" id="asks"></ul>
+          </section>
+          <section>
+            <h2>Roadmap</h2>
+            <ul class="phases" id="phases"></ul>
+            <div class="kb-hint"><kbd>J</kbd> <kbd>K</kbd> move · <kbd>Enter</kbd> open · drag a chat onto a phase to link it</div>
+          </section>
+        </div>
+
+        <div class="aside">
+          <section>
+            <h2>Live now</h2>
+            <ul class="live" id="live"></ul>
+          </section>
+          <section>
+            <h2>Not linked to a phase</h2>
+            <div class="tray" id="tray"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout B -->
+    <div class="view" id="view-chat" hidden>
+      <div class="chat">
+        <div class="tabs">
+          <div class="tab on"><span class="dot working"></span><span class="t">Find it later: search</span></div>
+          <div class="tab"><span class="t">Journal scratch notes to fl…</span></div>
+        </div>
+        <div class="strip">
+          <button class="strip-btn" id="stripBtn" aria-haspopup="dialog" aria-expanded="false">
+            <span>Yap</span><span style="color:var(--faint)">›</span>
+            <b id="stripPhase">Phase 3 · Find it later</b>
+            <span class="mini-bar" id="miniBar"></span>
+            <span id="stripCount" style="color:var(--faint)"></span>
+            <svg class="chev" viewBox="0 0 16 16" style="transform:rotate(90deg)"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span style="flex:1"></span>
+          <span class="needs-pill" id="stripNeeds"></span>
+        </div>
+        <div class="chat-body">
+          <div class="msgs">
+            <div class="msg user">Add the calendar view for Phase 3. Tap a day to see its notes.</div>
+            <div class="msg bot">
+              <p>Calendar is in <code>CalendarScreen.kt</code>. Days with notes get a dot, and tapping one opens that day's list.</p>
+              <p>Running the UI tests on the shared Android emulator now.</p>
+            </div>
+          </div>
+        </div>
+        <div class="composer">Ask, build, / for commands, @ for references…</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="pop" id="menu" role="menu"></div>
+<div class="pop road" id="road" role="dialog" aria-label="Roadmap"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button class="undo" id="toastUndo">Undo</button></div>
+
+<div class="sim" id="sim">
+  <div class="k">Mock controls</div>
+  <button class="sim-toggle" id="simToggle" title="Hide">–</button>
+  <button data-sim="approve">A chat needs approval</button>
+  <button data-sim="finish">A chat finishes</button>
+  <button data-sim="merge">Phase 1 branch merges</button>
+  <button data-sim="reset">Reset demo</button>
+</div>
+
+<script>
+const STATUS = {
+  done: { label: "Done", fill: 1 },
+  built: { label: "Built, not merged", fill: 0.85 },
+  progress: { label: "In progress", fill: 0.45 },
+  todo: { label: "Not started", fill: 0 },
+};
+
+function seed()
+{
+  return {
+    phases: [
+      { id: "0.0", name: "Mockups", status: "done", what: "Clickable looks, closing moment, garden, themes.", checks: [{ t: "Sam picks a look", on: true }], sessions: [], branch: "step-0.0-mockups" },
+      { id: "0.1", name: "Android setup", status: "done", what: "Kotlin + Compose project, tests, lint, release build on your phone.", checks: [{ t: "App installs on the phone from a one-line command", on: true }], sessions: [], branch: "step-0.1-android" },
+      { id: "0.2", name: "Feel test", status: "done", what: "Measure opening, live Markdown on a long note, one garden animation.", checks: [{ t: "Open to typing under 1 s", on: true }, { t: "No typing lag at 10,000 words", on: true }, { t: "You like the feel", on: true }], sessions: [], branch: "step-0.2-feel-test" },
+      { id: "1", name: "Daily writer", status: "built", what: "New note on every open, autosave, discard empties, open previous note, screenshots and file attachments.", checks: [{ t: "You can journal offline", on: true }, { t: "Attached screenshots and files reopen", on: true }, { t: "Nothing is lost after killing the app", on: false }], sessions: [{ id: "s1", title: "Phase 1 Daily writer", state: "done", ago: "2d", last: "Built and tested on the phone. Waiting on you to journal on it for a day before merging." }], branch: "step-1-daily-writer", asOf: "2d ago" },
+      { id: "2", name: "Full Markdown", status: "progress", what: "All Markdown elements, format bar.", checks: [{ t: "Every element renders live", on: true }, { t: "Survives save and reload", on: true }], sessions: [{ id: "s2", title: "Full Markdown + format bar", state: "waiting", ago: "5h", last: "Phone test passed. Want me to commit and open the merge?" }], branch: "step-2-full-markdown", note: "Phone test passed; not committed", asOf: "5h ago" },
+      { id: "3", name: "Find it later", status: "progress", what: "Auto dates, calendar, search, stats, reminders.", checks: [{ t: "You find an old note in seconds", on: false }, { t: "One reminder a day", on: false }], sessions: [{ id: "s3", title: "Find it later: search", state: "working", ago: "now", last: "Running the calendar UI tests on the shared emulator…" }, { id: "s4", title: "Daily reminder", state: "working", ago: "now", last: "Wiring WorkManager for the 8 pm reminder." }], branch: "step-3-find-it-later" },
+      { id: "4", name: "Rewards", status: "todo", what: "Closing moment, then garden, then unlocks and customising.", checks: [{ t: "Each note grows a plant", on: false }, { t: "Everything can be turned off", on: false }], sessions: [], branch: "step-4-rewards", note: "Onboarding is separate work in another chat" },
+      { id: "5", name: "Landing and server", status: "todo", what: "yap.clupai.com page and waitlist, first server.", checks: [{ t: "Page is live", on: false }, { t: "A health check reaches the database", on: false }], sessions: [], branch: "step-5-landing" },
+      { id: "6", name: "Sync and AI", status: "todo", what: "Paid-tier sync, opt-in AI: tags, weekly letter, ask, patterns, voice, follow-ups.", checks: [{ t: "Notes restore on a new phone", on: false }, { t: "AI sees nothing until switched on", on: false }], sessions: [], branch: "step-6-sync-ai" },
+      { id: "7", name: "Public launch", status: "todo", what: "Sign-in, Play billing, privacy page, free export, final name check.", checks: [{ t: "Approved on the Play Store", on: false }], sessions: [], branch: "step-7-launch" },
+    ],
+    asks: [
+      { id: "a1", phase: "1", text: "Journal on the Phase 1 build for a day", from: "Phase 1 Daily writer", effect: "journal" },
+      { id: "a2", phase: "2", text: "Tell the Markdown chat to commit", from: "Full Markdown + format bar", effect: "commit" },
+    ],
+    unlinked: [
+      { id: "s5", title: "Journal scratch notes to flower press", state: "done", ago: "1d", last: "Moved 14 scratch notes into the flower press folder." },
+      { id: "s6", title: "Onboarding flow", state: "working", ago: "now", last: "Drafting the three welcome screens." },
+    ],
+    open: ["3"],
+  };
+}
+
+let S = seed();
+let prevStatus = statusMap();
+let toastTimer = null;
+let undoSnap = null;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+function statusMap()
+{
+  return Object.fromEntries(S.phases.map((p) => [p.id, p.status]));
+}
+
+function phase(id)
+{
+  return S.phases.find((p) => p.id === id);
+}
+
+function asksFor(id)
+{
+  return S.asks.filter((a) => a.phase === id);
+}
+
+function allSessions()
+{
+  return S.phases.flatMap((p) => p.sessions.map((s) => ({ ...s, phase: p })));
+}
+
+function currentPhase()
+{
+  return S.phases.find((p) => p.status === "progress") || S.phases.find((p) => p.status !== "done");
+}
+
+function snapshot()
+{
+  return structuredClone(S);
+}
+
+function chev()
+{
+  return '<svg class="chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+function checkSvg()
+{
+  return '<svg viewBox="0 0 14 14"><path d="M3 7.5l2.6 2.5L11 4.2"/></svg>';
+}
+
+/* ---------- render ---------- */
+
+function renderBar()
+{
+  const bar = $("#bar");
+  if (!bar.children.length) {
+    bar.innerHTML = S.phases.map((p) => `<button class="seg" data-goto="${p.id}" aria-label="Phase ${p.id}"><span class="fill"></span><span class="seg-tip"></span></button>`).join("");
+  }
+  S.phases.forEach((p, i) => {
+    const seg = bar.children[i];
+    seg.className = `seg st-${p.status}` + (asksFor(p.id).length && p.status !== "done" ? " needs" : "");
+    seg.style.setProperty("--f", STATUS[p.status].fill);
+    $(".seg-tip", seg).textContent = `${p.id} ${p.name} · ${STATUS[p.status].label}`;
+  });
+}
+
+function renderCount()
+{
+  const done = S.phases.filter((p) => p.status === "done").length;
+  const el = $("#count");
+  if (el.textContent !== String(done)) {
+    el.textContent = done;
+    el.classList.remove("bump");
+    void el.offsetWidth;
+    el.classList.add("bump");
+  }
+  $("#total").textContent = S.phases.length;
+  const ss = allSessions();
+  const w = ss.filter((s) => s.state === "working").length;
+  const q = ss.filter((s) => s.state === "waiting").length;
+  $("#liveSum").textContent = `${w} chat${w === 1 ? "" : "s"} working` + (q ? ` · ${q} waiting` : "");
+}
+
+function renderAsks()
+{
+  $("#askN").textContent = S.asks.length;
+  $("#askN").style.display = S.asks.length ? "" : "none";
+  if (!S.asks.length) {
+    $("#asks").innerHTML = '<li class="empty">Nothing needs you. Agents are on it.</li>';
+    return;
+  }
+  $("#asks").innerHTML = S.asks.map((a) => `
+    <li class="ask" data-ask="${a.id}"><div>
+      <div class="row">
+        <label class="cb"><input type="checkbox" aria-label="${a.text}" data-tick="${a.id}"><span class="box">${checkSvg()}</span></label>
+        <div class="txt"><b>${a.text}</b><small>Phase ${a.phase} · from “${a.from}”</small></div>
+        <button class="btn ghost" data-goto="${a.phase}">Open phase</button>
+      </div>
+    </div></li>`).join("");
+}
+
+function sessionChip(s, extra = "")
+{
+  return `<button class="chip ${extra}" data-last="${s.last}" data-session="${s.id}"><span class="dot ${s.state}"></span><span>${s.title}</span><span class="ago">${s.ago}</span></button>`;
+}
+
+function renderPhases()
+{
+  const open = new Set(S.open);
+  $("#phases").innerHTML = S.phases.map((p) => {
+    const needs = asksFor(p.id).length && p.status !== "done";
+    const dots = p.sessions.map((s) => `<span class="dot ${s.state}"></span>`).join("");
+    const allOn = p.checks.every((c) => c.on);
+    const freshness = p.asOf ? `<span class="stale" title="Status from a session note, not live">◷ as of ${p.asOf}</span>` : "";
+    const live = p.sessions.some((s) => s.state === "working") ? '<span style="color:var(--accent)">● live</span>' : "";
+    let actions = "";
+    if (p.status === "todo") {
+      actions = `<button class="btn primary" data-start="${p.id}">Start phase</button><span class="meta-line">Opens a chat with this phase's brief, on <span class="mono">${p.branch}</span></span>`;
+    } else if (p.status !== "done") {
+      actions = `<button class="btn" data-start="${p.id}">+ New chat for this phase</button>`;
+    }
+    const finish = allOn && p.status !== "done"
+      ? `<div class="finish-cta"><span>Every check passes.</span><button class="btn primary" data-finish="${p.id}">Merge and mark done</button></div>`
+      : "";
+    return `
+    <li class="phase st-${p.status} ${open.has(p.id) ? "open" : ""}" data-id="${p.id}">
+      <button class="ph-head" aria-expanded="${open.has(p.id)}" data-toggle="${p.id}">
+        <span class="glyph g-${p.status}"></span>
+        <span class="ph-num">${p.id}</span>
+        <span class="ph-name">${p.name}</span>
+        <span class="ph-meta">${needs ? '<span class="needs-pill">Needs you</span>' : ""}<span class="mini-dots">${dots}</span></span>
+        <span class="ph-status">${STATUS[p.status].label}</span>
+        ${chev()}
+      </button>
+      <div class="ph-body"><div class="ph-inner"><div class="ph-content">
+        <p class="what">${p.what}</p>
+        <div>
+          <div class="k">Done when</div>
+          <div class="checks">${p.checks.map((c, i) => `
+            <label class="check ${c.on ? "on" : ""}"><span class="cb"><input type="checkbox" ${c.on ? "checked" : ""} data-check="${p.id}:${i}"><span class="box">${checkSvg()}</span></span><span class="t">${c.t}</span></label>`).join("")}
+          </div>
+        </div>
+        ${finish}
+        ${p.sessions.length ? `<div><div class="k">Chats</div><div class="chips">${p.sessions.map((s) => sessionChip(s, s.fresh ? "new" : "")).join("")}</div></div>` : ""}
+        ${actions ? `<div class="actions">${actions}</div>` : ""}
+        <div class="meta-line"><span class="mono">${p.branch}</span>${p.note ? `<span>${p.note}</span>` : ""}${freshness}${live}</div>
+      </div></div></div>
+    </li>`;
+  }).join("");
+  S.phases.forEach((p) => p.sessions.forEach((s) => delete s.fresh));
+}
+
+function renderSide()
+{
+  const ss = allSessions().filter((s) => s.state !== "done");
+  $("#live").innerHTML = ss.length
+    ? ss.map((s) => `<li><button data-goto="${s.phase.id}"><span class="dot ${s.state}"></span><span class="t">${s.title}</span><span class="ph">${s.state === "waiting" ? "needs you" : "Phase " + s.phase.id}</span></button></li>`).join("")
+    : '<li class="empty">No chats running.</li>';
+  $("#tray").innerHTML = S.unlinked.map((s) => sessionChip(s).replace('class="chip', 'draggable="true" class="chip')).join("")
+    + (S.unlinked.length ? '<span class="hint">Drag onto a phase, or click to pick one.</span>' : '<span class="hint">Every chat is linked.</span>');
+
+  const done = S.phases.filter((p) => p.status === "done").length;
+  const projects = [
+    { nm: "Yap", logo: "Y", bg: "linear-gradient(140deg,#f6c177,#eb6f92)", p: done / S.phases.length, sel: true },
+    { nm: "MonoCode", logo: "M", bg: "#3b82f6", p: 0.7 },
+    { nm: "Glow-up", logo: "G", bg: "#a78bfa", p: 0.35 },
+    { nm: "Trading", logo: "T", bg: "#22c55e", p: 0.1 },
+    { nm: "Panoptic", logo: "P", bg: "#64748b", p: null },
+  ];
+  const C = 2 * Math.PI * 7;
+  $("#projList").innerHTML = projects.map((x) => `
+    <button class="proj ${x.sel ? "sel" : ""}" data-view-go="home"><span class="logo" style="background:${x.bg};color:#141414">${x.logo}</span><span class="nm">${x.nm}</span>
+    ${x.p === null ? "" : `<svg class="ring" width="18" height="18" viewBox="0 0 18 18" aria-label="${Math.round(x.p * 100)}% of roadmap done"><circle class="bgc" cx="9" cy="9" r="7"/><circle class="fg" cx="9" cy="9" r="7" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - x.p)}"/></svg>`}</button>`).join("");
+  $("#sideSessions").innerHTML = allSessions().concat(S.unlinked).map((s) => `<button class="sess" data-view-go="chat"><span class="dot ${s.state}"></span><span class="t">${s.title}</span></button>`).join("");
+}
+
+function renderStrip()
+{
+  const cur = phase("3");
+  $("#stripPhase").textContent = `Phase ${cur.id} · ${cur.name}`;
+  $("#miniBar").innerHTML = S.phases.map((p) => `<i class="st-${p.status} ${p.id === cur.id ? "cur" : ""}"></i>`).join("");
+  const done = S.phases.filter((p) => p.status === "done").length;
+  $("#stripCount").textContent = `${done}/${S.phases.length}`;
+  const n = S.asks.length;
+  $("#stripNeeds").textContent = n ? `${n} need${n === 1 ? "s" : ""} you` : "";
+  $("#stripNeeds").style.display = n ? "" : "none";
+}
+
+function render()
+{
+  renderBar();
+  renderCount();
+  renderAsks();
+  renderPhases();
+  renderSide();
+  renderStrip();
+  const now = statusMap();
+  for (const id in now) {
+    if (now[id] === "done" && prevStatus[id] !== "done") {
+      celebrate(id);
+    }
+  }
+  prevStatus = now;
+}
+
+function celebrate(id)
+{
+  const i = S.phases.findIndex((p) => p.id === id);
+  const seg = $("#bar").children[i];
+  const row = $(`.phase[data-id="${id}"]`);
+  [seg, row].forEach((el) => {
+    if (el) {
+      el.classList.remove("celebrate");
+      void el.offsetWidth;
+      el.classList.add("celebrate");
+    }
+  });
+}
+
+/* ---------- actions ---------- */
+
+function toast(msg, snap)
+{
+  undoSnap = snap || null;
+  $("#toastMsg").textContent = msg;
+  $("#toastUndo").style.display = snap ? "" : "none";
+  $("#toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 5000);
+}
+
+function act(msg, fn)
+{
+  const snap = snapshot();
+  fn();
+  render();
+  toast(msg, snap);
+}
+
+function setOpen(id, on)
+{
+  const set = new Set(S.open);
+  if (on) {
+    set.add(id);
+  } else {
+    set.delete(id);
+  }
+  S.open = [...set];
+  const row = $(`.phase[data-id="${id}"]`);
+  if (row) {
+    row.classList.toggle("open", on);
+    $(".ph-head", row).setAttribute("aria-expanded", on);
+  }
+}
+
+function goto(id)
+{
+  showView("home");
+  setOpen(id, true);
+  const row = $(`.phase[data-id="${id}"]`);
+  row.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  row.classList.remove("flash");
+  void row.offsetWidth;
+  row.classList.add("flash");
+  $(".ph-head", row).focus({ preventScroll: true });
+}
+
+function applyAsk(a)
+{
+  if (a.effect === "journal") {
+    phase("1").checks[2].on = true;
+    phase("1").asOf = null;
+    phase("1").sessions[0].last = "You journalled for a day. Ready to merge.";
+    if (!S.open.includes("1")) {
+      S.open.push("1");
+    }
+  } else if (a.effect === "commit") {
+    const p = phase("2");
+    p.status = "built";
+    p.note = "Committed; ready to merge";
+    p.asOf = null;
+    p.sessions[0].state = "done";
+    p.sessions[0].ago = "now";
+    p.sessions[0].last = "Committed on step-2-full-markdown. Merge when you're ready.";
+  } else if (a.effect === "approve") {
+    const s = phase("3").sessions[1];
+    s.state = "working";
+    s.last = "Approved. Running the reminder migration.";
+  }
+  S.asks = S.asks.filter((x) => x.id !== a.id);
+}
+
+function tickAsk(id, input)
+{
+  const a = S.asks.find((x) => x.id === id);
+  const li = input.closest(".ask");
+  li.classList.add("ticked");
+  const snap = snapshot();
+  setTimeout(() => li.classList.add("leaving"), 260);
+  setTimeout(() => {
+    applyAsk(a);
+    render();
+    toast(`Done: ${a.text.toLowerCase()}`, snap);
+  }, 540);
+}
+
+function finishPhase(id)
+{
+  act(`Phase ${id} merged and marked done`, () => {
+    const p = phase(id);
+    p.status = "done";
+    p.asOf = null;
+    p.note = null;
+    p.checks.forEach((c) => (c.on = true));
+    p.sessions.forEach((s) => {
+      if (s.state !== "working") {
+        s.state = "done";
+      }
+    });
+    S.asks = S.asks.filter((a) => a.phase !== id);
+    setTimeout(() => setOpen(id, false), 1400);
+  });
+}
+
+function startPhase(id, btn)
+{
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Starting…';
+  setTimeout(() => {
+    act(`New chat on ${phase(id).branch}`, () => {
+      const p = phase(id);
+      const n = p.sessions.length + 1;
+      p.sessions.push({ id: "n" + Date.now(), title: `${p.name}${n > 1 ? " " + n : ""}`, state: "working", ago: "now", last: `Reading the Phase ${id} brief and plan.md…`, fresh: true });
+      if (p.status === "todo") {
+        p.status = "progress";
+      }
+      if (!S.open.includes(id)) {
+        S.open.push(id);
+      }
+    });
+  }, 700);
+}
+
+function linkSession(sid, pid)
+{
+  const s = S.unlinked.find((x) => x.id === sid);
+  if (!s) {
+    return;
+  }
+  act(`Linked “${s.title}” to Phase ${pid}`, () => {
+    S.unlinked = S.unlinked.filter((x) => x.id !== sid);
+    const p = phase(pid);
+    p.sessions.push({ ...s, fresh: true });
+    if (p.status === "todo" && s.state === "working") {
+      p.status = "progress";
+    }
+    if (!S.open.includes(pid)) {
+      S.open.push(pid);
+    }
+  });
+}
+
+/* ---------- popovers ---------- */
+
+let openPop = null;
+
+function showPop(el, anchor, origin)
+{
+  closePop();
+  const r = anchor.getBoundingClientRect();
+  el.style.setProperty("--origin", origin);
+  el.style.left = Math.min(r.left, innerWidth - el.offsetWidth - 12) + "px";
+  el.style.top = r.bottom + 6 + "px";
+  el.classList.add("show");
+  openPop = { el, anchor };
+  anchor.setAttribute("aria-expanded", "true");
+  const first = $(".mi", el);
+  if (first) {
+    first.focus({ preventScroll: true });
+  }
+}
+
+function closePop()
+{
+  if (!openPop) {
+    return;
+  }
+  openPop.el.classList.remove("show");
+  openPop.anchor.setAttribute("aria-expanded", "false");
+  openPop = null;
+}
+
+function linkMenu(chip)
+{
+  const m = $("#menu");
+  m.innerHTML = '<div class="hd"><span>Link to phase</span></div>' + S.phases.filter((p) => p.status !== "done").map((p) =>
+    `<button class="mi" data-link="${chip.dataset.session}:${p.id}"><span class="glyph g-${p.status}"></span>${p.id} ${p.name}<span class="s">${STATUS[p.status].label}</span></button>`).join("");
+  showPop(m, chip, "top left");
+}
+
+function roadPop()
+{
+  const r = $("#road");
+  const done = S.phases.filter((p) => p.status === "done").length;
+  r.innerHTML = `<div class="hd"><span>Yap roadmap</span><span>${done} of ${S.phases.length} done</span></div>`
+    + (S.asks.length ? `<button class="mi" data-goto="${S.asks[0].phase}"><span class="dot waiting"></span>${S.asks.length} waiting on you<span class="s">${S.asks[0].text.slice(0, 22)}…</span></button>` : "")
+    + S.phases.map((p) => `<button class="mi ${p.id === "3" ? "cur" : ""}" data-goto="${p.id}"><span class="glyph g-${p.status}"></span><span>${p.id} ${p.name}</span><span class="s">${STATUS[p.status].label}</span></button>`).join("")
+    + '<div class="ft"><span>Click a phase to open it</span><span><kbd>Esc</kbd> close</span></div>';
+  showPop(r, $("#stripBtn"), "top left");
+}
+
+/* ---------- views ---------- */
+
+function showView(v)
+{
+  closePop();
+  $("#view-home").hidden = v !== "home";
+  $("#view-chat").hidden = v !== "chat";
+  $$(".seg-ctl button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === v));
+}
+
+/* ---------- events ---------- */
+
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  const g = t.closest("[data-goto]");
+  const tog = t.closest("[data-toggle]");
+  const start = t.closest("[data-start]");
+  const fin = t.closest("[data-finish]");
+  const link = t.closest("[data-link]");
+  const view = t.closest("[data-view]");
+  const viewGo = t.closest("[data-view-go]");
+  const sim = t.closest("[data-sim]");
+  const trayChip = t.closest("#tray .chip");
+
+  if (openPop && !openPop.el.contains(t) && !openPop.anchor.contains(t)) {
+    closePop();
+  }
+  if (link) {
+    const [sid, pid] = link.dataset.link.split(":");
+    closePop();
+    linkSession(sid, pid);
+  } else if (g) {
+    closePop();
+    goto(g.dataset.goto);
+  } else if (tog) {
+    const id = tog.dataset.toggle;
+    setOpen(id, !S.open.includes(id));
+  } else if (start) {
+    startPhase(start.dataset.start, start);
+  } else if (fin) {
+    finishPhase(fin.dataset.finish);
+  } else if (view) {
+    showView(view.dataset.view);
+  } else if (viewGo) {
+    showView(viewGo.dataset.viewGo);
+  } else if (trayChip) {
+    linkMenu(trayChip);
+  } else if (t.closest("#stripBtn")) {
+    if (openPop) {
+      closePop();
+    } else {
+      roadPop();
+    }
+  } else if (t.closest("#stripNeeds")) {
+    goto(S.asks[0].phase);
+  } else if (sim) {
+    simulate(sim.dataset.sim);
+  }
+});
+
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.tick) {
+    tickAsk(t.dataset.tick, t);
+  } else if (t.dataset.check) {
+    const [pid, i] = t.dataset.check.split(":");
+    const snap = snapshot();
+    phase(pid).checks[Number(i)].on = t.checked;
+    t.closest(".check").classList.toggle("on", t.checked);
+    const p = phase(pid);
+    if (p.checks.every((c) => c.on) && p.status !== "done") {
+      render();
+      toast("Every check passes. Ready to mark done.", snap);
+    }
+  }
+});
+
+$("#toastUndo").addEventListener("click", () => {
+  if (undoSnap) {
+    S = undoSnap;
+    undoSnap = null;
+    render();
+  }
+  $("#toast").classList.remove("show");
+});
+
+/* drag a chat onto a phase */
+document.addEventListener("dragstart", (e) => {
+  const chip = e.target.closest("#tray .chip");
+  if (!chip) {
+    return;
+  }
+  e.dataTransfer.setData("text/plain", chip.dataset.session);
+  e.dataTransfer.effectAllowed = "link";
+  chip.classList.add("dragging");
+  $$(".phase:not(.st-done)").forEach((r) => r.classList.add("drop-ok"));
+});
+document.addEventListener("dragend", () => {
+  $$(".dragging").forEach((c) => c.classList.remove("dragging"));
+  $$(".phase").forEach((r) => r.classList.remove("drop-ok", "drop-hover"));
+});
+document.addEventListener("dragover", (e) => {
+  const row = e.target.closest(".phase.drop-ok");
+  $$(".drop-hover").forEach((r) => r !== row && r.classList.remove("drop-hover"));
+  if (row) {
+    e.preventDefault();
+    row.classList.add("drop-hover");
+  }
+});
+document.addEventListener("drop", (e) => {
+  const row = e.target.closest(".phase.drop-ok");
+  if (row) {
+    e.preventDefault();
+    linkSession(e.dataTransfer.getData("text/plain"), row.dataset.id);
+  }
+});
+
+/* keyboard: J/K move between phases, Esc closes popovers */
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (openPop) {
+      const a = openPop.anchor;
+      closePop();
+      a.focus();
+    }
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey || $("#view-home").hidden) {
+    return;
+  }
+  if (e.key !== "j" && e.key !== "k") {
+    return;
+  }
+  const heads = $$(".ph-head");
+  const i = heads.indexOf(document.activeElement);
+  const next = e.key === "j" ? Math.min(heads.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
+  heads[next].focus();
+  e.preventDefault();
+});
+
+/* ---------- mock controls ---------- */
+
+function simulate(kind)
+{
+  if (kind === "approve") {
+    const s = phase("3").sessions[1];
+    if (s.state === "waiting") {
+      return;
+    }
+    act("“Daily reminder” is asking for approval", () => {
+      s.state = "waiting";
+      s.last = "Needs approval: run the database migration for reminders?";
+      S.asks.push({ id: "a" + Date.now(), phase: "3", text: "Approve the reminder chat's migration", from: "Daily reminder", effect: "approve" });
+    });
+  } else if (kind === "finish") {
+    const s = phase("3").sessions[0];
+    act("“Find it later: search” finished its turn", () => {
+      s.state = "done";
+      s.ago = "now";
+      s.last = "Calendar view done, tests pass. Search is next.";
+      phase("3").checks[0].on = true;
+    });
+  } else if (kind === "merge") {
+    if (phase("1").status !== "done") {
+      finishPhase("1");
+    }
+  } else if (kind === "reset") {
+    S = seed();
+    prevStatus = statusMap();
+    render();
+    toast("Demo reset");
+  }
+}
+
+$("#simToggle").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const sim = $("#sim");
+  sim.classList.toggle("min");
+  e.currentTarget.textContent = sim.classList.contains("min") ? "+" : "–";
+});
+
+if (matchMedia("(max-width: 760px)").matches) {
+  $("#sim").classList.add("min");
+  $("#simToggle").textContent = "+";
+}
+render();
+</script>
+</body>
+</html>
