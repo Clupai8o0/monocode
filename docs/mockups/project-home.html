@@ -442,6 +442,7 @@ let S = seed();
 let prevStatus = statusMap();
 let toastTimer = null;
 let undoSnap = null;
+let gen = 0;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -734,8 +735,12 @@ function tickAsk(id, input)
   const li = input.closest(".ask");
   li.classList.add("ticked");
   const snap = snapshot();
+  const g = gen;
   setTimeout(() => li.classList.add("leaving"), 260);
   setTimeout(() => {
+    if (g !== gen || !S.asks.includes(a)) {
+      return;
+    }
     applyAsk(a);
     render();
     toast(`Done: ${a.text.toLowerCase()}`, snap);
@@ -744,6 +749,9 @@ function tickAsk(id, input)
 
 function finishPhase(id)
 {
+  if (!phase(id).checks.every((c) => c.on)) {
+    return;
+  }
   act(`Phase ${id} merged and marked done`, () => {
     const p = phase(id);
     p.status = "done";
@@ -764,7 +772,11 @@ function startPhase(id, btn)
 {
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Starting…';
+  const g = gen;
   setTimeout(() => {
+    if (g !== gen) {
+      return;
+    }
     act(`New chat on ${phase(id).branch}`, () => {
       const p = phase(id);
       const n = p.sessions.length + 1;
@@ -914,18 +926,23 @@ document.addEventListener("change", (e) => {
   } else if (t.dataset.check) {
     const [pid, i] = t.dataset.check.split(":");
     const snap = snapshot();
-    phase(pid).checks[Number(i)].on = t.checked;
-    t.closest(".check").classList.toggle("on", t.checked);
     const p = phase(pid);
-    if (p.checks.every((c) => c.on) && p.status !== "done") {
+    const wasAll = p.checks.every((c) => c.on);
+    p.checks[Number(i)].on = t.checked;
+    t.closest(".check").classList.toggle("on", t.checked);
+    const isAll = p.checks.every((c) => c.on);
+    if (wasAll !== isAll && p.status !== "done") {
       render();
-      toast("Every check passes. Ready to mark done.", snap);
+      if (isAll) {
+        toast("Every check passes. Ready to mark done.", snap);
+      }
     }
   }
 });
 
 $("#toastUndo").addEventListener("click", () => {
   if (undoSnap) {
+    gen++;
     S = undoSnap;
     undoSnap = null;
     render();
@@ -1014,6 +1031,7 @@ function simulate(kind)
       finishPhase("1");
     }
   } else if (kind === "reset") {
+    gen++;
     S = seed();
     prevStatus = statusMap();
     render();
