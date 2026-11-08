@@ -1,7 +1,6 @@
 /**
- * Fork feature: "Auto" as a per-project Claude account choice. Each new
- * session starts on the account with the most headroom; a running session
- * never moves on its own. This file is pure so the pick is easy to test.
+ * Auto picks the profile with the most headroom for each new session.
+ * Running turns keep their account; usage-limit recovery waits for them to stop.
  */
 
 /** Stored in place of an account id when a project's choice is Auto. */
@@ -24,9 +23,9 @@ const RANK: Record<AutoTone, number> = {
   exhausted: 3,
 };
 
-/** Only Claude has two logins on this Mac worth choosing between. */
+/** These providers support isolated account profiles and usage probes. */
 export function supportsAutoAccount(provider: string): boolean {
-  return provider === "claude";
+  return provider === "claude" || provider === "codex";
 }
 
 /**

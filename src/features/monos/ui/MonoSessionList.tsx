@@ -237,7 +237,21 @@ export function MonoSessionList({
         ].map((row) => row.id)
       : filtered.map((row) => row.id),
   );
-  const matching = launches.filter((launch) => matched.has(launch.sessionId));
+  // Fork, from the native app: running and waiting sub-agents first, then the
+  // latest saved update, then newest launch (the order they arrive in). A live
+  // row's `updatedAt` may be the clock, so it is not used to compare. One not
+  // saved yet has only just started, so it counts as the latest.
+  const isActive = (id: string) => busyIds.has(id) || approvalIds.has(id);
+  const savedAt = (id: string) =>
+    (history.find((entry) => entry.id === id) ?? stored.byId.get(id))
+      ?.updatedAt ?? Number.MAX_SAFE_INTEGER;
+  const matching = launches
+    .filter((launch) => matched.has(launch.sessionId))
+    .sort(
+      (a, b) =>
+        Number(isActive(b.sessionId)) - Number(isActive(a.sessionId)) ||
+        savedAt(b.sessionId) - savedAt(a.sessionId),
+    );
   // A page of cards mounts at a time, as in the sidebar; the sentinel below
   // asks for the next one as it nears the panel's bottom. Searching or
   // filtering starts over from the first page.
@@ -270,9 +284,9 @@ export function MonoSessionList({
     return (
       <EmptyState icon={Search}>
         {needle
-          ? "No sessions match this search."
+          ? "No sub-agents match this search."
           : hasActiveSessionFilters(filters)
-            ? "No sessions match these filters."
+            ? "No sub-agents match these filters."
             : // Every one it started is gone; the filter still lists them.
               `The sessions ${agent.name} started have since been deleted.`}
       </EmptyState>

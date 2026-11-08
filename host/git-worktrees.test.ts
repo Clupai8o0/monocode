@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { HostEngine } from "./engine";
 import { HostStore } from "./store";
 import {
+  NO_COMMITS,
   createHostWorktree,
   hostWorktrees,
   renameHostWorktreeBranch,
@@ -194,4 +195,23 @@ it("creates registered host worktrees and binds new sessions to the selected che
   ).rejects.toThrow("already has a working copy");
   const existing = await createHostWorktree(cwd, "existing", "HEAD", true);
   expect(existing.branch).toBe("existing");
+});
+
+it.each(["HEAD", "main"])("explains an empty repo instead of git's revision error (base: %s)", async (base) => {
+  const cwd = mkdtempSync(join(tmpdir(), "monocode-host-empty-"));
+  cleanups.push(() => rmSync(cwd, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd });
+  await expect(createHostWorktree(cwd, "feature", base, false)).rejects.toThrow(NO_COMMITS);
+});
+
+it("keeps git's error on an orphan branch when other branches have commits", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "monocode-host-orphan-"));
+  cleanups.push(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd });
+  git("init", "-q", "-b", "main");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "initial");
+  git("checkout", "-q", "--orphan", "fresh");
+  const error = await createHostWorktree(cwd, "feature", "HEAD", false).catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).not.toBe(NO_COMMITS);
 });

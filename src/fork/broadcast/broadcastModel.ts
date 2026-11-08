@@ -43,7 +43,8 @@ export type LeftOutReason =
   | "orchestration"
   | "needs input"
   | "draft"
-  | "not started";
+  | "not started"
+  | "not running";
 
 /** Would take it now, or after its turn, or is shown unticked with why not. */
 export type BroadcastTarget = {
@@ -79,6 +80,11 @@ function leftOutReason(
   // A blank tab has no conversation to join; this would start one.
   if (!session.blocks.some((block) => block.role === "user")) {
     return "not started";
+  }
+  // Across every project, only sessions mid-turn: idle ones from elsewhere
+  // drown the list, and This / One project still reaches them.
+  if (facts.scope === "all" && !session.busy) {
+    return "not running";
   }
   return undefined;
 }
@@ -155,6 +161,7 @@ const LEFT_OUT_WORDS: Record<LeftOutReason, [string, string]> = {
   "needs input": ["1 needs your input", "need your input"],
   draft: ["1 holds a draft", "hold a draft"],
   "not started": ["1 not started", "not started"],
+  "not running": ["1 not running", "not running"],
 };
 
 /** "Left out: 2 need your input, 1 holds a draft"; empty with none. */

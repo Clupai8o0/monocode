@@ -7,6 +7,8 @@ import {
   defaultSessionChoice,
   encodeModelLaunchId,
   firstEnabledHarness,
+  findModel,
+  findModelReference,
   hasLiveCatalog,
   isPickerProviderVisible,
   isUltracodeOn,
@@ -764,6 +766,32 @@ function expectedNative(id: string, nativeId?: string): string {
   const colon = id.indexOf(":");
   return colon >= 0 ? id.slice(colon + 1) : id;
 }
+
+describe("model reference lookup", () => {
+  afterEach(() => resetHarnessModelOverlays());
+
+  it("preserves catalog ordering for native aliases without changing exact lookup", () => {
+    const first: AgentModel = {
+      id: "claude:first",
+      nativeId: "claude:second",
+      harness: "claude",
+      name: "First",
+    };
+    const second: AgentModel = {
+      id: "claude:second",
+      nativeId: "second-native",
+      harness: "claude",
+      name: "Second",
+    };
+    setHarnessModels("claude", [first, second]);
+    expect(findModelReference("claude:second")?.name).toBe("First");
+    expect(findModel("claude:second")?.name).toBe("Second");
+    expect(findModelReference("second-native")?.name).toBe("Second");
+    setHarnessModels("claude", [{ ...first, nativeId: "new-native" }]);
+    expect(findModelReference("new-native")?.name).toBe("First");
+    expect(findModelReference("second-native")).toBeUndefined();
+  });
+});
 
 function bundledByHarness(): Map<string, AgentModel[]> {
   const grouped = new Map<string, AgentModel[]>();

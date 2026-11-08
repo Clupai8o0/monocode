@@ -90,8 +90,9 @@ let prefillId = 0;
 let usedPrefill = 0;
 
 /**
- * Opens the bar with this text, every project shown and no session ticked, so
- * the user picks who gets it. Text already typed there is replaced.
+ * Opens the bar with this text, every project's running sessions shown and no
+ * session ticked, so the user picks who gets it. Idle ones stay under This /
+ * One project. Text already typed there is replaced.
  */
 export function openBroadcastWith(text: string): void {
   prefill = { id: ++prefillId, text };

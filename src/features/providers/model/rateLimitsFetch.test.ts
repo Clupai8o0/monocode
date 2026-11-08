@@ -38,6 +38,10 @@ vi.mock("../../../integrations/harness/core/child", () => ({
     child.killed.push(id);
   },
 }));
+const jsonRpc = vi.hoisted(() => ({
+  requestError: null as Error | null,
+}));
+
 vi.mock("../../../integrations/harness/core/jsonRpc", () => ({
   JsonRpcClient: class {
     close() {}
@@ -50,6 +54,7 @@ vi.mock("../../../integrations/harness/core/jsonRpc", () => ({
     }
     async request(method: string) {
       if (method !== "account/rateLimits/read") return {};
+      if (jsonRpc.requestError) throw jsonRpc.requestError;
       await new Promise((resolve) => setTimeout(resolve, 5));
       return {
         rateLimits: {
@@ -106,6 +111,33 @@ describe("fetchCodexRateLimits", () => {
     child.spawned = [];
     child.ids = [];
     child.killed = [];
+    jsonRpc.requestError = null;
+  });
+
+  it("treats expired ChatGPT tokens as signed out, not a raw probe error", async () => {
+    jsonRpc.requestError = new Error(
+      'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; body={"error":{"code":"invalid_jwt","message":"Please try signing in again."}}',
+    );
+    const limits = await fetchCodexRateLimits("account-plus");
+    expect(limits.status).toBe("unavailable");
+    expect(limits.error).toBe("Codex not signed in");
+  });
+
+  it("treats a 401 on the usage read as signed out, in either word order", async () => {
+    for (const text of [
+      "GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized",
+      "workspace routing discovery unauthorized (401)",
+    ]) {
+      jsonRpc.requestError = new Error(text);
+      const limits = await fetchCodexRateLimits("account-plus");
+      expect(limits.status).toBe("unavailable");
+    }
+  });
+
+  it("keeps vague token errors as a failed read", async () => {
+    jsonRpc.requestError = new Error("Usage could not be refreshed");
+    const limits = await fetchCodexRateLimits("account-plus");
+    expect(limits.status).toBe("error");
   });
 
   it("runs usage probes for different accounts one at a time", async () => {
