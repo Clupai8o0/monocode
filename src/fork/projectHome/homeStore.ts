@@ -524,11 +524,13 @@ function holdsSlot(
   running: ((id: string) => boolean | null) | null,
   now: number,
 ): boolean {
-  if (run.id === null) {
-    return now - run.since < FILL_LAUNCH_TIMEOUT_MS;
-  }
+  // Only the app's pump, which knows the sessions, lets a chat go. A pump from
+  // a settling launch must not time out a sibling whose answer is a tick behind.
   if (!running) {
     return true;
+  }
+  if (run.id === null) {
+    return now - run.since < FILL_LAUNCH_TIMEOUT_MS;
   }
   if (running(run.id) === true) {
     run.seenRunning = true;

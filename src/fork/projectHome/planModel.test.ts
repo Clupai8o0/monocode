@@ -205,6 +205,21 @@ const x = 1;
 | 1 Hidden | inside | Met |
 `;
     expect(parsePlan(unclosed)).toBeNull();
+
+    // A sample in an indented fence (say, nested in a list) is not the roadmap.
+    const sample = `- Example:
+    \`\`\`
+    | Phase | What | Done when |
+    |---|---|---|
+    | 99 | Example only | Ignored |
+    \`\`\`
+
+| Phase | What | Done when |
+|---|---|---|
+| 1 Real | work | Done |
+`;
+    expect(parsePlan(sample)?.phases.map((phase) => phase.id)).toEqual(["1"]);
+    expect(setPhaseStatus(sample, "1", "done", "")).toContain("    | 99 | Example only | Ignored |\n");
   });
 
   it("assigns fallback ids without colliding with explicit ids", () => {
@@ -293,9 +308,30 @@ describe("setPhaseStatus", () => {
       name: "Ship search",
       status: "built",
     });
-    expect(
-      setPhaseStatus(shifted, "1", "built", "agent, 9 Nov", "Polish"),
-    ).toBeNull();
+    // Renumbered to 2, but the only Polish: that is the phase that was clicked.
+    const renamed = setPhaseStatus(shifted, "1", "built", "agent, 9 Nov", "Polish");
+    expect(parsePlan(renamed ?? "")?.phases[2]).toMatchObject({ id: "2", status: "built" });
+    expect(setPhaseStatus(shifted, "1", "built", "", "Missing")).toBeNull();
+  });
+
+  it("finds a phase by name when its id is gone, but never guesses", () => {
+    // Alpha was deleted, so Beta (shown as 1-2) is now plain 1.
+    const renumbered = `| Phase | What | Done when | Status |
+|---|---|---|---|
+| Phase 1 Beta | second | Met | |
+| 2 Gamma | third | Met | |
+`;
+    const next = setPhaseStatus(renumbered, "1-2", "built", "", "Beta");
+    expect(parsePlan(next ?? "")?.phases[0]).toMatchObject({ id: "1", status: "built" });
+
+    // Two rows named Beta under the same base id: no safe pick.
+    const twice = `| Phase | What | Done when | Status |
+|---|---|---|---|
+| 1 Beta | a | Met | |
+| 1 Gamma | b | Met | |
+| 1 Beta | c | Met | |
+`;
+    expect(setPhaseStatus(twice, "1-2", "built", "", "Beta")).toBeNull();
   });
 
   it("adds Status after the widest row without clobbering an extra body cell", () => {
@@ -344,6 +380,14 @@ describe("helpers", () => {
     expect(phaseForTitle("Phase 1-2 Beta", phases)?.id).toBe("1-2");
     expect(phaseForTitle("Phase 1-3 Unknown", phases)?.id).toBe("1");
     expect(phaseForTitle("Phase 1 Alpha", phases)?.id).toBe("1");
+
+    const lettered =
+      parsePlan(`| Phase | What | Done when |
+|---|---|---|
+| 1a Alpha | first | Met |
+| Phase 1a Beta | second | Met |
+`)?.phases ?? [];
+    expect(phaseForTitle("Phase 1a-2 Beta", lettered)?.id).toBe("1a-2");
   });
 
   it("matches phase names on word boundaries only", () => {

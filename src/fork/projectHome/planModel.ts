@@ -72,6 +72,11 @@ function isRow(line: string): boolean {
   return line.trim().startsWith("|");
 }
 
+/** Four spaces or a tab of indent: a code sample (or one nested in a list), never the roadmap. */
+function isIndentedCode(line: string): boolean {
+  return /^(?: {4}| {0,3}\t)/.test(line);
+}
+
 function isSeparator(line: string): boolean {
   return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
 }
@@ -158,13 +163,13 @@ function findTable(lines: string[]): Table | null {
       inFence = open;
       continue;
     }
-    if (!isRow(lines[i]) || !isSeparator(lines[i + 1])) {
+    if (isIndentedCode(lines[i]) || !isRow(lines[i]) || !isSeparator(lines[i + 1])) {
       continue;
     }
     const head = headerOf(splitRow(lines[i]));
     const rows: number[] = [];
     let j = i + 2;
-    while (j < lines.length && isRow(lines[j])) {
+    while (j < lines.length && isRow(lines[j]) && !isIndentedCode(lines[j])) {
       rows.push(j);
       j++;
     }
@@ -337,6 +342,21 @@ function cellText(text: string): string {
   return text.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 }
 
+function baseId(id: string): string {
+  return id.replace(/-\d+$/, "");
+}
+
+/**
+ * The one row named `name`, preferring rows with the same base id. -1 when
+ * there is none, or more than one and so no safe pick.
+ */
+function rowByName(phases: PlanPhase[], phaseId: string, name: string): number {
+  const named = phases.flatMap((phase, index) => (phase.name === name ? [index] : []));
+  const sameBase = named.filter((index) => baseId(phases[index].id) === baseId(phaseId));
+  const pick = sameBase.length ? sameBase : named;
+  return pick.length === 1 ? pick[0] : -1;
+}
+
 /**
  * Returns `text` with the phase's Status cell set, adding a Status column to
  * the table when it has none. Returns null when the phase is not found.
@@ -356,20 +376,12 @@ export function setPhaseStatus(
   }
   const phases = phasesFromTable(lines, table);
   let rowIndex = phases.findIndex((phase) => phase.id === phaseId);
+  if (name !== undefined && (rowIndex < 0 || phases[rowIndex].name !== name)) {
+    // The table changed since it was shown: find that phase by its name.
+    rowIndex = rowByName(phases, phaseId, name);
+  }
   if (rowIndex < 0) {
     return null;
-  }
-  if (name !== undefined && phases[rowIndex].name !== name) {
-    const baseId = phaseId.replace(/-\d+$/, "");
-    const match = phases.find(
-      (phase) =>
-        phase.name === name
-        && (phase.id === phaseId || phase.id.replace(/-\d+$/, "") === baseId),
-    );
-    if (!match) {
-      return null;
-    }
-    rowIndex = phases.indexOf(match);
   }
   let statusCol = table.statusCol;
   if (statusCol < 0) {
@@ -431,15 +443,15 @@ export function phaseForTitle(
   phases: PlanPhase[],
 ): PlanPhase | null {
   const text = title.toLowerCase();
-  const byId = /\b(?:phase|step|stage|milestone)\s+([a-z]{0,2}\d+(?:\.\d+)*(?:-\d+)?)\b/i.exec(text)
-    ?? /^([a-z]{1,2}\d+(?:\.\d+)*(?:-\d+)?)\b/i.exec(text);
+  const byId = /\b(?:phase|step|stage|milestone)\s+([a-z]{0,2}\d+(?:\.\d+)*[a-z]?(?:-\d+)?)\b/i.exec(text)
+    ?? /^([a-z]{1,2}\d+(?:\.\d+)*[a-z]?(?:-\d+)?)\b/i.exec(text);
   if (byId) {
     const token = byId[1];
     const exact = phases.find((phase) => phase.id.toLowerCase() === token);
     if (exact) {
       return exact;
     }
-    const base = token.replace(/-\d+$/, "");
+    const base = baseId(token);
     const hit = phases.find((phase) => phase.id.toLowerCase() === base);
     if (hit) {
       return hit;

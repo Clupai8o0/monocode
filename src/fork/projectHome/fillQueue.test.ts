@@ -115,6 +115,30 @@ describe("roadmap chat queue", () => {
     expect(started).toHaveLength(4);
   });
 
+  it("keeps launches that answer together after a slow start", async () => {
+    const started: string[] = [];
+    const answers: Array<() => void> = [];
+    setHomeLauncher((launch) => {
+      started.push(launch.cwd);
+      return new Promise((resolve) => {
+        answers.push(() => resolve(launch.cwd));
+      });
+    });
+    queueFillChats(launches(4), 0);
+    await settle();
+
+    // All three answer in one tick, just past the launch timeout.
+    vi.setSystemTime(125_000);
+    for (const answer of answers) {
+      answer();
+    }
+    await settle();
+    expect(started).toHaveLength(FILL_AT_ONCE);
+    pumpFillQueue(() => true, 126_000);
+    await settle();
+    expect(started).toHaveLength(FILL_AT_ONCE);
+  });
+
   it("times the start-up grace from when a launch was accepted", async () => {
     const started: string[] = [];
     const answers: Array<() => void> = [];
