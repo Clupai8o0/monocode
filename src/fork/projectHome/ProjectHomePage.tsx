@@ -51,9 +51,12 @@ import {
   type NeedsItem,
 } from "./homeModel";
 import {
+  FILL_AT_ONCE,
   launchHomeChat,
   linkSessionToPhase,
+  queueFillChats,
   savePhaseStatus,
+  useFillProgress,
   usePhaseLinks,
   usePlans,
   type HomePage,
@@ -1486,44 +1489,48 @@ function FillPlans({
   });
   const [open, setOpen] = useState(false);
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
-  const [started, setStarted] = useState<number | null>(null);
-  if (!needing.length && started === null) {
+  const [sent, setSent] = useState(false);
+  const progress = useFillProgress();
+  const queueActive = progress.running + progress.waiting > 0;
+  const started = sent || queueActive;
+  if (!needing.length && !started) {
     return null;
   }
   const picked = needing.filter((path) => !skipped.has(path));
   const start = () => {
-    let count = 0;
-    for (const path of picked) {
-      const state = plans.get(path);
-      const id = launchHomeChat({
-        cwd: path,
-        prompt: fillPlanPrompt(state?.file ?? null),
-        title: state?.plan ? "Fill the roadmap" : "Draft a roadmap",
-        reveal: false,
-      });
-      if (id) {
-        count += 1;
-      }
-    }
-    setStarted(count);
+    queueFillChats(
+      picked.map((path) => {
+        const state = plans.get(path);
+        return {
+          cwd: path,
+          prompt: fillPlanPrompt(state?.file ?? null),
+          title: state?.plan ? "Fill the roadmap" : "Draft a roadmap",
+          reveal: false,
+        };
+      }),
+    );
+    setSent(true);
     setOpen(false);
   };
+  const chats = (count: number) => `${count} ${count === 1 ? "chat" : "chats"}`;
   return (
     <section className={`${CARD} px-[18px] py-4`}>
       <div className="flex items-center gap-4 max-[620px]:flex-col max-[620px]:items-start">
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-semibold">
-            {started !== null
-              ? `Started ${started} ${started === 1 ? "chat" : "chats"}`
-              : `${needing.length} ${needing.length === 1 ? "project has" : "projects have"} no roadmap status`}
+            {!started
+              ? `${needing.length} ${needing.length === 1 ? "project has" : "projects have"} no roadmap status`
+              : progress.waiting
+                ? `Started ${chats(progress.started)}, ${progress.waiting} waiting`
+                : `Started ${chats(progress.started)}`}
           </div>
           <div className="mt-1 text-[13px] leading-normal text-content/55">
-            {started !== null
-              ? "Each one fills its project's roadmap. Their homes update as they save."
-              : "A chat in each one can write the phase table or fill its Status column, from the code and git log."}
+            {!started
+              ? "A chat in each one can write the phase table or fill its Status column, from the code and git log."
+              : `Each one fills its project's roadmap; ${FILL_AT_ONCE} run at a time. Their homes update as they save.`}
           </div>
         </div>
-        {started === null && !open ? (
+        {!started && !open ? (
           <button
             type="button"
             aria-expanded={open}

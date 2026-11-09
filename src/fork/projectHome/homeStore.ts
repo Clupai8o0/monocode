@@ -3,7 +3,9 @@
  * projects), each project's parsed roadmap, chats put on a phase by hand,
  * and the launcher App registers for starting chats from the page.
  */
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
+import { isInFlightSession } from "../../features/sessions/model/inFlight";
+import type { Session } from "../../features/sessions/model/session";
 import {
   readTextFile,
   statFiles,
@@ -341,9 +343,133 @@ let launcher: Launcher | null = null;
 /** App registers how to start a chat that sends `prompt` at once. */
 export function setHomeLauncher(fn: Launcher | null) {
   launcher = fn;
+  if (fn) {
+    pumpFillQueue(null);
+  }
 }
 
 /** Starts a chat; returns its session id, or null when App is not ready. */
 export function launchHomeChat(launch: HomeLaunch): string | null {
   return launcher ? launcher(launch) : null;
+}
+
+// --- Roadmap chats, a few at a time -------------------------------------------
+
+/** How many roadmap chats run at once; the rest wait their turn. */
+export const FILL_AT_ONCE = 3;
+/** A chat that never shows up as running within this long is counted as gone. */
+const FILL_START_GRACE_MS = 90_000;
+
+type FillRun = { id: string; startedAt: number; seenRunning: boolean };
+
+let fillWaiting: HomeLaunch[] = [];
+let fillRunning: FillRun[] = [];
+let fillStarted = 0;
+let fillVersion = 0;
+const fillListeners = new Set<() => void>();
+
+function emitFill() {
+  fillVersion += 1;
+  for (const listener of fillListeners) {
+    listener();
+  }
+}
+
+function subscribeFill(listener: () => void): () => void {
+  fillListeners.add(listener);
+  return () => {
+    fillListeners.delete(listener);
+  };
+}
+
+function fillVersionNow(): number {
+  return fillVersion;
+}
+
+export type FillProgress = { started: number; running: number; waiting: number };
+
+/** How the queued roadmap chats are getting on. */
+export function useFillProgress(): FillProgress {
+  useSyncExternalStore(subscribeFill, fillVersionNow, fillVersionNow);
+  return { started: fillStarted, running: fillRunning.length, waiting: fillWaiting.length };
+}
+
+/** Queues roadmap chats; they start in the background, FILL_AT_ONCE at a time. */
+export function queueFillChats(launches: readonly HomeLaunch[], now: number = Date.now()) {
+  const queued = new Set(fillWaiting.map((launch) => launch.cwd));
+  for (const launch of launches) {
+    if (!queued.has(launch.cwd)) {
+      fillWaiting.push({ ...launch, reveal: false });
+      queued.add(launch.cwd);
+    }
+  }
+  pumpFillQueue(null, now);
+}
+
+/**
+ * Drops finished roadmap chats and starts waiting ones while there is room.
+ * `running` says whether a session is still working (null: not known yet).
+ */
+export function pumpFillQueue(
+  running: ((id: string) => boolean | null) | null,
+  now: number = Date.now(),
+) {
+  if (!fillWaiting.length && !fillRunning.length) {
+    return;
+  }
+  let changed = false;
+  if (running) {
+    fillRunning = fillRunning.filter((run) => {
+      if (running(run.id) === true) {
+        run.seenRunning = true;
+        return true;
+      }
+      // Not running: finished once it was seen running, else still starting.
+      const keep = !run.seenRunning && now - run.startedAt < FILL_START_GRACE_MS;
+      changed ||= !keep;
+      return keep;
+    });
+  }
+  while (fillWaiting.length && fillRunning.length < FILL_AT_ONCE && launcher) {
+    const next = fillWaiting.shift()!;
+    const id = launcher(next);
+    changed = true;
+    if (id) {
+      fillRunning.push({ id, startedAt: now, seenRunning: false });
+      fillStarted += 1;
+    }
+  }
+  if (changed) {
+    emitFill();
+  }
+}
+
+/** For tests: forget every queued and running roadmap chat. */
+export function resetFillQueue() {
+  fillWaiting = [];
+  fillRunning = [];
+  fillStarted = 0;
+  emitFill();
+}
+
+/** App runs this so queued roadmap chats start as earlier ones finish. */
+export function useFillQueuePump(sessions: readonly Session[]) {
+  const latest = useRef(sessions);
+  latest.current = sessions;
+  useEffect(() => {
+    const pump = () => {
+      if (!fillWaiting.length && !fillRunning.length) {
+        return;
+      }
+      const byId = new Map(latest.current.map((session) => [session.id, session]));
+      pumpFillQueue((id) => {
+        const session = byId.get(id);
+        return session ? isInFlightSession(session) : null;
+      });
+    };
+    pump();
+    // Also on a timer, for a chat that never started.
+    const timer = setInterval(pump, 15_000);
+    return () => clearInterval(timer);
+  }, [sessions]);
 }

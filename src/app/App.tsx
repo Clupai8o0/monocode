@@ -685,6 +685,7 @@ import {
   openAllProjects,
   openProjectHome,
   setHomeLauncher,
+  useFillQueuePump,
   useHomePage,
   withinOpenGrace,
 } from "../fork/projectHome/homeStore"; // Fork
@@ -14063,6 +14064,7 @@ function Workspace({
     monoCovers,
   ]);
   const homeRuntimeMode = sessionDefaults?.runtimeMode;
+  useFillQueuePump(promptableSessions);
   useEffect(() => {
     if (!FORK_PROJECT_HOME) return;
     setHomeLauncher(({ cwd, prompt, title, reveal }) => {
