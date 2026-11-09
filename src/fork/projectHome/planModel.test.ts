@@ -1,0 +1,189 @@
+import { describe, expect, it } from "vitest";
+import {
+  currentPhase,
+  doneCount,
+  fillPlanPrompt,
+  parsePlan,
+  parseStatus,
+  phaseForTitle,
+  setPhaseStatus,
+  splitChecks,
+  startPhasePrompt,
+} from "./planModel";
+
+const YAP = `# Yap: plan
+
+**See the feel first.**
+
+| Phase | What | Done when |
+|---|---|---|
+| 0.0 Mockups | Clickable looks (Kickoff, in chat) | Sam picks a look |
+| 0.2 Feel test | Measure opening | Open to typing under 1 s, no typing lag at 10,000 words, Sam likes the feel |
+| 1 Daily writer | New note on every open | Sam can journal offline, reopen attached screenshots/files, and nothing is lost after killing the app |
+| 4 Rewards | Closing moment | Each note grows a plant; everything can be turned off |
+
+## Open questions
+
+| Question | Who |
+|---|---|
+| Final name | Sam |
+`;
+
+const GLOW = `# Glow up
+
+| Step | Done when |
+|---|---|
+| 0.1 Monorepo scaffold: pnpm + Turborepo, \`apps/web\` | \`pnpm test\` and \`pnpm lint\` pass |
+| 0.2 Vercel + Neon: project in \`syd1\` | \`/api/health\` returns 200 |
+`;
+
+const JOBBIRD = `| Step | What | Done when | Status |
+| --- | --- | --- | --- |
+| M1 Taste loop | review | ✓ your answers change the ranking | Done (Sam, 2 Nov) |
+| M2 Spend cap | cap \\| warn | a run that could pass the cap is refused | In progress |
+`;
+
+const CSTACK = `# Roadmap
+
+| # | Change | Why | Size |
+|---|---|---|---|
+| 1 | Interfaces doc | MonoCode parses these | M |
+| 2 | Find claims.py | Fixed path today | S |
+`;
+
+describe("parsePlan", () => {
+  it("reads Kickoff's Phase | What | Done when table and skips later tables", () => {
+    const plan = parsePlan(YAP);
+    expect(plan?.title).toBe("Yap: plan");
+    expect(plan?.hasStatusColumn).toBe(false);
+    expect(plan?.phases.map((phase) => phase.id)).toEqual(["0.0", "0.2", "1", "4"]);
+    expect(plan?.phases[0]).toMatchObject({
+      name: "Mockups",
+      what: "Clickable looks (Kickoff, in chat)",
+      status: "todo",
+    });
+  });
+
+  it("splits done-when into checks without breaking numbers", () => {
+    const plan = parsePlan(YAP);
+    expect(plan?.phases[1].checks.map((check) => check.text)).toEqual([
+      "Open to typing under 1 s",
+      "No typing lag at 10,000 words",
+      "Sam likes the feel",
+    ]);
+    expect(plan?.phases[2].checks).toHaveLength(3);
+    expect(plan?.phases[3].checks.map((check) => check.text)).toEqual([
+      "Each note grows a plant",
+      "Everything can be turned off",
+    ]);
+  });
+
+  it("splits a Step cell with a colon into name and what", () => {
+    const plan = parsePlan(GLOW);
+    expect(plan?.phases[0]).toMatchObject({
+      id: "0.1",
+      name: "Monorepo scaffold",
+      what: "pnpm + Turborepo, apps/web",
+    });
+  });
+
+  it("reads lettered ids, a Status column, notes, ticks and escaped pipes", () => {
+    const plan = parsePlan(JOBBIRD);
+    expect(plan?.hasStatusColumn).toBe(true);
+    expect(plan?.phases[0]).toMatchObject({
+      id: "M1",
+      name: "Taste loop",
+      status: "done",
+      statusNote: "Sam, 2 Nov",
+    });
+    expect(plan?.phases[0].checks[0]).toEqual({
+      text: "Your answers change the ranking",
+      met: true,
+    });
+    expect(plan?.phases[1]).toMatchObject({ status: "progress", what: "cap | warn" });
+  });
+
+  it("takes the name from the next column when the id column holds only a number", () => {
+    const plan = parsePlan(CSTACK);
+    expect(plan?.phases.map((phase) => [phase.id, phase.name])).toEqual([
+      ["1", "Interfaces doc"],
+      ["2", "Find claims.py"],
+    ]);
+  });
+
+  it("returns null without a roadmap table", () => {
+    expect(parsePlan("# Notes\n\nJust text.\n\n| Question | Who |\n|---|---|\n| A | B |\n")).toBeNull();
+  });
+});
+
+describe("parseStatus", () => {
+  it("maps loose words onto the five statuses", () => {
+    expect(parseStatus("Built, not merged").status).toBe("built");
+    expect(parseStatus("**Blocked** (waiting on Sam)")).toEqual({
+      status: "blocked",
+      note: "waiting on Sam",
+    });
+    expect(parseStatus("WIP").status).toBe("progress");
+    expect(parseStatus("✅ Done").status).toBe("done");
+    expect(parseStatus("").status).toBe("todo");
+  });
+});
+
+describe("setPhaseStatus", () => {
+  it("adds a Status column and sets one row", () => {
+    const next = setPhaseStatus(YAP, "1", "built", "Sam, 8 Nov");
+    expect(next).not.toBeNull();
+    const plan = parsePlan(next ?? "");
+    expect(plan?.hasStatusColumn).toBe(true);
+    expect(plan?.phases.map((phase) => phase.status)).toEqual(["todo", "todo", "built", "todo"]);
+    expect(plan?.phases[2].statusNote).toBe("Sam, 8 Nov");
+    expect(next).toContain("| Phase | What | Done when | Status |");
+    expect(next).toContain("## Open questions\n\n| Question | Who |");
+  });
+
+  it("changes only the target row when the column exists", () => {
+    const next = setPhaseStatus(JOBBIRD, "M2", "done", "") ?? "";
+    expect(next.split("\n")[2]).toBe(JOBBIRD.split("\n")[2]);
+    expect(parsePlan(next)?.phases[1].status).toBe("done");
+    expect(parsePlan(next)?.phases[1].what).toBe("cap | warn");
+  });
+
+  it("returns null for an unknown phase", () => {
+    expect(setPhaseStatus(YAP, "9", "done", "")).toBeNull();
+  });
+});
+
+describe("helpers", () => {
+  it("finds the current phase and counts done", () => {
+    const plan = parsePlan(setPhaseStatus(JOBBIRD, "M2", "done", "") ?? "");
+    expect(doneCount(plan?.phases ?? [])).toBe(2);
+    expect(currentPhase(plan?.phases ?? [])).toBeNull();
+    expect(currentPhase(parsePlan(JOBBIRD)?.phases ?? [])?.id).toBe("M2");
+    expect(currentPhase(parsePlan(YAP)?.phases ?? [])?.id).toBe("0.0");
+  });
+
+  it("matches chat titles to phases", () => {
+    const phases = parsePlan(YAP)?.phases ?? [];
+    expect(phaseForTitle("Phase 1 Daily writer", phases)?.id).toBe("1");
+    expect(phaseForTitle("Feel test numbers", phases)?.id).toBe("0.2");
+    expect(phaseForTitle("Fix the build", phases)).toBeNull();
+    expect(phaseForTitle("M1 polish", parsePlan(JOBBIRD)?.phases ?? [])?.id).toBe("M1");
+  });
+
+  it("splits checks with and-lists and tick marks", () => {
+    expect(splitChecks("✓ A works, and B works")).toEqual([
+      { text: "A works", met: true },
+      { text: "B works", met: false },
+    ]);
+  });
+
+  it("writes prompts that name the file and the status rules", () => {
+    expect(fillPlanPrompt(null)).toContain("no roadmap yet");
+    expect(fillPlanPrompt("docs/roadmap.md")).toContain("docs/roadmap.md");
+    const phase = parsePlan(YAP)?.phases[2];
+    const prompt = startPhasePrompt("docs/plan.md", phase!);
+    expect(prompt).toContain("Phase 1 · Daily writer");
+    expect(prompt).toContain("- Sam can journal offline");
+    expect(prompt).toContain("Built (Phase 1 chat, 8 Nov)");
+  });
+});

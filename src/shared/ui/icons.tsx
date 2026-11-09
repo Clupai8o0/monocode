@@ -119,6 +119,8 @@ import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Location01Icon from "@hugeicons/core-free-icons/Location01Icon";
 // Fork: the footer Home lab button.
 import HomeWifiIcon from "@hugeicons/core-free-icons/HomeWifiIcon";
+// Fork: Project home.
+import Home01Icon from "@hugeicons/core-free-icons/Home01Icon";
 import LaptopIcon from "@hugeicons/core-free-icons/LaptopIcon";
 import ServerStack01Icon from "@hugeicons/core-free-icons/ServerStack01Icon"; // Fork
 import { forwardRef, type Ref } from "react";
@@ -313,4 +315,6 @@ export const Bell = wrap(Notification01Icon, "Bell");
 export const MapPin = wrap(Location01Icon, "MapPin");
 // Fork: the footer Home lab button.
 export const HomeLab = wrap(HomeWifiIcon, "HomeLab");
+// Fork: Project home.
+export const Home = wrap(Home01Icon, "Home");
 export const ServerStack = wrap(ServerStack01Icon, "ServerStack"); // Fork

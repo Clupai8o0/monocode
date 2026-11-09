@@ -679,6 +679,16 @@ import { STARTER_MONOS } from "../fork/starterMonos/allStarterMonos"; // Fork
 import { DOJO_MONO } from "../fork/starterMonos/dojoMono"; // Fork
 import { OPEN_DOJO_EVENT } from "../fork/games/code/events"; // Fork
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
+import {
+  closeHomePage,
+  FORK_PROJECT_HOME,
+  openAllProjects,
+  openProjectHome,
+  setHomeLauncher,
+  useHomePage,
+  withinOpenGrace,
+} from "../fork/projectHome/homeStore"; // Fork
+import { ProjectHomePage } from "../fork/projectHome/ProjectHomePage"; // Fork
 import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
 import type { FileOpenOptions } from "../features/search/model/search"; // Fork
 import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
@@ -5503,6 +5513,7 @@ function Workspace({
       workspaceNavigation.cancel();
       let session = await ensureOpenSession(sessionId);
       if (!session || session.inboxAsk) return;
+      closeHomePage(); // Fork: Project home
       const mono = monoForSession(session.id);
       if (mono) {
         await onOpenMono(mono.id);
@@ -13941,6 +13952,7 @@ function Workspace({
 
   const onSelectTitleTab = useCallback(
     (id: string) => {
+      closeHomePage(); // Fork: Project home
       const monoId = monoForTab(id);
       if (monoId) {
         void onOpenMono(monoId);
@@ -13985,6 +13997,98 @@ function Workspace({
           : activeTabId,
     select: onSelectTitleTab,
   };
+
+  // Fork: Project home, a page over the session area for one project's
+  // roadmap, or every project's. It follows the sidebar's project and closes
+  // when a chat or another view takes the area.
+  const homePage = useHomePage();
+  const homeOpen = FORK_PROJECT_HOME && homePage !== null;
+  const homeProjects = useMemo(
+    () => projectRailItems(recents, sidebarCwd).map((project) => project.path),
+    [recents, sidebarCwd],
+  );
+  const leaveForHome = useCallback(() => {
+    workspaceNavigation.cancel();
+    closeMonoView();
+    setFilePickerOpen(false);
+    setSettingsOpen(false);
+    setSearchViewOpen(false);
+    setInboxViewOpen(false);
+    setNotesViewOpen(false);
+    setAutomationsViewOpen(false);
+  }, [closeMonoView, workspaceNavigation.cancel]);
+  const onOpenProjectHome = useCallback(() => {
+    leaveForHome();
+    openProjectHome(sidebarCwdRef.current);
+  }, [leaveForHome]);
+  const onOpenAllProjects = useCallback(() => {
+    leaveForHome();
+    openAllProjects();
+  }, [leaveForHome]);
+  const onOpenHomeOf = useCallback(
+    (path: string) => {
+      openProjectHome(path);
+      if (!sameProjectPath(path, sidebarCwdRef.current)) onSelectProject(path);
+    },
+    [onSelectProject],
+  );
+  const homeSeen = useRef({ tab: activeTabId, cwd: sidebarCwd });
+  useEffect(() => {
+    const seen = homeSeen.current;
+    homeSeen.current = { tab: activeTabId, cwd: sidebarCwd };
+    if (!homePage) return;
+    if (!sameProjectPath(seen.cwd, sidebarCwd)) {
+      // Another project picked while a home is open shows that one's home.
+      if (homePage.kind === "home") openProjectHome(sidebarCwd);
+      return;
+    }
+    if (seen.tab !== activeTabId && !withinOpenGrace()) closeHomePage();
+  }, [homePage, activeTabId, sidebarCwd]);
+  useEffect(() => {
+    if (
+      searchViewOpen ||
+      settingsOpen ||
+      inboxViewOpen ||
+      notesViewOpen ||
+      automationsViewOpen ||
+      monoCovers
+    )
+      closeHomePage();
+  }, [
+    searchViewOpen,
+    settingsOpen,
+    inboxViewOpen,
+    notesViewOpen,
+    automationsViewOpen,
+    monoCovers,
+  ]);
+  const homeRuntimeMode = sessionDefaults?.runtimeMode;
+  useEffect(() => {
+    if (!FORK_PROJECT_HOME) return;
+    setHomeLauncher(({ cwd, prompt, title, reveal }) => {
+      const base = newWorkspaceSession(cwd, homeRuntimeMode);
+      const id = crypto.randomUUID();
+      if (reveal) closeHomePage();
+      void launchQuickSessionRef
+        .current(
+          {
+            prompt,
+            title,
+            cwd,
+            harness: base.harness,
+            model: base.model,
+            runtimeMode: base.runtimeMode,
+            reveal,
+          },
+          id,
+        )
+        .catch((error: unknown) => {
+          console.warn("Project home could not start a chat", error);
+        });
+      return id;
+    });
+    return () => setHomeLauncher(null);
+  }, [homeRuntimeMode]);
 
   const onCloseAppView = useCallback((view: AppView, selectNeighbor = true) => {
     const navigation = displayedTabNavigation.current;
@@ -15504,6 +15608,8 @@ function Workspace({
       onOpenInboxItem={onOpenLinkedWorkItem}
       onOpenNotes={notesEnabled ? onOpenNotes : undefined}
       onOpenAutomations={HIDDEN.automations ? undefined : onOpenAutomations}
+      onOpenProjectHome={FORK_PROJECT_HOME ? onOpenProjectHome : undefined}
+      onOpenAllProjects={FORK_PROJECT_HOME ? onOpenAllProjects : undefined}
       onGoToFile={onGoToFile}
       searchActive={searchViewOpen}
       inboxActive={inboxViewOpen}
@@ -15616,7 +15722,8 @@ function Workspace({
                       settingsOpen ||
                       inboxViewOpen ||
                       notesViewOpen ||
-                      automationsViewOpen
+                      automationsViewOpen ||
+                      homeOpen // Fork: Project home
                         ? "hidden"
                         : "flex min-h-0 min-w-0 flex-1 flex-col"
                     }
@@ -15625,7 +15732,8 @@ function Workspace({
                       settingsOpen ||
                       inboxViewOpen ||
                       notesViewOpen ||
-                      automationsViewOpen
+                      automationsViewOpen ||
+                      homeOpen // Fork: Project home
                     }
                     inert={
                       searchViewOpen ||
@@ -15633,6 +15741,7 @@ function Workspace({
                       inboxViewOpen ||
                       notesViewOpen ||
                       automationsViewOpen ||
+                      homeOpen || // Fork: Project home
                       undefined
                     }
                   >
@@ -16042,6 +16151,37 @@ function Workspace({
                         onOpenSession={onOpenAutomationSession}
                       />
                     </AppViewSurface>
+                  ) : null}
+                  {/* Fork: Project home */}
+                  {homeOpen && homePage && !settingsOpen ? (
+                    <ProjectHomePage
+                      page={homePage}
+                      tabbed={insetLayout}
+                      besideRail={
+                        insetLayout || projectRailOpen || compactProjectRail
+                      }
+                      compactRail={!insetLayout && compactRailActive}
+                      projects={homeProjects}
+                      sessions={promptableSessions}
+                      summaries={history}
+                      unseenIds={unseenFinishedIds}
+                      onClose={closeHomePage}
+                      onToggleSidebar={onToggleSidebar}
+                      onOpenChat={(sessionId) => {
+                        closeHomePage();
+                        void onSelectHistorySession(sessionId);
+                      }}
+                      onOpenProjectHome={onOpenHomeOf}
+                      onOpenAllProjects={onOpenAllProjects}
+                      onOpenFile={(path) => {
+                        closeHomePage();
+                        onOpenFile(path);
+                      }}
+                      onNewChat={() => {
+                        closeHomePage();
+                        onNew();
+                      }}
+                    />
                   ) : null}
                   {settingsOpen ? (
                     <SettingsView

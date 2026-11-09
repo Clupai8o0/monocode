@@ -29,6 +29,7 @@ import {
   CircleDashed,
   CircleDot,
   Clock,
+  DashboardSquare,
   FileScript,
   Folder,
   GitBranch,
@@ -202,6 +203,8 @@ import {
   elsewhereTarget,
 } from "../../fork/externalSessions/ElsewhereGroup"; // Fork
 import { RunningBadge } from "../../fork/backgroundAgents/RunningBadge"; // Fork
+import { ProjectHomeRow } from "../../fork/projectHome/ProjectHomeRow"; // Fork
+import { useHomePage } from "../../fork/projectHome/homeStore"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
 import {
   CurrentProjectIcon,
@@ -424,6 +427,9 @@ type Props = {
   onOpenInboxItem?: (item: LinkedWorkItem, sessionId: string) => void;
   onOpenNotes?: () => void;
   onOpenAutomations?: () => void;
+  /** Fork: Project home for the current project, and All projects. */
+  onOpenProjectHome?: () => void;
+  onOpenAllProjects?: () => void;
   onGoToFile?: () => void;
   searchActive?: boolean;
   inboxActive?: boolean;
@@ -540,6 +546,8 @@ function SidebarComponent({
   onOpenInboxItem,
   onOpenNotes,
   onOpenAutomations,
+  onOpenProjectHome, // Fork
+  onOpenAllProjects, // Fork
   onGoToFile,
   searchActive = false,
   inboxActive = false,
@@ -2560,6 +2568,7 @@ function SidebarComponent({
     </SidebarSectionLabel>
   ) : null;
 
+  const homePage = useHomePage(); // Fork
   const navList = inset ? (
     <SidebarNavList
       search={
@@ -2593,6 +2602,13 @@ function SidebarComponent({
           icon: Zap,
           active: automationsActive,
           onClick: onOpenAutomations,
+        },
+        // Fork: Project home's cross-project page.
+        onOpenAllProjects && {
+          label: "All projects",
+          icon: DashboardSquare,
+          active: homePage?.kind === "all",
+          onClick: onOpenAllProjects,
         },
       ]}
     />
@@ -2832,6 +2848,7 @@ function SidebarComponent({
             monosSplit.height != null || projectsSplit.height != null
           }
           onNew={onNew}
+          onOpenHome={onOpenProjectHome}
           ref={(el) => {
             if (inset) slideRefs.current[0] = el;
           }}
@@ -4313,6 +4330,7 @@ function ProjectSessionsCard({
   hidden,
   keepRoom = false,
   onNew,
+  onOpenHome,
   ref,
   children,
 }: {
@@ -4322,6 +4340,8 @@ function ProjectSessionsCard({
   /** Fork: resized sections above shrink before this list does. */
   keepRoom?: boolean;
   onNew?: () => string | void;
+  /** Fork: opens the Project home. */
+  onOpenHome?: () => void;
   ref?: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
@@ -4337,6 +4357,9 @@ function ProjectSessionsCard({
       }`}
     >
       {project ? <ProjectSessionsHeader cwd={cwd} onNew={onNew} /> : null}
+      {project && onOpenHome ? (
+        <ProjectHomeRow cwd={cwd} onOpen={onOpenHome} />
+      ) : null}
       {children}
     </div>
   );
