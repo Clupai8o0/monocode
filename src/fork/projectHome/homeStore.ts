@@ -253,18 +253,20 @@ function plansVersion(): number {
 
 /**
  * Sets one phase's status in the roadmap file, re-reading it first so an
- * agent's edit a moment ago is kept. Returns false when it could not.
+ * agent's edit a moment ago is kept. `name` is the phase as shown, so a row
+ * an agent moved since is still found. Returns false when it could not.
  */
 export function savePhaseStatus(
   cwd: string,
   phaseId: string,
   status: PhaseStatus,
   note: string,
+  name?: string,
 ): Promise<boolean> {
   // One save at a time per project, so a quick second change reads the first.
   const run = (saving.get(cwd) ?? Promise.resolve(true))
     .catch(() => false)
-    .then(() => saveNow(cwd, phaseId, status, note));
+    .then(() => saveNow(cwd, phaseId, status, note, name));
   saving.set(cwd, run);
   void run.finally(() => {
     if (saving.get(cwd) === run) {
@@ -281,6 +283,7 @@ async function saveNow(
   phaseId: string,
   status: PhaseStatus,
   note: string,
+  name?: string,
 ): Promise<boolean> {
   const file = planFor(cwd).file;
   if (!file || !local(cwd)) {
@@ -293,7 +296,7 @@ async function saveNow(
     for (let attempt = 0; attempt < 3 && !saved; attempt += 1) {
       const before = await mtimeOf(path);
       const text = await readTextFile(path);
-      const next = setPhaseStatus(text, phaseId, status, note);
+      const next = setPhaseStatus(text, phaseId, status, note, name);
       if (next === null) {
         return false;
       }
@@ -413,9 +416,15 @@ export function launchHomeChat(launch: HomeLaunch): Promise<string | null> {
 export const FILL_AT_ONCE = 3;
 /** A chat that never shows up as running within this long is counted as gone. */
 const FILL_START_GRACE_MS = 90_000;
+/** A launch not accepted within this long is given up on, freeing its slot. */
+const FILL_LAUNCH_TIMEOUT_MS = 120_000;
 
-/** `id` is null until the launch is accepted. */
-type FillRun = { id: string | null; startedAt: number; seenRunning: boolean };
+/**
+ * `id` is null until the launch is accepted. `since` is when the slot was
+ * taken, then when the launch was accepted. `dropped` runs no longer hold a
+ * slot, so a late answer from their launch is ignored.
+ */
+type FillRun = { id: string | null; since: number; seenRunning: boolean; dropped: boolean };
 
 let fillWaiting: HomeLaunch[] = [];
 let fillRunning: FillRun[] = [];
@@ -472,30 +481,31 @@ export function pumpFillQueue(
   if (!fillWaiting.length && !fillRunning.length) {
     return;
   }
-  let changed = false;
-  if (running) {
-    fillRunning = fillRunning.filter((run) => {
-      if (run.id === null) {
-        return true;
-      }
-      if (running(run.id) === true) {
-        run.seenRunning = true;
-        return true;
-      }
-      // Not running: finished once it was seen running, else still starting.
-      const keep = !run.seenRunning && now - run.startedAt < FILL_START_GRACE_MS;
-      changed ||= !keep;
-      return keep;
-    });
-  }
+  const kept = fillRunning.filter((run) => {
+    const keep = holdsSlot(run, running, now);
+    if (!keep) {
+      run.dropped = true;
+    }
+    return keep;
+  });
+  let changed = kept.length !== fillRunning.length;
+  fillRunning = kept;
   while (fillWaiting.length && fillRunning.length < FILL_AT_ONCE && launcher) {
-    const run: FillRun = { id: null, startedAt: now, seenRunning: false };
+    const run: FillRun = { id: null, since: now, seenRunning: false, dropped: false };
     fillRunning.push(run);
     changed = true;
     void launcher(fillWaiting.shift()!).catch(() => null).then((id) => {
       if (id) {
-        run.id = id;
         fillStarted += 1;
+      }
+      if (run.dropped) {
+        // Given up on already; its slot has gone to another chat.
+        emitFill();
+        return;
+      }
+      if (id) {
+        run.id = id;
+        run.since = Date.now();
       } else {
         fillRunning = fillRunning.filter((other) => other !== run);
       }
@@ -508,8 +518,31 @@ export function pumpFillQueue(
   }
 }
 
+/** Whether a roadmap chat still holds one of the FILL_AT_ONCE slots. */
+function holdsSlot(
+  run: FillRun,
+  running: ((id: string) => boolean | null) | null,
+  now: number,
+): boolean {
+  if (run.id === null) {
+    return now - run.since < FILL_LAUNCH_TIMEOUT_MS;
+  }
+  if (!running) {
+    return true;
+  }
+  if (running(run.id) === true) {
+    run.seenRunning = true;
+    return true;
+  }
+  // Not running: finished once it was seen running, else still starting.
+  return !run.seenRunning && now - run.since < FILL_START_GRACE_MS;
+}
+
 /** For tests: forget every queued and running roadmap chat. */
 export function resetFillQueue() {
+  for (const run of fillRunning) {
+    run.dropped = true;
+  }
   fillWaiting = [];
   fillRunning = [];
   fillStarted = 0;

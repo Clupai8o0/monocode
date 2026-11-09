@@ -157,6 +157,74 @@ describe("parsePlan", () => {
     expect(plan?.phases.map((phase) => phase.id)).toEqual(["1"]);
     expect(plan?.phases[0].name).toBe("Real phase");
   });
+
+  it("uses CommonMark fences: nested shorter close, 4-space indent, unclosed", () => {
+    const nested = `# Plan
+
+\`\`\`\`markdown
+\`\`\`js
+const x = 1;
+\`\`\`
+| Phase | What | Done when |
+|---|---|---|
+| 99 | Example only | Ignored |
+| Phase | What | Done when |
+|---|---|---|
+| 98 | Still inside fence | Ignored |
+\`\`\`\`
+
+| Phase | What | Done when |
+|---|---|---|
+| 1 Ship search | find articles | Results load |
+| 2 Polish | UI | Ship |
+`;
+    const plan = parsePlan(nested);
+    expect(plan?.phases.map((phase) => [phase.id, phase.name])).toEqual([
+      ["1", "Ship search"],
+      ["2", "Polish"],
+    ]);
+    const next = setPhaseStatus(nested, "1", "progress", "chat, 9 Nov");
+    expect(next).not.toBeNull();
+    expect(parsePlan(next ?? "")?.phases[0].status).toBe("progress");
+    // The example inside the fence is left as it was.
+    expect(next).toContain("| 99 | Example only | Ignored |\n");
+    expect(next).toMatch(/\| 1 Ship search \|[^\n]*\| In progress/);
+
+    // Four spaces of indent is code, not a fence, so the table after it counts.
+    const indented = `    \`\`\`
+| Phase | What | Done when |
+|---|---|---|
+| 1 Real | after an indented line | Met |
+`;
+    expect(parsePlan(indented)?.phases.map((phase) => phase.id)).toEqual(["1"]);
+
+    // An unclosed fence runs to the end, hiding any table after it.
+    const unclosed = `~~~
+| Phase | What | Done when |
+|---|---|---|
+| 1 Hidden | inside | Met |
+`;
+    expect(parsePlan(unclosed)).toBeNull();
+  });
+
+  it("assigns fallback ids without colliding with explicit ids", () => {
+    const mixed = `# Plan
+
+| Phase | What | Done when |
+|---|---|---|
+| Setup | bootstrap repo | Tests pass |
+| 1 Ship search | search UX | Fast results |
+| Configure | settings page | Saved |
+| 3 Deploy | prod | Live |
+`;
+    const plan = parsePlan(mixed);
+    expect(plan?.phases.map((phase) => [phase.id, phase.name])).toEqual([
+      ["2", "Setup"],
+      ["1", "Ship search"],
+      ["4", "Configure"],
+      ["3", "Deploy"],
+    ]);
+  });
 });
 
 describe("parseStatus", () => {
@@ -211,6 +279,25 @@ describe("setPhaseStatus", () => {
     expect(plan?.phases[1].statusNote).toBe("chat, 9 Nov");
   });
 
+  it("resolves the target row by name when the table changed under a stale id", () => {
+    const shifted = `| Phase | What | Done when | Status |
+|---|---|---|---|
+| 1 Prep | warmup | Ready | |
+| Phase 1 Ship search | UX | Results | |
+| 2 Polish | UI | Ship | |
+`;
+    const next = setPhaseStatus(shifted, "1", "built", "agent, 9 Nov", "Ship search");
+    expect(next).not.toBeNull();
+    expect(parsePlan(next ?? "")?.phases[1]).toMatchObject({
+      id: "1-2",
+      name: "Ship search",
+      status: "built",
+    });
+    expect(
+      setPhaseStatus(shifted, "1", "built", "agent, 9 Nov", "Polish"),
+    ).toBeNull();
+  });
+
   it("adds Status after the widest row without clobbering an extra body cell", () => {
     const uneven = `# Plan
 
@@ -245,6 +332,18 @@ describe("helpers", () => {
     expect(phaseForTitle("Feel test numbers", phases)?.id).toBe("0.2");
     expect(phaseForTitle("Fix the build", phases)).toBeNull();
     expect(phaseForTitle("M1 polish", parsePlan(JOBBIRD)?.phases ?? [])?.id).toBe("M1");
+  });
+
+  it("matches suffixed duplicate ids in chat titles", () => {
+    const phases =
+      parsePlan(`| Phase | What | Done when |
+|---|---|---|
+| 1 Alpha | first | Met |
+| Phase 1 Beta | second | Met |
+`)?.phases ?? [];
+    expect(phaseForTitle("Phase 1-2 Beta", phases)?.id).toBe("1-2");
+    expect(phaseForTitle("Phase 1-3 Unknown", phases)?.id).toBe("1");
+    expect(phaseForTitle("Phase 1 Alpha", phases)?.id).toBe("1");
   });
 
   it("matches phase names on word boundaries only", () => {

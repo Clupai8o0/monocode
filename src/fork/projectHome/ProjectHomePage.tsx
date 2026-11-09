@@ -352,18 +352,27 @@ function ChatStateLabel({ state }: { state: ChatState }) {
   );
 }
 
+/** Menus that have had their first focus; Tab can then leave them freely. */
+const focusedMenus = new WeakSet<HTMLElement>();
+
 /**
- * Puts focus on the menu's picked item, else its first. Popover calls its ref
- * on every render, and only a placed (visible) menu can take focus.
+ * Puts focus on the menu's picked item, else its first, once per opening.
+ * Popover calls its ref on every render, and only a placed (visible) menu
+ * can take focus, so this retries until focus lands.
  */
 function focusMenu(menu: HTMLDivElement | null) {
-  if (!menu || menu.contains(document.activeElement)) {
+  if (!menu || focusedMenus.has(menu)) {
     return;
   }
-  const item =
-    menu.querySelector<HTMLElement>('[aria-checked="true"]') ??
-    menu.querySelector<HTMLElement>('[role^="menuitem"]');
-  item?.focus({ preventScroll: true });
+  if (!menu.contains(document.activeElement)) {
+    const item =
+      menu.querySelector<HTMLElement>('[aria-checked="true"]') ??
+      menu.querySelector<HTMLElement>('[role^="menuitem"]');
+    item?.focus({ preventScroll: true });
+  }
+  if (menu.contains(document.activeElement)) {
+    focusedMenus.add(menu);
+  }
 }
 
 /** Arrow keys, Home and End move between a menu's items. */
@@ -860,7 +869,7 @@ function ProjectHome({
     startChat(fillPlanPrompt(state.file), state.plan ? "Update the roadmap" : "Draft a roadmap");
   const setStatus = (phase: PlanPhase, status: PhaseStatus) => {
     const before = { status: phase.status, note: phase.statusNote };
-    void savePhaseStatus(cwd, phase.id, status, shortDate()).then((ok) => {
+    void savePhaseStatus(cwd, phase.id, status, shortDate(), phase.name).then((ok) => {
       if (!ok) {
         setNotice({ text: `Could not save to ${file}.` });
         return;
@@ -868,7 +877,7 @@ function ProjectHome({
       setNotice({
         text: `Phase ${phase.id} set to ${PHASE_STATUS_LABEL[status]}.`,
         undo: () => {
-          void savePhaseStatus(cwd, phase.id, before.status, before.note);
+          void savePhaseStatus(cwd, phase.id, before.status, before.note, phase.name);
         },
       });
     });
@@ -887,7 +896,7 @@ function ProjectHome({
       }
       linkSessionToPhase(id, phase.id);
       if (phase.status === "todo") {
-        void savePhaseStatus(cwd, phase.id, "progress", shortDate());
+        void savePhaseStatus(cwd, phase.id, "progress", shortDate(), phase.name);
       }
     });
   };

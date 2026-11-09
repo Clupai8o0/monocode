@@ -14083,6 +14083,8 @@ function Workspace({
     setHomeLauncher(async ({ cwd, prompt, title, reveal }) => {
       const base = newWorkspaceSession(cwd, homeRuntimeMode);
       const id = crypto.randomUUID();
+      // Fork: only close the page the person launched from, not one opened since.
+      const homeOpens = homeOpenCount();
       try {
         await launchQuickSessionRef.current(
           {
@@ -14100,7 +14102,9 @@ function Workspace({
         console.warn("Project home could not start a chat", error);
         return null;
       }
-      if (reveal) closeHomePage();
+      if (reveal) {
+        closeHomePage(homeOpens);
+      }
       return id;
     });
     return () => setHomeLauncher(null);

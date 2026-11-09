@@ -111,12 +111,26 @@ function headerOf(cells: string[]) {
   };
 }
 
-function fenceAt(line: string): "`" | "~" | null {
-  const match = /^(`{3,}|~{3,})/.exec(line.trim());
+type OpenFence = { char: "`" | "~"; length: number };
+
+function openingFence(line: string): OpenFence | null {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
   if (!match) {
     return null;
   }
-  return match[1][0] as "`" | "~";
+  const run = match[1];
+  const char = run[0] as "`" | "~";
+  const info = match[2].replace(/\s+$/, "");
+  if (char === "`" && info.includes("`")) {
+    return null;
+  }
+  return { char, length: run.length };
+}
+
+function closingFence(line: string, open: OpenFence): boolean {
+  const mark = open.char === "`" ? "`" : "~";
+  const pattern = new RegExp(`^ {0,3}\\${mark}{${open.length},}\\s*$`);
+  return pattern.test(line);
 }
 
 function tableWidth(lines: string[], table: Table): number {
@@ -131,21 +145,17 @@ function tableWidth(lines: string[], table: Table): number {
 /** The roadmap table: the first one with a "Done when" column, else the first with a Phase/Step column. */
 function findTable(lines: string[]): Table | null {
   let fallback: Table | null = null;
-  let inFence = false;
-  let fenceChar = "";
+  let inFence: OpenFence | null = null;
   for (let i = 0; i + 1 < lines.length; i++) {
-    const fence = fenceAt(lines[i]);
-    if (fence) {
-      if (!inFence) {
-        inFence = true;
-        fenceChar = fence;
-      } else if (fence === fenceChar) {
-        inFence = false;
-        fenceChar = "";
+    if (inFence) {
+      if (closingFence(lines[i], inFence)) {
+        inFence = null;
       }
       continue;
     }
-    if (inFence) {
+    const open = openingFence(lines[i]);
+    if (open) {
+      inFence = open;
       continue;
     }
     if (!isRow(lines[i]) || !isSeparator(lines[i + 1])) {
@@ -238,20 +248,37 @@ function withUniquePhaseIds(phases: PlanPhase[]): PlanPhase[] {
   });
 }
 
-function phaseFrom(cells: string[], table: Table, index: number): PlanPhase {
+function explicitIdFromCell(first: string): string | null {
+  const match = ID_CELL.exec(first);
+  return match ? match[1] : null;
+}
+
+function nextFallbackId(explicitIds: Set<string>, usedFallback: Set<string>): string {
+  let n = 1;
+  while (explicitIds.has(String(n)) || usedFallback.has(String(n))) {
+    n++;
+  }
+  const id = String(n);
+  usedFallback.add(id);
+  return id;
+}
+
+function phaseFrom(
+  cells: string[],
+  table: Table,
+  explicitIds: Set<string>,
+  usedFallback: Set<string>,
+): PlanPhase {
   const first = plain(cells[table.idCol] ?? "");
   const whatCell = table.whatCol >= 0 ? plain(cells[table.whatCol] ?? "") : "";
   const match = ID_CELL.exec(first);
-  let id = match ? match[1] : String(index + 1);
+  const id = match ? match[1] : nextFallbackId(explicitIds, usedFallback);
   let name = match ? (match[2] ?? "").trim() : first;
   let what = whatCell;
   if (!name) {
     // "# | Change | Why": the id column holds only the number.
     name = whatCell;
     what = "";
-  }
-  if (!match && !first) {
-    id = String(index + 1);
   }
   if (!what) {
     const colon = name.indexOf(": ");
@@ -273,15 +300,28 @@ function phaseFrom(cells: string[], table: Table, index: number): PlanPhase {
   };
 }
 
+function phasesFromTable(lines: string[], table: Table): PlanPhase[] {
+  const explicitIds = new Set<string>();
+  for (const row of table.rows) {
+    const first = plain(splitRow(lines[row])[table.idCol] ?? "");
+    const id = explicitIdFromCell(first);
+    if (id) {
+      explicitIds.add(id);
+    }
+  }
+  const usedFallback = new Set<string>();
+  return withUniquePhaseIds(
+    table.rows.map((row) => phaseFrom(splitRow(lines[row]), table, explicitIds, usedFallback)),
+  );
+}
+
 export function parsePlan(text: string): Plan | null {
   const lines = text.split(/\r?\n/);
   const table = findTable(lines);
   if (!table) {
     return null;
   }
-  const phases = withUniquePhaseIds(
-    table.rows.map((row, i) => phaseFrom(splitRow(lines[row]), table, i)),
-  ).filter((phase) => phase.name);
+  const phases = phasesFromTable(lines, table).filter((phase) => phase.name);
   if (phases.length === 0) {
     return null;
   }
@@ -306,6 +346,7 @@ export function setPhaseStatus(
   phaseId: string,
   status: PhaseStatus,
   note: string,
+  name?: string,
 ): string | null {
   const newline = text.includes("\r\n") ? "\r\n" : "\n";
   const lines = text.split(/\r?\n/);
@@ -313,12 +354,22 @@ export function setPhaseStatus(
   if (!table) {
     return null;
   }
-  const phases = withUniquePhaseIds(
-    table.rows.map((row, i) => phaseFrom(splitRow(lines[row]), table, i)),
-  );
-  const rowIndex = phases.findIndex((phase) => phase.id === phaseId);
+  const phases = phasesFromTable(lines, table);
+  let rowIndex = phases.findIndex((phase) => phase.id === phaseId);
   if (rowIndex < 0) {
     return null;
+  }
+  if (name !== undefined && phases[rowIndex].name !== name) {
+    const baseId = phaseId.replace(/-\d+$/, "");
+    const match = phases.find(
+      (phase) =>
+        phase.name === name
+        && (phase.id === phaseId || phase.id.replace(/-\d+$/, "") === baseId),
+    );
+    if (!match) {
+      return null;
+    }
+    rowIndex = phases.indexOf(match);
   }
   let statusCol = table.statusCol;
   if (statusCol < 0) {
@@ -380,10 +431,16 @@ export function phaseForTitle(
   phases: PlanPhase[],
 ): PlanPhase | null {
   const text = title.toLowerCase();
-  const byId = /\b(?:phase|step|stage|milestone)\s+([a-z]{0,2}\d+(?:\.\d+)*)\b/i.exec(text)
-    ?? /^([a-z]{1,2}\d+(?:\.\d+)*)\b/i.exec(text);
+  const byId = /\b(?:phase|step|stage|milestone)\s+([a-z]{0,2}\d+(?:\.\d+)*(?:-\d+)?)\b/i.exec(text)
+    ?? /^([a-z]{1,2}\d+(?:\.\d+)*(?:-\d+)?)\b/i.exec(text);
   if (byId) {
-    const hit = phases.find((phase) => phase.id.toLowerCase() === byId[1]);
+    const token = byId[1];
+    const exact = phases.find((phase) => phase.id.toLowerCase() === token);
+    if (exact) {
+      return exact;
+    }
+    const base = token.replace(/-\d+$/, "");
+    const hit = phases.find((phase) => phase.id.toLowerCase() === base);
     if (hit) {
       return hit;
     }
