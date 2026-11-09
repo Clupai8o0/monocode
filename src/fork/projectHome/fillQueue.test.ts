@@ -17,19 +17,23 @@ function launches(count: number): HomeLaunch[] {
   }));
 }
 
+/** Lets accepted launches settle. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe("roadmap chat queue", () => {
   afterEach(() => {
     setHomeLauncher(null);
     resetFillQueue();
   });
 
-  it("starts a few at a time and the next as one finishes", () => {
+  it("starts a few at a time and the next as one finishes", async () => {
     const started: HomeLaunch[] = [];
-    setHomeLauncher((launch) => {
+    setHomeLauncher(async (launch) => {
       started.push(launch);
       return `s-${launch.cwd}`;
     });
     queueFillChats(launches(5), 0);
+    await settle();
     expect(started).toHaveLength(FILL_AT_ONCE);
     expect(started.every((launch) => launch.reveal === false)).toBe(true);
 
@@ -40,21 +44,36 @@ describe("roadmap chat queue", () => {
     // All running, then the first one finishes.
     pumpFillQueue(() => true, 2_000);
     pumpFillQueue((id) => id !== "s-/p/0", 3_000);
+    await settle();
     expect(started.map((launch) => launch.cwd)).toEqual(["/p/0", "/p/1", "/p/2", "/p/3"]);
 
     // One that never showed up is let go after the grace period.
     pumpFillQueue((id) => (id === "s-/p/3" ? null : true), 200_000);
+    await settle();
     expect(started).toHaveLength(5);
   });
 
-  it("waits for the launcher and does not queue a project twice", () => {
+  it("frees the slot of a chat that could not start", async () => {
+    const started: string[] = [];
+    setHomeLauncher(async (launch) => {
+      started.push(launch.cwd);
+      return launch.cwd === "/p/0" ? null : launch.cwd;
+    });
+    queueFillChats(launches(4), 0);
+    await settle();
+    await settle();
+    expect(started).toEqual(["/p/0", "/p/1", "/p/2", "/p/3"]);
+  });
+
+  it("waits for the launcher and does not queue a project twice", async () => {
     queueFillChats(launches(2), 0);
     queueFillChats(launches(2), 0);
     const started: string[] = [];
-    setHomeLauncher((launch) => {
+    setHomeLauncher(async (launch) => {
       started.push(launch.cwd);
       return launch.cwd;
     });
+    await settle();
     expect(started).toEqual(["/p/0", "/p/1"]);
   });
 });

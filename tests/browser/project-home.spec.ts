@@ -34,6 +34,19 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.getByRole("status")).toContainText("Phase 2 set to Built");
     await expect(home.locator('[data-phase="2"]').getByRole("button", { name: /Built/ })).toBeVisible();
 
+    // The status menu works from the keyboard and gives focus back.
+    const status = home.locator('[data-phase="1"]').getByRole("button", { name: /Built/ });
+    await status.focus();
+    await page.keyboard.press("Enter");
+    const menu = page.getByRole("menu", { name: "Status of phase 1" });
+    await expect(menu.getByRole("menuitemradio", { name: "Built" })).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(menu.getByRole("menuitemradio").first()).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(menu.getByRole("menuitemradio").last()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(status).toBeFocused();
+
     // Putting a loose chat on a phase moves it into that phase's card.
     await home.getByRole("button", { name: /Fix the CI cache/ }).click();
     await page.getByRole("menuitemradio", { name: /Search/ }).click();

@@ -111,8 +111,51 @@ describe("parsePlan", () => {
     ]);
   });
 
+  it("suffixes duplicate parsed phase ids in table order", () => {
+    const dup = `# Plan
+
+| Phase | What | Done when |
+|---|---|---|
+| 1 Alpha | first | Met |
+| Phase 1 Beta | second | Met |
+| 1 Gamma | third | Met |
+| 2 Unique | ok | Met |
+`;
+    const plan = parsePlan(dup);
+    expect(plan?.phases.map((phase) => [phase.id, phase.name])).toEqual([
+      ["1", "Alpha"],
+      ["1-2", "Beta"],
+      ["1-3", "Gamma"],
+      ["2", "Unique"],
+    ]);
+  });
+
   it("returns null without a roadmap table", () => {
     expect(parsePlan("# Notes\n\nJust text.\n\n| Question | Who |\n|---|---|\n| A | B |\n")).toBeNull();
+  });
+
+  it("ignores a roadmap-shaped table inside fenced code blocks", () => {
+    const fenced = `# Plan
+
+\`\`\`markdown
+| Phase | What | Done when |
+|---|---|---|
+| 99 | Example only | Not the real plan |
+\`\`\`
+
+~~~text
+| Step | Done when |
+|---|---|
+| X | Still ignored |
+~~~
+
+| Phase | What | Done when |
+|---|---|---|
+| 1 | Real phase | Ship it |
+`;
+    const plan = parsePlan(fenced);
+    expect(plan?.phases.map((phase) => phase.id)).toEqual(["1"]);
+    expect(plan?.phases[0].name).toBe("Real phase");
   });
 });
 
@@ -151,6 +194,40 @@ describe("setPhaseStatus", () => {
   it("returns null for an unknown phase", () => {
     expect(setPhaseStatus(YAP, "9", "done", "")).toBeNull();
   });
+
+  it("updates the row that matches a suffixed duplicate id", () => {
+    const dup = `| Phase | What | Done when | Status |
+|---|---|---|---|
+| 1 Alpha | first | Met | |
+| Phase 1 Beta | second | Met | |
+`;
+    const next = setPhaseStatus(dup, "1-2", "built", "chat, 9 Nov");
+    expect(next).not.toBeNull();
+    const plan = parsePlan(next ?? "");
+    expect(plan?.phases.map((phase) => [phase.id, phase.status])).toEqual([
+      ["1", "todo"],
+      ["1-2", "built"],
+    ]);
+    expect(plan?.phases[1].statusNote).toBe("chat, 9 Nov");
+  });
+
+  it("adds Status after the widest row without clobbering an extra body cell", () => {
+    const uneven = `# Plan
+
+| Phase | What | Done when |
+|---|---|---|
+| 1 | Alpha | Met when |
+| 2 | Beta | Met when | extra note |
+`;
+    const next = setPhaseStatus(uneven, "2", "progress", "");
+    expect(next).toContain("| extra note | In progress |");
+    expect(next).not.toContain("| In progress | extra note");
+    expect(next).toContain("| --- | --- | --- | --- | --- |");
+    expect(parsePlan(next ?? "")?.phases[1]).toMatchObject({
+      status: "progress",
+      name: "Beta",
+    });
+  });
 });
 
 describe("helpers", () => {
@@ -168,6 +245,18 @@ describe("helpers", () => {
     expect(phaseForTitle("Feel test numbers", phases)?.id).toBe("0.2");
     expect(phaseForTitle("Fix the build", phases)).toBeNull();
     expect(phaseForTitle("M1 polish", parsePlan(JOBBIRD)?.phases ?? [])?.id).toBe("M1");
+  });
+
+  it("matches phase names on word boundaries only", () => {
+    const plan = parsePlan(`| Phase | What | Done when |
+|---|---|---|
+| 1 Writer | daily | Ship |
+| 2 Search | find things | Ship |
+`);
+    const phases = plan?.phases ?? [];
+    expect(phaseForTitle("Research indexing", phases)).toBeNull();
+    expect(phaseForTitle("Improve Search ranking", phases)?.id).toBe("2");
+    expect(phaseForTitle("Daily writer flow", phases)?.id).toBe("1");
   });
 
   it("splits checks with and-lists and tick marks", () => {

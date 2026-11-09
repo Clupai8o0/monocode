@@ -111,10 +111,43 @@ function headerOf(cells: string[]) {
   };
 }
 
+function fenceAt(line: string): "`" | "~" | null {
+  const match = /^(`{3,}|~{3,})/.exec(line.trim());
+  if (!match) {
+    return null;
+  }
+  return match[1][0] as "`" | "~";
+}
+
+function tableWidth(lines: string[], table: Table): number {
+  let width = splitRow(lines[table.header]).length;
+  width = Math.max(width, splitRow(lines[table.header + 1]).length);
+  for (const row of table.rows) {
+    width = Math.max(width, splitRow(lines[row]).length);
+  }
+  return width;
+}
+
 /** The roadmap table: the first one with a "Done when" column, else the first with a Phase/Step column. */
 function findTable(lines: string[]): Table | null {
   let fallback: Table | null = null;
+  let inFence = false;
+  let fenceChar = "";
   for (let i = 0; i + 1 < lines.length; i++) {
+    const fence = fenceAt(lines[i]);
+    if (fence) {
+      if (!inFence) {
+        inFence = true;
+        fenceChar = fence;
+      } else if (fence === fenceChar) {
+        inFence = false;
+        fenceChar = "";
+      }
+      continue;
+    }
+    if (inFence) {
+      continue;
+    }
     if (!isRow(lines[i]) || !isSeparator(lines[i + 1])) {
       continue;
     }
@@ -183,6 +216,28 @@ export function parseStatus(cell: string): {
   return { status, note };
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** First row keeps its parsed id; later duplicates get `${id}-2`, `${id}-3`, … */
+function withUniquePhaseIds(phases: PlanPhase[]): PlanPhase[] {
+  const used = new Set<string>();
+  return phases.map((phase) => {
+    let id = phase.id;
+    if (used.has(id)) {
+      const base = phase.id;
+      let n = 2;
+      while (used.has(`${base}-${n}`)) {
+        n++;
+      }
+      id = `${base}-${n}`;
+    }
+    used.add(id);
+    return id === phase.id ? phase : { ...phase, id };
+  });
+}
+
 function phaseFrom(cells: string[], table: Table, index: number): PlanPhase {
   const first = plain(cells[table.idCol] ?? "");
   const whatCell = table.whatCol >= 0 ? plain(cells[table.whatCol] ?? "") : "";
@@ -224,9 +279,9 @@ export function parsePlan(text: string): Plan | null {
   if (!table) {
     return null;
   }
-  const phases = table.rows
-    .map((row, i) => phaseFrom(splitRow(lines[row]), table, i))
-    .filter((phase) => phase.name);
+  const phases = withUniquePhaseIds(
+    table.rows.map((row, i) => phaseFrom(splitRow(lines[row]), table, i)),
+  ).filter((phase) => phase.name);
   if (phases.length === 0) {
     return null;
   }
@@ -258,32 +313,43 @@ export function setPhaseStatus(
   if (!table) {
     return null;
   }
-  const rowIndex = table.rows.findIndex(
-    (row, i) => phaseFrom(splitRow(lines[row]), table, i).id === phaseId,
+  const phases = withUniquePhaseIds(
+    table.rows.map((row, i) => phaseFrom(splitRow(lines[row]), table, i)),
   );
+  const rowIndex = phases.findIndex((phase) => phase.id === phaseId);
   if (rowIndex < 0) {
     return null;
   }
-  const width = splitRow(lines[table.header]).length;
   let statusCol = table.statusCol;
   if (statusCol < 0) {
-    statusCol = width;
-    lines[table.header] = joinRow([...splitRow(lines[table.header]), "Status"]);
-    lines[table.header + 1] = joinRow([
-      ...splitRow(lines[table.header + 1]),
-      "---",
-    ]);
+    statusCol = tableWidth(lines, table);
+    const headerCells = splitRow(lines[table.header]);
+    while (headerCells.length < statusCol) {
+      headerCells.push("");
+    }
+    headerCells.push("Status");
+    lines[table.header] = joinRow(headerCells);
+    const sepCells = splitRow(lines[table.header + 1]);
+    while (sepCells.length < statusCol) {
+      sepCells.push("---");
+    }
+    sepCells.push("---");
+    lines[table.header + 1] = joinRow(sepCells);
   }
   table.rows.forEach((row, i) => {
     const cells = splitRow(lines[row]);
-    while (cells.length <= statusCol) {
-      cells.push("");
-    }
     if (i === rowIndex) {
+      while (cells.length < statusCol) {
+        cells.push("");
+      }
       const label = PHASE_STATUS_LABEL[status];
       cells[statusCol] = note ? `${label} (${cellText(note)})` : label;
     } else if (table.statusCol >= 0) {
       return;
+    } else {
+      while (cells.length <= statusCol) {
+        cells.push("");
+      }
     }
     lines[row] = joinRow(cells);
   });
@@ -325,7 +391,11 @@ export function phaseForTitle(
   const named = phases
     .filter((phase) => phase.name.length >= 6)
     .sort((a, b) => b.name.length - a.name.length)
-    .find((phase) => text.includes(phase.name.toLowerCase()));
+    .find((phase) => {
+      // Whole words only, even for names that end in a symbol ("C++ port").
+      const pattern = new RegExp(`(?<!\\w)${escapeRegex(phase.name)}(?!\\w)`, "i");
+      return pattern.test(title);
+    });
   return named ?? null;
 }
 

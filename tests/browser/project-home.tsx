@@ -131,7 +131,7 @@ const summaries: SessionSummary[] = [
 ] as SessionSummary[];
 
 const launched: string[] = [];
-setHomeLauncher((launch) => {
+setHomeLauncher(async (launch) => {
   launched.push(`${launch.cwd} | ${launch.title} | ${launch.reveal ? "reveal" : "quiet"}`);
   document.body.dataset.launched = launched.join("\n");
   return `launch-${launched.length}`;

@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import type { SessionSummary } from "../../features/sessions/data/sessionStore";
@@ -51,6 +52,7 @@ import {
   type NeedsItem,
 } from "./homeModel";
 import {
+  closeHomePage,
   FILL_AT_ONCE,
   launchHomeChat,
   linkSessionToPhase,
@@ -350,6 +352,45 @@ function ChatStateLabel({ state }: { state: ChatState }) {
   );
 }
 
+/**
+ * Puts focus on the menu's picked item, else its first. Popover calls its ref
+ * on every render, and only a placed (visible) menu can take focus.
+ */
+function focusMenu(menu: HTMLDivElement | null) {
+  if (!menu || menu.contains(document.activeElement)) {
+    return;
+  }
+  const item =
+    menu.querySelector<HTMLElement>('[aria-checked="true"]') ??
+    menu.querySelector<HTMLElement>('[role^="menuitem"]');
+  item?.focus({ preventScroll: true });
+}
+
+/** Arrow keys, Home and End move between a menu's items. */
+function onMenuKeys(event: KeyboardEvent<HTMLElement>) {
+  const items = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+  ];
+  if (!items.length) {
+    return;
+  }
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  let next: number;
+  if (event.key === "ArrowDown") {
+    next = at < 0 ? 0 : (at + 1) % items.length;
+  } else if (event.key === "ArrowUp") {
+    next = at <= 0 ? items.length - 1 : at - 1;
+  } else if (event.key === "Home") {
+    next = 0;
+  } else if (event.key === "End") {
+    next = items.length - 1;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  items[next].focus();
+}
+
 function StatusButton({
   phase,
   onPick,
@@ -359,6 +400,12 @@ function StatusButton({
 }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) {
+      button.current?.focus();
+    }
+  };
   return (
     <>
       <button
@@ -381,8 +428,10 @@ function StatusButton({
           align="end"
           gap={4}
           width={170}
-          autoFocus
-          onDismiss={() => setOpen(false)}
+          ref={focusMenu}
+          tabIndex={-1}
+          onKeyDown={onMenuKeys}
+          onDismiss={(reason) => close(reason === "escape")}
           role="menu"
           aria-label={`Status of phase ${phase.id}`}
           className="overflow-hidden p-1 font-sans text-content"
@@ -395,7 +444,7 @@ function StatusButton({
               aria-checked={status === phase.status}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                setOpen(false);
+                close(true);
                 if (status !== phase.status) {
                   onPick(status);
                 }
@@ -427,11 +476,12 @@ function LinkMenu({
   chatId: string;
   phases: readonly PlanPhase[];
   current: string | null;
-  onClose: () => void;
+  /** `refocus` is true when the menu had focus and the anchor should get it back. */
+  onClose: (refocus: boolean) => void;
 }) {
   const pick = (phaseId: string) => {
     linkSessionToPhase(chatId, phaseId);
-    onClose();
+    onClose(true);
   };
   return (
     <Popover
@@ -441,8 +491,10 @@ function LinkMenu({
       gap={4}
       width={260}
       maxHeight={320}
-      autoFocus
-      onDismiss={onClose}
+      ref={focusMenu}
+      tabIndex={-1}
+      onKeyDown={onMenuKeys}
+      onDismiss={(reason) => onClose(reason === "escape")}
       role="menu"
       aria-label="Put this chat on a phase"
       className="overflow-y-auto p-1 font-sans text-content"
@@ -518,7 +570,12 @@ function ChatRow({
           chatId={chat.id}
           phases={phases}
           current={chat.phaseId}
-          onClose={() => setMenu(null)}
+          onClose={(refocus) => {
+            if (refocus) {
+              menu.focus();
+            }
+            setMenu(null);
+          }}
         />
       ) : null}
     </div>
@@ -680,7 +737,10 @@ function HandoffSection({ cwd }: { cwd: string }) {
       ) : null}
       <button
         type="button"
-        onClick={() => continueFromHandoff(cwd)}
+        onClick={() => {
+          closeHomePage();
+          continueFromHandoff(cwd);
+        }}
         className={`${GHOST} ${SMALL} mt-3`}
       >
         Continue from it
@@ -787,10 +847,14 @@ function ProjectHome({
       <ChevronRight className="size-3" strokeWidth={2} aria-hidden />
     </button>
   );
+  const couldNotStart = () =>
+    setNotice({ text: "Could not start a chat. Try again in a moment." });
   const startChat = (prompt: string, title: string) => {
-    if (!launchHomeChat({ cwd, prompt, title, reveal: true })) {
-      setNotice({ text: "Could not start a chat yet. Try again in a moment." });
-    }
+    void launchHomeChat({ cwd, prompt, title, reveal: true }).then((id) => {
+      if (!id) {
+        couldNotStart();
+      }
+    });
   };
   const fillPlan = () =>
     startChat(fillPlanPrompt(state.file), state.plan ? "Update the roadmap" : "Draft a roadmap");
@@ -810,20 +874,22 @@ function ProjectHome({
     });
   };
   const startPhase = (phase: PlanPhase) => {
-    const id = launchHomeChat({
+    void launchHomeChat({
       cwd,
       prompt: startPhasePrompt(file, phase),
       title: `Phase ${phase.id} ${phase.name}`,
       reveal: true,
+    }).then((id) => {
+      // Only a chat that really started goes on the phase and moves it on.
+      if (!id) {
+        couldNotStart();
+        return;
+      }
+      linkSessionToPhase(id, phase.id);
+      if (phase.status === "todo") {
+        void savePhaseStatus(cwd, phase.id, "progress", shortDate());
+      }
     });
-    if (!id) {
-      setNotice({ text: "Could not start a chat yet. Try again in a moment." });
-      return;
-    }
-    linkSessionToPhase(id, phase.id);
-    if (phase.status === "todo") {
-      void savePhaseStatus(cwd, phase.id, "progress", shortDate());
-    }
   };
 
   if (!state.loaded) {
@@ -1331,7 +1397,12 @@ function LooseChip({ chat, phases }: { chat: HomeChat; phases: readonly PlanPhas
           chatId={chat.id}
           phases={phases}
           current={null}
-          onClose={() => setMenu(null)}
+          onClose={(refocus) => {
+            if (refocus) {
+              menu.focus();
+            }
+            setMenu(null);
+          }}
         />
       ) : null}
     </>

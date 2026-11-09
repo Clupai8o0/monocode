@@ -681,7 +681,9 @@ import { OPEN_DOJO_EVENT } from "../fork/games/code/events"; // Fork
 import { setHandoffLauncher } from "../fork/handoff/handoffStore";
 import {
   closeHomePage,
+  followProjectHome,
   FORK_PROJECT_HOME,
+  homeOpenCount,
   openAllProjects,
   openProjectHome,
   setHomeLauncher,
@@ -5512,9 +5514,10 @@ function Workspace({
   const onSelectHistorySession = useCallback(
     async (sessionId: string) => {
       workspaceNavigation.cancel();
+      const homeOpens = homeOpenCount(); // Fork: Project home
       let session = await ensureOpenSession(sessionId);
       if (!session || session.inboxAsk) return;
-      closeHomePage(); // Fork: Project home
+      closeHomePage(homeOpens); // Fork: unless reopened during the load
       const mono = monoForSession(session.id);
       if (mono) {
         await onOpenMono(mono.id);
@@ -7321,6 +7324,7 @@ function Workspace({
   const onOpenFile = useCallback<OpenFileFn>(
     (path, navigation, options) => {
       closeMonoView();
+      closeHomePage(); // Fork: Project home
       void (async () => {
         // Fork: a shown file opens from the local cache, even in a remote project.
         const localCwd = (options as { forkLocalCwd?: string } | undefined)?.forkLocalCwd;
@@ -14040,7 +14044,7 @@ function Workspace({
     if (!homePage) return;
     if (!sameProjectPath(seen.cwd, sidebarCwd)) {
       // Another project picked while a home is open shows that one's home.
-      if (homePage.kind === "home") openProjectHome(sidebarCwd);
+      if (homePage.kind === "home") followProjectHome(sidebarCwd);
       return;
     }
     if (seen.tab !== activeTabId && !withinOpenGrace()) closeHomePage();
@@ -14064,15 +14068,23 @@ function Workspace({
     monoCovers,
   ]);
   const homeRuntimeMode = sessionDefaults?.runtimeMode;
+  // New chat on another project's home waits for the switch to land.
+  const homeNewChatFor = useRef<{ cwd: string; at: number } | null>(null);
+  useEffect(() => {
+    const want = homeNewChatFor.current;
+    if (!want || !sameProjectPath(want.cwd, sidebarCwd)) return;
+    homeNewChatFor.current = null;
+    // A switch that took too long is not this click any more.
+    if (Date.now() - want.at < 10_000) onNew();
+  }, [sidebarCwd, onNew]);
   useFillQueuePump(promptableSessions);
   useEffect(() => {
     if (!FORK_PROJECT_HOME) return;
-    setHomeLauncher(({ cwd, prompt, title, reveal }) => {
+    setHomeLauncher(async ({ cwd, prompt, title, reveal }) => {
       const base = newWorkspaceSession(cwd, homeRuntimeMode);
       const id = crypto.randomUUID();
-      if (reveal) closeHomePage();
-      void launchQuickSessionRef
-        .current(
+      try {
+        await launchQuickSessionRef.current(
           {
             prompt,
             title,
@@ -14083,10 +14095,12 @@ function Workspace({
             reveal,
           },
           id,
-        )
-        .catch((error: unknown) => {
-          console.warn("Project home could not start a chat", error);
-        });
+        );
+      } catch (error: unknown) {
+        console.warn("Project home could not start a chat", error);
+        return null;
+      }
+      if (reveal) closeHomePage();
       return id;
     });
     return () => setHomeLauncher(null);
@@ -16179,9 +16193,14 @@ function Workspace({
                         closeHomePage();
                         onOpenFile(path);
                       }}
-                      onNewChat={() => {
+                      onNewChat={(cwd) => {
                         closeHomePage();
-                        onNew();
+                        if (sameProjectPath(cwd, sidebarCwdRef.current)) {
+                          onNew();
+                        } else {
+                          homeNewChatFor.current = { cwd, at: Date.now() };
+                          onSelectProject(cwd);
+                        }
                       }}
                     />
                   ) : null}

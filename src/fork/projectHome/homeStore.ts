@@ -27,10 +27,12 @@ export const FORK_PROJECT_HOME = import.meta.env.MODE !== "test";
 export type HomePage = { kind: "home"; cwd: string } | { kind: "all" };
 
 /** A project switch right after opening moves the active tab; ignore that. */
-const OPEN_GRACE_MS = 1500;
+const OPEN_GRACE_MS = 3000;
 
 let page: HomePage | null = null;
 let openedAt = 0;
+/** Goes up each time the user opens a home page. */
+let openCount = 0;
 const pageListeners = new Set<() => void>();
 
 function emitPage() {
@@ -59,26 +61,38 @@ export function homePageOpen(): boolean {
 }
 
 export function openProjectHome(cwd: string) {
+  openCount += 1;
+  followProjectHome(cwd);
+}
+
+/** Points an open home at the sidebar's new project; not a user open. */
+export function followProjectHome(cwd: string) {
+  openedAt = Date.now();
   if (page?.kind === "home" && page.cwd === cwd) {
-    openedAt = Date.now();
     return;
   }
   page = { kind: "home", cwd };
-  openedAt = Date.now();
   emitPage();
 }
 
 export function openAllProjects() {
+  openCount += 1;
+  openedAt = Date.now();
   if (page?.kind === "all") {
     return;
   }
   page = { kind: "all" };
-  openedAt = Date.now();
   emitPage();
 }
 
-export function closeHomePage() {
-  if (!page) {
+/** Read before a slow step; pass to closeHomePage to keep a page opened since. */
+export function homeOpenCount(): number {
+  return openCount;
+}
+
+/** Closes the page, unless `ifOpenCount` is given and the user opened one since. */
+export function closeHomePage(ifOpenCount?: number) {
+  if (!page || (ifOpenCount !== undefined && ifOpenCount !== openCount)) {
     return;
   }
   page = null;
@@ -182,11 +196,14 @@ async function load(cwd: string): Promise<void> {
   }
 }
 
-/** Re-reads the project's roadmap (skipped when the file did not change). */
-export function refreshPlan(cwd: string): Promise<void> {
+/**
+ * Re-reads the project's roadmap (skipped when the file did not change).
+ * `fresh` waits out a read already under way, which may predate a write.
+ */
+export function refreshPlan(cwd: string, fresh = false): Promise<void> {
   const running = loading.get(cwd);
   if (running) {
-    return running;
+    return fresh ? running.then(() => refreshPlan(cwd)) : running;
   }
   const next = load(cwd).finally(() => {
     loading.delete(cwd);
@@ -238,7 +255,28 @@ function plansVersion(): number {
  * Sets one phase's status in the roadmap file, re-reading it first so an
  * agent's edit a moment ago is kept. Returns false when it could not.
  */
-export async function savePhaseStatus(
+export function savePhaseStatus(
+  cwd: string,
+  phaseId: string,
+  status: PhaseStatus,
+  note: string,
+): Promise<boolean> {
+  // One save at a time per project, so a quick second change reads the first.
+  const run = (saving.get(cwd) ?? Promise.resolve(true))
+    .catch(() => false)
+    .then(() => saveNow(cwd, phaseId, status, note));
+  saving.set(cwd, run);
+  void run.finally(() => {
+    if (saving.get(cwd) === run) {
+      saving.delete(cwd);
+    }
+  });
+  return run;
+}
+
+const saving = new Map<string, Promise<boolean>>();
+
+async function saveNow(
   cwd: string,
   phaseId: string,
   status: PhaseStatus,
@@ -249,20 +287,35 @@ export async function savePhaseStatus(
     return false;
   }
   const path = `${root(cwd)}/${file}`;
+  let saved = false;
   try {
-    const text = await readTextFile(path);
-    const next = setPhaseStatus(text, phaseId, status, note);
-    if (next === null) {
-      return false;
-    }
-    if (next !== text) {
-      await writeTextFile(path, next);
+    // An agent may save the file while we edit it: then read it again.
+    for (let attempt = 0; attempt < 3 && !saved; attempt += 1) {
+      const before = await mtimeOf(path);
+      const text = await readTextFile(path);
+      const next = setPhaseStatus(text, phaseId, status, note);
+      if (next === null) {
+        return false;
+      }
+      if (next === text) {
+        saved = true;
+      } else if ((await mtimeOf(path)) === before) {
+        await writeTextFile(path, next);
+        saved = true;
+      }
     }
   } catch {
     return false;
   }
-  await refreshPlan(cwd);
-  return true;
+  if (saved) {
+    await refreshPlan(cwd, true);
+  }
+  return saved;
+}
+
+async function mtimeOf(path: string): Promise<number | null> {
+  const [stat] = await statFiles([path]);
+  return stat?.mtimeMs ?? null;
 }
 
 // --- Chats put on a phase by hand ---------------------------------------------
@@ -336,7 +389,8 @@ export type HomeLaunch = {
   reveal: boolean;
 };
 
-type Launcher = (launch: HomeLaunch) => string | null;
+/** Resolves to the new session's id once the chat is accepted, or null. */
+type Launcher = (launch: HomeLaunch) => Promise<string | null>;
 
 let launcher: Launcher | null = null;
 
@@ -348,9 +402,9 @@ export function setHomeLauncher(fn: Launcher | null) {
   }
 }
 
-/** Starts a chat; returns its session id, or null when App is not ready. */
-export function launchHomeChat(launch: HomeLaunch): string | null {
-  return launcher ? launcher(launch) : null;
+/** Starts a chat; its session id, or null when it could not start. */
+export function launchHomeChat(launch: HomeLaunch): Promise<string | null> {
+  return launcher ? launcher(launch) : Promise.resolve(null);
 }
 
 // --- Roadmap chats, a few at a time -------------------------------------------
@@ -360,7 +414,8 @@ export const FILL_AT_ONCE = 3;
 /** A chat that never shows up as running within this long is counted as gone. */
 const FILL_START_GRACE_MS = 90_000;
 
-type FillRun = { id: string; startedAt: number; seenRunning: boolean };
+/** `id` is null until the launch is accepted. */
+type FillRun = { id: string | null; startedAt: number; seenRunning: boolean };
 
 let fillWaiting: HomeLaunch[] = [];
 let fillRunning: FillRun[] = [];
@@ -420,6 +475,9 @@ export function pumpFillQueue(
   let changed = false;
   if (running) {
     fillRunning = fillRunning.filter((run) => {
+      if (run.id === null) {
+        return true;
+      }
       if (running(run.id) === true) {
         run.seenRunning = true;
         return true;
@@ -431,13 +489,19 @@ export function pumpFillQueue(
     });
   }
   while (fillWaiting.length && fillRunning.length < FILL_AT_ONCE && launcher) {
-    const next = fillWaiting.shift()!;
-    const id = launcher(next);
+    const run: FillRun = { id: null, startedAt: now, seenRunning: false };
+    fillRunning.push(run);
     changed = true;
-    if (id) {
-      fillRunning.push({ id, startedAt: now, seenRunning: false });
-      fillStarted += 1;
-    }
+    void launcher(fillWaiting.shift()!).catch(() => null).then((id) => {
+      if (id) {
+        run.id = id;
+        fillStarted += 1;
+      } else {
+        fillRunning = fillRunning.filter((other) => other !== run);
+      }
+      emitFill();
+      pumpFillQueue(null);
+    });
   }
   if (changed) {
     emitFill();
