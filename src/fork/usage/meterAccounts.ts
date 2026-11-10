@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
  * skip it; the All usage panel reads its windows like any account's.
  */
 export type MeterAccount = {
-  provider: "claude" | "codex";
+  provider: "codex";
   id: string;
   /** Where the folder points, with `~` for the home folder. */
   home: string;
@@ -21,7 +21,7 @@ export function isMeterAccount(value: unknown): value is MeterAccount {
   if (!value || typeof value !== "object") return false;
   const entry = value as Record<string, unknown>;
   return (
-    (entry.provider === "claude" || entry.provider === "codex") &&
+    entry.provider === "codex" &&
     typeof entry.id === "string" &&
     entry.id.startsWith(PREFIX) &&
     entry.id.length > PREFIX.length &&

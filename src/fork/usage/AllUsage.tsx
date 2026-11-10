@@ -191,7 +191,6 @@ export function AllUsagePanel() {
             now={now}
           />
         ))}
-        <MeterRows meters={meters} provider="claude" now={now} />
       </Section>
       <Section name="Codex" harness="codex">
         {codex.map((account) => (
@@ -226,7 +225,7 @@ function MeterRows({
   now,
 }: {
   meters: MeterAccount[];
-  provider: "claude" | "codex";
+  provider: "codex";
   now: number;
 }) {
   return (
@@ -243,6 +242,7 @@ function MeterRows({
               label: `${meterAccountName(meter)} · meter only`,
             }}
             now={now}
+            meterOnly
           />
         ))}
     </>
@@ -291,10 +291,13 @@ function PlanRow({
   provider,
   account,
   now,
+  meterOnly = false,
 }: {
   provider: "claude" | "codex";
   account: ProviderAccount;
   now: number;
+  /** A meter's login is not MonoCode's to replace: no Sign in button. */
+  meterOnly?: boolean;
 }) {
   const limits = useCachedRateLimits(provider, account.id);
   const bars = windowsOf(limits);
@@ -325,6 +328,8 @@ function PlanRow({
     <Row label={footerAccountLabel(account)}>
       {bars.length > 0 ? (
         <Bars bars={bars} now={now} />
+      ) : needsLogin && meterOnly ? (
+        <Note>Signed out: sign in from a terminal for this login</Note>
       ) : needsLogin ? (
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <Note>{signInError ?? limits.error ?? "Not signed in"}</Note>

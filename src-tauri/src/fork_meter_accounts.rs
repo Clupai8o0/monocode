@@ -10,8 +10,9 @@ use std::path::{Component, Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-/// The providers whose account folders can be meter-only, in display order.
-const PROVIDERS: [&str; 2] = ["claude", "codex"];
+/// Codex only: a Claude meter would need the Keychain lookup keyed by the
+/// link target, and `fork_account_homes` would read it as the cx login.
+const PROVIDERS: [&str; 1] = ["codex"];
 /// The name prefix that marks a folder as usage-only.
 const METER_PREFIX: &str = "meter-";
 
@@ -144,17 +145,8 @@ mod tests {
             .iter()
             .map(|a| (a.provider.as_str(), a.id.as_str(), a.home.as_str()))
             .collect();
-        assert_eq!(
-            summary,
-            vec![
-                (
-                    "claude",
-                    "meter-x",
-                    "~/app/provider-accounts/claude/meter-x"
-                ),
-                ("codex", "meter-codex-3", "~/.codex-3"),
-            ]
-        );
+        // claude/meter-x is ignored: meters are Codex only.
+        assert_eq!(summary, vec![("codex", "meter-codex-3", "~/.codex-3")]);
         std::fs::remove_dir_all(&home).unwrap();
     }
 
