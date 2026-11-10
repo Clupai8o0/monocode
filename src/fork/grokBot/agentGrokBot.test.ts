@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Session } from "../../features/sessions/model/session";
 import {
   GROK_BOT_FIELDS,
+  GROK_BOT_RUN_LIMIT,
   handleGrokBot,
   parseSince,
   resolveBot,
@@ -52,6 +53,9 @@ function makeBackend(
     chat?: GrokBotBackend["chat"];
     open?: GrokBotBackend["open"];
     status?: GrokBotBackend["status"];
+    webhooks?: GrokBotBackend["webhooks"];
+    run?: GrokBotBackend["run"];
+    requestId?: GrokBotBackend["requestId"];
     savedAt?: number | null;
   },
 ): GrokBotBackend & {
@@ -59,6 +63,9 @@ function makeBackend(
   roster: ReturnType<typeof vi.fn>;
   chat: ReturnType<typeof vi.fn>;
   open: ReturnType<typeof vi.fn>;
+  webhooks: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
+  requestId: ReturnType<typeof vi.fn>;
   now: ReturnType<typeof vi.fn>;
 } {
   const rosterValue: GrokBotRoster = {
@@ -78,6 +85,9 @@ function makeBackend(
       entries: [],
     })),
     open: opts?.open ?? vi.fn(async () => undefined),
+    webhooks: opts?.webhooks ?? vi.fn(async () => []),
+    run: opts?.run ?? vi.fn(async () => ({ outcome: "started" as const, status: 200, detail: null })),
+    requestId: opts?.requestId ?? vi.fn(() => "mc-test1234"),
     now: vi.fn(() => opts?.now ?? FIXED_NOW),
   };
 }
@@ -117,6 +127,7 @@ describe("GROK_BOT_FIELDS", () => {
       ["grokbot.list", ["all"]],
       ["grokbot.read", ["bot", "limit", "since", "before", "maxChars"]],
       ["grokbot.draft", ["bot", "text"]],
+      ["grokbot.run", ["bot", "text"]],
     ]);
   });
 });
@@ -238,6 +249,34 @@ describe("grokbot.list", () => {
     await expect(handleGrokBot(session({}), "grokbot.list", { all: "yes" }, backend)).rejects.toThrow(
       "all must be true or false",
     );
+  });
+
+  it("marks bots with canRun true or false based on webhooks", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const backend = makeBackend(rosterBots, { webhooks });
+    const result = (await handleGrokBot(session({}), "grokbot.list", {}, backend)) as {
+      bots: { id: string; canRun?: boolean }[];
+    };
+    const alpha = result.bots.find((b) => b.id === "bot-alpha");
+    const other = result.bots.find((b) => b.id !== "bot-alpha");
+    expect(alpha?.canRun).toBe(true);
+    expect(other?.canRun).toBe(false);
+  });
+
+  it("succeeds without canRun keys when webhooks rejects", async () => {
+    const webhooks = vi.fn(async () => {
+      throw new Error("Keychain locked");
+    });
+    const backend = makeBackend(rosterBots, { webhooks });
+    const result = (await handleGrokBot(session({}), "grokbot.list", {}, backend)) as {
+      bots: Record<string, unknown>[];
+    };
+    expect(result.bots.length).toBeGreaterThan(0);
+    for (const b of result.bots) {
+      expect(b).not.toHaveProperty("canRun");
+    }
   });
 });
 
@@ -548,6 +587,177 @@ describe("grokbot.draft", () => {
     await expect(
       handleGrokBot(session({}), "grokbot.draft", { bot: "Alpha", text: "hi" }, backend),
     ).rejects.toThrow("link failed");
+  });
+});
+
+describe("grokbot.run", () => {
+  it("rejects a codex harness and an mcp- session id before calling any backend method", async () => {
+    const quiet = makeBackend(rosterBots);
+    const codex = session({ harness: "codex" });
+    await expect(
+      handleGrokBot(codex, "grokbot.run", { bot: "Alpha", text: "hi" }, quiet),
+    ).rejects.toThrow("only Claude sessions");
+
+    const mcp = session({ id: "mcp-tool-1", harness: "claude" });
+    await expect(
+      handleGrokBot(mcp, "grokbot.run", { bot: "Alpha", text: "hi" }, quiet),
+    ).rejects.toThrow("only Claude sessions");
+
+    expect(quiet.status).not.toHaveBeenCalled();
+    expect(quiet.roster).not.toHaveBeenCalled();
+    expect(quiet.webhooks).not.toHaveBeenCalled();
+    expect(quiet.run).not.toHaveBeenCalled();
+    expect(quiet.requestId).not.toHaveBeenCalled();
+    expect(quiet.now).not.toHaveBeenCalled();
+  });
+
+  it("checks the folder policy first and throws without calling roster, webhooks or run", async () => {
+    const blocked = makeBackend(rosterBots, {
+      status: vi.fn(async () => ({ installed: true, allowed: false, policy: "confidential" })),
+    });
+    const claude = session({ harness: "claude", cwd: "/client" });
+    await expect(
+      handleGrokBot(claude, "grokbot.run", { bot: "Alpha", text: "hi" }, blocked),
+    ).rejects.toThrow("privacy policy is confidential");
+
+    expect(blocked.status).toHaveBeenCalledWith("/client");
+    expect(blocked.roster).not.toHaveBeenCalled();
+    expect(blocked.webhooks).not.toHaveBeenCalled();
+    expect(blocked.run).not.toHaveBeenCalled();
+  });
+
+  it("throws a message naming the bot and mentioning grokbot.draft when bot has no webhook", async () => {
+    const backend = makeBackend(rosterBots);
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: "hi" }, backend),
+    ).rejects.toThrow("Alpha has no webhook yet");
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: "hi" }, backend),
+    ).rejects.toThrow("grokbot.draft");
+
+    expect(backend.run).not.toHaveBeenCalled();
+  });
+
+  it("runs the bot through webhook on happy path with worktreeCwd or cwd, outcome started, requestId, since, bot, and note", async () => {
+    let nowCalledBeforeRun = false;
+    let backend!: ReturnType<typeof makeBackend>;
+    const run = vi.fn(async () => {
+      nowCalledBeforeRun = backend.now.mock.calls.length > 0;
+      return { outcome: "started" as const, status: 200, detail: null };
+    });
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    backend = makeBackend(rosterBots, { webhooks, run, now: FIXED_NOW });
+
+    const sessWorktree = session({ cwd: "/repo", worktreeCwd: "/repo/wt" });
+    const result = (await handleGrokBot(
+      sessWorktree,
+      "grokbot.run",
+      { bot: "Alpha", text: "  start task  " },
+      backend,
+    )) as {
+      outcome: string;
+      requestId: string;
+      since: string;
+      bot: { id: string; name: string };
+      note: string;
+    };
+
+    expect(backend.run).toHaveBeenCalledWith("bot-alpha", "start task", "mc-test1234", "/repo/wt");
+    expect(nowCalledBeforeRun).toBe(true);
+    expect(backend.now).toHaveBeenCalled();
+    expect(result).toEqual({
+      bot: { id: "bot-alpha", name: "Alpha" },
+      outcome: "started",
+      requestId: "mc-test1234",
+      since: new Date(FIXED_NOW).toISOString(),
+      note: expect.stringContaining("grokbot.read"),
+    });
+
+    const sessCwd = session({ cwd: "/only-cwd", worktreeCwd: undefined });
+    await handleGrokBot(sessCwd, "grokbot.run", { bot: "Alpha", text: "x" }, backend);
+    expect(backend.run).toHaveBeenLastCalledWith("bot-alpha", "x", "mc-test1234", "/only-cwd");
+  });
+
+  it("returns outcome unknown and a note that it may or may not have started when backend outcome is unknown", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const run = vi.fn(async () => ({ outcome: "unknown" as const, status: null, detail: null }));
+    const backend = makeBackend(rosterBots, { webhooks, run });
+
+    const result = (await handleGrokBot(
+      session({}),
+      "grokbot.run",
+      { bot: "Alpha", text: "hi" },
+      backend,
+    )) as { outcome: string; note: string };
+
+    expect(result.outcome).toBe("unknown");
+    expect(result.note).toContain("may or may not have started");
+  });
+
+  it("propagates an error thrown by run unchanged", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const customError = new Error("network timeout");
+    const run = vi.fn(async () => {
+      throw customError;
+    });
+    const backend = makeBackend(rosterBots, { webhooks, run });
+
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: "hi" }, backend),
+    ).rejects.toThrow(customError);
+  });
+
+  it("throws on empty or whitespace text, accepts GROK_BOT_RUN_LIMIT emoji code points, and rejects one more", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const backend = makeBackend(rosterBots, { webhooks });
+
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: "" }, backend),
+    ).rejects.toThrow("text must be a non-empty string");
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: "   \t\n  " }, backend),
+    ).rejects.toThrow("text must be a non-empty string");
+
+    const okEmoji = "🚀".repeat(GROK_BOT_RUN_LIMIT);
+    expect(okEmoji.length).toBe(GROK_BOT_RUN_LIMIT * 2);
+    expect([...okEmoji].length).toBe(GROK_BOT_RUN_LIMIT);
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: okEmoji }, backend),
+    ).resolves.toBeDefined();
+
+    const tooLongEmoji = "🚀".repeat(GROK_BOT_RUN_LIMIT + 1);
+    expect([...tooLongEmoji].length).toBe(GROK_BOT_RUN_LIMIT + 1);
+    await expect(
+      handleGrokBot(session({}), "grokbot.run", { bot: "Alpha", text: tooLongEmoji }, backend),
+    ).rejects.toThrow(String(GROK_BOT_RUN_LIMIT));
+  });
+
+  it("still runs when Grok Bot is not installed locally if allowed is true", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const backend = makeBackend(rosterBots, {
+      webhooks,
+      status: vi.fn(async () => ({ installed: false, allowed: true, policy: "personal" })),
+    });
+
+    const result = (await handleGrokBot(
+      session({}),
+      "grokbot.run",
+      { bot: "Alpha", text: "cloud run" },
+      backend,
+    )) as { outcome: string };
+
+    expect(result.outcome).toBe("started");
+    expect(backend.run).toHaveBeenCalled();
   });
 });
 
