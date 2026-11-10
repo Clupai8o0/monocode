@@ -559,3 +559,42 @@ describe("unknown action", () => {
     );
   });
 });
+
+describe("limits", () => {
+  it("rejects a since past the safe integer range and clamps old spans to zero", () => {
+    expect(() => parseSince(1e19, FIXED_NOW)).toThrow("since must be");
+    expect(parseSince("999999w", FIXED_NOW)).toBe(0);
+  });
+
+  it("returns null times for out-of-range timestamps instead of failing", async () => {
+    const backend = makeBackend([bot({ id: "bot-far", name: "Far", lastActivityAt: 9.2e18 })]);
+    const result = (await handleGrokBot(session({}), "grokbot.list", {}, backend)) as {
+      bots: { lastActivity: string | null }[];
+    };
+    expect(result.bots[0].lastActivity).toBeNull();
+  });
+
+  it("pages out older entries once a read passes the text budget", async () => {
+    const big = "x".repeat(20_000);
+    const chat = vi.fn(async (): Promise<GrokBotChat> => ({
+      botId: "bot-alpha",
+      schemaVersion: 1,
+      persistedAt: SAVED_AT,
+      total: 200,
+      moreBefore: false,
+      entries: Array.from({ length: 200 }, (_, seq) => ({ id: `e${seq}`, seq, kind: "message", role: "user", text: big, at: null })),
+    }));
+    const backend = makeBackend(rosterBots, { chat });
+    const result = (await handleGrokBot(session({}), "grokbot.read", { bot: "Alpha", limit: 200, maxChars: 20_000 }, backend)) as {
+      entries: { seq: number }[];
+      moreBefore: boolean;
+      nextBefore?: number;
+    };
+    expect(result.entries.length).toBeLessThan(200);
+    expect(result.entries.length).toBeGreaterThan(0);
+    expect(result.entries[result.entries.length - 1].seq).toBe(199);
+    expect(result.moreBefore).toBe(true);
+    expect(result.nextBefore).toBe(result.entries[0].seq);
+    expect(JSON.stringify(result).length).toBeLessThan(4_000_000);
+  });
+});

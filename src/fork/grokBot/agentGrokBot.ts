@@ -107,8 +107,29 @@ function requireReader(source: Session) {
   if (source.id.startsWith("mcp-") || source.harness !== "claude") throw new Error(DENIED);
 }
 
+/** JavaScript dates stop at ±8.64e15 ms; anything past that is bad data. */
 function iso(ms: number | null | undefined): string | null {
-  return typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  return typeof ms === "number" && Number.isFinite(ms) && Math.abs(ms) <= 8.64e15
+    ? new Date(ms).toISOString()
+    : null;
+}
+
+/**
+ * The app CLI drops answers over 4 MB, and escaping can make a character six
+ * bytes, so one read returns at most this much text; older entries page out.
+ */
+const READ_TEXT_BUDGET = 500_000;
+
+function withinBudget(entries: GrokBotEntry[]): GrokBotEntry[] {
+  let used = 0;
+  let start = entries.length;
+  while (start > 0) {
+    const size = (entries[start - 1].text?.length ?? 0) + 200;
+    if (used + size > READ_TEXT_BUDGET && start < entries.length) break;
+    used += size;
+    start -= 1;
+  }
+  return entries.slice(start);
 }
 
 function integer(value: unknown, name: string, min: number, max: number): number | undefined {
@@ -125,12 +146,12 @@ const SPAN_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000
 export function parseSince(value: unknown, now: number): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value === "number") {
-    if (Number.isInteger(value) && value >= 0) return value;
+    if (Number.isSafeInteger(value) && value >= 0) return value;
   } else if (typeof value === "string") {
     const span = /^(\d{1,6})\s*([mhdw])$/i.exec(value.trim());
-    if (span) return now - Number(span[1]) * SPAN_MS[span[2].toLowerCase()];
+    if (span) return Math.max(0, now - Number(span[1]) * SPAN_MS[span[2].toLowerCase()]);
     const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed)) return Math.max(0, parsed);
   }
   throw new Error("since must be an ISO time, epoch milliseconds, or a span such as 24h or 7d");
 }
@@ -229,14 +250,16 @@ export async function handleGrokBot(
         return { bot: { id: bot.id, name: bot.name }, total: 0, moreBefore: false, entries: [], note: "Grok Bot has no saved chat for this bot yet." };
       }
       const chat = await backend.chat(bot.id, options);
-      const first = chat.entries[0];
+      const entries = withinBudget(chat.entries);
+      const moreBefore = chat.moreBefore || entries.length < chat.entries.length;
+      const first = entries[0];
       return {
         bot: { id: bot.id, name: bot.name },
         savedAt: iso(chat.persistedAt),
         total: chat.total,
-        moreBefore: chat.moreBefore,
-        ...(chat.moreBefore && first ? { nextBefore: first.seq } : {}),
-        entries: chat.entries.map(entryView),
+        moreBefore,
+        ...(moreBefore && first ? { nextBefore: first.seq } : {}),
+        entries: entries.map(entryView),
         note: READ_NOTE,
       };
     }
