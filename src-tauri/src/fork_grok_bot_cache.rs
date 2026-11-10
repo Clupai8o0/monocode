@@ -1,6 +1,7 @@
 //! Fork feature: read Grok Bot's local cache (bots and chats), read only.
 
 use std::collections::HashSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -213,12 +214,18 @@ pub fn parse_chat(json: &str, bot_id: &str, options: &ReadOptions) -> Result<Gro
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| CHAT_FORMAT.to_string())?;
 
+    // If any entry lacks a seq, number them all by position, so a made-up
+    // number can never equal a real one and break paging.
+    let numbered = raw_entries
+        .iter()
+        .filter(|raw| raw.is_object())
+        .all(|raw| int_field(raw, "seq").is_some());
     let mut entries = Vec::new();
     for (index, raw) in raw_entries.iter().enumerate() {
         if !raw.is_object() {
             continue;
         }
-        let fallback_seq = i64::try_from(index).unwrap_or(i64::MAX);
+        let position = i64::try_from(index).unwrap_or(i64::MAX);
         let kind = string_field(raw, "kind").unwrap_or_default();
         let (text, truncated) = clip_text(entry_text(kind, raw), options.max_chars);
         let streaming = kind == "message" && bool_field(raw, "isStreaming");
@@ -232,7 +239,11 @@ pub fn parse_chat(json: &str, bot_id: &str, options: &ReadOptions) -> Result<Gro
         };
         entries.push(GrokBotEntry {
             id: string_field(raw, "id").unwrap_or_default().to_string(),
-            seq: int_field(raw, "seq").unwrap_or(fallback_seq),
+            seq: if numbered {
+                int_field(raw, "seq").unwrap_or(position)
+            } else {
+                position
+            },
             kind: kind.to_string(),
             role: if kind == "message" {
                 string_field(raw, "role").map(str::to_string)
@@ -282,7 +293,8 @@ pub fn load_roster(dir: &Path) -> Result<GrokBotRoster, String> {
     if roster.size > MAX_FILE_BYTES {
         return Err(ROSTER_TOO_LARGE.to_string());
     }
-    let (schema_version, mut bots) = read_twice(&roster.path, ROSTER_FORMAT, parse_roster)?;
+    let (schema_version, mut bots) =
+        read_twice(&roster.path, ROSTER_FORMAT, ROSTER_TOO_LARGE, parse_roster)?;
     let chats: HashSet<String> = scan
         .transcripts
         .iter()
@@ -313,22 +325,30 @@ pub fn load_chat(dir: &Path, bot_id: &str, options: &ReadOptions) -> Result<Grok
     if transcript.size > MAX_FILE_BYTES {
         return Err(CHAT_TOO_LARGE.to_string());
     }
-    read_twice(&transcript.path, CHAT_FORMAT, |json| {
+    read_twice(&transcript.path, CHAT_FORMAT, CHAT_TOO_LARGE, |json| {
         parse_chat(json, bot_id, options)
     })
 }
 
 /// Grok Bot may be rewriting a file while we read it, so a file that won't
 /// read or parse gets one more try a moment later.
+/// The size cap holds for the bytes actually read, even if the file grew
+/// after it was listed.
 fn read_twice<T>(
     path: &Path,
     unreadable: &str,
+    too_large: &str,
     parse: impl Fn(&str) -> Result<T, String>,
 ) -> Result<T, String> {
     let attempt = || {
-        std::fs::read_to_string(path)
-            .map_err(|_| unreadable.to_string())
-            .and_then(|json| parse(&json))
+        let mut json = String::new();
+        std::fs::File::open(path)
+            .and_then(|file| file.take(MAX_FILE_BYTES + 1).read_to_string(&mut json))
+            .map_err(|_| unreadable.to_string())?;
+        if json.len() as u64 > MAX_FILE_BYTES {
+            return Err(too_large.to_string());
+        }
+        parse(&json)
     };
     attempt().or_else(|_| {
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -919,6 +939,29 @@ mod tests {
                 .as_nanos()
         ));
         assert_eq!(load_roster(&dir), Err(NO_DATA.to_string()));
+    }
+
+    #[test]
+    fn a_missing_seq_numbers_every_entry_by_position() {
+        let json = r#"{"schemaVersion":1,"value":{"entries":[
+            {"id":"a","kind":"notice","text":"first"},
+            {"id":"b","kind":"notice","seq":0,"text":"second"}
+        ]}}"#;
+        let options = ReadOptions {
+            limit: 1,
+            since_ms: None,
+            before_seq: None,
+            max_chars: 4000,
+        };
+        let newest = parse_chat(json, "bot", &options).unwrap();
+        assert_eq!(newest.entries[0].text.as_deref(), Some("second"));
+        assert_eq!(newest.entries[0].seq, 1);
+        let older = ReadOptions {
+            before_seq: Some(1),
+            ..options
+        };
+        let page = parse_chat(json, "bot", &older).unwrap();
+        assert_eq!(page.entries[0].text.as_deref(), Some("first"));
     }
 
     #[test]
