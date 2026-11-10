@@ -13,6 +13,13 @@ import {
 } from "../fork/continueElsewhere/continueElsewhere";
 import { harnessUsedPercent } from "../fork/continueElsewhere/continueUsage";
 import {
+  grokBotAvailable,
+  grokBotBrief,
+  grokBotPrompt,
+  openGrokBot,
+  registerGrokBotHost,
+} from "../fork/grokBot/grokBot"; // Fork
+import {
   buildHandoffTarget,
   sourceHandoffPrefs,
 } from "../fork/continueElsewhere/handoffPrefs";
@@ -11635,6 +11642,49 @@ function Workspace({
     });
     return () => registerContinueHost(null);
   }, [onHandoff]);
+
+  // Fork: "Hand over to Grok Bot" (src/fork/grokBot). Local sessions only;
+  // Grok Bot gets a short prompt by link and the full brief goes on the clipboard.
+  useEffect(() => {
+    const localSource = (sessionId: string) => {
+      const source = sessionsRef.current.find((s) => s.id === sessionId);
+      if (!source || source.worktreeRemoved || remoteProjectFor(source.cwd)) {
+        return null;
+      }
+      return source;
+    };
+    registerGrokBotHost({
+      canHandOver: (sessionId) => {
+        const source = localSource(sessionId);
+        return Boolean(source && grokBotAvailable(sessionWorkCwd(source)));
+      },
+      handOver: (sessionId) => {
+        const source = localSource(sessionId);
+        if (!source) return;
+        const cwd = sessionWorkCwd(source);
+        const sliced = sessionThroughTurn(source, source.blocks);
+        const input = {
+          title: sessionDisplayTitle(source.title, source.harness),
+          cwd,
+          branch: source.branch,
+          userRequest: turnUserRequest(source.blocks),
+          files: turnEditedFiles(sliced.blocks, cwd),
+        };
+        const brief = grokBotBrief({
+          ...input,
+          brief: buildDeterministicHandoff(sliced),
+        });
+        void navigator.clipboard
+          .writeText(brief)
+          .catch(() => undefined)
+          .then(() => openGrokBot(grokBotPrompt(input), cwd))
+          .catch((error: unknown) => {
+            console.warn("[fork] Grok Bot handover failed:", error);
+          });
+      },
+    });
+    return () => registerGrokBotHost(null);
+  }, []);
 
   // Fork: what a move needs from the app (src/fork/sessionMove).
   useEffect(() => {

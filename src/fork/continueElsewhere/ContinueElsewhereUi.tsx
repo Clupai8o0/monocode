@@ -13,6 +13,7 @@ import {
   handoffTargets,
   type ContinuedOrigin,
 } from "./continueElsewhere";
+import { GROK_BOT_MENU_LABEL, grokBotHost } from "../grokBot/grokBot";
 
 const PRESS =
   "transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
@@ -37,8 +38,9 @@ export function ContinueElsewhereButton({
   cwd?: string;
 }) {
   const targets = resolveTargets(sessionId, harness);
-  if (targets.length === 0) return null;
-  if (targets.length === 1) {
+  const grokBot = Boolean(grokBotHost()?.canHandOver(sessionId));
+  if (targets.length === 0 && !grokBot) return null;
+  if (targets.length === 1 && !grokBot) {
     const target = targets[0]!;
     return (
       <button
@@ -57,6 +59,7 @@ export function ContinueElsewhereButton({
       sessionId={sessionId}
       harness={harness}
       targets={targets}
+      grokBot={grokBot}
     />
   );
 }
@@ -65,10 +68,13 @@ function ContinueElsewhereMenu({
   sessionId,
   harness,
   targets,
+  grokBot,
 }: {
   sessionId: string;
   harness: HarnessId;
   targets: HarnessId[];
+  /** Fork: also offer the Grok Bot app, which isn't a session provider. */
+  grokBot: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -127,6 +133,21 @@ function ContinueElsewhereMenu({
               </span>
             </button>
           ))}
+          {grokBot ? (
+            <button
+              type="button"
+              role="menuitem"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                dismiss(true);
+                grokBotHost()?.handOver(sessionId);
+              }}
+              className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[12px] text-content/80 hover:bg-content/8 hover:text-content ${PRESS}`}
+            >
+              <HarnessIcon harness="grok" className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{GROK_BOT_MENU_LABEL}</span>
+            </button>
+          ) : null}
         </Popover>
       ) : null}
     </>

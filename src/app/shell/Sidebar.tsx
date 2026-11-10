@@ -86,7 +86,13 @@ import { useTrafficLightsVisible } from "../../platform/tauri/useTrafficLightsVi
 import { copyText } from "../../platform/tauri/clipboard";
 import { resolveModel } from "../../features/sessions/model/models";
 import type { OpenFileFn } from "../../features/search/model/search";
-import { sessionDisplayTitle } from "../../features/sessions/model/session";
+import { sessionDisplayTitle, sessionWorkCwd } from "../../features/sessions/model/session";
+import {
+  GROK_BOT_MENU_ID,
+  GROK_BOT_MENU_LABEL,
+  grokBotAvailable,
+  grokBotHost,
+} from "../../fork/grokBot/grokBot"; // Fork
 import { ParticleText } from "../../shared/ui/ParticleText";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
 import { orchestrationTaskLabel } from "../../features/orchestration/model/orchestrationSummary";
@@ -1629,6 +1635,25 @@ function SidebarComponent({
           }));
         })()
       : []),
+    // Fork: hand the session to the Grok Bot app, when the folder allows it.
+    ...(!multipleMenuSessions &&
+    menuSessions[0] &&
+    grokBotAvailable(sessionWorkCwd(menuSessions[0]))
+      ? (() => {
+          const can = Boolean(grokBotHost()?.canHandOver(menuSessions[0].id));
+          return [
+            {
+              kind: "item" as const,
+              id: GROK_BOT_MENU_ID,
+              label: GROK_BOT_MENU_LABEL,
+              disabled: !can,
+              description: can
+                ? "Opens Grok Bot with a short prompt; the full brief is copied"
+                : "Open the session first",
+            },
+          ];
+        })()
+      : []),
     // Fork: move the session and its work to another machine.
     ...(!multipleMenuSessions && menuSessions[0]
       ? moveMenuItems(menuSessions[0], moveMachines)
@@ -1797,6 +1822,10 @@ function SidebarComponent({
     if (id.startsWith("continue-elsewhere:")) {
       const target = id.slice("continue-elsewhere:".length) as HarnessId;
       continueHost()?.continueSession(sessionIds[0], target);
+      return;
+    }
+    if (id === GROK_BOT_MENU_ID) {
+      grokBotHost()?.handOver(sessionIds[0]); // Fork
       return;
     }
     if (pickMoveItem(id, sessionIds[0], moveMachines)) return; // Fork
