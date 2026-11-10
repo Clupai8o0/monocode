@@ -125,6 +125,8 @@ describe("status", () => {
   it("passes the text and folder to the open command", async () => {
     invoke.mockResolvedValue(undefined);
     await openGrokBot("hi", "/p");
-    expect(invoke).toHaveBeenCalledWith("fork_grok_bot_open", { text: "hi", cwd: "/p" });
+    expect(invoke).toHaveBeenCalledWith("fork_grok_bot_open", { text: "hi", cwd: "/p", botId: null });
+    await openGrokBot("hi", "/p", "bot-1");
+    expect(invoke).toHaveBeenLastCalledWith("fork_grok_bot_open", { text: "hi", cwd: "/p", botId: "bot-1" });
   });
 });

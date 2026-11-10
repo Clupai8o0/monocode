@@ -162,8 +162,13 @@ export function grokBotAvailable(cwd: string): boolean {
   return Boolean(hit?.status.installed && hit.status.allowed);
 }
 
-export function openGrokBot(text: string | undefined, cwd: string): Promise<void> {
-  return invoke("fork_grok_bot_open", { text: text ?? null, cwd });
+/** `botId` picks the bot whose message box gets the text; default is Grok Bot's main bot. */
+export function openGrokBot(
+  text: string | undefined,
+  cwd: string,
+  botId?: string,
+): Promise<void> {
+  return invoke("fork_grok_bot_open", { text: text ?? null, cwd, botId: botId ?? null });
 }
 
 /** For tests. */

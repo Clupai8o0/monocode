@@ -21,6 +21,7 @@ mod fork_tz;
 mod fork_latex;
 mod fork_office;
 mod fork_grok_bot; // Fork: hand a task to the Grok Bot desktop app.
+mod fork_grok_bot_cache; // Fork: read Grok Bot bots and chats for sessions.
 mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 mod fork_code_run; // Fork: sandboxed code drills for the Games panel's Code tab.
@@ -737,6 +738,8 @@ pub fn run() {
             fork_office::fork_office_convert, // Fork
             fork_grok_bot::fork_grok_bot_status, // Fork
             fork_grok_bot::fork_grok_bot_open, // Fork
+            fork_grok_bot_cache::fork_grok_bot_bots, // Fork
+            fork_grok_bot_cache::fork_grok_bot_chat, // Fork
             fork_html::fork_html_preview_create, // Fork
             fork_html::fork_html_preview_remove, // Fork
             fork_code_run::fork_code_run,        // Fork

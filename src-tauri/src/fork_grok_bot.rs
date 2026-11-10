@@ -40,18 +40,30 @@ struct PolicyRule {
 #[tauri::command]
 pub async fn fork_grok_bot_status(cwd: Option<String>) -> GrokBotStatus {
     let (policy, allowed) = folder_policy(cwd.as_deref());
-    GrokBotStatus { installed: installed(), allowed, policy }
+    GrokBotStatus {
+        installed: installed(),
+        allowed,
+        policy,
+    }
 }
 
 /// Async so the `open` call stays off the main thread.
 #[tauri::command]
-pub async fn fork_grok_bot_open(text: Option<String>, cwd: Option<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || open_grok_bot(text, cwd))
+pub async fn fork_grok_bot_open(
+    text: Option<String>,
+    cwd: Option<String>,
+    bot_id: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || open_grok_bot(text, cwd, bot_id))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn open_grok_bot(text: Option<String>, cwd: Option<String>) -> Result<(), String> {
+fn open_grok_bot(
+    text: Option<String>,
+    cwd: Option<String>,
+    bot_id: Option<String>,
+) -> Result<(), String> {
     // No folder means the default policy, never a free pass.
     let (policy, allowed) = folder_policy(cwd.as_deref());
     if !allowed {
@@ -63,7 +75,7 @@ fn open_grok_bot(text: Option<String>, cwd: Option<String>) -> Result<(), String
         return Err("Grok Bot is not installed.".into());
     }
     let output = Command::new("/usr/bin/open")
-        .arg(prompt_url(text.as_deref())?)
+        .arg(prompt_url(text.as_deref(), bot_id.as_deref())?)
         .output()
         .map_err(|e| format!("Grok Bot could not be opened: {e}"))?;
     if output.status.success() {
@@ -130,7 +142,11 @@ fn installed() -> bool {
 /// Expand a leading `~` and drop a trailing `/`, without touching the disk.
 fn expand_rule_path(path: &str, home: &Path) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
-        return home.join(rest).to_string_lossy().trim_end_matches('/').to_string();
+        return home
+            .join(rest)
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_string();
     }
     if path == "~" {
         return home.to_string_lossy().trim_end_matches('/').to_string();
@@ -168,8 +184,26 @@ fn policy_for(policy_json: Option<&str>, home: &Path, cwd: Option<&str>) -> (Str
     (policy, allowed)
 }
 
-fn prompt_url(text: Option<&str>) -> Result<String, String> {
+/// Grok Bot's own pattern for a bot id in its links.
+fn valid_bot_id(id: &str) -> bool {
+    (1..=128).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// `bot_id` picks the bot whose message box gets the text; without it Grok
+/// Bot uses its main bot.
+fn prompt_url(text: Option<&str>, bot_id: Option<&str>) -> Result<String, String> {
     let text = text.map(str::trim).unwrap_or_default();
+    if let Some(id) = bot_id {
+        if !valid_bot_id(id) {
+            return Err("Invalid Grok Bot bot id.".to_string());
+        }
+        if text.is_empty() {
+            return Err("A message for a Grok Bot bot can't be empty.".to_string());
+        }
+    }
     if text.is_empty() {
         return Ok("grokbot://app/v1/open".to_string());
     }
@@ -177,7 +211,10 @@ fn prompt_url(text: Option<&str>) -> Result<String, String> {
         return Err("Grok Bot prompts are limited to 1000 characters.".to_string());
     }
     let encoded: String = url::form_urlencoded::byte_serialize(text.as_bytes()).collect();
-    Ok(format!("grokbot://app/v1/prompt?text={encoded}"))
+    Ok(match bot_id {
+        Some(id) => format!("grokbot://app/v1/prompt?text={encoded}&id={id}"),
+        None => format!("grokbot://app/v1/prompt?text={encoded}"),
+    })
 }
 
 #[cfg(test)]
@@ -197,13 +234,22 @@ mod tests {
 
     #[test]
     fn no_policy_file_allows_everything() {
-        assert_eq!(policy_for(None, Path::new(HOME), Some("/x")), ("none".to_string(), true));
+        assert_eq!(
+            policy_for(None, Path::new(HOME), Some("/x")),
+            ("none".to_string(), true)
+        );
     }
 
     #[test]
     fn a_broken_policy_file_blocks_everything() {
-        assert_eq!(policy_for(Some("{not json"), Path::new(HOME), Some("/x")), unreadable());
-        assert_eq!(policy_for(Some(r#"{"rules": 3}"#), Path::new(HOME), Some("/x")), unreadable());
+        assert_eq!(
+            policy_for(Some("{not json"), Path::new(HOME), Some("/x")),
+            unreadable()
+        );
+        assert_eq!(
+            policy_for(Some(r#"{"rules": 3}"#), Path::new(HOME), Some("/x")),
+            unreadable()
+        );
     }
 
     #[test]
@@ -217,29 +263,52 @@ mod tests {
 
     #[test]
     fn the_longest_matching_rule_wins() {
-        assert_eq!(policy("/Users/sam/Documents/projects/monocode/src"), ("personal".to_string(), true));
-        assert_eq!(policy("/Users/sam/Documents/projects/upwork"), ("confidential".to_string(), false));
-        assert_eq!(policy("/x/monocode-worktrees/foo"), ("confidential".to_string(), false));
+        assert_eq!(
+            policy("/Users/sam/Documents/projects/monocode/src"),
+            ("personal".to_string(), true)
+        );
+        assert_eq!(
+            policy("/Users/sam/Documents/projects/upwork"),
+            ("confidential".to_string(), false)
+        );
+        assert_eq!(
+            policy("/x/monocode-worktrees/foo"),
+            ("confidential".to_string(), false)
+        );
         assert_eq!(policy("/elsewhere"), ("confidential".to_string(), false));
     }
 
     #[test]
     fn urls_encode_and_cap_the_text() {
-        assert_eq!(prompt_url(None).unwrap(), "grokbot://app/v1/open");
-        assert_eq!(prompt_url(Some("  \n ")).unwrap(), "grokbot://app/v1/open");
+        assert_eq!(prompt_url(None, None).unwrap(), "grokbot://app/v1/open");
+        assert_eq!(
+            prompt_url(Some("  \n "), None).unwrap(),
+            "grokbot://app/v1/open"
+        );
         let text = "summarise src/lib.rs & tell me\nwhy";
-        let url = prompt_url(Some(text)).unwrap();
+        let url = prompt_url(Some(text), None).unwrap();
         let query = url.split_once('?').unwrap().1;
         let parsed: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect();
         assert_eq!(parsed, vec![("text".to_string(), text.to_string())]);
-        assert!(prompt_url(Some("😀".repeat(MAX_PROMPT_CHARS / 2).as_str())).is_ok());
-        assert!(prompt_url(Some("😀".repeat(MAX_PROMPT_CHARS / 2 + 1).as_str())).is_err());
+        assert!(prompt_url(Some("😀".repeat(MAX_PROMPT_CHARS / 2).as_str()), None).is_ok());
+        assert!(prompt_url(Some("😀".repeat(MAX_PROMPT_CHARS / 2 + 1).as_str()), None).is_err());
         let too_long = "a".repeat(MAX_PROMPT_CHARS + 1);
         assert_eq!(
-            prompt_url(Some(too_long.as_str())),
+            prompt_url(Some(too_long.as_str()), None),
             Err("Grok Bot prompts are limited to 1000 characters.".to_string())
         );
+    }
+
+    #[test]
+    fn urls_can_name_a_bot() {
+        let url = prompt_url(Some("hi there"), Some("8c1f-ab_C")).unwrap();
+        assert_eq!(url, "grokbot://app/v1/prompt?text=hi+there&id=8c1f-ab_C");
+        assert!(prompt_url(Some("hi"), Some("bad id")).is_err());
+        assert!(prompt_url(Some("hi"), Some("a&text=x")).is_err());
+        assert!(prompt_url(Some("hi"), Some("")).is_err());
+        assert!(prompt_url(Some("hi"), Some("a".repeat(129).as_str())).is_err());
+        assert!(prompt_url(Some("  "), Some("abc")).is_err());
     }
 }

@@ -5,6 +5,8 @@ import { agentProjectLogo } from "../../../fork/projectLogos/agentProjectLogos";
 import { projectLook, setProjectLook } from "../../../fork/stylist/agentProjectLook";
 import { createAgentProject } from "../../../fork/starterMonos/agentProjectCreate";
 import { handleMonoMaker } from "../../../fork/starterMonos/agentMonoMaker";
+// Fork: Grok Bot bots for /operator sessions.
+import { GROK_BOT_FIELDS, handleGrokBot } from "../../../fork/grokBot/agentGrokBot";
 import { looksLikeProject } from "../../projects/model/recents";
 import {
   mergeModelSettings,
@@ -268,6 +270,7 @@ const FIELDS = new Map<string, readonly string[]>([
   ["habits.run", ["id"]],
   ["habits.remove", ["id"]],
   ["chat.card", [...CARD_FIELDS]],
+  ...GROK_BOT_FIELDS, // Fork
 ]);
 
 function fields(action: string, input: Record<string, unknown>) {
@@ -1125,6 +1128,7 @@ export async function handleAgentApp(
     return handleMemory(source, action, input, host);
   if (action.startsWith("habits."))
     return handleHabits(source, action, input, host);
+  if (action.startsWith("grokbot.")) return handleGrokBot(source, action, input); // Fork
   if (action === "chat.card") {
     if (
       !host.postCard ||
