@@ -10,13 +10,19 @@ import { GROK_BOT_PROMPT_LIMIT, openGrokBot, type GrokBotStatus } from "./grokBo
  * dates), so only Claude sessions may use these actions; outside models never
  * do. `grokbot.draft` puts text in one bot's message box through Grok Bot's
  * link. The user still presses send, and the folder's privacy policy applies.
+ * `grokbot.run` starts a run without a click, through a webhook routine the
+ * user set up for that bot (`fork_grok_bot_webhook.rs`; key in the Keychain).
  */
 
 export const GROK_BOT_FIELDS: ReadonlyArray<[string, readonly string[]]> = [
   ["grokbot.list", ["all"]],
   ["grokbot.read", ["bot", "limit", "since", "before", "maxChars"]],
   ["grokbot.draft", ["bot", "text"]],
+  ["grokbot.run", ["bot", "text"]],
 ];
+
+/** Same limit as `fork_grok_bot_webhook.rs`, counted in code points. */
+export const GROK_BOT_RUN_LIMIT = 20_000;
 
 export type GrokBotBot = {
   id: string;
@@ -66,11 +72,27 @@ export type GrokBotChatOptions = {
   maxChars?: number;
 };
 
+export type GrokBotWebhook = {
+  botId: string;
+  host: string;
+  addedAt: number;
+  lastRunAt: number | null;
+};
+
+export type GrokBotRunOutcome = {
+  outcome: "started" | "unknown";
+  status: number | null;
+  detail: string | null;
+};
+
 export type GrokBotBackend = {
   status(cwd: string): Promise<GrokBotStatus>;
   roster(): Promise<GrokBotRoster>;
   chat(botId: string, options: GrokBotChatOptions): Promise<GrokBotChat>;
   open(text: string, cwd: string, botId: string): Promise<void>;
+  webhooks(): Promise<GrokBotWebhook[]>;
+  run(botId: string, text: string, requestId: string, cwd: string): Promise<GrokBotRunOutcome>;
+  requestId(): string;
   now(): number;
 };
 
@@ -86,6 +108,10 @@ const tauriBackend: GrokBotBackend = {
       maxChars: options.maxChars ?? null,
     }),
   open: (text, cwd, botId) => openGrokBot(text, cwd, botId),
+  webhooks: () => invoke<GrokBotWebhook[]>("fork_grok_bot_webhooks"),
+  run: (botId, text, requestId, cwd) =>
+    invoke<GrokBotRunOutcome>("fork_grok_bot_run", { botId, text, requestId, cwd }),
+  requestId: () => `mc-${crypto.randomUUID().slice(0, 8)}`,
   now: () => Date.now(),
 };
 
@@ -99,6 +125,22 @@ const DRAFT_NOTE =
   "The text is in the bot's message box in Grok Bot, not sent: the user presses send. " +
   "If the bot already had an unsent draft, Grok Bot keeps that draft and drops this text. " +
   "To get the answer once it is sent, call grokbot.read with this bot and since.";
+
+const RUN_NOTE =
+  "Grok Bot started a run in the cloud. The answer appears in the bot's chat, usually within a few minutes, " +
+  "and should start with the requestId in square brackets. Call grokbot.read with this bot and since to get it; " +
+  "the saved copy only updates while Grok Bot is open. Each run uses the user's Grok Bot plan, so never send the same task twice.";
+
+const UNKNOWN_NOTE =
+  "The request went out but no answer came back, so the run may or may not have started. " +
+  "Check grokbot.read with this bot and since before sending it again.";
+
+function noWebhook(name: string): string {
+  return (
+    `${name} has no webhook yet, so it can't be run from here. The user can add one in MonoCode Settings > Connections ` +
+    `under "Let sessions run Grok Bot bots". Until then use grokbot.draft: it puts the text in the bot's message box for the user to send.`
+  );
+}
 
 const DENIED =
   "Grok Bot chats hold the user's personal data, so only Claude sessions in MonoCode may read them.";
@@ -230,9 +272,12 @@ export async function handleGrokBot(
       const roster = await backend.roster();
       const shown = input.all ? roster.bots : roster.bots.filter((bot) => !bot.hidden);
       const hiddenCount = roster.bots.length - shown.length;
+      // Listing still works when the Keychain can't be read; canRun is left out then.
+      const hooks = await backend.webhooks().catch(() => null);
+      const runnable = new Set(hooks?.map((hook) => hook.botId));
       return {
         savedAt: iso(roster.savedAt),
-        bots: shown.map(botView),
+        bots: shown.map((bot) => ({ ...botView(bot), ...(hooks ? { canRun: runnable.has(bot.id) } : {}) })),
         ...(hiddenCount > 0 ? { hiddenCount } : {}),
         note: READ_NOTE,
       };
@@ -280,6 +325,30 @@ export async function handleGrokBot(
       const since = backend.now();
       await backend.open(text, cwd, bot.id);
       return { bot: { id: bot.id, name: bot.name }, placed: true, sent: false, since: iso(since), note: DRAFT_NOTE };
+    }
+    case "grokbot.run": {
+      requireReader(source);
+      const cwd = sessionWorkCwd(source);
+      const status = await backend.status(cwd);
+      if (!status.allowed) throw new Error(`Grok Bot is off for this folder: its privacy policy is ${status.policy}.`);
+      if (typeof input.text !== "string" || !input.text.trim()) throw new Error("text must be a non-empty string");
+      const text = input.text.trim();
+      if ([...text].length > GROK_BOT_RUN_LIMIT) {
+        throw new Error(`text is limited to ${GROK_BOT_RUN_LIMIT} characters for a Grok Bot run`);
+      }
+      const bot = resolveBot((await backend.roster()).bots, input.bot);
+      if (!(await backend.webhooks()).some((hook) => hook.botId === bot.id)) throw new Error(noWebhook(bot.name));
+      const requestId = backend.requestId();
+      const since = backend.now();
+      const result = await backend.run(bot.id, text, requestId, cwd);
+      const started = result.outcome === "started";
+      return {
+        bot: { id: bot.id, name: bot.name },
+        outcome: started ? "started" : "unknown",
+        requestId,
+        since: iso(since),
+        note: started ? RUN_NOTE : UNKNOWN_NOTE,
+      };
     }
     default:
       throw new Error(`Unknown app action: ${action}`);
