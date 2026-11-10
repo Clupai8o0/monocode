@@ -51,9 +51,11 @@ function makeBackend(
     now?: number;
     chat?: GrokBotBackend["chat"];
     open?: GrokBotBackend["open"];
+    status?: GrokBotBackend["status"];
     savedAt?: number | null;
   },
 ): GrokBotBackend & {
+  status: ReturnType<typeof vi.fn>;
   roster: ReturnType<typeof vi.fn>;
   chat: ReturnType<typeof vi.fn>;
   open: ReturnType<typeof vi.fn>;
@@ -65,6 +67,7 @@ function makeBackend(
     bots: rosterBots,
   };
   return {
+    status: opts?.status ?? vi.fn(async () => ({ installed: true, allowed: true, policy: "personal" })),
     roster: vi.fn(async () => rosterValue),
     chat: opts?.chat ?? vi.fn(async (): Promise<GrokBotChat> => ({
       botId: "x",
@@ -145,10 +148,40 @@ describe("callers", () => {
     await expect(handleGrokBot(claude, "grokbot.read", { bot: "Alpha" }, backend)).resolves.toBeDefined();
   });
 
-  it("allows grokbot.draft for codex sessions", async () => {
+  it("rejects grokbot.draft for codex sessions before reading anything", async () => {
+    const quiet = makeBackend(rosterBots);
     const codex = session({ harness: "codex" });
     await expect(
-      handleGrokBot(codex, "grokbot.draft", { bot: "Alpha", text: "hi" }, backend),
+      handleGrokBot(codex, "grokbot.draft", { bot: "zzz", text: "hi" }, quiet),
+    ).rejects.toThrow("only Claude sessions");
+    expect(quiet.status).not.toHaveBeenCalled();
+    expect(quiet.roster).not.toHaveBeenCalled();
+    expect(quiet.open).not.toHaveBeenCalled();
+  });
+
+  it("checks the folder policy before reading the bot list", async () => {
+    const blocked = makeBackend(rosterBots, {
+      status: vi.fn(async () => ({ installed: true, allowed: false, policy: "confidential" })),
+    });
+    const claude = session({ harness: "claude", cwd: "/client" });
+    await expect(
+      handleGrokBot(claude, "grokbot.draft", { bot: "zzz", text: "hi" }, blocked),
+    ).rejects.toThrow("its privacy policy is confidential");
+    expect(blocked.status).toHaveBeenCalledWith("/client");
+    expect(blocked.roster).not.toHaveBeenCalled();
+    expect(blocked.open).not.toHaveBeenCalled();
+    const missing = makeBackend(rosterBots, {
+      status: vi.fn(async () => ({ installed: false, allowed: true, policy: "personal" })),
+    });
+    await expect(
+      handleGrokBot(claude, "grokbot.draft", { bot: "Alpha", text: "hi" }, missing),
+    ).rejects.toThrow("not installed");
+  });
+
+  it("allows grokbot.draft for claude sessions", async () => {
+    const claude = session({ harness: "claude" });
+    await expect(
+      handleGrokBot(claude, "grokbot.draft", { bot: "Alpha", text: "hi" }, backend),
     ).resolves.toMatchObject({ placed: true, sent: false });
   });
 });

@@ -113,9 +113,20 @@ pub fn decode_blob_name(file_name: &str) -> Option<String> {
 }
 
 /// Split a decoded key into its account and slice.
+/// The account can hold dots (an email login, say), so the known slices are
+/// found from the right first.
 pub fn split_key(key: &str) -> Option<(String, String)> {
     let rest = key.strip_prefix(KEY_PREFIX)?;
-    let (account, slice) = rest.split_once('.')?;
+    let roster = format!(".{ROSTER_SLICE}");
+    let transcript = format!(".{TRANSCRIPT_PREFIX}");
+    let cut = if rest.ends_with(&roster) {
+        rest.len() - roster.len()
+    } else if let Some(at) = rest.rfind(&transcript) {
+        at
+    } else {
+        rest.find('.')?
+    };
+    let (account, slice) = (&rest[..cut], &rest[cut + 1..]);
     if account.is_empty() || slice.is_empty() {
         return None;
     }
@@ -271,8 +282,7 @@ pub fn load_roster(dir: &Path) -> Result<GrokBotRoster, String> {
     if roster.size > MAX_FILE_BYTES {
         return Err(ROSTER_TOO_LARGE.to_string());
     }
-    let json = std::fs::read_to_string(&roster.path).map_err(|_| ROSTER_FORMAT.to_string())?;
-    let (schema_version, mut bots) = parse_roster(&json)?;
+    let (schema_version, mut bots) = read_twice(&roster.path, ROSTER_FORMAT, parse_roster)?;
     let chats: HashSet<String> = scan
         .transcripts
         .iter()
@@ -303,8 +313,27 @@ pub fn load_chat(dir: &Path, bot_id: &str, options: &ReadOptions) -> Result<Grok
     if transcript.size > MAX_FILE_BYTES {
         return Err(CHAT_TOO_LARGE.to_string());
     }
-    let json = std::fs::read_to_string(&transcript.path).map_err(|_| CHAT_FORMAT.to_string())?;
-    parse_chat(&json, bot_id, options)
+    read_twice(&transcript.path, CHAT_FORMAT, |json| {
+        parse_chat(json, bot_id, options)
+    })
+}
+
+/// Grok Bot may be rewriting a file while we read it, so a file that won't
+/// read or parse gets one more try a moment later.
+fn read_twice<T>(
+    path: &Path,
+    unreadable: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> Result<T, String> {
+    let attempt = || {
+        std::fs::read_to_string(path)
+            .map_err(|_| unreadable.to_string())
+            .and_then(|json| parse(&json))
+    };
+    attempt().or_else(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        attempt()
+    })
 }
 
 /// List the saved bots for the TS side.
@@ -626,6 +655,21 @@ mod tests {
             None
         );
         assert_eq!(split_key("sand.client.slice.account.account"), None);
+        assert_eq!(
+            split_key("sand.client.slice.account.sam.l%40x.com.roster.last-roster"),
+            Some((
+                "sam.l%40x.com".to_string(),
+                "roster.last-roster".to_string()
+            ))
+        );
+        assert_eq!(
+            split_key("sand.client.slice.account.a.b.transcript.replicas.bot-1"),
+            Some(("a.b".to_string(), "transcript.replicas.bot-1".to_string()))
+        );
+        assert_eq!(
+            split_key("sand.client.slice.account..transcript.replicas.x"),
+            None
+        );
     }
 
     #[test]
