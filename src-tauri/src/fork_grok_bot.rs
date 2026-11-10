@@ -89,7 +89,8 @@ fn open_grok_bot(
     })
 }
 
-fn folder_policy(cwd: Option<&str>) -> (String, bool) {
+/// Also used by `fork_grok_bot_webhook.rs`.
+pub(crate) fn folder_policy(cwd: Option<&str>) -> (String, bool) {
     let home = dirs_home().map(PathBuf::from).unwrap_or_default();
     match read_policy(&home) {
         Ok(json) => policy_for(json.as_deref(), &home, cwd),
@@ -185,7 +186,7 @@ fn policy_for(policy_json: Option<&str>, home: &Path, cwd: Option<&str>) -> (Str
 }
 
 /// Grok Bot's own pattern for a bot id in its links.
-fn valid_bot_id(id: &str) -> bool {
+pub(crate) fn valid_bot_id(id: &str) -> bool {
     (1..=128).contains(&id.len())
         && id
             .bytes()
