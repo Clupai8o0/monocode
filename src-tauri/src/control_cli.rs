@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 50] = [
+const APP_ACTIONS: [&str; 51] = [
     "projects.list",
     "models.list",
     "monos.list",
@@ -134,6 +134,7 @@ const APP_ACTIONS: [&str; 50] = [
     "grokbot.list",
     "grokbot.read",
     "grokbot.draft",
+    "grokbot.run",
 ];
 const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /operator.
 
@@ -390,6 +391,14 @@ Actions:
                   user presses send in Grok Bot. Claude only, and the folder's
                   privacy policy must allow Grok. Then poll grokbot.read with
                   the returned since.
+  grokbot.run    {"bot":"Finance","text":"..."}  Start a run of that bot now,
+                  no click needed (up to 20000 characters). Works only for
+                  bots the user gave a webhook in MonoCode settings (list
+                  shows canRun). Each run uses the user's Grok Bot plan:
+                  never send the same task twice. Returns requestId and
+                  since; the bot's answer starts with [requestId] in
+                  grokbot.read. outcome "unknown" means check before resending.
+                  Claude only, and the folder's privacy policy must allow Grok.
 
 The output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 Use --input - to pass JSON on stdin. Never print MonoCode credentials.
@@ -892,7 +901,7 @@ mod tests {
 
     #[test]
     fn app_mode_exposes_grok_bot_actions() {
-        for action in ["grokbot.list", "grokbot.read", "grokbot.draft"] {
+        for action in ["grokbot.list", "grokbot.read", "grokbot.draft", "grokbot.run"] {
             assert!(matches!(
                 parse_args_for(&args(&[action, "--json", r#"{"bot":"Email"}"#]), true),
                 Ok(Parsed::Call(_, _, _))

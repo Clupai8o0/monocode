@@ -220,6 +220,13 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "ssh remote connect host server environment",
   },
   {
+    // Fork: src/fork/grokBot/GrokBotWebhooksSection.tsx.
+    id: "grok-bot-webhooks",
+    section: "connections",
+    label: "Let sessions run Grok Bot bots",
+    keywords: "grok bot xai webhook routine key keychain run send automation",
+  },
+  {
     id: "mcp-servers",
     section: "mcp",
     label: "MCP servers",

@@ -441,6 +441,7 @@ import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
 import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
 import { FeatureCoachPage } from "../../../fork/featureCoach/FeatureCoachPage"; // Fork
 import { McpAccessSection } from "../../../fork/mcpAccess/McpAccessSection"; // Fork
+import { GrokBotWebhooksSection } from "../../../fork/grokBot/GrokBotWebhooksSection"; // Fork
 import { IdleCompactSetting } from "../../../fork/idleCompact/IdleCompactSetting"; // Fork
 import {
   removeWorktree,
@@ -664,6 +665,8 @@ export function SettingsView({
                 <div className="flex flex-col gap-10">
                   <ConnectionsSettings />
                   <MobileSettings />
+                  {/* Fork: Grok Bot runs from sessions. */}
+                  <GrokBotWebhooksSection />
                 </div>
               ) : null}
               {/* Fork: Home lab. */}
