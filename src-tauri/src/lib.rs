@@ -35,6 +35,7 @@ mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
 mod fork_memory; // Fork: the Memory manager's per-session RAM report.
 mod fork_account_homes; // Fork: which Claude login (main or cx) each account runs on.
+mod fork_meter_accounts; // Fork: usage-meter-only account folders (e.g. a client login).
 // Fork: installs a staged personal build on quit, however MonoCode was opened.
 #[cfg(target_os = "macos")]
 mod fork_update;
@@ -776,6 +777,7 @@ pub fn run() {
             fork_workspaces::fork_workspace_chrome,         // Fork
             fork_account_homes::fork_account_homes,         // Fork
             fork_account_homes::fork_add_cx_account,        // Fork
+            fork_meter_accounts::fork_meter_accounts,       // Fork
             fork_location::fork_location_status,            // Fork
             fork_location::fork_location_set_mode,          // Fork
             fork_location::fork_place_add,                  // Fork

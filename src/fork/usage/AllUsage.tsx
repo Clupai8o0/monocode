@@ -37,6 +37,11 @@ import {
   type ExtraUsageProvider,
   type UsageBar,
 } from "./extraUsage";
+import {
+  meterAccountName,
+  useMeterAccounts,
+  type MeterAccount,
+} from "./meterAccounts"; // Fork: meter-only logins (e.g. a client seat)
 
 const EXTRA: {
   provider: ExtraUsageProvider;
@@ -113,6 +118,7 @@ export function AllUsagePanel() {
   const [tab, setTab] = useState<"usage" | "cost">("usage");
   const claude = useAccounts("claude");
   const codex = useAccounts("codex");
+  const meters = useMeterAccounts();
   const [now, setNow] = useState(Date.now);
   const refresh = (force: boolean) => {
     setNow(Date.now());
@@ -122,12 +128,15 @@ export function AllUsagePanel() {
     for (const account of codex) {
       void loadRateLimits("codex", account.id, force);
     }
+    for (const meter of meters) {
+      void loadRateLimits(meter.provider, meter.id, force);
+    }
     for (const { provider } of EXTRA) void loadExtraUsage(provider, force);
   };
   // Read on open and when an account is added; cached answers keep this cheap.
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  const accountKey = [...claude, ...codex]
+  const accountKey = [...claude, ...codex, ...meters]
     .map((account) => `${account.provider}:${account.id}`)
     .join(",");
   useEffect(() => refreshRef.current(false), [accountKey]);
@@ -182,6 +191,7 @@ export function AllUsagePanel() {
             now={now}
           />
         ))}
+        <MeterRows meters={meters} provider="claude" now={now} />
       </Section>
       <Section name="Codex" harness="codex">
         {codex.map((account) => (
@@ -192,6 +202,7 @@ export function AllUsagePanel() {
             now={now}
           />
         ))}
+        <MeterRows meters={meters} provider="codex" now={now} />
       </Section>
       {EXTRA.map(({ provider, name, harness }) => (
         <ExtraSection
@@ -205,6 +216,36 @@ export function AllUsagePanel() {
         </>
       ) : null}
     </div>
+  );
+}
+
+/** Meter-only logins: shown like an account, never offered for sessions. */
+function MeterRows({
+  meters,
+  provider,
+  now,
+}: {
+  meters: MeterAccount[];
+  provider: "claude" | "codex";
+  now: number;
+}) {
+  return (
+    <>
+      {meters
+        .filter((meter) => meter.provider === provider)
+        .map((meter) => (
+          <PlanRow
+            key={meter.id}
+            provider={provider}
+            account={{
+              id: meter.id,
+              provider,
+              label: `${meterAccountName(meter)} · meter only`,
+            }}
+            now={now}
+          />
+        ))}
+    </>
   );
 }
 
