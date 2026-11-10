@@ -13,7 +13,11 @@ import {
   handoffTargets,
   type ContinuedOrigin,
 } from "./continueElsewhere";
-import { GROK_BOT_MENU_LABEL, grokBotHost } from "../grokBot/grokBot";
+import {
+  GROK_BOT_MENU_LABEL,
+  grokBotHost,
+  useGrokBotStatusVersion,
+} from "../grokBot/grokBot";
 
 const PRESS =
   "transition-[background-color,color,transform] duration-150 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
@@ -37,6 +41,7 @@ export function ContinueElsewhereButton({
   /** Kept for call-site compatibility; live targets come from the continue host. */
   cwd?: string;
 }) {
+  useGrokBotStatusVersion();
   const targets = resolveTargets(sessionId, harness);
   const grokBot = Boolean(grokBotHost()?.canHandOver(sessionId));
   if (targets.length === 0 && !grokBot) return null;

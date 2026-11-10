@@ -19,6 +19,7 @@ import {
   openGrokBot,
   registerGrokBotHost,
 } from "../fork/grokBot/grokBot"; // Fork
+import { copyText } from "../platform/tauri/clipboard"; // Fork: Grok Bot brief
 import {
   buildHandoffTarget,
   sourceHandoffPrefs,
@@ -11663,23 +11664,36 @@ function Workspace({
         if (!source) return;
         const cwd = sessionWorkCwd(source);
         const sliced = sessionThroughTurn(source, source.blocks);
+        // The latest request, not the session's first one.
+        let lastUser = source.blocks.length - 1;
+        while (lastUser >= 0 && source.blocks[lastUser]!.role !== "user") {
+          lastUser -= 1;
+        }
         const input = {
           title: sessionDisplayTitle(source.title, source.harness),
           cwd,
           branch: source.branch,
-          userRequest: turnUserRequest(source.blocks),
+          userRequest:
+            lastUser >= 0 ? turnUserRequest(source.blocks.slice(lastUser)) : "",
           files: turnEditedFiles(sliced.blocks, cwd),
         };
         const brief = grokBotBrief({
           ...input,
           brief: buildDeterministicHandoff(sliced),
         });
-        void navigator.clipboard
-          .writeText(brief)
-          .catch(() => undefined)
-          .then(() => openGrokBot(grokBotPrompt(input), cwd))
+        void copyText(brief)
+          .then(
+            () => true,
+            () => false,
+          )
+          .then((briefCopied) =>
+            openGrokBot(grokBotPrompt({ ...input, briefCopied }), cwd),
+          )
           .catch((error: unknown) => {
-            console.warn("[fork] Grok Bot handover failed:", error);
+            void message(String(error), {
+              title: "Couldn't hand over to Grok Bot",
+              kind: "warning",
+            });
           });
       },
     });

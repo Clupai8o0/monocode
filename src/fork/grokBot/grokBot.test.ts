@@ -31,6 +31,11 @@ describe("grokBotPrompt", () => {
     expect(text).toContain("clipboard");
   });
 
+  it("doesn't mention the clipboard when the copy failed", () => {
+    const text = grokBotPrompt({ ...base, briefCopied: false });
+    expect(text).not.toContain("clipboard");
+  });
+
   it("leaves out lines it has nothing for", () => {
     const text = grokBotPrompt({ title: "T", cwd: "/x/y", files: [] });
     expect(text).not.toContain("Branch:");
@@ -96,6 +101,19 @@ describe("status", () => {
     invoke.mockResolvedValueOnce({ installed: false, allowed: true, policy: "none" });
     await loadGrokBotStatus("/other");
     expect(grokBotAvailable("/other")).toBe(false);
+  });
+
+  it("refreshes a stale entry while keeping the last answer", async () => {
+    vi.useFakeTimers();
+    try {
+      invoke.mockResolvedValue({ installed: true, allowed: true, policy: "personal" });
+      await loadGrokBotStatus("/p");
+      vi.advanceTimersByTime(61_000);
+      expect(grokBotAvailable("/p")).toBe(true);
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("treats a failed status call as unavailable", async () => {

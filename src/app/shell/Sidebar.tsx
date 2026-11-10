@@ -92,6 +92,7 @@ import {
   GROK_BOT_MENU_LABEL,
   grokBotAvailable,
   grokBotHost,
+  useGrokBotStatusVersion,
 } from "../../fork/grokBot/grokBot"; // Fork
 import { ParticleText } from "../../shared/ui/ParticleText";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
@@ -792,6 +793,7 @@ function SidebarComponent({
   const sessionsScrollRef = useRef<HTMLDivElement>(null);
   const { machines: moveMachines } = useRemoteMachines(FORK_SESSION_MOVE); // Fork
   useMoveVersion(); // Fork: the menu's move item follows the host's answer.
+  useGrokBotStatusVersion(); // Fork: the Grok Bot item appears once its check loads.
   const [sessionMenu, setSessionMenu] = useState<{
     x: number;
     y: number;

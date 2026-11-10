@@ -1,7 +1,7 @@
 //! Fork feature: hand a task to the Grok Bot desktop app through its URL scheme.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -52,13 +52,12 @@ pub async fn fork_grok_bot_open(text: Option<String>, cwd: Option<String>) -> Re
 }
 
 fn open_grok_bot(text: Option<String>, cwd: Option<String>) -> Result<(), String> {
-    if let Some(folder) = cwd.as_deref() {
-        let (policy, allowed) = folder_policy(Some(folder));
-        if !allowed {
-            return Err(format!(
-                "Grok Bot is off for this folder: its privacy policy is {policy}."
-            ));
-        }
+    // No folder means the default policy, never a free pass.
+    let (policy, allowed) = folder_policy(cwd.as_deref());
+    if !allowed {
+        return Err(format!(
+            "Grok Bot is off for this folder: its privacy policy is {policy}."
+        ));
     }
     if !installed() {
         return Err("Grok Bot is not installed.".into());
@@ -80,14 +79,43 @@ fn open_grok_bot(text: Option<String>, cwd: Option<String>) -> Result<(), String
 
 fn folder_policy(cwd: Option<&str>) -> (String, bool) {
     let home = dirs_home().map(PathBuf::from).unwrap_or_default();
-    policy_for(read_policy(&home).as_deref(), &home, cwd)
+    match read_policy(&home) {
+        Ok(json) => policy_for(json.as_deref(), &home, cwd),
+        Err(()) => unreadable(),
+    }
 }
 
-fn read_policy(home: &Path) -> Option<String> {
+/// `Ok(None)` only when there is no policy file; any other failure is `Err`.
+fn read_policy(home: &Path) -> Result<Option<String>, ()> {
     if home.as_os_str().is_empty() {
-        return None;
+        return Ok(None);
     }
-    std::fs::read_to_string(home.join(POLICY_FILE)).ok()
+    match std::fs::read_to_string(home.join(POLICY_FILE)) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
+/// A policy file that can't be read or parsed blocks Grok everywhere.
+fn unreadable() -> (String, bool) {
+    ("unreadable".to_string(), false)
+}
+
+/// Resolve `.` and `..` without touching the disk, so `a/allowed/../secret`
+/// is judged as `a/secret`.
+fn normalize(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_str().unwrap_or_default()),
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    format!("/{}", parts.join("/"))
 }
 
 fn installed() -> bool {
@@ -116,10 +144,11 @@ fn policy_for(policy_json: Option<&str>, home: &Path, cwd: Option<&str>) -> (Str
         return ("none".to_string(), true);
     };
     let Ok(file) = serde_json::from_str::<PolicyFile>(json) else {
-        return ("none".to_string(), true);
+        return unreadable();
     };
     let default = file.default.unwrap_or_else(|| "confidential".to_string());
-    let policy = match cwd.filter(|cwd| !cwd.is_empty()) {
+    let cwd = cwd.filter(|cwd| !cwd.is_empty()).map(normalize);
+    let policy = match cwd.as_deref() {
         Some(cwd) => file
             .rules
             .iter()
@@ -169,6 +198,21 @@ mod tests {
     #[test]
     fn no_policy_file_allows_everything() {
         assert_eq!(policy_for(None, Path::new(HOME), Some("/x")), ("none".to_string(), true));
+    }
+
+    #[test]
+    fn a_broken_policy_file_blocks_everything() {
+        assert_eq!(policy_for(Some("{not json"), Path::new(HOME), Some("/x")), unreadable());
+        assert_eq!(policy_for(Some(r#"{"rules": 3}"#), Path::new(HOME), Some("/x")), unreadable());
+    }
+
+    #[test]
+    fn dot_dot_cannot_escape_an_allowed_folder() {
+        assert_eq!(
+            policy("/Users/sam/Documents/projects/monocode/../upwork"),
+            ("confidential".to_string(), false)
+        );
+        assert_eq!(policy("/x/./monocode/src/"), ("personal".to_string(), true));
     }
 
     #[test]

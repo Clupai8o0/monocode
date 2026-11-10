@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useSyncExternalStore } from "react";
 
 /**
  * Fork feature: hand a session over to Grok Bot, xAI's desktop agent app.
@@ -23,6 +24,8 @@ export type GrokBotHandoff = {
   branch?: string;
   userRequest?: string;
   files: string[];
+  /** False when the clipboard copy failed: the prompt then doesn't mention it. */
+  briefCopied?: boolean;
 };
 
 function folderName(cwd: string): string {
@@ -65,7 +68,8 @@ export function grokBotPrompt(input: GrokBotHandoff): string {
     `Task: ${clip(oneLine(input.title), 120)}`,
   ].filter((line): line is string => line !== null);
   const files = filesLine(input.files);
-  const tail = [files ? clip(files, 300) : null, CLIPBOARD_LINE].filter(
+  const clipboard = input.briefCopied === false ? null : CLIPBOARD_LINE;
+  const tail = [files ? clip(files, 300) : null, clipboard].filter(
     (line): line is string => line !== null,
   );
   const request = input.userRequest ? oneLine(input.userRequest) : "";
@@ -101,6 +105,24 @@ export type GrokBotStatus = {
 const STATUS_TTL_MS = 60_000;
 const statusCache = new Map<string, { at: number; status: GrokBotStatus }>();
 const statusLoads = new Map<string, Promise<GrokBotStatus | null>>();
+const listeners = new Set<() => void>();
+let statusVersion = 0;
+
+function statusChanged() {
+  statusVersion += 1;
+  for (const listener of listeners) listener();
+}
+
+/** Re-renders the caller whenever a folder's status loads. */
+export function useGrokBotStatusVersion(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => statusVersion,
+  );
+}
 
 /** Last known status for a folder, or null until one has loaded. */
 export function cachedGrokBotStatus(cwd: string): GrokBotStatus | null {
@@ -114,7 +136,14 @@ export function loadGrokBotStatus(cwd: string): Promise<GrokBotStatus | null> {
   if (pending) return pending;
   const load = invoke<GrokBotStatus>("fork_grok_bot_status", { cwd })
     .then((status) => {
+      const before = statusCache.get(cwd)?.status;
       statusCache.set(cwd, { at: Date.now(), status });
+      if (
+        before?.installed !== status.installed ||
+        before?.allowed !== status.allowed
+      ) {
+        statusChanged();
+      }
       return status;
     })
     .catch(() => null)
@@ -123,14 +152,14 @@ export function loadGrokBotStatus(cwd: string): Promise<GrokBotStatus | null> {
   return load;
 }
 
-/** Show the handover only once the folder is known to allow it. */
+/**
+ * Show the handover only once the folder is known to allow it. A missing or
+ * stale entry starts a load; `useGrokBotStatusVersion` re-renders on change.
+ */
 export function grokBotAvailable(cwd: string): boolean {
-  const status = cachedGrokBotStatus(cwd);
-  if (!status) {
-    void loadGrokBotStatus(cwd);
-    return false;
-  }
-  return status.installed && status.allowed;
+  const hit = statusCache.get(cwd);
+  if (!hit || Date.now() - hit.at >= STATUS_TTL_MS) void loadGrokBotStatus(cwd);
+  return Boolean(hit?.status.installed && hit.status.allowed);
 }
 
 export function openGrokBot(text: string | undefined, cwd: string): Promise<void> {
@@ -141,6 +170,7 @@ export function openGrokBot(text: string | undefined, cwd: string): Promise<void
 export function resetGrokBotStatusCache() {
   statusCache.clear();
   statusLoads.clear();
+  statusVersion = 0;
 }
 
 export type GrokBotHost = {
