@@ -35,6 +35,71 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+/** One row's form. Its own state, so a URL or key typed for one bot never shows in another's. */
+function WebhookForm({
+  botId,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  botId: string;
+  saving: boolean;
+  onSave: (botId: string, url: string, key: string) => void;
+  onCancel: () => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const saveReady = url.trim().length > 0 && key.trim().length > 0 && !saving;
+
+  return (
+    <form
+      className="mt-3 flex flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!saveReady) return;
+        onSave(botId, url.trim(), key.trim());
+      }}
+    >
+      <input
+        type="url"
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        placeholder="https://…"
+        autoComplete="off"
+        className="h-8 rounded-lg bg-content/[0.06] px-2.5 text-[13px] text-content outline-none placeholder:text-content/30 focus-visible:outline-2 focus-visible:outline-accent"
+      />
+      <input
+        type="password"
+        value={key}
+        onChange={(event) => setKey(event.target.value)}
+        placeholder="Key or Authorization header"
+        autoComplete="off"
+        className="h-8 rounded-lg bg-content/[0.06] px-2.5 text-[13px] text-content outline-none placeholder:text-content/30 focus-visible:outline-2 focus-visible:outline-accent"
+      />
+      <div className="flex items-center gap-1.5">
+        <button
+          type="submit"
+          disabled={!saveReady}
+          className={`inline-flex h-7 items-center gap-1.5 rounded-lg bg-content px-2.5 text-[12px] font-medium text-background-base hover:bg-content/85 ${PRESS}`}
+        >
+          {saving ? (
+            <Loader className="size-3.5 animate-spin" aria-hidden />
+          ) : null}
+          Save
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onCancel}
+          className={`h-7 rounded-lg px-2.5 text-[12px] text-content/60 hover:bg-content/8 hover:text-content ${PRESS}`}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function GrokBotWebhooksView({
   rows,
   loading,
@@ -68,22 +133,6 @@ export function GrokBotWebhooksView({
   onRemove: (botId: string) => void;
   onRowTouched: (botId: string) => void;
 }) {
-  const [url, setUrl] = useState("");
-  const [key, setKey] = useState("");
-
-  // Clear on every change of row, so a key typed for one bot never lands on another.
-  useEffect(() => {
-    setUrl("");
-    setKey("");
-  }, [addingBotId]);
-
-  const clearForm = () => {
-    setUrl("");
-    setKey("");
-  };
-
-  const saveReady = url.trim().length > 0 && key.trim().length > 0 && !saving;
-
   return (
     <section
       data-setting-id="grok-bot-webhooks"
@@ -154,6 +203,7 @@ export function GrokBotWebhooksView({
                     confirmRemoveId === row.botId ? (
                       <button
                         type="button"
+                        disabled={saving}
                         onClick={() => {
                           onRemove(row.botId);
                         }}
@@ -164,6 +214,7 @@ export function GrokBotWebhooksView({
                     ) : (
                       <button
                         type="button"
+                        disabled={saving}
                         onClick={() => {
                           onRowTouched(row.botId);
                           onRemoveConfirm(row.botId);
@@ -176,6 +227,7 @@ export function GrokBotWebhooksView({
                   ) : (
                     <button
                       type="button"
+                      disabled={saving}
                       onClick={() => {
                         onRowTouched(row.botId);
                         onAddStart(row.botId);
@@ -188,53 +240,12 @@ export function GrokBotWebhooksView({
                 </div>
 
                 {isAdding ? (
-                  <form
-                    className="mt-3 flex flex-col gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!saveReady) return;
-                      onSave(row.botId, url.trim(), key.trim());
-                    }}
-                  >
-                    <input
-                      type="url"
-                      value={url}
-                      onChange={(event) => setUrl(event.target.value)}
-                      placeholder="https://…"
-                      autoComplete="off"
-                      className="h-8 rounded-lg bg-content/[0.06] px-2.5 text-[13px] text-content outline-none placeholder:text-content/30 focus-visible:outline-2 focus-visible:outline-accent"
-                    />
-                    <input
-                      type="password"
-                      value={key}
-                      onChange={(event) => setKey(event.target.value)}
-                      placeholder="Key or Authorization header"
-                      autoComplete="off"
-                      className="h-8 rounded-lg bg-content/[0.06] px-2.5 text-[13px] text-content outline-none placeholder:text-content/30 focus-visible:outline-2 focus-visible:outline-accent"
-                    />
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="submit"
-                        disabled={!saveReady}
-                        className={`inline-flex h-7 items-center gap-1.5 rounded-lg bg-content px-2.5 text-[12px] font-medium text-background-base hover:bg-content/85 ${PRESS}`}
-                      >
-                        {saving ? (
-                          <Loader className="size-3.5 animate-spin" aria-hidden />
-                        ) : null}
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          clearForm();
-                          onAddCancel();
-                        }}
-                        className={`h-7 rounded-lg px-2.5 text-[12px] text-content/60 hover:bg-content/8 hover:text-content ${PRESS}`}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
+                  <WebhookForm
+                    botId={row.botId}
+                    saving={saving}
+                    onSave={onSave}
+                    onCancel={onAddCancel}
+                  />
                 ) : null}
 
                 {rowError && rowErrorBotId === row.botId ? (
@@ -328,7 +339,7 @@ export function GrokBotWebhooksSection() {
         setRowErrorBotId(undefined);
         saveWebhook(botId, url, key)
           .then(() => {
-            setAddingBotId(null);
+            setAddingBotId((current) => (current === botId ? null : current));
             return reloadHooks();
           })
           .catch((failure) => {

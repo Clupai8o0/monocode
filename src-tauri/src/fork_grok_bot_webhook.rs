@@ -3,7 +3,7 @@
 //! The webhook URL and key stay in the system keychain and never reach the
 //! webview. Grok Bot itself need not be installed: routines run in the cloud.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::io::Read;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,6 +31,10 @@ const MIN_KEY_BYTES: usize = 8;
 const MAX_TEXT_CHARS: usize = 20_000;
 const MAX_SNIPPET_BYTES: u64 = 2048;
 const MAX_SNIPPET_CHARS: usize = 200;
+/// Letters and digits in a row that count as echoing a secret.
+const SECRET_RUN: usize = 12;
+/// Secrets with fewer letters and digits than this are too short to match on.
+const MIN_SECRET_RUN: usize = 8;
 const MIN_GAP_MS: u64 = 10_000;
 const HOUR_MS: u64 = 3_600_000;
 const MAX_RUNS_PER_HOUR: usize = 30;
@@ -468,7 +472,20 @@ fn send(url: &str, key: &str, body: &str) -> Result<RunOutcome, String> {
             }
         }
         Err(ureq::Error::Status(code, response)) => {
-            Err(status_message(code, &read_snippet(response, key)))
+            let snippet = read_snippet(response, url, key);
+            if (500..=599).contains(&code) {
+                // A gateway can fail after the routine already fired.
+                Ok(RunOutcome {
+                    outcome: "unknown",
+                    status: Some(code),
+                    detail: Some(with_snippet(
+                        format!("Grok Bot answered HTTP {code}, so the run may or may not have started."),
+                        &snippet,
+                    )),
+                })
+            } else {
+                Err(status_message(code, &snippet))
+            }
         }
         Err(ureq::Error::Transport(error)) => match error.kind() {
             ureq::ErrorKind::Dns
@@ -489,7 +506,7 @@ fn send(url: &str, key: &str, body: &str) -> Result<RunOutcome, String> {
 }
 
 fn status_message(code: u16, snippet: &str) -> String {
-    let mut message = match code {
+    let message = match code {
         401 | 403 => format!(
             "Grok Bot refused the webhook key (HTTP {code}), so no run started. The routine may have a new key: paste it again in MonoCode Settings > Connections."
         ),
@@ -501,20 +518,60 @@ fn status_message(code: u16, snippet: &str) -> String {
         }
         _ => format!("Grok Bot answered HTTP {code}, so no run started."),
     };
+    with_snippet(message, snippet)
+}
+
+fn with_snippet(mut message: String, snippet: &str) -> String {
     if !snippet.is_empty() {
         message.push_str(&format!(" Grok Bot said: \"{snippet}\""));
     }
     message
 }
 
-/// At most 2048 body bytes, the key masked, whitespace and controls folded.
-fn read_snippet(response: ureq::Response, key: &str) -> String {
+/// The part of the webhook URL that is secret: everything after the host.
+fn url_secret_part(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    rest.find(['/', '?']).map_or("", |at| &rest[at..])
+}
+
+fn alnum_lower(text: &str) -> Vec<u8> {
+    text.bytes()
+        .filter(u8::is_ascii_alphanumeric)
+        .map(|b| b.to_ascii_lowercase())
+        .collect()
+}
+
+/// True when the body holds any SECRET_RUN-long run of the key or of the URL's path and query.
+/// Only letters and digits are compared, ignoring case, so JSON escapes, percent-encoding or a
+/// truncated echo can't hide it. A false match only drops the snippet.
+fn leaks_secret(body: &str, url: &str, key: &str) -> bool {
+    let body = alnum_lower(body);
+    let runs: HashSet<&[u8]> = body.windows(SECRET_RUN).collect();
+    [key, url_secret_part(url)].into_iter().any(|secret| {
+        let secret = alnum_lower(secret);
+        if secret.len() < MIN_SECRET_RUN {
+            false
+        } else if secret.len() < SECRET_RUN {
+            body.windows(secret.len())
+                .any(|run| run == secret.as_slice())
+        } else {
+            secret.windows(SECRET_RUN).any(|run| runs.contains(run))
+        }
+    })
+}
+
+/// At most 2048 body bytes, whitespace and controls folded. Dropped entirely when it
+/// could echo the key or the URL's path.
+fn read_snippet(response: ureq::Response, url: &str, key: &str) -> String {
     let mut bytes = Vec::new();
     let _ = response
         .into_reader()
         .take(MAX_SNIPPET_BYTES)
         .read_to_end(&mut bytes);
     let text = String::from_utf8_lossy(&bytes);
+    if leaks_secret(&text, url, key) {
+        return String::new();
+    }
     let replaced = if key.is_empty() {
         text.into_owned()
     } else {
@@ -770,15 +827,82 @@ mod tests {
     }
 
     #[test]
-    fn send_masks_the_key_in_an_error_body() {
+    fn send_drops_an_error_body_that_echoes_the_key() {
         let key = "sk-secret-key";
         let body = format!("the key {key} was rejected");
         let (url, worker) = serve(answer("401 Unauthorized", "", &body));
         let error = send(&url, key, "{}").unwrap_err();
         assert!(error.to_ascii_lowercase().contains("refused"));
-        assert!(error.contains("[key]"));
-        assert!(!error.contains(key));
+        assert!(!error.contains("said"));
+        assert!(!error.contains("secret"));
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn send_keeps_an_error_body_without_secrets() {
+        let (url, worker) = serve(answer("404 Not Found", "", "routine  is\npaused"));
+        let error = send(&url, "sk-test-key", "{}").unwrap_err();
+        assert!(
+            error.ends_with("Grok Bot said: \"routine is paused\""),
+            "{error}"
+        );
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn send_drops_an_error_body_that_echoes_the_url_path() {
+        let (base, worker) = serve(answer(
+            "404 Not Found",
+            "",
+            r#"{"error":"no route \/v1\/routines\/9F3C2A7B1E5D4C88"}"#,
+        ));
+        let url = base.replace("/hook", "/v1/routines/9f3c2a7b1e5d4c88?sig=abc");
+        let error = send(&url, "sk-test-key", "{}").unwrap_err();
+        assert!(!error.contains("said"), "{error}");
+        assert!(!error.to_ascii_lowercase().contains("9f3c"));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn send_reports_unknown_on_a_server_error() {
+        let (url, worker) = serve(answer("503 Service Unavailable", "", "try later"));
+        let outcome = send(&url, "sk-test-key", "{}").unwrap();
+        assert_eq!(outcome.outcome, "unknown");
+        assert_eq!(outcome.status, Some(503));
+        let detail = outcome.detail.unwrap();
+        assert!(detail.contains("may or may not"), "{detail}");
+        assert!(detail.ends_with("Grok Bot said: \"try later\""), "{detail}");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn leaks_secret_sees_through_encodings_and_truncation() {
+        let url = "https://hooks.example/v1/routines/9f3c2a7b1e5d4c88";
+        let long_key = format!("k{}", "Zq81".repeat(800));
+        // A truncated echo of a key longer than the read window.
+        assert!(leaks_secret(&long_key[..300], url, &long_key));
+        // Percent-encoded and JSON-escaped echoes.
+        assert!(leaks_secret(
+            "key=abcdEFGH1234%2FijklMNOP",
+            url,
+            "abcdEFGH1234/ijklMNOP"
+        ));
+        assert!(leaks_secret(
+            r#""\/routines\/9f3c2a7b1e5d4c88""#,
+            url,
+            "sk-test-key"
+        ));
+        // Case changes don't hide it.
+        assert!(leaks_secret("SK-TEST-KEY bad", url, "sk-test-key"));
+        // The host alone is not secret, and plain messages pass.
+        assert!(!leaks_secret("hooks.example is down", url, "sk-test-key"));
+        assert!(!leaks_secret("routine is paused", url, "sk-test-key"));
+        // Too short to match on: a bare path like /hook.
+        assert!(!leaks_secret(
+            "no hook here",
+            "https://h.example/hook",
+            "sk-test-key"
+        ));
     }
 
     #[test]

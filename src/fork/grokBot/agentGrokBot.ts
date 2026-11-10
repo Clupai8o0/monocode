@@ -111,7 +111,7 @@ const tauriBackend: GrokBotBackend = {
   webhooks: () => invoke<GrokBotWebhook[]>("fork_grok_bot_webhooks"),
   run: (botId, text, requestId, cwd) =>
     invoke<GrokBotRunOutcome>("fork_grok_bot_run", { botId, text, requestId, cwd }),
-  requestId: () => `mc-${crypto.randomUUID().slice(0, 8)}`,
+  requestId: () => `mc-${crypto.randomUUID()}`,
   now: () => Date.now(),
 };
 
@@ -132,7 +132,7 @@ const RUN_NOTE =
   "the saved copy only updates while Grok Bot is open. Each run uses the user's Grok Bot plan, so never send the same task twice.";
 
 const UNKNOWN_NOTE =
-  "The request went out but no answer came back, so the run may or may not have started. " +
+  "Grok Bot didn't confirm the run, so it may or may not have started. " +
   "Check grokbot.read with this bot and since before sending it again.";
 
 function noWebhook(name: string): string {
@@ -342,12 +342,13 @@ export async function handleGrokBot(
       const since = backend.now();
       const result = await backend.run(bot.id, text, requestId, cwd);
       const started = result.outcome === "started";
+      const detail = !started && typeof result.detail === "string" && result.detail ? `${result.detail} ` : "";
       return {
         bot: { id: bot.id, name: bot.name },
         outcome: started ? "started" : "unknown",
         requestId,
         since: iso(since),
-        note: started ? RUN_NOTE : UNKNOWN_NOTE,
+        note: started ? RUN_NOTE : `${detail}${UNKNOWN_NOTE}`,
       };
     }
     default:

@@ -698,6 +698,25 @@ describe("grokbot.run", () => {
     expect(result.note).toContain("may or may not have started");
   });
 
+  it("puts the backend's detail in front of the note when the outcome is unknown", async () => {
+    const webhooks = vi.fn(async () => [
+      { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
+    ]);
+    const detail = "Grok Bot answered HTTP 503, so the run may or may not have started.";
+    const run = vi.fn(async () => ({ outcome: "unknown" as const, status: 503, detail }));
+    const backend = makeBackend(rosterBots, { webhooks, run });
+
+    const result = (await handleGrokBot(
+      session({}),
+      "grokbot.run",
+      { bot: "Alpha", text: "hi" },
+      backend,
+    )) as { outcome: string; note: string };
+
+    expect(result.outcome).toBe("unknown");
+    expect(result.note.startsWith(`${detail} Grok Bot didn't confirm`)).toBe(true);
+  });
+
   it("propagates an error thrown by run unchanged", async () => {
     const webhooks = vi.fn(async () => [
       { botId: "bot-alpha", host: "grok.test", addedAt: 1, lastRunAt: null },
