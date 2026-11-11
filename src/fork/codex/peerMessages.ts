@@ -71,6 +71,10 @@ export class CodexPeerMessages {
       this.submitted.has(envelopeKey(message))
     )
       return null;
+    // Find the sender's project now, while it still runs.
+    void import("../peerMessages/peerProject")
+      .then((module) => module.notePeerArrival(peer.text))
+      .catch(() => undefined);
     return peer;
   }
 }

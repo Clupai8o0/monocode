@@ -700,6 +700,7 @@ import {
   withinOpenGrace,
 } from "../fork/projectHome/homeStore"; // Fork
 import { ProjectHomePage } from "../fork/projectHome/ProjectHomePage"; // Fork
+import { setHomeInlineData } from "../fork/projectHome/homeInline"; // Fork
 import { setShowsOpener } from "../fork/shows/showsOpener"; // Fork
 import type { FileOpenOptions } from "../features/search/model/search"; // Fork
 import { ShowsWatcher } from "../fork/shows/ShowsLayer"; // Fork
@@ -14142,6 +14143,41 @@ function Workspace({
     if (Date.now() - want.at < 10_000) onNew();
   }, [sidebarCwd, onNew]);
   useFillQueuePump(promptableSessions);
+  // Fork: an empty chat on a project shows that project's home around its
+  // composer, so these feed it the same data as the home page.
+  const inlineHome = useMemo(
+    () =>
+      FORK_PROJECT_HOME
+        ? {
+            sessions: promptableSessions,
+            summaries: history,
+            unseenIds: unseenFinishedIds,
+            onOpenChat: (sessionId: string) => {
+              closeHomePage();
+              void onSelectHistorySession(sessionId);
+            },
+            onOpenProjectHome: onOpenHomeOf,
+            onOpenAllProjects,
+            onOpenFile: (path: string) => {
+              closeHomePage();
+              onOpenFile(path);
+            },
+          }
+        : null,
+    [
+      promptableSessions,
+      history,
+      unseenFinishedIds,
+      onSelectHistorySession,
+      onOpenHomeOf,
+      onOpenAllProjects,
+      onOpenFile,
+    ],
+  );
+  useEffect(() => {
+    setHomeInlineData(inlineHome);
+  }, [inlineHome]);
+  useEffect(() => () => setHomeInlineData(null), []);
   useEffect(() => {
     if (!FORK_PROJECT_HOME) return;
     setHomeLauncher(async ({ cwd, prompt, title, reveal }) => {

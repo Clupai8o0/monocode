@@ -1105,6 +1105,10 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
   const peer = peerInterjection(rec);
   if (peer) {
     live.onEvent(peer);
+    // Fork: find the sender's project now, while it still runs.
+    void import("../../../../fork/peerMessages/peerProject")
+      .then((module) => module.notePeerArrival(peer.text))
+      .catch(() => undefined);
     return;
   }
   for (const result of toolResultsFromUserMessage(rec)) {

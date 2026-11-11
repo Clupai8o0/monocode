@@ -730,6 +730,7 @@ pub fn run() {
             fork_claims::fork_claims_list,    // Fork
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork
+            fork_external_sessions::fork_peer_sender_project, // Fork
             fork_relay::fork_relay_status,
             fork_relay::fork_relay_traffic,    // Fork
             fork_messages::fork_message_log,   // Fork    // Fork

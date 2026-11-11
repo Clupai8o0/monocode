@@ -38,6 +38,7 @@ import {
   Sparkles,
 } from "../../shared/ui/icons";
 import { handoffAge } from "../handoff/handoffModel";
+import type { HomeInlineData } from "./homeInline";
 import { continueFromHandoff } from "../handoff/handoffStore";
 import { useHandoff } from "../handoff/HandoffCard";
 import {
@@ -803,6 +804,42 @@ function NoticeBar({ notice, onDone }: { notice: Notice | null; onDone: () => vo
 
 // --- One project ----------------------------------------------------------------
 
+type HomeProps = Pick<
+  Props,
+  "sessions" | "summaries" | "unseenIds" | "onOpenChat" | "onOpenAllProjects" | "onOpenFile"
+> & {
+  cwd: string;
+  /** Hidden when absent: the inline home already has a composer. */
+  onNewChat?: (cwd: string) => void;
+};
+
+/**
+ * Fork: a project's home as an empty chat's first screen; the chat's own
+ * composer sits under it, so typing there starts the chat.
+ */
+export function ProjectHomeInline({
+  cwd,
+  data,
+}: {
+  cwd: string;
+  data: HomeInlineData;
+}) {
+  return (
+    <div data-fork-project-home="inline" className="min-w-0 text-content">
+      <ProjectHome
+        key={cwd}
+        cwd={cwd}
+        sessions={data.sessions}
+        summaries={data.summaries}
+        unseenIds={data.unseenIds}
+        onOpenChat={data.onOpenChat}
+        onOpenAllProjects={data.onOpenAllProjects}
+        onOpenFile={data.onOpenFile}
+      />
+    </div>
+  );
+}
+
 function ProjectHome({
   cwd,
   sessions,
@@ -812,7 +849,7 @@ function ProjectHome({
   onOpenAllProjects,
   onOpenFile,
   onNewChat,
-}: Props & { cwd: string }) {
+}: HomeProps) {
   const label = useProjectLabel(cwd);
   const plans = usePlans(useMemo(() => [cwd], [cwd]));
   const state = plans.get(cwd) as PlanState;
@@ -922,10 +959,12 @@ function ProjectHome({
           title={label}
           line={`No plan yet · ${chats.length} ${chats.length === 1 ? "chat" : "chats"}`}
         >
-          <button type="button" onClick={() => onNewChat(cwd)} className={GHOST}>
-            <Plus className="size-3.5" strokeWidth={1.75} aria-hidden />
-            New chat
-          </button>
+          {onNewChat ? (
+            <button type="button" onClick={() => onNewChat(cwd)} className={GHOST}>
+              <Plus className="size-3.5" strokeWidth={1.75} aria-hidden />
+              New chat
+            </button>
+          ) : null}
         </Header>
         <HandoffSection cwd={cwd} />
         <Section title="Needs you" count={needs.length} amber meta={needs.length > 1 ? "oldest first" : undefined}>
@@ -1016,10 +1055,12 @@ function ProjectHome({
           <File className="size-3.5" strokeWidth={1.75} aria-hidden />
           <span className="max-[620px]:hidden">{file.split("/").pop()}</span>
         </button>
-        <button type="button" aria-label="New chat" onClick={() => onNewChat(cwd)} className={SOLID}>
-          <Plus className="size-3.5" strokeWidth={1.75} aria-hidden />
-          <span className="max-[620px]:hidden">New chat</span>
-        </button>
+        {onNewChat ? (
+          <button type="button" aria-label="New chat" onClick={() => onNewChat(cwd)} className={SOLID}>
+            <Plus className="size-3.5" strokeWidth={1.75} aria-hidden />
+            <span className="max-[620px]:hidden">New chat</span>
+          </button>
+        ) : null}
       </Header>
       <Stats>
         <Stat label="Phases done" value={doneTotal} of={phases.length} />
