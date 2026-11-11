@@ -92,8 +92,11 @@ fn open_grok_bot(
 /// Also used by `fork_grok_bot_webhook.rs`.
 pub(crate) fn folder_policy(cwd: Option<&str>) -> (String, bool) {
     let home = dirs_home().map(PathBuf::from).unwrap_or_default();
+    let Ok(real) = real_cwd(cwd) else {
+        return ("unresolved".to_string(), false);
+    };
     match read_policy(&home) {
-        Ok(json) => policy_for(json.as_deref(), &home, cwd),
+        Ok(json) => policy_for(json.as_deref(), &home, real.as_deref()),
         Err(()) => unreadable(),
     }
 }
@@ -155,6 +158,26 @@ fn expand_rule_path(path: &str, home: &Path) -> String {
     path.trim_end_matches('/').to_string()
 }
 
+/// Where the folder really is, so a symlink can't borrow a looser policy.
+/// `Err` when it can't be resolved; the caller then blocks.
+fn real_cwd(cwd: Option<&str>) -> Result<Option<String>, ()> {
+    match cwd.filter(|cwd| !cwd.is_empty()) {
+        Some(cwd) => std::fs::canonicalize(cwd)
+            .map(|path| Some(path.to_string_lossy().into_owned()))
+            .map_err(|_| ()),
+        None => Ok(None),
+    }
+}
+
+/// A rule's folder as it really is on disk, when it exists, so it matches a
+/// resolved working folder.
+fn real_rule_path(path: String) -> String {
+    match std::fs::canonicalize(&path) {
+        Ok(real) => real.to_string_lossy().trim_end_matches('/').to_string(),
+        Err(_) => path,
+    }
+}
+
 /// The policy a folder falls under, and whether Grok may see it.
 fn policy_for(policy_json: Option<&str>, home: &Path, cwd: Option<&str>) -> (String, bool) {
     let Some(json) = policy_json else {
@@ -170,7 +193,7 @@ fn policy_for(policy_json: Option<&str>, home: &Path, cwd: Option<&str>) -> (Str
             .rules
             .iter()
             .filter_map(|rule| {
-                let path = expand_rule_path(&rule.path, home);
+                let path = real_rule_path(expand_rule_path(&rule.path, home));
                 let hit = !path.is_empty() && (cwd == path || cwd.starts_with(&format!("{path}/")));
                 hit.then_some((path.len(), rule.policy.as_str()))
             })
@@ -231,6 +254,33 @@ mod tests {
 
     fn policy(cwd: &str) -> (String, bool) {
         policy_for(Some(POLICY), Path::new(HOME), Some(cwd))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_is_judged_by_where_it_points() {
+        let root = std::env::temp_dir().join(format!("grokbot-policy-{}", std::process::id()));
+        let secret = root.join("secret");
+        let open = root.join("open");
+        std::fs::create_dir_all(&secret).unwrap();
+        std::fs::create_dir_all(&open).unwrap();
+        let link = open.join("link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        let json = format!(
+            r#"{{"default":"personal","routes":{{"personal":["grok"],"confidential":["codex"]}},
+                "rules":[{{"path":"{}","policy":"confidential"}},{{"path":"{}","policy":"personal"}}]}}"#,
+            secret.display(),
+            open.display()
+        );
+        let real = real_cwd(Some(link.to_str().unwrap())).unwrap();
+        assert_eq!(
+            policy_for(Some(&json), Path::new(HOME), real.as_deref()),
+            ("confidential".to_string(), false)
+        );
+        assert!(real_cwd(Some(root.join("missing").to_str().unwrap())).is_err());
+        assert_eq!(real_cwd(None), Ok(None));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
