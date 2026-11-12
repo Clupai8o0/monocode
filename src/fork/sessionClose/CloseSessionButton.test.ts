@@ -157,3 +157,16 @@ it("the button still closes at once", () => {
   act(() => button!.click());
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+it("a refused close by hand does not start the countdown again", async () => {
+  onClose.mockResolvedValue(false);
+  render();
+  const button = container.querySelector<HTMLButtonElement>("[data-fork-safe-close]");
+  act(() => button!.click());
+  await act(async () => {});
+  wait(AUTO_CLOSE_AFTER_S * 2);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  // Still there to try again by hand.
+  act(() => button!.click());
+  expect(onClose).toHaveBeenCalledTimes(2);
+});

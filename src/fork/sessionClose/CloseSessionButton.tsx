@@ -104,7 +104,12 @@ export function CloseSessionButton({
         title="Archive this session; you can restore it from Archived"
         data-fork-safe-close=""
         disabled={closing}
-        onClick={close}
+        onClick={() => {
+          // A refused or failed close by hand is not tried again on its own.
+          claimAutoClose(replyKey);
+          setKept(true);
+          close();
+        }}
         className="flex select-none items-center gap-1.5 rounded-md bg-content/8 px-2 py-1 font-sans text-xs text-content/80 outline-none hover:bg-content/12 hover:text-content focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-50"
       >
         <CheckCheck
