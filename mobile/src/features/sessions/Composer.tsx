@@ -29,6 +29,7 @@ import {
   pasteImage,
   pickFiles,
   pickPhotos,
+  restore,
   watchClipboardImage,
   type Attachment,
 } from "./attachments";
@@ -144,6 +145,14 @@ export function Composer({
     text: string;
     at: number;
   } | null>(null);
+  // What's held as of now, not as of the last render: picks can overlap (a
+  // paste waiting on iOS's prompt, then another), and each must add to the
+  // other's result rather than to the list its menu was opened with.
+  const held = useRef<Attachment[]>([]);
+  const hold = (next: (current: Attachment[]) => Attachment[]) => {
+    held.current = next(held.current);
+    setAttachments(held.current);
+  };
   const [inputHeight, setInputHeight] = useState(INPUT_MIN);
   const [dictating, setDictating] = useState(false);
   // A copied screenshot or photo: the add menu offers to paste it, as
@@ -286,7 +295,7 @@ export function Composer({
     }
     const pasted = pasteAttachment(`paste-${Date.now()}`, large.inserted);
     try {
-      setAttachments(merge(attachments, [pasted]));
+      hold((current) => merge(current, [pasted]));
     } catch {
       // Over the link's limit as a file: it stays as the text it was.
       setText(next);
@@ -298,7 +307,7 @@ export function Composer({
 
   const restorePasteAsText = () => {
     if (!largePaste) return;
-    setAttachments((current) => current.filter((item) => item.id !== largePaste.id));
+    hold((current) => current.filter((item) => item.id !== largePaste.id));
     setText(
       (current) =>
         current.slice(0, largePaste.at) + largePaste.text + current.slice(largePaste.at),
@@ -307,16 +316,19 @@ export function Composer({
   };
 
   const attach = async (pick: (room: number) => Promise<Attachment[]>) => {
-    const room = MAX_ATTACHMENTS - attachments.length;
-    if (room <= 0) {
+    const limit = () =>
       Alert.alert("Attachment limit", `A message can carry up to ${MAX_ATTACHMENTS} files.`);
-      return;
-    }
+    const room = MAX_ATTACHMENTS - held.current.length;
+    if (room <= 0) return limit();
     try {
       const picked = await pick(room);
       if (!picked.length) return;
-      // Merged here, not in an updater, so its size error lands in the catch.
-      setAttachments(merge(attachments, picked));
+      // Into what's held now, which another pick may have added to meanwhile;
+      // merged outside the update so its size error lands in the catch.
+      const current = held.current;
+      const next = merge(current, picked);
+      hold(() => next);
+      if (next.length < current.length + picked.length) limit();
       // Ready to say what they're for.
       input.current?.focus();
     } catch (reason) {
@@ -331,10 +343,10 @@ export function Composer({
     // The draft stays put until the desktop can take it.
     if (!canSend || blocked || offline) return;
     const message = text.trim();
-    const files = attachments;
+    const files = held.current;
     setSending(true);
     setText("");
-    setAttachments([]);
+    hold(() => []);
     morph(false);
     if (!compact) {
       focused.set(false);
@@ -344,8 +356,22 @@ export function Composer({
       await onSend(message, files);
     } catch (reason) {
       setText((current) => current || message);
-      setAttachments((current) => (current.length ? current : files));
-      Alert.alert("Message not sent", reason instanceof Error ? reason.message : String(reason));
+      // Back with anything pasted or picked while it was sending, not instead of it.
+      let dropped: Attachment[] = [];
+      hold((current) => {
+        const restored = restore(files, current);
+        dropped = restored.dropped;
+        return restored.kept;
+      });
+      const why = reason instanceof Error ? reason.message : String(reason);
+      Alert.alert(
+        "Message not sent",
+        dropped.length
+          ? `${why}\n\nA message can carry up to ${MAX_ATTACHMENTS} files within its size limit, so ` +
+              `${dropped.map((attachment) => attachment.name).join(", ")}, added while it was sending, ` +
+              `${dropped.length === 1 ? "was" : "were"} removed.`
+          : why,
+      );
     } finally {
       setSending(false);
     }
@@ -404,7 +430,7 @@ export function Composer({
                 key={attachment.id}
                 attachment={attachment}
                 onRemove={() =>
-                  setAttachments((current) => current.filter((item) => item.id !== attachment.id))
+                  hold((current) => current.filter((item) => item.id !== attachment.id))
                 }
               />
             ))}
