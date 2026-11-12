@@ -81,6 +81,25 @@ describe("project bots", () => {
     expect(projectBotFor("/Users/sam/Documents/projects/glow-up")).toBeNull();
   });
 
+  it.each([
+    ["apple", 0, "...#.##.", "...#..##", [[1, 4], [3, 4]], "nomnom"],
+    ["kettlebell", 6, "########", "###..###", [[2, 5], [5, 5]], "tempo"],
+    ["camera", 1, ".##..#..", ".##.###.", [[3, 4], [4, 4], [3, 5], [4, 5]], "clearroll"],
+  ] as const)("offers the %s as a pick, talking only in row %i", (name, row, rest, talk, eyes, project) => {
+    const mascot = PROJECT_MASCOTS.find((entry) => entry.name === name);
+    expect(mascot).toBeDefined();
+    for (const rows of [mascot!.rest, mascot!.talk]) {
+      expect(rows).toHaveLength(8);
+      for (const line of rows) expect(line).toMatch(/^[#.]{8}$/);
+      for (const [x, y] of eyes) expect(rows[y][x]).toBe(".");
+    }
+    expect(PROJECT_BOT_SPRITES[name].eyes).toEqual({ rest: eyes, talk: eyes });
+    expect(mascot!.rest[row]).toBe(rest);
+    expect(mascot!.talk[row]).toBe(talk);
+    expect(mascot!.talk.filter((_, y) => y !== row)).toEqual(mascot!.rest.filter((_, y) => y !== row));
+    expect(projectBotFor(`/Users/sam/Documents/projects/${project}`)).toBeNull();
+  });
+
   it("no longer offers the jar", () => {
     expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).not.toContain("jar");
   });

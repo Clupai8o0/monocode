@@ -8,7 +8,7 @@ import {
 
 describe("projectMascots", () => {
   it("keeps every sprite on the shared grid", () => {
-    expect(PROJECT_MASCOTS).toHaveLength(26); // Fork: belt joined for Dojo, then flower, pig and couple as picks.
+    expect(PROJECT_MASCOTS).toHaveLength(29); // Fork: belt joined for Dojo, then flower, pig, couple, apple, kettlebell and camera as picks.
     for (const mascot of PROJECT_MASCOTS) {
       for (const frame of [mascot.rest, mascot.talk]) {
         expect(frame).toHaveLength(MASCOT_GRID);

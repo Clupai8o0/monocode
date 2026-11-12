@@ -456,6 +456,94 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
     ],
     eyes: same([]),
   },
+  // Apple (pick only, no project maps to it; made for nomnom): a bitten apple
+  // with a stalk and leaf, the bite out of its right side. Its leaf flutters
+  // while it talks.
+  apple: {
+    rest: [
+      "...#.##.",
+      "...##...",
+      ".##.##..",
+      "######..",
+      "#.#.#...",
+      "######..",
+      ".######.",
+      "..##.##.",
+    ],
+    talk: [
+      "...#..##",
+      "...##...",
+      ".##.##..",
+      "######..",
+      "#.#.#...",
+      "######..",
+      ".######.",
+      "..##.##.",
+    ],
+    eyes: same([
+      [1, 4],
+      [3, 4],
+    ]),
+  },
+  // Kettlebell (pick only, no project maps to it; made for Tempo): a handle
+  // over a solid bell with two eyes. Its mouth opens while it talks.
+  kettlebell: {
+    rest: [
+      "..####..",
+      ".#....#.",
+      ".#....#.",
+      ".######.",
+      "########",
+      "##.##.##",
+      "########",
+      ".######.",
+    ],
+    talk: [
+      "..####..",
+      ".#....#.",
+      ".#....#.",
+      ".######.",
+      "########",
+      "##.##.##",
+      "###..###",
+      ".######.",
+    ],
+    eyes: same([
+      [2, 5],
+      [5, 5],
+    ]),
+  },
+  // Camera (pick only, no project maps to it; made for Clearroll): a body with
+  // a viewfinder bump and a flash; the 2x2 lens is its one big eye. The flash
+  // pops while it talks.
+  camera: {
+    rest: [
+      "........",
+      ".##..#..",
+      "########",
+      "########",
+      "###..###",
+      "###..###",
+      "########",
+      "........",
+    ],
+    talk: [
+      "........",
+      ".##.###.",
+      "########",
+      "########",
+      "###..###",
+      "###..###",
+      "########",
+      "........",
+    ],
+    eyes: same([
+      [3, 4],
+      [4, 4],
+      [3, 5],
+      [4, 5],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(
