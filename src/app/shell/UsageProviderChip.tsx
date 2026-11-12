@@ -46,6 +46,7 @@ import {
   meterWindows,
   UsageMeter,
 } from "../../features/providers/ui/ProviderAccountUsage";
+import { isHarnessAuthError } from "../../integrations/harness/core/authSupport";
 import {
   identityKey,
   identityOrganizationTag,
@@ -577,7 +578,7 @@ function ProviderAccountPicker({
         <h2 className="text-[13px] font-medium">{providerLabel} accounts</h2>
       </div>
       <p className="mt-1 px-1 text-[10px] leading-4 text-content/40">
-        Each conversation stays pinned to the account that started it.
+        Conversations keep their account until it hits its usage limit.
       </p>
       <div
         className="mt-2 flex flex-col gap-1"
@@ -1177,14 +1178,15 @@ function EmptyUsageState({
 
 export function needsProviderLogin(limits: ProviderRateLimits): boolean {
   if (limits.status === "unavailable") return true;
-  if (limits.status !== "error") return false;
-  const text = limits.error?.toLowerCase() ?? "";
+  if (limits.status !== "error" || !limits.error) return false;
+  const text = limits.error.toLowerCase();
   return (
     text.includes("expired") ||
     text.includes("sign-in") ||
     text.includes("not signed in") ||
     text.includes("not connected") ||
-    text.includes("authentication")
+    text.includes("authentication") ||
+    isHarnessAuthError(limits.error)
   );
 }
 

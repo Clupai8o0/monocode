@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleAgentApp, type AgentAppHost } from "../../features/agent-app/model/agentApp";
 import { newSession } from "../../features/sessions/model/session";
+import { resetHarnessModelOverlays, setHarnessModels } from "../../features/sessions/model/models";
+import { setHarnessAvailability, type HarnessAvailability } from "../../integrations/harness/core/availabilityState";
 import {
   loadTabGroupColors,
   loadTabGroupCustomColors,
@@ -18,7 +20,10 @@ import {
   STYLIST_COLOR,
   STYLIST_MASCOT,
   STYLIST_NAME,
+  STYLIST_SOUL,
+  withoutOldStylistLines,
 } from "./stylistMono";
+import { monoContext } from "../../features/monos/model/monoFiles";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke, convertFileSrc: (path: string) => path }));
@@ -56,6 +61,10 @@ describe("project look app actions", () => {
     });
     expect(result.choices.mascots).toContain(STYLIST_MASCOT);
     expect(result.choices.mascots).toHaveLength(PROJECT_MASCOTS.length);
+    expect(result.choices.mascots).toContain("flower");
+    expect(result.choices.mascots).toContain("pig");
+    expect(result.choices.mascots).toContain("couple");
+    for (const name of ["apple", "kettlebell", "camera"]) expect(result.choices.mascots).toContain(name);
     expect(result.choices.colors[0]).toEqual({ index: 0, value: expect.any(String) });
   });
 
@@ -160,5 +169,76 @@ describe("Stylist Mono", () => {
       project: SITE, projectRoot: SITE, sourcePath: "public/logo.svg",
     });
     saveTabGroupMascot(SITE, null);
+  });
+});
+
+// Fork: like any Mono, the Stylist can hand code work to project sessions.
+describe("the Stylist can start project sessions", () => {
+  const files = (id: string) => ({
+    id, dir: "/data", soul: "Be brief.", soulHash: "s", memory: "", memoryHash: "m",
+    memoryPath: "/data/MEMORY.md", topics: [],
+  });
+  const look = { name: "Stylist", mascot: "beret", color: "#fff", projects: [{ path: APP, name: "app" }] };
+
+  it("gets the same delegation rules as other Monos", () => {
+    const id = ensureStylistMono([APP])!;
+    const stylist = monoContext(look, files(id), { soul: true, memory: false });
+    expect(stylist).toContain("<session_delegation_rules>");
+    expect(stylist).toContain("<habits_rules>");
+    expect(stylist).not.toContain("<stylist_rules>");
+  });
+
+  it("can start a project session", async () => {
+    const id = ensureStylistMono([APP])!;
+    const none = { claude: false, codex: false, cursor: false, grok: false, opencode: false, pi: false, omp: false,
+      fx: false, hermes: false, deepseek: false, antigravity: false, devin: false, vivobook: false } as HarnessAvailability;
+    setHarnessAvailability({ ...none, codex: true });
+    setHarnessModels("codex", [{ id: "codex:test", harness: "codex", name: "Test model", settings: [] }]);
+    const source = newSession("codex", APP, "codex:test");
+    const start = vi.fn(async () => {});
+    const host = {
+      start,
+      isMono: () => true,
+      monoOf: () => ({ id, projects: [APP] }),
+    } as unknown as AgentAppHost;
+    await handleAgentApp(source, "req1", "sessions.start", {
+      prompt: "add a mascot", draft: true,
+    }, host);
+    expect(start).toHaveBeenCalledOnce();
+    resetHarnessModelOverlays();
+    setHarnessAvailability(none);
+  });
+
+  it("upgrades a saved soul once at launch", async () => {
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request: (_name: string, work: () => unknown) => Promise.resolve(work()) },
+    });
+    const old = "You never write code or change files inside a project; projects are read-only to you.\n- Prefer pink.\n";
+    mocks.invoke.mockImplementation(async (command: string) =>
+      command === "mono_read" ? { text: old, hash: "h1" } : command === "mono_save" ? "h2" : undefined);
+    await seedStylistMono([APP]);
+    const saves = mocks.invoke.mock.calls.filter(([command]) => command === "mono_save");
+    expect(saves).toHaveLength(1);
+    const saved = (saves[0][1] as { text: string }).text;
+    expect(saved).toContain("app sessions.start");
+    expect(saved).toContain("- Prefer pink.");
+    mocks.invoke.mockClear();
+    await seedStylistMono([APP]);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "mono_read")).toHaveLength(0);
+  });
+
+  it("drops the old no-sessions lines from a saved soul and keeps the rest", () => {
+    const old = "You are the Stylist. You never write code or change files inside a project; projects are read-only to you.\n\n"
+      + "- Your projects are the user's local projects.\n"
+      + "- Do all of this yourself. Never start or message project sessions; those are coding agents that can change files.\n"
+      + "- Prefer pink.\n";
+    const next = withoutOldStylistLines(old);
+    expect(next).not.toContain("Never start");
+    expect(next).not.toContain("read-only to you");
+    expect(next).toContain("app sessions.start");
+    expect(next).toContain("- Prefer pink.");
+    expect(withoutOldStylistLines(next)).toBe(next);
+    expect(withoutOldStylistLines(STYLIST_SOUL)).toBe(STYLIST_SOUL);
   });
 });

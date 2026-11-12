@@ -212,17 +212,29 @@ export type GitDiffIndex = {
 const pendingGitReads = new Map<string, Promise<unknown>>();
 let gitReadEpoch = 0;
 
+/** Let a watcher reload start fresh; existing callers still settle normally. */
+export function invalidateGitReads(cwd: string): void {
+  for (const key of pendingGitReads.keys()) {
+    if (key.endsWith(`\0${cwd}`)) pendingGitReads.delete(key);
+  }
+}
+
 /** Share concurrent reads, and never resolve with a pre-mutation snapshot. */
 function readGit<T>(command: string, cwd: string): Promise<T> {
   const key = `${command}\0${cwd}`;
   const pending = pendingGitReads.get(key);
   if (pending) return pending as Promise<T>;
   const epoch = gitReadEpoch;
-  const request = invoke<T>(command, { cwd })
+  const request: Promise<T> = invoke<T>(command, { cwd })
     .then(
-      (result) => (epoch === gitReadEpoch ? result : readGit<T>(command, cwd)),
+      (result) =>
+        epoch === gitReadEpoch
+          ? result
+          : readGit<T>(command, cwd),
       (error) => {
-        if (epoch !== gitReadEpoch) return readGit<T>(command, cwd);
+        if (epoch !== gitReadEpoch) {
+          return readGit<T>(command, cwd);
+        }
         throw error;
       },
     )
@@ -474,22 +486,27 @@ function invalidatePendingGitReads() {
   pendingGitReads.clear();
 }
 
-function dispatchGitChanged() {
-  // This reload covers whatever the waiting agent notice was going to report.
-  clearTimeout(agentGitTimer);
-  agentGitTimer = undefined;
+function dispatchGitChanged(cwd?: string) {
+  // Only a global reload covers a queued notice from any agent checkout.
+  if (!cwd) {
+    clearTimeout(agentGitTimer);
+    agentGitTimer = undefined;
+  }
   lastGitDispatch = Date.now();
-  window.dispatchEvent(new Event(GIT_CHANGED));
+  window.dispatchEvent(new CustomEvent(GIT_CHANGED, { detail: cwd }));
 }
 
 /** Tell git UIs (diff pane, branch picker) to reload after a local git mutation. */
-export function notifyGitChanged({ invalidatePending = true } = {}) {
+export function notifyGitChanged({
+  invalidatePending = true,
+  cwd,
+}: { invalidatePending?: boolean; cwd?: string } = {}) {
   // Publishing an already-read index is not a mutation. All actual mutations
   // invalidate both new readers and original callers still awaiting old data.
   if (invalidatePending) {
     invalidatePendingGitReads();
   }
-  dispatchGitChanged();
+  dispatchGitChanged(cwd);
 }
 
 /**
@@ -506,12 +523,16 @@ export function notifyAgentGitActivity() {
     dispatchGitChanged();
     return;
   }
-  agentGitTimer = setTimeout(dispatchGitChanged, wait);
+  agentGitTimer = setTimeout(() => dispatchGitChanged(), wait);
 }
 
-export function subscribeGitChanged(listener: () => void): () => void {
-  window.addEventListener(GIT_CHANGED, listener);
-  return () => window.removeEventListener(GIT_CHANGED, listener);
+export function subscribeGitChanged(listener: () => void, cwd?: string): () => void {
+  const changed = (event: Event) => {
+    const affected = (event as CustomEvent<string | undefined>).detail;
+    if (!cwd || !affected || affected === cwd) listener();
+  };
+  window.addEventListener(GIT_CHANGED, changed);
+  return () => window.removeEventListener(GIT_CHANGED, changed);
 }
 
 export function createPath(

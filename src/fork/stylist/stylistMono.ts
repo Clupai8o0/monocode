@@ -9,6 +9,8 @@ import {
   updateMono,
 } from "../../features/monos/model/mono";
 import { withMonoConfigurationLock } from "../../features/monos/model/monoConfigurationLock";
+import { editMonoFile } from "../../features/monos/model/monoFiles";
+import { STYLIST_STATE_KEY } from "./stylistId";
 
 /**
  * Fork: the Stylist, a Mono whose only job is each project's look: its real
@@ -17,13 +19,16 @@ import { withMonoConfigurationLock } from "../../features/monos/model/monoConfig
  * seen; a project the user takes off it stays off. Deleting the Stylist keeps
  * it deleted.
  */
-const STATE_KEY = "monocode.fork.stylist";
+const STATE_KEY = STYLIST_STATE_KEY;
 
 export const STYLIST_NAME = "Stylist";
 export const STYLIST_MASCOT = "beret";
 export const STYLIST_COLOR: string = MONO_COLORS[4];
 
-export const STYLIST_SOUL = `You are the Stylist. Your one job is how each MonoCode project looks: its logo, color, mascot and name label. You never write code or change files inside a project; projects are read-only to you.
+const STYLIST_SESSIONS =
+  "You don't edit project files yourself. When a look needs code changed (a new mascot in MonoCode, an icon wired into an app), start a session in that project with app sessions.start and give it the exact spec.";
+
+export const STYLIST_SOUL = `You are the Stylist. Your one job is how each MonoCode project looks: its logo, color, mascot and name label. ${STYLIST_SESSIONS}
 
 Tools (run with the app command, always passing "project"):
 - \`app projects.look {"project":"<name>"}\`: the current look, the colors and mascots to choose from, and your \`iconsDir\`.
@@ -128,5 +133,39 @@ export function ensureStylistMono(paths: readonly string[]): string | undefined 
 
 /** At launch: one window at a time, so two windows never make two Stylists. */
 export function seedStylistMono(paths: readonly string[]): Promise<string | undefined> {
-  return withMonoConfigurationLock(async () => ensureStylistMono(paths)).catch(() => undefined);
+  return withMonoConfigurationLock(async () => {
+    const id = ensureStylistMono(paths);
+    if (id && localStorage.getItem(SOUL_UPGRADE_KEY) !== id) {
+      const done = await upgradeStylistSoul(id).then(() => true, () => false);
+      if (done) {
+        localStorage.setItem(SOUL_UPGRADE_KEY, id);
+      }
+    }
+    return id;
+  }).catch(() => undefined);
+}
+
+/** Set once a Stylist's soul lost the old no-sessions lines, so it runs once. */
+const SOUL_UPGRADE_KEY = `${STYLIST_STATE_KEY}.soulUpgraded`;
+
+/** Lines from older Stylist seeds that kept it out of project sessions. */
+const OLD_SOUL_LINES: readonly (readonly [string, string])[] = [
+  ["You never write code or change files inside a project; projects are read-only to you.", STYLIST_SESSIONS],
+  ["- Do all of this yourself. Never start or message project sessions; those are coding agents that can change files.\n", ""],
+];
+
+/** Takes the old no-sessions lines out of a soul; the user's own edits stay. */
+export function withoutOldStylistLines(text: string): string
+{
+  return OLD_SOUL_LINES.reduce((soul, [old, next]) => soul.split(old).join(next), text);
+}
+
+/** A Stylist made before it could start sessions gets the new lines. */
+async function upgradeStylistSoul(id: string): Promise<void>
+{
+  const instructions = findMono(id)?.instructions;
+  if (instructions && withoutOldStylistLines(instructions) !== instructions) {
+    updateMono(id, (mono) => ({ ...mono, instructions: withoutOldStylistLines(mono.instructions ?? "") }));
+  }
+  await editMonoFile(id, "soul", withoutOldStylistLines);
 }

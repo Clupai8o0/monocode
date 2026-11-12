@@ -51,7 +51,7 @@ export function UsageLimitNotice({
       >
         <Gauge className="size-3.5 shrink-0 text-amber-400" />
         <span className="shrink-0 text-content/85">
-          {providerName
+          {limit.recoveryFailed ? "Continuation paused" : providerName
             ? `${providerName} usage limit reached`
             : "Usage limit reached"}
         </span>

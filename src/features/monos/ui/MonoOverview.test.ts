@@ -9,6 +9,12 @@ vi.mock("../model/monoHabits", async (original) => ({
   loadHabits: async () => [],
 }));
 
+const invoked = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...(await original<object>()),
+  invoke: invoked,
+}));
+
 vi.mock("./MonoChangesView", () => ({
   MonoChangesView: () => createElement("p", { "data-changes-view": "" }),
 }));
@@ -96,6 +102,16 @@ async function render(
   return onTabChange;
 }
 
+const changes = (totals: unknown) => ({
+  changes: {
+    sessionId: "mono",
+    cwd: "/home",
+    totals,
+    request: {},
+    projects: [],
+  },
+});
+
 function tabs() {
   return [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 }
@@ -105,17 +121,52 @@ it("names only the open tab, with its count, and switches tabs", async () => {
   const labels = tabs().map((tab) =>
     tab.querySelector("[data-tab-label]")!.getAttribute("data-tab-label"),
   );
-  expect(labels).toEqual(["open", "closed", "closed", "closed"]);
+  expect(labels).toEqual(["closed", "open", "closed", "closed", "closed"]);
   expect(tabs().map((tab) => tab.getAttribute("aria-label"))).toEqual([
-    "Sessions",
+    "Overview",
+    "Sub-agents",
     "Documents",
     "Habits",
     "Changes",
   ]);
-  expect(tabs()[0].textContent).toBe("Sessions2");
-  expect(tabs()[0].getAttribute("aria-selected")).toBe("true");
-  act(() => tabs()[1].click());
+  expect(tabs()[1].textContent).toBe("Sub-agents2");
+  expect(tabs()[1].getAttribute("aria-selected")).toBe("true");
+  act(() => tabs()[2].click());
   expect(onTabChange).toHaveBeenCalledWith("documents");
+});
+
+it("opens the dashboard, asking for its own and its launches' contributions", async () => {
+  invoked.mockImplementation(async (command: string) =>
+    command === "fork_mono_contributions"
+      ? {
+          contributions: [
+            {
+              sessionId: "a",
+              kind: "commit",
+              reference: "abc",
+              at: Date.now(),
+              additions: 12,
+              deletions: 3,
+            },
+          ],
+          sessions: [{ id: "a", updatedAt: Date.now() }],
+        }
+      : undefined,
+  );
+  await render("dashboard", vi.fn(), changes(null));
+  expect(tabs()[0].getAttribute("aria-selected")).toBe("true");
+  const dashboard = container.querySelector("[data-mono-dashboard]")!;
+  expect(dashboard.textContent).toContain("Broski");
+  const call = invoked.mock.calls.find(
+    ([command]) => command === "fork_mono_contributions",
+  );
+  expect(call?.[1].sessionIds).toEqual(
+    expect.arrayContaining(["mono", "a", "b"]),
+  );
+  expect(call?.[1].checkLanded).toBe(true);
+  expect(dashboard.textContent).toContain("1in the last 6 months");
+  expect(dashboard.textContent).toContain("+12 −3");
+  expect(dashboard.textContent).toContain("Nothing scheduled.");
 });
 
 it("toggles activity from beside the panel toggle", async () => {
@@ -154,19 +205,9 @@ it("shows the picked turn's activity, or how to pick one", async () => {
   expect(panel.textContent).not.toContain("Select the activity");
 });
 
-const changes = (totals: unknown) => ({
-  changes: {
-    sessionId: "mono",
-    cwd: "/home",
-    totals,
-    request: {},
-    projects: [],
-  },
-});
-
 it("always offers a Changes tab and keeps its view mounted once opened", async () => {
   await render("sessions", vi.fn(), changes(null));
-  expect(tabs()[3].getAttribute("aria-label")).toBe("Changes");
+  expect(tabs()[4].getAttribute("aria-label")).toBe("Changes");
   expect(container.querySelector("[data-changes-view]")).toBeNull();
   const onTabChange = vi.fn();
   await render(
@@ -174,11 +215,11 @@ it("always offers a Changes tab and keeps its view mounted once opened", async (
     onTabChange,
     changes({ files: 3, additions: 12, deletions: 4 }),
   );
-  expect(tabs()[3].textContent).toBe("Changes3");
+  expect(tabs()[4].textContent).toBe("Changes3");
   expect(container.querySelector("[data-changes-view]")).not.toBeNull();
   // Another tab keeps the view mounted, hidden, so a commit draft survives.
   await render("sessions", onTabChange, changes(null));
-  expect(tabs()[3].getAttribute("aria-label")).toBe("Changes");
+  expect(tabs()[4].getAttribute("aria-label")).toBe("Changes");
   expect(
     container.querySelector("[data-changes-view]")!.closest("[hidden]"),
   ).not.toBeNull();
@@ -186,20 +227,20 @@ it("always offers a Changes tab and keeps its view mounted once opened", async (
 
 it("dots the folded Changes icon while there are changes", async () => {
   await render("sessions", vi.fn(), changes(null));
-  expect(tabs()[3].querySelector("[data-changes-dot]")).toBeNull();
+  expect(tabs()[4].querySelector("[data-changes-dot]")).toBeNull();
   await render(
     "sessions",
     vi.fn(),
     changes({ files: 2, additions: 3, deletions: 1 }),
   );
-  expect(tabs()[3].querySelector("[data-changes-dot]")).not.toBeNull();
+  expect(tabs()[4].querySelector("[data-changes-dot]")).not.toBeNull();
   // Open, the tab names its count instead.
   await render(
     "changes",
     vi.fn(),
     changes({ files: 2, additions: 3, deletions: 1 }),
   );
-  expect(tabs()[3].querySelector("[data-changes-dot]")).toBeNull();
+  expect(tabs()[4].querySelector("[data-changes-dot]")).toBeNull();
 });
 
 it("lists every session it started, newest first", async () => {

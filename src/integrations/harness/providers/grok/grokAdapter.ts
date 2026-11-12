@@ -26,7 +26,7 @@ import { registerHarness, type HarnessAdapter } from "../../core/registry";
 export const grokAdapter: HarnessAdapter = {
   id: "grok",
   live: true,
-  canSteer: false,
+  canSteer: true,
   sendTurn: sendGrokTurn,
   compactContext: compactGrokContext,
   steerTurn: steerGrokTurn,

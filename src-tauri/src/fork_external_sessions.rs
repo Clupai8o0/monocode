@@ -123,6 +123,21 @@ pub async fn fork_external_sessions_read(
     .map_err(|e| e.to_string())?
 }
 
+/// The project folder of the session that sent a peer message, by its address.
+#[tauri::command]
+pub async fn fork_peer_sender_project(
+    address: String,
+    projects: Vec<ProjectRef>,
+    at: Option<i64>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let env = Env::system();
+        peer_sender_project(&env, &projects, &address, at)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 // ---- environment ----
 
 #[derive(Clone, Debug)]
@@ -480,6 +495,73 @@ fn match_project<'a>(env: &Env, projects: &'a [ProjectRef], cwd: &str) -> Option
     projects
         .iter()
         .find(|p| (env.common_dir)(Path::new(&p.cwd)).as_deref() == Some(common.as_path()))
+}
+
+// ---- peer senders ----
+
+/// The project a peer message's sender works in, by its session address.
+/// A record whose socket is the address wins; else the newest record for the
+/// address's pid that has no socket field. With `at` (when the message came
+/// in), a session started after it is a later process that reused the pid.
+fn peer_sender_project(
+    env: &Env,
+    projects: &[ProjectRef],
+    address: &str,
+    at: Option<i64>,
+) -> Option<String> {
+    if address.chars().count() > 512 {
+        return None;
+    }
+    let socket = address.strip_prefix("uds:").unwrap_or(address);
+    let name = Path::new(socket).file_name()?.to_str()?;
+    let pid = name.strip_suffix(".sock")?.parse::<i64>().ok();
+    let copies = if env.mac {
+        mirror_copies(&env.home)
+    } else {
+        HashSet::new()
+    };
+    let mut by_socket: Option<(i64, String)> = None;
+    let mut by_pid: Option<(i64, String)> = None;
+    for (dir, _) in registries() {
+        let Ok(entries) = std::fs::read_dir(env.home.join(dir)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") || copies.contains(&path) {
+                continue;
+            }
+            let Some(v) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            else {
+                continue;
+            };
+            if crate::fork_relay::is_relay_entry(&v) {
+                continue;
+            }
+            let Some(cwd) = text(&v["cwd"]) else {
+                continue;
+            };
+            if let (Some(at), Some(started)) = (at, num(&v["startedAt"])) {
+                if started > at {
+                    continue;
+                }
+            }
+            let updated = num(&v["updatedAt"]).unwrap_or(0);
+            let slot = match v["messagingSocketPath"].as_str() {
+                Some(found) if crate::fork_messages::same_path(found, socket) => &mut by_socket,
+                Some(_) => continue,
+                None if pid.is_some() && num(&v["pid"]) == pid => &mut by_pid,
+                None => continue,
+            };
+            if slot.as_ref().is_none_or(|(old, _)| updated > *old) {
+                *slot = Some((updated, cwd));
+            }
+        }
+    }
+    let (_, cwd) = by_socket.or(by_pid)?;
+    match_project(env, projects, &cwd).map(|p| p.cwd.clone())
 }
 
 // ---- transcripts ----
@@ -1976,5 +2058,173 @@ mod tests {
         let next = read(&e, &projects, "p", "livelive-1", page.before, Some(1)).unwrap();
         assert_eq!(next.turns[0].text, "one");
         assert_eq!(next.before, None);
+    }
+
+    #[test]
+    fn peer_sender_matches_socket_then_pid() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let projects = [project("p", &repo)];
+        let e = env(&home, vec![]);
+        // The socket decides, even though the file name names another pid.
+        write(
+            &home.join(".claude/sessions/1.json"),
+            &rec(
+                31,
+                "socketsock-1",
+                &repo,
+                1,
+                r#","messagingSocketPath":"/tmp/cc-socks/11.sock""#,
+            ),
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/11.sock", None),
+            Some(projects[0].cwd.clone())
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "/tmp/cc-socks/11.sock", None),
+            Some(projects[0].cwd.clone())
+        );
+        // Without the field, the pid from the address's file name decides.
+        write(
+            &home.join(".claude/sessions/22.json"),
+            &rec(22, "pidlookup-2", &repo, 1, ""),
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/22.sock", None),
+            Some(projects[0].cwd.clone())
+        );
+        // A socket that does not match is not overridden by the pid.
+        write(
+            &home.join(".claude/sessions/33.json"),
+            &rec(
+                33,
+                "socketwin-3",
+                &repo,
+                1,
+                r#","messagingSocketPath":"/tmp/cc-socks/99.sock""#,
+            ),
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/33.sock", None),
+            None
+        );
+    }
+
+    #[test]
+    fn peer_sender_prefers_newest_pid_record_and_skips_later_processes() {
+        let home = temp();
+        let old = home.join("old");
+        let new = home.join("new");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let projects = [project("old", &old), project("new", &new)];
+        let e = env(&home, vec![]);
+        write(
+            &home.join(".claude/sessions/7.json"),
+            &rec(7, "oldrecord-7", &old, 5, ""),
+        );
+        write(
+            &home.join(".claude-exec/sessions/7.json"),
+            &rec(7, "newrecord-7", &new, 50, ""),
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/7.sock", None),
+            Some(projects[1].cwd.clone())
+        );
+        // A session started after the message came in reused the pid.
+        write(
+            &home.join(".claude-exec/sessions/7.json"),
+            &format!(
+                r#"{{"pid":7,"sessionId":"newrecord-7","cwd":"{}","startedAt":9000,"updatedAt":50}}"#,
+                new.display()
+            ),
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/7.sock", Some(1000)),
+            Some(projects[0].cwd.clone())
+        );
+    }
+
+    #[test]
+    fn peer_sender_matches_a_worktree() {
+        let home = temp();
+        let repo = home.join("repo");
+        let worktree = repo.join(".worktrees/one");
+        std::fs::create_dir_all(&worktree).unwrap();
+        write(
+            &home.join(".claude/sessions/41.json"),
+            &rec(
+                41,
+                "worktree-41",
+                &worktree,
+                1,
+                r#","messagingSocketPath":"/tmp/cc-socks/41.sock""#,
+            ),
+        );
+        let e = env(&home, vec![]);
+        let projects = [project("p", &repo)];
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/41.sock", None),
+            Some(projects[0].cwd.clone())
+        );
+    }
+
+    #[test]
+    fn peer_sender_skips_relay_entries() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        write(
+            &home.join(".claude/sessions/51.json"),
+            &rec(
+                51,
+                "relaysent-51",
+                &repo,
+                1,
+                r#","messagingSocketPath":"/tmp/cc-socks/51.sock","monocodeRelay":{"machine":"vivobook"}"#,
+            ),
+        );
+        let e = env(&home, vec![]);
+        let projects = [project("p", &repo)];
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/51.sock", None),
+            None
+        );
+    }
+
+    #[test]
+    fn peer_sender_reads_cx_and_rejects_bad_addresses() {
+        let home = temp();
+        let repo = home.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        write(
+            &home.join(".claude-exec/sessions/61.json"),
+            &rec(
+                61,
+                "execsock-61",
+                &repo,
+                1,
+                r#","messagingSocketPath":"/tmp/cc-socks/61.sock""#,
+            ),
+        );
+        let e = env(&home, vec![]);
+        let projects = [project("p", &repo)];
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/61.sock", None),
+            Some(projects[0].cwd.clone())
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/999.sock", None),
+            None
+        );
+        assert_eq!(
+            peer_sender_project(&e, &projects, "uds:/tmp/cc-socks/61", None),
+            None
+        );
+        let long = format!("uds:/tmp/cc-socks/{}.sock", "1".repeat(500));
+        assert!(long.chars().count() > 512);
+        assert_eq!(peer_sender_project(&e, &projects, &long, None), None);
     }
 }

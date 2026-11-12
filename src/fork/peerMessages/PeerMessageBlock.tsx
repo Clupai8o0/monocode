@@ -4,6 +4,7 @@ import { NOTIFICATION_CLICK_EVENT } from "../../features/notifications/model/not
 import { sessionIdForPid } from "../../integrations/harness/core/child";
 import { PeerMessageCard } from "./PeerMessageCard";
 import { parsePeerMessage, peerPid } from "./peerMessage";
+import { usePeerProject } from "./peerProject";
 import { isUrgentPeer } from "./peerStats";
 
 /**
@@ -25,6 +26,7 @@ export function PeerMessageBlock({
   };
   const pid = peerPid(message.from);
   const sessionId = pid == null ? undefined : sessionIdForPid(pid);
+  const projectCwd = usePeerProject(message.from, message.at);
   return (
     <div className={embedded ? "py-2" : "px-4 py-2"}>
       <PeerMessageCard
@@ -32,6 +34,7 @@ export function PeerMessageBlock({
         harness={message.harness}
         at={message.at}
         urgent={isUrgentPeer(message.body)}
+        projectCwd={projectCwd}
         onOpen={
           sessionId
             ? () => void emit(NOTIFICATION_CLICK_EVENT, sessionId)

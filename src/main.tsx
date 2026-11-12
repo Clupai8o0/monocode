@@ -16,6 +16,7 @@ import {
   loadBootWorkspace,
   reportQuitPoll,
 } from "./app/model/appLifecycle";
+import { resetGitWatches } from "./platform/tauri/gitWatch";
 import { homeDir } from "./platform/tauri/fs";
 import { setHomeDir } from "./shared/lib/paths";
 import { installNativeContextMenuGuard } from "./shared/lib/nativeContextMenu";
@@ -26,6 +27,7 @@ import "./features/connections/model/remoteCommands";
 import "./styles/index.css";
 
 performance.mark("monocode:bootstrap");
+const gitWatchesReset = resetGitWatches();
 // Let local boot IPC overlap loading/evaluating the workspace UI.
 const appLoaded = import("./app/App");
 
@@ -96,6 +98,7 @@ void Promise.all([
   providerBinaryPathsPrimed,
   loadBootWorkspace(),
   appLoaded,
+  gitWatchesReset,
 ]).then(
   ([
     ,

@@ -5,9 +5,14 @@ import { useSyncExternalStore } from "react";
  * Fork feature: usage for agents MonoCode has no usage API for, read by
  * `fork_extra_usage` (Rust) and parsed here. Muse and Antigravity report
  * windows like Claude's; Cursor reports Auto and API plan pools; DeepSeek
- * reports a prepaid balance.
+ * reports a prepaid balance; Grok reports its shared plan credits.
  */
-export type ExtraUsageProvider = "muse" | "antigravity" | "cursor" | "deepseek";
+export type ExtraUsageProvider =
+  | "muse"
+  | "antigravity"
+  | "cursor"
+  | "deepseek"
+  | "grok";
 
 export type UsageBar = {
   /** Short window name, e.g. "5h" or "wk". */
@@ -198,11 +203,47 @@ export function parseDeepseekBalance(body: string): ExtraUsage {
   };
 }
 
+/** Grok `/v1/billing?format=credits`: one shared allowance for the current period. */
+export function parseGrokUsage(body: string): ExtraUsage {
+  const data = record(JSON.parse(body));
+  const config = record(data?.config);
+  const used = percent(config?.creditUsagePercent);
+  if (used == null) {
+    return {
+      status: "error",
+      message: "Grok did not report usage",
+      checkedAt: Date.now(),
+    };
+  }
+  const period = record(config?.currentPeriod);
+  const type = typeof period?.type === "string" ? period.type : "";
+  const label = /(^|_)WEEKLY$/.test(type)
+    ? "wk"
+    : /(^|_)MONTHLY$/.test(type)
+      ? "mo"
+      : "Plan";
+  const reset = typeof period?.end === "string" ? Date.parse(period.end) : NaN;
+  const tier = config?.subscription_tier ?? data?.subscription_tier;
+  return {
+    status: "ok",
+    bars: [
+      {
+        label,
+        usedPercent: used,
+        resetsAt: Number.isFinite(reset) ? reset : null,
+      },
+    ],
+    detail: typeof tier === "string" && tier.trim() ? tier.trim() : undefined,
+    checkedAt: Date.now(),
+  };
+}
+
 const PARSERS: Record<ExtraUsageProvider, (body: string) => ExtraUsage> = {
   muse: parseMuseUsage,
   antigravity: parseAntigravityQuota,
   cursor: parseCursorUsage,
   deepseek: parseDeepseekBalance,
+  grok: parseGrokUsage,
 };
 
 /** Each read runs a CLI or calls an API, so a footer opening reuses it a while. */

@@ -15,7 +15,7 @@ import {
 } from "../../../shared/lib/paths";
 import { INTERRUPT_MESSAGE } from "./inFlight";
 import type { Block, ToolPreview } from "./session";
-import { allModels } from "./models";
+import { findModelReference } from "./models";
 import { monoCodeWorkSummary } from "./monocodeToolCall";
 
 export type ToolCallState = "pending" | "accepted" | "rejected";
@@ -601,6 +601,7 @@ export function groupMonoTurnItems(
     if (
       index >= start &&
       index <= end &&
+      !(item.type === "block" && item.block.fileDelivery) &&
       !(item.type === "block" && followUpReplies.has(item.block.id)) &&
       // A reply already delivered before background work resumed stays put.
       !(boundary < items.length && index === boundary - 1) &&
@@ -766,10 +767,7 @@ export function subagentModelName(block: Block): string | undefined {
   const id = block.agentRun?.model?.trim();
   if (!id || /^(?:auto|default|inherit|unspecified)$/i.test(id))
     return undefined;
-  return (
-    allModels().find((model) => model.id === id || model.nativeId === id)
-      ?.name ?? id
-  );
+  return findModelReference(id)?.name ?? id;
 }
 
 /**
@@ -1179,6 +1177,7 @@ function yieldedAt(items: TurnItem[]): number {
 }
 
 function isFoldableItem(item: TurnItem): boolean {
+  if (item.type === "block" && item.block.fileDelivery) return false;
   // A stack of delegated runs is work, so the fold reaches across it and the
   // turn's status line stays at the top. The rows themselves never collapse —
   // the transcript pins them outside the fold's body.

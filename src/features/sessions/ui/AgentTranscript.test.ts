@@ -38,7 +38,7 @@ describe("AgentTranscript running turn clock", () => {
         true,
       );
       // Started 90s ago; without the joined turn's start it read from mount.
-      expect(markup).toContain("Working for 1m 30s");
+      expect(markup).toContain("· 1m 30s");
     } finally {
       vi.restoreAllMocks();
     }
@@ -188,7 +188,7 @@ describe("AgentTranscript collapsed work", () => {
     );
   });
 
-  it("hides provider authentication errors handled by the sign-in modal", () => {
+  it("keeps a provider authentication error visible when no sign-in notice replaces it", () => {
     const markup = renderToStaticMarkup(
       createElement(AgentTranscript, {
         harness: "grok",
@@ -203,7 +203,8 @@ describe("AgentTranscript collapsed work", () => {
       }),
     );
 
-    expect(markup).not.toContain("Authentication required");
+    expect(markup).toContain("Authentication required");
+    expect(markup).toContain("Grok Build is not signed in.");
     expect(markup).not.toContain("Sign in to Grok Build");
     expect(markup).not.toContain("<button");
   });
