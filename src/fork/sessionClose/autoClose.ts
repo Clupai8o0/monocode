@@ -31,6 +31,39 @@ export function isKeptOpen(key: string): boolean {
   return keptOpen.has(key);
 }
 
+// Replies already closed automatically once this run. A failed archive is not
+// retried on its own, even when the button is mounted again.
+const autoTried = new Set<string>();
+
+/** Claims the one automatic close of a reply; false if it was tried before. */
+export function claimAutoClose(key: string): boolean {
+  if (autoTried.has(key)) {
+    return false;
+  }
+  autoTried.add(key);
+  return true;
+}
+
+export function autoCloseTried(key: string): boolean {
+  return autoTried.has(key);
+}
+
+/**
+ * Whether the offer is really on screen: the point at its middle belongs to
+ * it, so a dialog, menu or picker over it counts as not seen.
+ */
+export function offerUncovered(node: Element): boolean {
+  const rect = node.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    return false;
+  }
+  const hit = node.ownerDocument.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2,
+  );
+  return !!hit && node.contains(hit);
+}
+
 /** The person can see the offer: window focused and the offer on screen. */
 export type Seen = { windowActive: boolean; inView: boolean };
 

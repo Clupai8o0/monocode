@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCheck } from "../../shared/ui/icons";
 import {
   AUTO_CLOSE_AFTER_S,
+  autoCloseTried,
+  claimAutoClose,
   isKeptOpen,
   keepOpen,
+  offerUncovered,
   tickCountdown,
 } from "./autoClose";
 
@@ -22,17 +25,18 @@ export function CloseSessionButton({
   onClose: () => Promise<boolean>;
 }) {
   const [closing, setClosing] = useState(false);
-  const [kept, setKept] = useState(() => isKeptOpen(replyKey));
+  // Kept open, or closed automatically once already: no countdown.
+  const settled = (key: string) => isKeptOpen(key) || autoCloseTried(key);
+  const [kept, setKept] = useState(() => settled(replyKey));
   const [remaining, setRemaining] = useState(AUTO_CLOSE_AFTER_S);
   const [prevKey, setPrevKey] = useState(replyKey);
   if (prevKey !== replyKey) {
     setPrevKey(replyKey);
-    setKept(isKeptOpen(replyKey));
+    setKept(settled(replyKey));
     setRemaining(AUTO_CLOSE_AFTER_S);
   }
   const box = useRef<HTMLDivElement>(null);
   const inView = useRef(false);
-  const fired = useRef<string | null>(null);
 
   const close = () => {
     setClosing(true);
@@ -50,11 +54,20 @@ export function CloseSessionButton({
       return;
     }
     const observer = new IntersectionObserver((entries) => {
-      inView.current = entries.some((entry) => entry.isIntersecting);
+      // The newest entry wins: an older one may still say it was in view.
+      inView.current = entries[entries.length - 1]?.isIntersecting ?? false;
     });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  const seen = () => ({
+    windowActive: document.visibilityState === "visible" && document.hasFocus(),
+    inView:
+      inView.current &&
+      !!box.current?.isConnected &&
+      offerUncovered(box.current),
+  });
 
   const counting = !kept && !closing && remaining > 0;
   useEffect(() => {
@@ -62,21 +75,23 @@ export function CloseSessionButton({
       return;
     }
     const id = setInterval(() => {
-      setRemaining((left) =>
-        tickCountdown(left, {
-          windowActive:
-            document.visibilityState === "visible" && document.hasFocus(),
-          inView: inView.current,
-        }),
-      );
+      setRemaining((left) => tickCountdown(left, seen()));
     }, 1000);
     return () => clearInterval(id);
   }, [counting]);
 
   // One automatic close per reply: a failed archive is not retried on its own.
+  // Looks once more first, in case the pane was left in the last second.
   useEffect(() => {
-    if (remaining === 0 && !kept && fired.current !== replyKey) {
-      fired.current = replyKey;
+    if (remaining !== 0 || kept) {
+      return;
+    }
+    const now = seen();
+    if (!now.windowActive || !now.inView) {
+      setRemaining(1);
+      return;
+    }
+    if (claimAutoClose(replyKey)) {
       close();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

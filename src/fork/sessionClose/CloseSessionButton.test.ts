@@ -8,6 +8,7 @@ import { AUTO_CLOSE_AFTER_S } from "./autoClose";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let visible = true;
+let covered = false;
 let observers: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
 
 class FakeObserver {
@@ -33,6 +34,13 @@ beforeEach(() => {
   observers = [];
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  covered = false;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 100, height: 20,
+  } as DOMRect);
+  // The offer is on top unless a test covers it.
+  document.elementFromPoint = () =>
+    covered ? document.body : container.querySelector("[data-fork-safe-close]");
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -84,6 +92,42 @@ it("waits while the offer is out of view or the window is in the background", ()
 
   vi.mocked(document.hasFocus).mockReturnValue(true);
   wait(AUTO_CLOSE_AFTER_S);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("waits while something covers the offer", () => {
+  covered = true;
+  render();
+  wait(AUTO_CLOSE_AFTER_S * 2);
+  expect(onClose).not.toHaveBeenCalled();
+  covered = false;
+  wait(AUTO_CLOSE_AFTER_S);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("does not try again when a failed close is mounted again", async () => {
+  onClose.mockResolvedValue(false);
+  const key = render();
+  wait(AUTO_CLOSE_AFTER_S);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await act(async () => {});
+  act(() => root.unmount());
+  root = createRoot(container);
+  render(key);
+  wait(AUTO_CLOSE_AFTER_S * 2);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(container.querySelector("[data-fork-auto-close]")).toBeNull();
+});
+
+it("holds at the last second when the pane is left just then", () => {
+  render();
+  wait(AUTO_CLOSE_AFTER_S - 1);
+  // The tick lands before the observer hears the pane went away.
+  covered = true;
+  wait(1);
+  expect(onClose).not.toHaveBeenCalled();
+  covered = false;
+  wait(1);
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
