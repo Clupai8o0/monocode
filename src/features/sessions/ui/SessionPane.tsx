@@ -11,6 +11,7 @@ import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
+import { autoCloseKey } from "../../../fork/sessionClose/autoClose";
 import { TaskPicksSession } from "../../../fork/taskPicks/TaskPicks"; // Fork
 import { MovedCard, MoveLine } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
 import { isMoveLocked, useMovedRecord, useMoveView } from "../../../fork/sessionMove/sessionMoveStore"; // Fork
@@ -713,7 +714,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
     !draftTyped &&
     !draftAttached &&
     offersSafeClose(session, withRunningLeads(NO_SESSIONS, orchestrationRuns)) ? (
-      <CloseSessionButton onClose={() => onArchiveSession(session.id, true)} />
+      <CloseSessionButton
+        replyKey={autoCloseKey(session.id, session.blocks)}
+        onClose={() => onArchiveSession(session.id, true)}
+      />
     ) : undefined;
   // Fork: a moved session has a card here instead; a moving one a line above.
   const movedHere = useMovedRecord(session.id);
