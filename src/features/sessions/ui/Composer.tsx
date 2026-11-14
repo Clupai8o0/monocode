@@ -2462,9 +2462,15 @@ export function Composer({
                 label={
                   threadModes.orchestrator === "paused"
                     ? "Orchestrator paused"
-                    : "Orchestrating"
+                    : threadModes.orchestrator === "planning"
+                      ? "Orchestrator planning"
+                      : "Orchestrating"
                 }
-                title="This thread leads an orchestration run: it splits the work and runs worker sessions."
+                title={
+                  threadModes.orchestrator === "planning"
+                    ? "This thread is the orchestrator: it is drawing up a plan to split the work across worker sessions. Approve the plan to start them."
+                    : "This thread leads an orchestration run: it splits the work and runs worker sessions."
+                }
               />
             ) : null}
             {!compact && operatorActive ? (

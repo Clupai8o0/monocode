@@ -173,8 +173,8 @@ export function ModeCommandPill({
 export type ThreadModes = {
   /** A past /operator turn gave this thread app access. */
   operator?: boolean;
-  /** This thread leads an orchestration run that is still open. */
-  orchestrator?: "active" | "paused";
+  /** This thread is planning, or leads an orchestration run still open. */
+  orchestrator?: "planning" | "active" | "paused";
 };
 
 /**

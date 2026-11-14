@@ -1094,6 +1094,25 @@ describe("Composer question focus", () => {
     );
     expect(container.textContent).toContain("Operator on");
     expect(container.textContent).toContain("Orchestrating");
+
+    await act(async () =>
+      root.render(
+        createElement(Composer, {
+          ...props,
+          threadModes: { orchestrator: "planning" },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("Orchestrator planning");
+
+    await act(async () =>
+      root.render(
+        createElement(Composer, {
+          ...props,
+          threadModes: { operator: true, orchestrator: "active" },
+        }),
+      ),
+    );
     // A thread mode can't be switched off from the composer.
     expect(
       container.querySelector('[aria-label="Turn off Operator"]'),

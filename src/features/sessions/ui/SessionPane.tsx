@@ -41,6 +41,7 @@ import {
 } from "react";
 import { Composer } from "./Composer";
 import { operatorEnabledInThread } from "../model/operatorCommand";
+import { orchestrationPlanningInThread } from "../../orchestration/model/orchestrationPlan";
 import type { Worktree } from "../../source-control/model/worktrees";
 import {
   orchestrationCheckoutCwd,
@@ -434,15 +435,21 @@ const LocalSessionPane = memo(function LocalSessionPane({
     () => operatorEnabledInThread(session.blocks),
     [session.blocks],
   );
+  const planning = useMemo(
+    () => orchestrationPlanningInThread(session.blocks),
+    [session.blocks],
+  );
   const threadModes = useMemo(
     () => ({
       operator: operatorOn,
       orchestrator:
         leadRun?.status === "active" || leadRun?.status === "paused"
           ? leadRun.status
-          : undefined,
+          : planning
+            ? ("planning" as const)
+            : undefined,
     }),
-    [operatorOn, leadRun?.status],
+    [operatorOn, leadRun?.status, planning],
   );
   const title = sessionDisplayTitle(session.title, session.harness);
   const isEmpty = session.blocks.length === 0;
