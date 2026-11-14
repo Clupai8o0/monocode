@@ -286,6 +286,11 @@ export function buildClaudeSpawnArgs(input: {
     args.push("--settings", JSON.stringify(settings));
     // Fork: headless Claude skips the Chrome extension unless asked.
     args.push("--chrome");
+    // Newer models send empty thinking blocks unless asked for summaries,
+    // and in print mode only this flag asks (`showThinkingSummaries` is read
+    // by the interactive UI alone), so without it the transcript shows
+    // "Thinking…" with nothing under it.
+    args.push("--thinking-display", "summarized");
   }
   if (input.model) args.push("--model", input.model);
   if (input.effort) args.push("--effort", input.effort);
