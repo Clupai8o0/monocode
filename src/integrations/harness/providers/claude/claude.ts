@@ -94,7 +94,21 @@ import type {
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
 import { effortAutoFor } from "../../../../fork/effortAsk/effortAsk"; // Fork
 import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
-import { remoteControlRequest } from "../../../../fork/peerMessages/remoteControl"; // Fork
+import {
+  remoteControlReply,
+  remoteControlRequest,
+  remoteControlSwitch,
+  remoteControlUnavailable,
+  trackRemoteControl,
+  type RemoteControlReply,
+} from "../../../../fork/peerMessages/remoteControl"; // Fork
+import {
+  remoteControlEnded,
+  remoteControlActive,
+  remoteControlChoice,
+  remoteControlUrl,
+  setRemoteControlState,
+} from "../../../../fork/remoteControl/remoteControlStore"; // Fork
 import { publishClaudeStreamUsage } from "../../../../fork/usage/claudeStreamUsage"; // Fork
 
 /**
@@ -211,6 +225,8 @@ type Live = {
   pendingAssistantBoundary: boolean;
   manualCompaction: boolean;
   compactionConfirmed: boolean;
+  /** Fork: a turn the phone started over Remote Control, until it ends. */
+  remoteTurn: Promise<void> | null;
 };
 
 type Resume = {
@@ -266,6 +282,11 @@ export function setClaudeBinaryResolver(
 export async function sendClaudeTurn(input: SendTurnInput): Promise<void> {
   let live: Live;
   try {
+    // Fork: a new model or effort respawns Claude; let a phone turn end
+    // first. Stop pressed meanwhile drops this message.
+    const stops = stopCount(input.sessionId);
+    await waitForRemoteTurn(input.sessionId);
+    if (stopCount(input.sessionId) !== stops) return;
     live = await ensureLive(input);
   } catch (error) {
     cancelledThreads.delete(input.sessionId);
@@ -294,6 +315,7 @@ export async function compactClaudeContext(
   input: CompactContextInput,
 ): Promise<void> {
   const settingsKey = settingsKeyFor(input);
+  await waitForRemoteTurn(input.sessionId); // Fork
   let live = liveByThread.get(input.sessionId);
   if (!live || live.cwd !== input.cwd || live.settingsKey !== settingsKey) {
     live = await ensureLive(input);
@@ -412,6 +434,7 @@ export function respondClaudeQuestion(
 }
 
 export async function cancelClaudeTurn(sessionId: string): Promise<void> {
+  stopsByThread.set(sessionId, stopCount(sessionId) + 1); // Fork
   const live = liveByThread.get(sessionId);
   if (!live) {
     cancelledThreads.add(sessionId);
@@ -453,6 +476,7 @@ export async function stopClaudeSession(sessionId: string): Promise<void> {
   cancelledThreads.delete(sessionId);
   const live = liveByThread.get(sessionId);
   liveByThread.delete(sessionId);
+  remoteControlEnded(sessionId); // Fork
   if (live) {
     live.muteUpdates = true;
     for (const [, pending] of live.approvals) pending.resolve("deny");
@@ -469,6 +493,64 @@ export async function stopClaudeSession(sessionId: string): Promise<void> {
   }
   unwatchChild(sessionId);
   await killChild(sessionId).catch(() => undefined);
+}
+
+/**
+ * Fork: turn Remote Control on or off for a running session. False when its
+ * Claude isn't running yet; a wish saved with `setRemoteControlWanted` then
+ * starts it with the session.
+ */
+export function setClaudeRemoteControl(
+  sessionId: string,
+  enabled: boolean,
+): boolean {
+  const live = liveByThread.get(sessionId);
+  // A cancelled turn mutes updates but the process, and its bridge, live on.
+  if (!live?.initialized) return false;
+  sendRemoteControl(sessionId, live, enabled);
+  return true;
+}
+
+function sendRemoteControl(sessionId: string, live: Live, enabled: boolean): void {
+  const requestId = nextControlId(live);
+  trackRemoteControl(live, requestId, enabled);
+  setRemoteControlState(
+    sessionId,
+    enabled
+      ? { status: "starting" }
+      : { status: "stopping", url: remoteControlUrl(sessionId) },
+  );
+  void writeJson(
+    sessionId,
+    buildControlRequest(requestId, remoteControlSwitch(enabled)),
+  ).catch(() => {
+    // The session works without it; only the phone can't reach it.
+    noteRemoteControlReply(sessionId, {
+      enabled,
+      ok: false,
+      error: "Could not reach this session's Claude.",
+    });
+  });
+}
+
+function noteRemoteControlReply(
+  sessionId: string,
+  reply: RemoteControlReply,
+): void {
+  if (!reply.ok && !reply.enabled) {
+    // Still on: say why it didn't turn off, and keep it reachable.
+    setRemoteControlState(sessionId, {
+      status: "on",
+      url: remoteControlUrl(sessionId),
+      error: reply.error,
+    });
+  } else if (!reply.ok) {
+    setRemoteControlState(sessionId, { status: "failed", error: reply.error });
+  } else if (reply.enabled) {
+    setRemoteControlState(sessionId, { status: "on", url: reply.url });
+  } else {
+    setRemoteControlState(sessionId, { status: "off" });
+  }
 }
 
 export async function forgetClaudeSession(sessionId: string): Promise<void> {
@@ -625,6 +707,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     pendingAssistantBoundary: false,
     manualCompaction: false,
     compactionConfirmed: false,
+    remoteTurn: null,
   };
   liveRef.current = live;
 
@@ -639,6 +722,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       exited = true;
       gatewayExited();
       liveByThread.delete(input.sessionId);
+      remoteControlEnded(input.sessionId); // Fork
       const current = liveRef.current;
       if (!current?.muteUpdates) {
         (current?.onEvent ?? input.onEvent)({ type: "session.ended", code });
@@ -732,6 +816,13 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
 }
 
 async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
+  // Fork: a phone turn that started after this was queued goes first; Stop
+  // pressed meanwhile drops this message.
+  if (live.remoteTurn) {
+    const stops = stopCount(input.sessionId);
+    while (live.remoteTurn) await live.remoteTurn;
+    if (stopCount(input.sessionId) !== stops) return;
+  }
   const effort = input.modelSettings?.effort;
   const message = buildClaudeUserMessage({
     text: input.text,
@@ -761,7 +852,11 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.turnResultSeen = false;
   live.pendingSteers = [];
 
+  let ownDone: (() => void) | null = null;
+  let ownFailed: ((error: Error) => void) | null = null;
   const turnPromise = new Promise<void>((resolve, reject) => {
+    ownDone = resolve;
+    ownFailed = reject;
     live.turnDone = resolve;
     live.turnFailed = reject;
   });
@@ -781,8 +876,10 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     });
     throw error;
   } finally {
-    live.turnDone = null;
-    live.turnFailed = null;
+    // Fork: a phone turn may already have started after this one ended;
+    // its callbacks stay.
+    if (live.turnDone === ownDone) live.turnDone = null;
+    if (live.turnFailed === ownFailed) live.turnFailed = null;
   }
 }
 
@@ -828,6 +925,28 @@ function handleLine(sessionId: string, live: Live, line: string): void {
     return;
   }
 
+  // Fork: a Remote Control answer counts even while a stopped turn is muted.
+  if (type === "control_response") {
+    const switched = remoteControlReply(live, rec);
+    if (switched) {
+      markInitialized(live);
+      noteRemoteControlReply(sessionId, switched);
+      return;
+    }
+  }
+
+  // Fork: a turn the phone started while none runs here. Claude opens each
+  // turn with `system/init`.
+  if (
+    !live.activeTurn &&
+    !live.turnDone &&
+    type === "system" &&
+    stringField(rec, "subtype") === "init" &&
+    remoteControlActive(sessionId)
+  ) {
+    startRemoteTurn(live);
+  }
+
   if (live.muteUpdates) return;
 
   const sessionIdFromLine = sessionIdFromMessage(rec);
@@ -861,15 +980,16 @@ function handleLine(sessionId: string, live: Live, line: string): void {
 
   if (type === "control_response") {
     markInitialized(live);
-    // Fork: start Remote Control when Claude's setting asks, as the terminal
-    // does, so sessions on other machines can message this one.
-    const remoteControl = remoteControlRequest(live, rec);
-    if (remoteControl) {
-      void writeJson(
-        sessionId,
-        buildControlRequest(nextControlId(live), remoteControl),
-      ).catch(() => {
-        // The session works without it; only other machines can't reach it.
+    // Fork: start Remote Control with the session when Claude's setting or
+    // the user asks, as the terminal does, so the phone and other machines
+    // can reach it.
+    const choice = remoteControlChoice(sessionId);
+    if (remoteControlRequest(live, rec, choice)) {
+      sendRemoteControl(sessionId, live, true);
+    } else if (choice === true && remoteControlUnavailable(rec)) {
+      setRemoteControlState(sessionId, {
+        status: "failed",
+        error: "Remote Control isn't available for this Claude account.",
       });
     }
     return;
@@ -2053,6 +2173,59 @@ function finishActiveTurn(live: Live, extraEvents: HarnessEvent[] = []): void {
 function settlePendingTurn(live: Live): void {
   if (!live.turnEndPending || !live.turnDone) return;
   finishActiveTurn(live);
+}
+
+/**
+ * Fork: give a turn the phone started over Remote Control a turn of its own,
+ * unmuted, as `runTurn` does for one sent here, so its output and approvals
+ * reach MonoCode and its reply ends with Claude's result. Messages sent here
+ * meanwhile wait for it (`waitForRemoteTurn`), before any respawn too.
+ */
+function startRemoteTurn(live: Live): void {
+  live.cancelled = false;
+  live.muteUpdates = false;
+  live.emittedAssistant = "";
+  live.emittedReasoning = "";
+  live.pendingAssistantBoundary = false;
+  live.toolsByIndex.clear();
+  live.toolsById.clear();
+  live.outputPathsByToolId.clear();
+  live.agentTasks.clear();
+  live.backgroundTasks.clear();
+  live.backgroundRows.clear();
+  clearAwaitingResume(live);
+  live.backgroundKey = "";
+  live.taskNotes = [];
+  live.turnResultSeen = false;
+  live.turnEndPending = false;
+  const remote = new Promise<void>((resolve) => {
+    live.turnDone = resolve;
+    // Claude exited mid-turn: a message waiting on it moves on and reports
+    // the dead session itself.
+    live.turnFailed = () => resolve();
+  });
+  live.remoteTurn = remote;
+  void remote.then(() => {
+    if (live.remoteTurn === remote) live.remoteTurn = null;
+  });
+  live.activeTurn = true;
+  live.onEvent({ type: "status", text: "Turn from your phone (Remote Control)" });
+}
+
+/** Fork: how many times Stop was pressed in each session. */
+const stopsByThread = new Map<string, number>();
+
+function stopCount(sessionId: string): number {
+  return stopsByThread.get(sessionId) ?? 0;
+}
+
+/** Fork: wait until no phone turn runs in this session's Claude. */
+async function waitForRemoteTurn(sessionId: string): Promise<void> {
+  for (;;) {
+    const remote = liveByThread.get(sessionId)?.remoteTurn;
+    if (!remote) return;
+    await remote;
+  }
 }
 
 function markInitialized(live: Live): void {

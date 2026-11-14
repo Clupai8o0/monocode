@@ -11,6 +11,7 @@ import type { PrContent } from "../../../features/source-control/model/gitText";
 import { hasLiveCatalog } from "../../../features/sessions/model/models";
 import type { UserQuestionReply } from "../../../features/sessions/model/userQuestion";
 import type { NativeCommandProvider } from "./nativeCommands";
+import { remoteControlActive } from "../../../fork/remoteControl/remoteControlStore"; // Fork
 import type {
   ApprovalDecision,
   CompactContextInput,
@@ -210,6 +211,14 @@ function scheduleIdlePark(harness: HarnessId, sessionId: string): void {
   idleParkTimers.set(sessionId, {
     harness,
     timer: setTimeout(() => {
+      // Fork: the phone may be using a session with Remote Control on, so
+      // it stays warm; look again later, keeping when it went idle.
+      if (remoteControlActive(sessionId)) {
+        const since = idleSinceBySession.get(sessionId);
+        scheduleIdlePark(harness, sessionId);
+        if (since !== undefined) idleSinceBySession.set(sessionId, since);
+        return;
+      }
       idleParkTimers.delete(sessionId);
       void stopHarnessSession(harness, sessionId);
     }, HARNESS_IDLE_PARK_MS),
@@ -235,6 +244,7 @@ export function enforceHarnessIdleLimit(): void {
     if (excess <= 0) return;
     if (sessionOperationTails.has(sessionId)) continue;
     if (limit > 0 && idleParkPolicy.keep(sessionId)) continue;
+    if (remoteControlActive(sessionId)) continue; // Fork
     excess -= 1;
     void stopHarnessSession(harness, sessionId);
   }

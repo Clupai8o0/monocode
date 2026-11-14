@@ -133,6 +133,7 @@ import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { EffortMeter } from "../../../fork/effortAsk/EffortMeter"; // Fork
 import { UltrareviewButton } from "../../../fork/ultrareview/UltrareviewButton"; // Fork
 import { MoveToHostButton } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
+import { RemoteControlButton } from "../../../fork/remoteControl/RemoteControlButton"; // Fork
 import { QuestionForm } from "./QuestionForm";
 import { MessageQueue } from "./MessageQueue";
 import { SkillPicker } from "../../skills/ui/SkillPicker";
@@ -2560,6 +2561,9 @@ export function Composer({
                 {/* Fork */}
                 {!compact ? <UltrareviewButton /> : null}
                 {!compact && sessionId ? <MoveToHostButton sessionId={sessionId} /> : null}
+                {!compact && sessionId && harness === "claude" ? (
+                  <RemoteControlButton sessionId={sessionId} />
+                ) : null}
                 {!compact && harness !== "fx" ? (
                   <AccessPicker
                     value={runtimeMode}
