@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyHarnessEvent } from "../../core/apply";
+import {
+  __resetRemoteControlStore,
+  remoteControlActive,
+  remoteControlState,
+  setRemoteControlWanted,
+} from "../../../../fork/remoteControl/remoteControlStore";
 import { newSession } from "../../../../features/sessions/model/session";
 import {
   foldableWork,
@@ -42,6 +48,7 @@ const {
   respondClaudeQuestion,
   restoreClaudeTaskLists,
   sendClaudeTurn,
+  setClaudeRemoteControl,
   stopClaudeSession,
   __claudeTestReset,
 } = await import("./claude");
@@ -2185,6 +2192,10 @@ describe("claude manual compaction", () => {
 });
 
 describe("claude Remote Control at startup (fork)", () => {
+  beforeEach(() => {
+    __resetRemoteControlStore();
+  });
+
   async function startWithInitReply(reply: Record<string, unknown>) {
     const turn = sendClaudeTurn({
       sessionId: "s1",
@@ -2246,6 +2257,199 @@ describe("claude Remote Control at startup (fork)", () => {
     emit({ type: "result", subtype: "success", session_id: "sess_1" });
     await turn;
     expect(remoteControlRequests()).toHaveLength(1);
+  });
+
+  it("starts it when the user turned it on, and keeps the phone link", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: true,
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    expect(remoteControlState("s1")).toEqual({ status: "starting" });
+    const onId = remoteControlRequests()[0]?.request_id;
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: onId,
+        response: { session_url: "https://claude.ai/code/session_1" },
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    expect(remoteControlState("s1")).toEqual({
+      status: "on",
+      url: "https://claude.ai/code/session_1",
+    });
+
+    // Off again while the session runs, as the composer button does it.
+    setRemoteControlWanted("s1", false);
+    expect(setClaudeRemoteControl("s1", false)).toBe(true);
+    await waitFor(() => remoteControlRequests().length > 1, "remote_control off");
+    const off = remoteControlRequests().at(-1);
+    expect(off?.request).toEqual({ subtype: "remote_control", enabled: false });
+    emit({
+      type: "control_response",
+      response: { subtype: "success", request_id: off?.request_id, response: {} },
+    });
+    await waitFor(() => remoteControlState("s1").status === "off", "off");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("stays on, and says why, when turning it off fails", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: true,
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: remoteControlRequests()[0]?.request_id,
+        response: { session_url: "https://claude.ai/code/session_1" },
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    // A cancelled turn mutes updates; the switch and its answer still count.
+    await cancelClaudeTurn("s1");
+    setRemoteControlWanted("s1", false);
+    expect(setClaudeRemoteControl("s1", false)).toBe(true);
+    await waitFor(() => remoteControlRequests().length > 1, "remote_control off");
+    expect(remoteControlActive("s1")).toBe(true);
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "error",
+        request_id: remoteControlRequests().at(-1)?.request_id,
+        error: "bridge busy",
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on" &&
+      "error" in remoteControlState("s1"), "still on");
+    expect(remoteControlState("s1")).toEqual({
+      status: "on",
+      url: "https://claude.ai/code/session_1",
+      error: "bridge busy",
+    });
+    await turn.catch(() => undefined);
+  });
+
+  it("lets a turn from the phone through after one cancelled here", async () => {
+    setRemoteControlWanted("s1", true);
+    const events: HarnessEvent[] = [];
+    const turn = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    await waitFor(
+      () =>
+        parse().some(
+          (m) => (m.request as Record<string, unknown> | undefined)?.subtype === "initialize",
+        ),
+      "initialize",
+    );
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "monocode_1",
+        response: { remote_control_available: true },
+      },
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: remoteControlRequests()[0]?.request_id,
+        response: {},
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    await cancelClaudeTurn("s1");
+    await turn.catch(() => undefined);
+    events.length = 0;
+
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      message: { id: "m_phone", role: "assistant", content: [{ type: "text", text: "from phone" }] },
+    });
+    await waitFor(
+      () => events.some((e) => e.type === "message.delta" && e.text.includes("from phone")),
+      "phone reply",
+    );
+    // A message sent here meanwhile waits for the phone's turn to end.
+    const next = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "again",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    let settled = false;
+    void next.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(parse().filter((m) => m.type === "user")).toHaveLength(1);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await waitFor(
+      () => events.some((e) => e.type === "message.completed"),
+      "phone reply completed",
+    );
+
+    // Then it runs to its own result, not the phone's.
+    await waitFor(
+      () => parse().filter((m) => m.type === "user").length > 1,
+      "second prompt",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await next;
+  });
+
+  it("says so when the account can't use Remote Control", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: false,
+    });
+    await waitFor(() => remoteControlState("s1").status === "failed", "failed");
+    expect(remoteControlRequests()).toHaveLength(0);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("can't switch a session whose Claude isn't running", () => {
+    expect(setClaudeRemoteControl("nobody", true)).toBe(false);
+  });
+
+  it("keeps it off when the user turned it off, whatever Claude's setting", async () => {
+    setRemoteControlWanted("s1", false);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: true,
+      remote_control_available: true,
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+    expect(remoteControlRequests()).toHaveLength(0);
   });
 
   it("leaves Remote Control off when the setting is off", async () => {
