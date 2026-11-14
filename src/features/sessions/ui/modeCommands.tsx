@@ -168,3 +168,40 @@ export function ModeCommandPill({
     </button>
   );
 }
+
+/** A mode that stays on for the whole thread, not just the next message. */
+export type ThreadModes = {
+  /** A past /operator turn gave this thread app access. */
+  operator?: boolean;
+  /** This thread leads an orchestration run that is still open. */
+  orchestrator?: "active" | "paused";
+};
+
+/**
+ * Shows a mode that is already on for this thread. It has no off switch:
+ * Operator stays on once used, and a run is stopped from its own card.
+ */
+export function ModeStatusPill({
+  name,
+  label,
+  title,
+}: {
+  name: string;
+  label: string;
+  title: string;
+}) {
+  const style = MODE_COMMAND_STYLES[name];
+  if (!style?.pill) return null;
+  const { Icon, pill } = style;
+  return (
+    <span
+      role="status"
+      title={title}
+      aria-label={title}
+      className={`flex h-6.5 shrink-0 cursor-default items-center gap-1 rounded-md px-1.5 text-[11px] ${pill.className}`}
+    >
+      <Icon className="size-3.5" />
+      <span>{label}</span>
+    </span>
+  );
+}

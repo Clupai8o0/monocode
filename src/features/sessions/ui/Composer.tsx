@@ -172,6 +172,8 @@ import {
   leadingModeCommand,
   MODE_COMMAND_INDENT,
   ModeCommandPill,
+  ModeStatusPill,
+  type ThreadModes,
   ModeCommandText,
   type ModeCommandToken,
 } from "./modeCommands";
@@ -243,6 +245,8 @@ type Props = {
   hideTopBar?: boolean;
   /** Keeps local file mentions, skills, and app modes off for host sessions. */
   remoteSession?: boolean;
+  /** Modes already on for this thread, shown beside the toolbar. */
+  threadModes?: ThreadModes;
   remoteFeatures?: { attachments: boolean; plan: boolean; draft: boolean };
   context?: ContextUsage;
   compactSupported?: boolean;
@@ -378,6 +382,7 @@ export function Composer({
   hideBranchPicker = false,
   hideTopBar = false,
   remoteSession = false,
+  threadModes,
   remoteFeatures,
   context,
   compactSupported = false,
@@ -2432,6 +2437,24 @@ export function Composer({
                 </Popover>
               ) : null}
             </div>
+            {!compact && threadModes?.operator && !operatorActive ? (
+              <ModeStatusPill
+                name={OPERATOR_COMMAND.name}
+                label="Operator on"
+                title="Operator is on for this thread: it can see and message other sessions and use MonoCode. It stays on once used."
+              />
+            ) : null}
+            {!compact && threadModes?.orchestrator && !orchestrationActive ? (
+              <ModeStatusPill
+                name={ORCHESTRATOR_COMMAND.name}
+                label={
+                  threadModes.orchestrator === "paused"
+                    ? "Orchestrator paused"
+                    : "Orchestrating"
+                }
+                title="This thread leads an orchestration run: it splits the work and runs worker sessions."
+              />
+            ) : null}
             {!compact && operatorActive ? (
               <ModeCommandPill
                 name={OPERATOR_COMMAND.name}
