@@ -198,6 +198,9 @@ describe("buildClaudeSpawnArgs", () => {
     expect(args).toContain("--strict-mcp-config");
     expect(args).not.toContain("--chrome");
     expect(args).not.toContain("--thinking-display");
+    expect(
+      buildClaudeSpawnArgs({ isolated: true, thinkingDisplay: true }),
+    ).toEqual(expect.arrayContaining(["--thinking-display", "summarized"]));
     expect(args).toEqual(expect.arrayContaining(["--max-turns", "1"]));
     const settings = args[args.indexOf("--settings") + 1];
     expect(JSON.parse(settings)).toMatchObject({ disableAllHooks: true });

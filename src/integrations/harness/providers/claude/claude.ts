@@ -8,7 +8,6 @@ import type {
 } from "../../../../features/sessions/model/session";
 import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
-  execChild,
   killChild,
   resolveClaudeBinary,
   resolveVivobookBinary,
@@ -30,7 +29,6 @@ import {
   turnMetricsFromResult,
   buildClaudeSpawnArgs,
   claudeSupportsThinkingDisplay,
-  parseClaudeVersion,
   buildClaudeUserMessage,
   buildControlRequest,
   buildControlResponse,
@@ -77,6 +75,7 @@ import {
   type ClaudeCliSettings,
   type ClaudeControlRequest,
 } from "./claudeProtocol";
+import { claudeVersionAt } from "./claudeVersion";
 import { extractShellCommand, isAgentToolName } from "../../core/preview";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
 import {
@@ -237,26 +236,6 @@ export function setClaudeBinaryResolver(
   fn: () => Promise<{ path: string }>,
 ): void {
   resolveClaudeBinaryImpl = fn;
-}
-
-/** CLI version per binary path, read once per app run. */
-const claudeVersionByPath = new Map<string, Promise<string | null>>();
-
-function claudeVersionAt(path: string): Promise<string | null> {
-  let version = claudeVersionByPath.get(path);
-  if (!version) {
-    version = (async () => {
-      try {
-        return parseClaudeVersion(
-          await execChild(path, ["--version"], undefined, "claude"),
-        );
-      } catch {
-        return null;
-      }
-    })();
-    claudeVersionByPath.set(path, version);
-  }
-  return version;
 }
 
 export async function sendClaudeTurn(input: SendTurnInput): Promise<void> {
