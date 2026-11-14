@@ -13,6 +13,8 @@ import {
   DEFAULT_PROVIDER_ACCOUNT_ID,
   renameProviderAccount,
   saveProviderAccount,
+  selectProviderAccount,
+  providerAccountChoice,
   selectedProviderAccountId,
 } from "../../features/providers/model/providerAccounts";
 import {
@@ -92,7 +94,7 @@ async function renderFooter(
   await act(async () =>
     root.render(
       createElement(UsageFooter, {
-        providers: ["claude"],
+        providers: [session.harness === "codex" ? "codex" : "claude"],
         project: session.cwd,
         session: {
           id: session.id,
@@ -106,13 +108,14 @@ async function renderFooter(
   );
 }
 
-async function openAccountPicker() {
-  await act(async () => button("Claude Code usage details").click());
-  await act(async () => button("Switch Claude Code account").click());
+async function openAccountPicker(provider = "Claude Code") {
+  await act(async () => button(`${provider} usage details`).click());
+  await act(async () => button(`Switch ${provider} account`).click());
 }
 
 describe("UsageFooter account per project", () => {
   it("keeps another project on its own account after a blank session moves there", async () => {
+    selectProviderAccount("claude", PROJECT_B, DEFAULT_PROVIDER_ACCOUNT_ID);
     let session = newSession("claude", PROJECT_A, "claude:opus-5");
 
     // Project A: the user picks Work. App stamps the blank session
@@ -135,7 +138,34 @@ describe("UsageFooter account per project", () => {
 
     await renderFooter(session);
     await openAccountPicker();
-    expect(button("Personal · main (~/.claude)").getAttribute("aria-pressed")).toBe("true");
+    expect(
+      button("Personal · main (~/.claude)").getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(button("Work").getAttribute("aria-pressed")).toBe("false");
   });
+
+  it.each(["claude", "codex"] as const)(
+    "offers Auto by default for new %s sessions",
+    async (provider) => {
+      saveProviderAccount({ id: WORK_ACCOUNT_ID, provider, label: "Work" });
+      const limits = { ...claudeLimits(), provider };
+      setCachedRateLimits(provider, "default", limits);
+      setCachedRateLimits(provider, WORK_ACCOUNT_ID, limits);
+      await renderFooter(newSession(provider, PROJECT_A));
+      await openAccountPicker(provider === "claude" ? "Claude Code" : "Codex");
+      const auto = [
+        ...document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"),
+      ].find((item) => item.textContent?.startsWith("Auto"));
+      expect(auto).toBeDefined();
+      expect(auto!.getAttribute("aria-pressed")).toBe("true");
+      await act(async () => button("Work").click());
+      expect(providerAccountChoice(provider, PROJECT_A)).toBe(WORK_ACCOUNT_ID);
+      await openAccountPicker(provider === "claude" ? "Claude Code" : "Codex");
+      const chooseAuto = [
+        ...document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"),
+      ].find((item) => item.textContent?.startsWith("Auto"));
+      await act(async () => chooseAuto!.click());
+      expect(providerAccountChoice(provider, PROJECT_A)).toBe("auto");
+    },
+  );
 });

@@ -13,6 +13,9 @@ import {
 } from "../../settings/model/settings";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { lazySurface } from "../../../shared/ui/lazySurface";
+// Fork: a project's empty chat opens on that project's home.
+import { useHomeInlineData } from "../../../fork/projectHome/homeInline";
+import { ProjectHomeInline } from "../../../fork/projectHome/ProjectHomePage";
 // Fork: idle games load only when an empty session shows them.
 const TerminalGridBackground = lazySurface(() =>
   import("../../terminal/ui/TerminalGridBackground")
@@ -51,6 +54,29 @@ export function EmptySession({ cwd, composer, hasChatBackground }: Props) {
   const title = project
     ? `What should we work on in ${project}?`
     : "What should we work on?";
+  const homeData = useHomeInlineData(); // Fork
+
+  // Only local folders: the home's roadmap, chats and launches are local.
+  if (homeData && project !== null && cwd.startsWith("/")) {
+    // The home scrolls; the composer stays under it in the docked composer's
+    // box (max-w-4xl, p-1.5), so its pickers open upward over the home and
+    // the first message docks it without a jump.
+    return (
+      <div data-session-home className="@container relative flex h-full min-h-0 flex-col">
+        <div
+          ref={lockOverscroll}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-none"
+        >
+          <ProjectHomeInline cwd={cwd} data={homeData} />
+        </div>
+        {composer ? (
+          <div className="relative z-10 mx-auto w-full max-w-4xl shrink-0 px-1.5 pb-1.5">
+            {composer}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div

@@ -85,6 +85,12 @@ describe("parseEffortNeeded", () => {
     expect(parseEffortNeeded(`Some answer\n${LINE}`)).toBeNull();
   });
 
+  it("reads the first line of a long reply", () => {
+    expect(parseEffortNeeded(`${LINE}\n${"word ".repeat(20_000)}`)).toBe(
+      "xhigh",
+    );
+  });
+
   it("rejects lines that only look alike", () => {
     expect(parseEffortNeeded("Effort: high")).toBeNull();
     expect(parseEffortNeeded("The effort: high now, xhigh needed")).toBeNull();
@@ -631,5 +637,53 @@ describe("a turn that runs past its raise", () => {
     noteEffortStop("s1");
     const change = effortChangesOfEndedTurns([session(turn, low)], wasBusy, seen).get("s1");
     expect(change?.resume).toBe(false);
+  });
+});
+
+describe("a raise asked after a follow-up sent mid-turn", () => {
+  // Replays a real session (6 Nov 2026): follow-ups sent while the turn ran,
+  // the CLI ran the last one as its own turn, both replies were bare raises.
+  const start = block("user", "Motion too slow", { startedAt: 1 });
+  const work = [
+    start,
+    block("assistant", "Effort: high now, medium needed (retune)."),
+    block("tool", "Bash"),
+    block("user", "Please also get copywriting skills", { sentAt: 2 }),
+    block("assistant", "Effort: high now, high needed (site).\n\nDoing all five."),
+    block("tool", "Bash"),
+  ];
+  const followUp = block("user", "Make the apps prettier", { sentAt: 3 });
+  const first = block("assistant", "Effort: high now, xhigh needed (copy).");
+  const second = block("assistant", "Effort: high now, xhigh needed (design).");
+
+  it("sends on a bare raise that answers a follow-up, despite work before it", () => {
+    const s = session([...work, followUp, first]);
+    expect(resumeLevelFor(s, effortChangeFor(s))).toBe("xhigh");
+    expect(endedForEffortRaise(s)).toBe(true);
+  });
+
+  it("does not send on when the follow-up got a worked reply", () => {
+    const s = session([...work, followUp, block("assistant", "Effort: high now, xhigh needed (x).\n\nDone.")]);
+    expect(resumeLevelFor(s, effortChangeFor(s))).toBeNull();
+  });
+
+  it("reads the CLI's turn for a follow-up, and sends on its stale raise once", () => {
+    const wasBusy = new Set<string>();
+    const seen = new Map<string, string>();
+    const stale = new Map<string, string>();
+    const end = (blocks: Block[], extra?: Partial<Session>) => {
+      effortChangesOfEndedTurns([session(blocks, { busy: true, ...extra })], wasBusy, seen, stale);
+      return effortChangesOfEndedTurns([session(blocks, extra)], wasBusy, seen, stale).get("s1");
+    };
+    expect(end([...work, followUp, first])).toMatchObject({ value: "xhigh", resume: true });
+    // The raise landed, but the CLI's queued turn was told "high" and asked again.
+    const raised = { modelSettings: { effort: "xhigh" } };
+    const note = block("system", "Effort raised to xhigh (model asked)");
+    expect(end([...work, followUp, first, note, second], raised)).toBeUndefined();
+    expect(stale.get("s1")).toBe("xhigh");
+    // Busy flipping again on the same blocks reads nothing.
+    stale.clear();
+    expect(end([...work, followUp, first, note, second], raised)).toBeUndefined();
+    expect(stale.size).toBe(0);
   });
 });

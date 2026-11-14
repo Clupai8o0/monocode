@@ -1,4 +1,5 @@
 import { TurnNotReadyError } from "../../core/types";
+import { claudeFileDelivery } from "./claudeDelivery";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
 import type {
@@ -23,6 +24,7 @@ import {
   assistantTextBlocks,
   assistantThinkingBlocks,
   assistantToolUses,
+  authFailureFromAssistant,
   backgroundOutputPath,
   contextFromResult,
   contextUsedFromAssistant,
@@ -94,7 +96,21 @@ import type {
 import { isChecklistToolName } from "../../../../fork/checklist/checklist";
 import { effortAutoFor } from "../../../../fork/effortAsk/effortAsk"; // Fork
 import { peerInterjection } from "../../../../fork/peerMessages/peerTranscript"; // Fork
-import { remoteControlRequest } from "../../../../fork/peerMessages/remoteControl"; // Fork
+import {
+  remoteControlReply,
+  remoteControlRequest,
+  remoteControlSwitch,
+  remoteControlUnavailable,
+  trackRemoteControl,
+  type RemoteControlReply,
+} from "../../../../fork/peerMessages/remoteControl"; // Fork
+import {
+  remoteControlEnded,
+  remoteControlActive,
+  remoteControlChoice,
+  remoteControlUrl,
+  setRemoteControlState,
+} from "../../../../fork/remoteControl/remoteControlStore"; // Fork
 import { publishClaudeStreamUsage } from "../../../../fork/usage/claudeStreamUsage"; // Fork
 
 /**
@@ -134,6 +150,11 @@ type LiveAgentTask = {
 type BackgroundTask = {
   description: string;
   toolUseId?: string;
+  /** Shell / monitor command, when the tool that started it is known. */
+  command?: string;
+  startedAt: number;
+  /** True after we sent stop_task; skip the follow-up grace wait. */
+  stopping?: boolean;
 };
 
 type Live = {
@@ -151,6 +172,7 @@ type Live = {
   nextControlId: number;
   toolsByIndex: Map<number, InFlightTool>;
   toolsById: Map<string, InFlightTool>;
+  deliveredToolIds: Set<string>;
   outputPathsByToolId: Map<string, string>;
   agentTasks: Map<string, LiveAgentTask>;
   /**
@@ -159,12 +181,31 @@ type Live = {
    * for another turn, so the MonoCode turn stays open until they are done.
    */
   backgroundTasks: Map<string, BackgroundTask>;
+  /**
+   * Task ids from the CLI's latest `background_tasks_changed` list. Only these
+   * are shown as background jobs above the composer.
+   */
+  backgroundListed: Set<string>;
   /** Rows shown for tasks still running when Claude yielded, by task id. */
   backgroundRows: Map<string, string>;
   /** A task finished after Claude yielded; its follow-up turn is on the way. */
   awaitingResume: ReturnType<typeof setTimeout> | null;
+  /**
+   * Follow-ups written into the running turn that Claude has not taken yet,
+   * by message uuid. One still queued when Claude yields runs as its own
+   * Claude turn, so the MonoCode turn stays open for it (Claude echoes each
+   * message, uuid kept, as it takes it, through `--replay-user-messages`).
+   */
+  pendingSteers: { uuid: string; text: string }[];
   /** Last background list sent to the UI, to skip repeats. */
   backgroundKey: string;
+  /** Last background.jobs payload, to skip repeats. */
+  jobsKey: string;
+  /**
+   * This turn opened because Claude woke itself (e.g. a finished background
+   * task), not because we sent one. Settles with `session.idle`.
+   */
+  woken: boolean;
   /** Finished-subagent notes held until Claude picks the thread back up. */
   taskNotes: string[];
   /** TaskCreate/TaskUpdate items, keyed by Claude's task id. */
@@ -186,6 +227,8 @@ type Live = {
   pendingAssistantBoundary: boolean;
   manualCompaction: boolean;
   compactionConfirmed: boolean;
+  /** Fork: a turn the phone started over Remote Control, until it ends. */
+  remoteTurn: Promise<void> | null;
 };
 
 type Resume = {
@@ -241,6 +284,11 @@ export function setClaudeBinaryResolver(
 export async function sendClaudeTurn(input: SendTurnInput): Promise<void> {
   let live: Live;
   try {
+    // Fork: a new model or effort respawns Claude; let a phone turn end
+    // first. Stop pressed meanwhile drops this message.
+    const stops = stopCount(input.sessionId);
+    await waitForRemoteTurn(input.sessionId);
+    if (stopCount(input.sessionId) !== stops) return;
     live = await ensureLive(input);
   } catch (error) {
     cancelledThreads.delete(input.sessionId);
@@ -269,6 +317,7 @@ export async function compactClaudeContext(
   input: CompactContextInput,
 ): Promise<void> {
   const settingsKey = settingsKeyFor(input);
+  await waitForRemoteTurn(input.sessionId); // Fork
   let live = liveByThread.get(input.sessionId);
   if (!live || live.cwd !== input.cwd || live.settingsKey !== settingsKey) {
     live = await ensureLive(input);
@@ -316,7 +365,52 @@ export async function steerClaudeTurn(input: SteerTurnInput): Promise<void> {
   const content = (message.message as { content: unknown[] }).content;
   if (content.length === 0) return;
 
-  await writeJson(input.sessionId, message);
+  // Noted before the write, so an echo that comes back at once finds it.
+  const pending = { uuid: crypto.randomUUID(), text: steerKey(content) };
+  live.pendingSteers.push(pending);
+  if (live.turnResultSeen && live.awaitingResume) {
+    // Sent while the turn is held for an earlier one: the wait starts over.
+    clearAwaitingResume(live);
+    maybeFinishTurn(live);
+  }
+  try {
+    await writeJson(input.sessionId, { ...message, uuid: pending.uuid });
+  } catch (error) {
+    live.pendingSteers = live.pendingSteers.filter((item) => item !== pending);
+    throw error;
+  }
+}
+
+/** A message's text, to match Claude's echo of it to the follow-up sent. */
+function steerKey(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      const record = part as Record<string, unknown> | null;
+      return record?.type === "text" && typeof record.text === "string"
+        ? record.text
+        : "";
+    })
+    .join("\n")
+    .trim();
+}
+
+/** Claude took a message from stdin: a follow-up it took is no longer queued. */
+function noteUserMessageTaken(live: Live, rec: Record<string, unknown>): void {
+  if (live.pendingSteers.length === 0) return;
+  const uuid = stringField(rec, "uuid");
+  const message = rec.message as Record<string, unknown> | undefined;
+  // An echo without a uuid (an older Claude) is matched by its text.
+  const text = uuid ? undefined : steerKey(message?.content);
+  const at = live.pendingSteers.findIndex((item) =>
+    uuid ? item.uuid === uuid : item.text === text,
+  );
+  if (at < 0) return;
+  live.pendingSteers.splice(at, 1);
+  // Taken after Claude yielded: it is running the follow-up now, so that
+  // turn's own result ends the MonoCode turn, however long it takes to answer.
+  noteClaudeTurnStarted(live);
 }
 
 export function respondClaudeApproval(
@@ -342,6 +436,7 @@ export function respondClaudeQuestion(
 }
 
 export async function cancelClaudeTurn(sessionId: string): Promise<void> {
+  stopsByThread.set(sessionId, stopCount(sessionId) + 1); // Fork
   const live = liveByThread.get(sessionId);
   if (!live) {
     cancelledThreads.add(sessionId);
@@ -365,6 +460,10 @@ export async function cancelClaudeTurn(sessionId: string): Promise<void> {
       }),
     ).catch(() => undefined);
   }
+  live.backgroundTasks.clear();
+  live.backgroundRows.clear();
+  live.backgroundListed.clear();
+  live.jobsKey = "";
   await writeJson(
     sessionId,
     buildControlRequest(nextControlId(live), { subtype: "interrupt" }),
@@ -379,6 +478,7 @@ export async function stopClaudeSession(sessionId: string): Promise<void> {
   cancelledThreads.delete(sessionId);
   const live = liveByThread.get(sessionId);
   liveByThread.delete(sessionId);
+  remoteControlEnded(sessionId); // Fork
   if (live) {
     live.muteUpdates = true;
     for (const [, pending] of live.approvals) pending.resolve("deny");
@@ -395,6 +495,64 @@ export async function stopClaudeSession(sessionId: string): Promise<void> {
   }
   unwatchChild(sessionId);
   await killChild(sessionId).catch(() => undefined);
+}
+
+/**
+ * Fork: turn Remote Control on or off for a running session. False when its
+ * Claude isn't running yet; a wish saved with `setRemoteControlWanted` then
+ * starts it with the session.
+ */
+export function setClaudeRemoteControl(
+  sessionId: string,
+  enabled: boolean,
+): boolean {
+  const live = liveByThread.get(sessionId);
+  // A cancelled turn mutes updates but the process, and its bridge, live on.
+  if (!live?.initialized) return false;
+  sendRemoteControl(sessionId, live, enabled);
+  return true;
+}
+
+function sendRemoteControl(sessionId: string, live: Live, enabled: boolean): void {
+  const requestId = nextControlId(live);
+  trackRemoteControl(live, requestId, enabled);
+  setRemoteControlState(
+    sessionId,
+    enabled
+      ? { status: "starting" }
+      : { status: "stopping", url: remoteControlUrl(sessionId) },
+  );
+  void writeJson(
+    sessionId,
+    buildControlRequest(requestId, remoteControlSwitch(enabled)),
+  ).catch(() => {
+    // The session works without it; only the phone can't reach it.
+    noteRemoteControlReply(sessionId, {
+      enabled,
+      ok: false,
+      error: "Could not reach this session's Claude.",
+    });
+  });
+}
+
+function noteRemoteControlReply(
+  sessionId: string,
+  reply: RemoteControlReply,
+): void {
+  if (!reply.ok && !reply.enabled) {
+    // Still on: say why it didn't turn off, and keep it reachable.
+    setRemoteControlState(sessionId, {
+      status: "on",
+      url: remoteControlUrl(sessionId),
+      error: reply.error,
+    });
+  } else if (!reply.ok) {
+    setRemoteControlState(sessionId, { status: "failed", error: reply.error });
+  } else if (reply.enabled) {
+    setRemoteControlState(sessionId, { status: "on", url: reply.url });
+  } else {
+    setRemoteControlState(sessionId, { status: "off" });
+  }
 }
 
 export async function forgetClaudeSession(sessionId: string): Promise<void> {
@@ -522,12 +680,17 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     nextControlId: 1,
     toolsByIndex: new Map(),
     toolsById: new Map(),
+    deliveredToolIds: new Set(),
     outputPathsByToolId: new Map(),
     agentTasks: new Map(),
     backgroundTasks: new Map(),
+    backgroundListed: new Set(),
     backgroundRows: new Map(),
     awaitingResume: null,
+    pendingSteers: [],
     backgroundKey: "",
+    jobsKey: "",
+    woken: false,
     taskNotes: [],
     claudeTasks,
     turnResultSeen: false,
@@ -546,6 +709,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     pendingAssistantBoundary: false,
     manualCompaction: false,
     compactionConfirmed: false,
+    remoteTurn: null,
   };
   liveRef.current = live;
 
@@ -560,6 +724,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       exited = true;
       gatewayExited();
       liveByThread.delete(input.sessionId);
+      remoteControlEnded(input.sessionId); // Fork
       const current = liveRef.current;
       if (!current?.muteUpdates) {
         (current?.onEvent ?? input.onEvent)({ type: "session.ended", code });
@@ -658,6 +823,13 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
 }
 
 async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
+  // Fork: a phone turn that started after this was queued goes first; Stop
+  // pressed meanwhile drops this message.
+  if (live.remoteTurn) {
+    const stops = stopCount(input.sessionId);
+    while (live.remoteTurn) await live.remoteTurn;
+    if (stopCount(input.sessionId) !== stops) return;
+  }
   const effort = input.modelSettings?.effort;
   const message = buildClaudeUserMessage({
     text: input.text,
@@ -672,16 +844,26 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
   live.pendingAssistantBoundary = false;
   live.toolsByIndex.clear();
   live.toolsById.clear();
+  live.deliveredToolIds.clear();
   live.outputPathsByToolId.clear();
   live.agentTasks.clear();
-  live.backgroundTasks.clear();
-  live.backgroundRows.clear();
+  // Background tasks outlive the turn that started them: they still wake
+  // Claude, and Stop still has to reach them.
+  for (const taskId of live.backgroundRows.keys()) {
+    if (!live.backgroundTasks.has(taskId)) live.backgroundRows.delete(taskId);
+  }
+  live.woken = false;
   clearAwaitingResume(live);
   live.backgroundKey = "";
   live.taskNotes = [];
   live.turnResultSeen = false;
+  live.pendingSteers = [];
 
+  let ownDone: (() => void) | null = null;
+  let ownFailed: ((error: Error) => void) | null = null;
   const turnPromise = new Promise<void>((resolve, reject) => {
+    ownDone = resolve;
+    ownFailed = reject;
     live.turnDone = resolve;
     live.turnFailed = reject;
   });
@@ -701,8 +883,10 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     });
     throw error;
   } finally {
-    live.turnDone = null;
-    live.turnFailed = null;
+    // Fork: a phone turn may already have started after this one ended;
+    // its callbacks stay.
+    if (live.turnDone === ownDone) live.turnDone = null;
+    if (live.turnFailed === ownFailed) live.turnFailed = null;
   }
 }
 
@@ -748,6 +932,28 @@ function handleLine(sessionId: string, live: Live, line: string): void {
     return;
   }
 
+  // Fork: a Remote Control answer counts even while a stopped turn is muted.
+  if (type === "control_response") {
+    const switched = remoteControlReply(live, rec);
+    if (switched) {
+      markInitialized(live);
+      noteRemoteControlReply(sessionId, switched);
+      return;
+    }
+  }
+
+  // Fork: a turn the phone started while none runs here. Claude opens each
+  // turn with `system/init`.
+  if (
+    !live.activeTurn &&
+    !live.turnDone &&
+    type === "system" &&
+    stringField(rec, "subtype") === "init" &&
+    remoteControlActive(sessionId)
+  ) {
+    startRemoteTurn(live);
+  }
+
   if (live.muteUpdates) return;
 
   const sessionIdFromLine = sessionIdFromMessage(rec);
@@ -781,17 +987,25 @@ function handleLine(sessionId: string, live: Live, line: string): void {
 
   if (type === "control_response") {
     markInitialized(live);
-    // Fork: start Remote Control when Claude's setting asks, as the terminal
-    // does, so sessions on other machines can message this one.
-    const remoteControl = remoteControlRequest(live, rec);
-    if (remoteControl) {
-      void writeJson(
-        sessionId,
-        buildControlRequest(nextControlId(live), remoteControl),
-      ).catch(() => {
-        // The session works without it; only other machines can't reach it.
+    // Fork: start Remote Control with the session when Claude's setting or
+    // the user asks, as the terminal does, so the phone and other machines
+    // can reach it.
+    const choice = remoteControlChoice(sessionId);
+    if (remoteControlRequest(live, rec, choice)) {
+      sendRemoteControl(sessionId, live, true);
+    } else if (choice === true && remoteControlUnavailable(rec)) {
+      setRemoteControlState(sessionId, {
+        status: "failed",
+        error: "Remote Control isn't available for this Claude account.",
       });
     }
+    return;
+  }
+
+  // Claude's echo of a message MonoCode wrote: the UI already shows it. A
+  // message from another session can carry the flag too, and stays.
+  if (type === "user" && rec.isReplay === true && !peerInterjection(rec)) {
+    noteUserMessageTaken(live, rec);
     return;
   }
 
@@ -805,12 +1019,12 @@ function handleLine(sessionId: string, live: Live, line: string): void {
     return;
   }
   if (type === "stream_event") {
-    if (!isSubagentMessage(rec)) noteClaudeTurnStarted(live);
+    if (!isSubagentMessage(rec)) noteClaudeOutput(live);
     handleStreamEvent(live, rec);
     return;
   }
   if (type === "assistant") {
-    if (!isSubagentMessage(rec)) noteClaudeTurnStarted(live);
+    if (!isSubagentMessage(rec)) noteClaudeOutput(live);
     handleAssistant(live, rec);
     return;
   }
@@ -926,6 +1140,14 @@ function handleAssistant(live: Live, rec: Record<string, unknown>): void {
   const used = contextUsedFromAssistant(rec);
   if (used !== undefined) live.onEvent({ type: "context", used });
 
+  // Report a failed sign-in as the error it is, not as the reply.
+  const authFailure = authFailureFromAssistant(rec);
+  if (authFailure) {
+    closePendingAssistantMessage(live);
+    live.onEvent({ type: "session.error", message: authFailure });
+    return;
+  }
+
   const snapshot = assistantTextBlocks(rec).join("");
   if (snapshot) closePendingAssistantMessage(live);
   const extra = snapshotRemainder(live.emittedAssistant, snapshot);
@@ -1010,6 +1232,10 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
   const peer = peerInterjection(rec);
   if (peer) {
     live.onEvent(peer);
+    // Fork: find the sender's project now, while it still runs.
+    void import("../../../../fork/peerMessages/peerProject")
+      .then((module) => module.notePeerArrival(peer.text))
+      .catch(() => undefined);
     return;
   }
   for (const result of toolResultsFromUserMessage(rec)) {
@@ -1031,6 +1257,14 @@ function handleUser(live: Live, rec: Record<string, unknown>): void {
       detail: result.text || undefined,
       preview: previewFromTool(tool.name, tool.input, result.text),
     });
+    if (!result.isError && !live.deliveredToolIds.has(tool.id)) {
+      const delivery = claudeFileDelivery(tool.name, tool.input, live.cwd, rec.tool_use_result, result.text);
+      if (delivery) {
+        live.deliveredToolIds.add(tool.id);
+        closePendingAssistantMessage(live);
+        live.onEvent({ type: "file.delivered", text: delivery });
+      }
+    }
     if (
       !result.isError &&
       applyClaudeTaskTool(live.claudeTasks, tool.name, tool.input, result.text)
@@ -1318,9 +1552,15 @@ function handleAgentLifecycle(
   const started = parseTaskStarted(rec);
   if (started) {
     if (started.ambient) return true;
+    const command = started.toolUseId
+      ? extractShellCommand(live.toolsById.get(started.toolUseId)?.input ?? {})
+      : undefined;
     live.backgroundTasks.set(started.taskId, {
       description: started.description,
       toolUseId: started.toolUseId,
+      ...(command !== undefined ? { command } : {}),
+      startedAt:
+        live.backgroundTasks.get(started.taskId)?.startedAt ?? Date.now(),
     });
     syncBackgroundWait(live);
     if (!isAgentTaskType(started.taskType)) return true;
@@ -1406,6 +1646,7 @@ function handleAgentLifecycle(
   const allTasks = parseBackgroundTasks(rec);
   if (!allTasks) return false;
   const next = new Set(allTasks.map((task) => task.taskId));
+  live.backgroundListed = next;
   for (const id of [...live.backgroundTasks.keys()]) {
     if (next.has(id)) continue;
     settleBackgroundRow(live, id, "completed");
@@ -1413,7 +1654,10 @@ function handleAgentLifecycle(
   }
   for (const row of allTasks) {
     if (!live.backgroundTasks.has(row.taskId)) {
-      live.backgroundTasks.set(row.taskId, { description: row.description });
+      live.backgroundTasks.set(row.taskId, {
+        description: row.description,
+        startedAt: Date.now(),
+      });
     }
   }
   const liveTasks = allTasks.filter((task) => isAgentTaskType(task.taskType));
@@ -1679,8 +1923,15 @@ function completeAgentTask(
  * than settling in the gap between the two.
  */
 function finishBackgroundTask(live: Live, taskId: string): void {
-  if (!live.backgroundTasks.delete(taskId)) return;
-  if (live.turnResultSeen && live.activeTurn && !live.awaitingResume) {
+  const task = live.backgroundTasks.get(taskId);
+  if (!task) return;
+  live.backgroundTasks.delete(taskId);
+  if (
+    !task.stopping &&
+    live.turnResultSeen &&
+    live.activeTurn &&
+    !live.awaitingResume
+  ) {
     live.awaitingResume = setTimeout(() => {
       live.awaitingResume = null;
       maybeFinishTurn(live);
@@ -1689,6 +1940,25 @@ function finishBackgroundTask(live: Live, taskId: string): void {
   }
   maybeFinishTurn(live);
   syncBackgroundWait(live);
+}
+
+/**
+ * Claude is writing. With no turn of ours open, something woke it, most often
+ * a task it left running: open a turn for that, so the session reads as busy
+ * and waits on its work like any other, until Claude yields again.
+ */
+function noteClaudeOutput(live: Live): void {
+  if (!live.activeTurn) {
+    live.activeTurn = true;
+    live.woken = true;
+    live.turnResultSeen = false;
+    live.emittedAssistant = "";
+    live.emittedReasoning = "";
+    live.pendingAssistantBoundary = false;
+    live.onEvent({ type: "session.woke" });
+    return;
+  }
+  noteClaudeTurnStarted(live);
 }
 
 /**
@@ -1804,6 +2074,7 @@ function clearAwaitingResume(live: Live): void {
  * still running, and clears it when Claude picks the thread back up.
  */
 function syncBackgroundWait(live: Live): void {
+  syncBackgroundJobs(live);
   const waiting =
     live.activeTurn && live.turnResultSeen && !live.cancelled
       ? [...live.backgroundTasks.values()].map((task) => task.description)
@@ -1815,11 +2086,69 @@ function syncBackgroundWait(live: Live): void {
   live.onEvent({ type: "background.updated", tasks: waiting });
 }
 
+/**
+ * Tells the UI every task Claude runs in the background, whichever turn
+ * started it. Only what the CLI lists as backgrounded: a foreground task is
+ * still its tool call's row.
+ */
+function syncBackgroundJobs(live: Live): void {
+  const jobs = [...live.backgroundTasks]
+    .filter(([id]) => live.backgroundListed.has(id))
+    .map(([id, task]) => ({
+      id,
+      title: task.description,
+      ...(task.command ? { command: task.command } : {}),
+      startedAt: task.startedAt,
+    }));
+  const key = JSON.stringify(jobs);
+  if (key === live.jobsKey) return;
+  live.jobsKey = key;
+  if (live.muteUpdates) return;
+  live.onEvent({ type: "background.jobs", jobs });
+}
+
+/** Stops one task Claude runs in the background, from whichever turn. */
+export async function stopClaudeBackgroundJob(
+  sessionId: string,
+  jobId: string,
+): Promise<void> {
+  const live = liveByThread.get(sessionId);
+  const task = live?.backgroundTasks.get(jobId);
+  if (!live || !task) return;
+  task.stopping = true;
+  try {
+    await writeJson(
+      sessionId,
+      buildControlRequest(nextControlId(live), {
+        subtype: "stop_task",
+        task_id: jobId,
+      }),
+    );
+  } catch (error) {
+    // Not stopped after all: it still wakes Claude when it ends.
+    task.stopping = false;
+    throw error;
+  }
+}
+
 function maybeFinishTurn(live: Live): void {
   if (!live.turnResultSeen) return;
   if (live.agentTasks.size > 0 || live.backgroundTasks.size > 0) return;
   if (live.awaitingResume) return;
   if (!live.activeTurn && !live.turnDone) return;
+  if (live.pendingSteers.length > 0) {
+    // Claude yielded before taking a follow-up, so it runs that next, as a
+    // turn of its own. Ending here would leave that turn untracked: the idle
+    // park would later kill it mid-work and the session would stay busy.
+    live.awaitingResume = setTimeout(() => {
+      live.awaitingResume = null;
+      // Never taken after all: let the turn end.
+      live.pendingSteers = [];
+      maybeFinishTurn(live);
+      syncBackgroundWait(live);
+    }, RESUME_GRACE_MS);
+    return;
+  }
   finishActiveTurn(live, [
     { type: "message.completed" },
     { type: "reasoning.completed" },
@@ -1828,9 +2157,15 @@ function maybeFinishTurn(live: Live): void {
 
 function finishActiveTurn(live: Live, extraEvents: HarnessEvent[] = []): void {
   clearAwaitingResume(live);
+  live.pendingSteers = [];
   live.turnEndPending = false;
   live.activeTurn = false;
   for (const event of extraEvents) live.onEvent(event);
+  if (live.woken) {
+    live.woken = false;
+    live.onEvent({ type: "session.idle" });
+    return;
+  }
   const done = live.turnDone;
   const failed = live.turnFailed;
   live.turnDone = null;
@@ -1845,6 +2180,59 @@ function finishActiveTurn(live: Live, extraEvents: HarnessEvent[] = []): void {
 function settlePendingTurn(live: Live): void {
   if (!live.turnEndPending || !live.turnDone) return;
   finishActiveTurn(live);
+}
+
+/**
+ * Fork: give a turn the phone started over Remote Control a turn of its own,
+ * unmuted, as `runTurn` does for one sent here, so its output and approvals
+ * reach MonoCode and its reply ends with Claude's result. Messages sent here
+ * meanwhile wait for it (`waitForRemoteTurn`), before any respawn too.
+ */
+function startRemoteTurn(live: Live): void {
+  live.cancelled = false;
+  live.muteUpdates = false;
+  live.emittedAssistant = "";
+  live.emittedReasoning = "";
+  live.pendingAssistantBoundary = false;
+  live.toolsByIndex.clear();
+  live.toolsById.clear();
+  live.outputPathsByToolId.clear();
+  live.agentTasks.clear();
+  live.backgroundTasks.clear();
+  live.backgroundRows.clear();
+  clearAwaitingResume(live);
+  live.backgroundKey = "";
+  live.taskNotes = [];
+  live.turnResultSeen = false;
+  live.turnEndPending = false;
+  const remote = new Promise<void>((resolve) => {
+    live.turnDone = resolve;
+    // Claude exited mid-turn: a message waiting on it moves on and reports
+    // the dead session itself.
+    live.turnFailed = () => resolve();
+  });
+  live.remoteTurn = remote;
+  void remote.then(() => {
+    if (live.remoteTurn === remote) live.remoteTurn = null;
+  });
+  live.activeTurn = true;
+  live.onEvent({ type: "status", text: "Turn from your phone (Remote Control)" });
+}
+
+/** Fork: how many times Stop was pressed in each session. */
+const stopsByThread = new Map<string, number>();
+
+function stopCount(sessionId: string): number {
+  return stopsByThread.get(sessionId) ?? 0;
+}
+
+/** Fork: wait until no phone turn runs in this session's Claude. */
+async function waitForRemoteTurn(sessionId: string): Promise<void> {
+  for (;;) {
+    const remote = liveByThread.get(sessionId)?.remoteTurn;
+    if (!remote) return;
+    await remote;
+  }
 }
 
 function markInitialized(live: Live): void {

@@ -1,4 +1,5 @@
 // Fork: auto worktrees, Merge back, the follow-up coach mark, Continue in Codex.
+import { IdleCompactChip } from "../../../fork/idleCompact/IdleCompactChip"; // Fork
 import { DevicePanel } from "../../../fork/device/DevicePanel";
 import {
   ContinuedFromCard,
@@ -11,6 +12,7 @@ import { WorktreeStrip } from "../../../fork/autoWorktree/WorktreeStrip";
 import { GripVertical, X } from "../../../shared/ui/icons";
 import { ChecklistSidebar } from "../../../fork/checklist/ChecklistSidebar";
 import { CloseSessionButton } from "../../../fork/sessionClose/CloseSessionButton";
+import { autoCloseKey } from "../../../fork/sessionClose/autoClose";
 import { TaskPicksSession } from "../../../fork/taskPicks/TaskPicks"; // Fork
 import { MovedCard, MoveLine } from "../../../fork/sessionMove/SessionMoveUi"; // Fork
 import { isMoveLocked, useMovedRecord, useMoveView } from "../../../fork/sessionMove/sessionMoveStore"; // Fork
@@ -38,6 +40,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Composer } from "./Composer";
+import { operatorEnabledInThread } from "../model/operatorCommand";
+import { orchestrationPlanningInThread } from "../../orchestration/model/orchestrationPlan";
 import type { Worktree } from "../../source-control/model/worktrees";
 import {
   orchestrationCheckoutCwd,
@@ -51,6 +55,8 @@ import { sessionEditPaths } from "../model/checkpointEdits";
 import { PromptOutline } from "./PromptOutline";
 import {
   canCompactHarnessContext,
+  stopHarnessBackgroundJob,
+  supportsHarnessLogin,
   type ApprovalDecision,
   type UserQuestionReply,
 } from "../../../integrations/harness";
@@ -132,7 +138,14 @@ import { isOpus55Model } from "../model/opusWelcome";
 import { AstraWelcome } from "./AstraWelcome";
 import { OpusWelcome } from "./OpusWelcome";
 import { projectKey } from "../../../shared/lib/paths";
-import { canEditLastTurn, lastTurnRecall } from "../model/editLastTurn";
+import {
+  canEditLastTurn,
+  lastTurnRecall,
+  lastTurnRetry,
+  runLastTurnRetry,
+} from "../model/editLastTurn";
+import { signInProvider } from "../../providers/model/providerSignIn";
+import { DEFAULT_PROVIDER_ACCOUNT_ID } from "../../providers/model/providerAccounts";
 import {
   loadProjectChatBackgroundSettings,
   projectChatBackgroundImageRevision,
@@ -416,6 +429,28 @@ const LocalSessionPane = memo(function LocalSessionPane({
       (run.status === "active" || run.status === "paused") &&
       sameCheckout(orchestrationCheckoutCwd(run), sessionWorkCwd(session)),
   );
+  // Fork: modes that stay on for this thread, shown in the composer.
+  const leadRun = orchestrationRuns.find((run) => run.leadId === session.id);
+  const operatorOn = useMemo(
+    () => operatorEnabledInThread(session.blocks),
+    [session.blocks],
+  );
+  const planning = useMemo(
+    () => orchestrationPlanningInThread(session.blocks),
+    [session.blocks],
+  );
+  const threadModes = useMemo(
+    () => ({
+      operator: operatorOn,
+      orchestrator:
+        leadRun?.status === "active" || leadRun?.status === "paused"
+          ? leadRun.status
+          : planning
+            ? ("planning" as const)
+            : undefined,
+    }),
+    [operatorOn, leadRun?.status, planning],
+  );
   const title = sessionDisplayTitle(session.title, session.harness);
   const isEmpty = session.blocks.length === 0;
   const editedPaths = useMemo(
@@ -437,6 +472,23 @@ const LocalSessionPane = memo(function LocalSessionPane({
   const editLastTurnSupported =
     !remote && !monoForSession(session.id) && canEditLastTurn(session);
   const turnRecall = editLastTurnSupported ? lastTurnRecall(session) : null;
+  // A turn that failed on provider sign-in offers it under the turn. Only for
+  // local conversations: a Mono's chat keeps the sign-in dialog, and a remote
+  // session's provider runs on its host.
+  const providerSignIn =
+    !remote &&
+    !monoForSession(session.id) &&
+    supportsHarnessLogin(session.harness)
+      ? () =>
+          signInProvider(
+            session.harness,
+            session.providerAccountId ?? DEFAULT_PROVIDER_ACCOUNT_ID,
+          )
+      : undefined;
+  const lastRetry = providerSignIn ? lastTurnRetry(session) : null;
+  // The plan card offers no build once its worktree is gone; neither does Retry.
+  const signInRetry =
+    lastRetry?.planBlockId && session.worktreeRemoved ? null : lastRetry;
   const draftBlock = sessionDraftBlock(session);
   useSyncExternalStore(
     subscribeProjectChatBackground,
@@ -713,7 +765,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
     !draftTyped &&
     !draftAttached &&
     offersSafeClose(session, withRunningLeads(NO_SESSIONS, orchestrationRuns)) ? (
-      <CloseSessionButton onClose={() => onArchiveSession(session.id, true)} />
+      <CloseSessionButton
+        replyKey={autoCloseKey(session.id, session.blocks)}
+        onClose={() => onArchiveSession(session.id, true)}
+      />
     ) : undefined;
   // Fork: a moved session has a card here instead; a moving one a line above.
   const movedHere = useMovedRecord(session.id);
@@ -737,6 +792,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
       cwd={workCwd}
       onOpenFile={onOpenFile}
       onOpenDiff={onOpenDiff}
+      onStopJob={
+        remote
+          ? undefined
+          : (jobId) => stopHarnessBackgroundJob(session.harness, session.id, jobId)
+      }
     />
     {/* Fork: teaches queue and steer the first time it applies */}
     <FollowUpCoachMark show={!!session.busy && !agent && !remote && draftTyped} />
@@ -764,6 +824,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id || isMoveLocked(session.id)}
       remoteSession={remoteSession}
+      threadModes={threadModes}
       remoteFeatures={remoteFeatures}
       allowedModelHarnesses={allowedModelHarnesses}
       enabled={visible}
@@ -916,6 +977,12 @@ const LocalSessionPane = memo(function LocalSessionPane({
       }}
       onEditingLastTurnChange={setEditingLastTurn}
       toolbarExtra={status ? <StatusExtras status={status} /> : null}
+      sendExtra={
+        // Fork: the app never compacts Monos, workers or remote threads.
+        !remote && !monoForSession(session.id) && !session.orchestrationLeadId ? (
+          <IdleCompactChip session={session} />
+        ) : null
+      }
       contextLabel={
         <ContextLabel
           usage={context}
@@ -1215,6 +1282,24 @@ const LocalSessionPane = memo(function LocalSessionPane({
                           }
                         : undefined
                     }
+                    onProviderSignIn={providerSignIn}
+                    onRetryAfterSignIn={
+                      signInRetry
+                        ? () => {
+                            onFocus(session.id);
+                            runLastTurnRetry(signInRetry, {
+                              buildPlan,
+                              submit: (text, attachments, options) =>
+                                onSubmit(
+                                  session.id,
+                                  text,
+                                  attachments,
+                                  options,
+                                ),
+                            });
+                          }
+                        : undefined
+                    }
                     latestTurnAccessory={
                       reviewHidden || agent ? (
                         closeSessionOffer
@@ -1363,7 +1448,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                               id: session.id,
                               harness: session.harness,
                               model: session.model,
-                              providerAccountId: session.providerAccountId,
+                              providerAccountId: session.providerAccountId ??
+                                (session.blocks.some((block) => block.role === "user" && !block.draft) ? "default" : undefined),
                             }}
                             project={session.cwd}
                             accountPicker={false}

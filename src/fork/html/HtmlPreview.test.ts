@@ -176,6 +176,141 @@ describe("HTML file preview", () => {
     expect(container.querySelector("iframe")).not.toBeNull();
   });
 
+  describe("when the native draft budget is full", () => {
+    const MEMORY_FULL =
+      "HTML preview memory is full. Close another HTML preview and retry.";
+    const TOO_LARGE =
+      "This HTML file is too large for the preview memory budget (32 MB). Open Code to edit it.";
+    type Page = ReturnType<typeof preview>;
+    type CreateResult = Page | string | Promise<Page>;
+
+    /** Scripted create results; once exhausted, creates succeed as usual. */
+    function scriptCreates(
+      results: Array<() => CreateResult>,
+      remove: () => Promise<void> = async () => undefined,
+    ) {
+      invoke.mockImplementation(async (command: string) => {
+        if (command !== "fork_html_preview_create") {
+          return remove();
+        }
+        const next = results.shift();
+        const result = next ? next() : preview(`preview-${++serial}`);
+        if (typeof result === "string") {
+          throw result;
+        }
+        return result;
+      });
+    }
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    }
+    const creates = () =>
+      invoke.mock.calls.filter(
+        ([command]) => command === "fork_html_preview_create",
+      );
+    const removed = () =>
+      invoke.mock.calls
+        .filter(([command]) => command === "fork_html_preview_remove")
+        .map(([, args]) => (args as { id: string }).id);
+    const frameSrc = () => container.querySelector("iframe")?.getAttribute("src");
+    const alert = () => container.querySelector('[role="alert"]')?.textContent;
+
+    it("frees the old draft, waits for the free, then retries once", async () => {
+      await render("Old");
+      const free = deferred<void>();
+      scriptCreates([() => MEMORY_FULL], () => free.promise);
+      await render("New");
+      expect(removed()).toEqual(["preview-1"]);
+      expect(creates()).toHaveLength(2);
+      expect(frameSrc()).toBeUndefined();
+
+      await act(async () => free.resolve());
+      expect(creates()).toHaveLength(3);
+      expect(creates()[2]![1]).toMatchObject({ source: "New" });
+      expect(frameSrc()).toContain("preview-2");
+      expect(alert()).toBeUndefined();
+
+      await act(async () =>
+        container.querySelector("iframe")!.dispatchEvent(new Event("load")),
+      );
+      expect(removed()).toEqual(["preview-1"]);
+    });
+
+    it("shows the error when the retry is also out of memory", async () => {
+      await render("Old");
+      scriptCreates([() => MEMORY_FULL, () => MEMORY_FULL]);
+      await render("New");
+      expect(creates()).toHaveLength(3);
+      expect(alert()).toContain("memory is full");
+      expect(frameSrc()).toBeUndefined();
+    });
+
+    it("does not retry when this preview has nothing to free", async () => {
+      scriptCreates([() => MEMORY_FULL]);
+      await render("Only");
+      expect(creates()).toHaveLength(1);
+      expect(alert()).toContain("memory is full");
+    });
+
+    it("does not retry a single source over the whole budget", async () => {
+      await render("Old");
+      scriptCreates([() => TOO_LARGE]);
+      await render("Huge");
+      expect(creates()).toHaveLength(2);
+      expect(alert()).toContain("Open Code");
+    });
+
+    it("drops the retry when a newer edit arrives during the free", async () => {
+      await render("Old");
+      const free = deferred<void>();
+      scriptCreates([() => MEMORY_FULL], () => free.promise);
+      await render("Stale");
+      await render("Newest");
+      expect(frameSrc()).toContain("preview-2");
+      await act(async () => free.resolve());
+
+      const sources = creates().map(
+        ([, args]) => (args as { source: string }).source,
+      );
+      expect(sources).toEqual(["Old", "Stale", "Newest"]);
+      expect(frameSrc()).toContain("preview-2");
+      expect(removed()).toEqual(["preview-1"]);
+    });
+
+    it("releases a late retry without touching the newer frame", async () => {
+      await render("Old");
+      const retry = deferred<Page>();
+      scriptCreates([() => MEMORY_FULL, () => retry.promise]);
+      await render("Stale");
+      expect(creates()).toHaveLength(3);
+      await render("Newest");
+      expect(frameSrc()).toContain("preview-2");
+
+      await act(async () => retry.resolve(preview("late-retry")));
+      expect(removed()).toEqual(["preview-1", "late-retry"]);
+      expect(frameSrc()).toContain("preview-2");
+    });
+
+    it("waits for a superseded create to be released before retrying", async () => {
+      await render("Old");
+      const superseded = deferred<Page>();
+      scriptCreates([() => superseded.promise, () => MEMORY_FULL]);
+      await render("Typing");
+      await render("Typed");
+      expect(creates()).toHaveLength(3);
+
+      await act(async () => superseded.resolve(preview("superseded")));
+      expect(removed()).toEqual(["preview-1", "superseded"]);
+      expect(creates()).toHaveLength(4);
+      expect(creates()[3]![1]).toMatchObject({ source: "Typed" });
+      expect(frameSrc()).toContain("preview-2");
+    });
+  });
+
   it("supports split and clears it when a line navigation arrives", async () => {
     const onModeChange = vi.fn();
     const shell = (navigationToken?: number) =>

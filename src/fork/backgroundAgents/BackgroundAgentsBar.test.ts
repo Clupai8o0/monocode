@@ -26,7 +26,7 @@ afterEach(() => {
   invoke.mockReset();
 });
 
-it("keeps many parallel agents collapsed until requested, and allows closing with Escape", () => {
+it("opens the board when agents appear, and allows closing with Escape", () => {
   const blocks: Block[] = Array.from({ length: 40 }, (_, index) => ({
     id: `agent-${index}`,
     role: "tool",
@@ -39,17 +39,53 @@ it("keeps many parallel agents collapsed until requested, and allows closing wit
   ));
   render(blocks);
   const toggle = container.querySelector<HTMLButtonElement>("button")!;
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(toggle.textContent).toContain("0 of 40 agents done");
-  expect(container.querySelector("[data-fork-agents-board]")).toBeNull();
-  act(() => toggle.click());
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.textContent).toContain("0 of 40 agents done");
   expect(container.querySelector("[data-fork-agents-board]")).not.toBeNull();
   act(() => toggle.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  // A new agent re-opens so parallel work stays visible like live sessions.
   render([...blocks, { ...blocks[0], id: "new-agent" }]);
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(container.querySelector("[data-fork-agents-board]")).toBeNull();
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(container.querySelector("[data-fork-agents-board]")).not.toBeNull();
+});
+
+it("lists Claude background jobs with a stop button above the composer", () => {
+  const onStopJob = vi.fn(async () => undefined);
+  act(() =>
+    root.render(
+      createElement(BackgroundAgentsBar, {
+        session: {
+          busy: false,
+          blocks: [],
+          backgroundJobs: [
+            {
+              id: "job-1",
+              title: "Dev server",
+              command: "npm run dev",
+              startedAt: Date.now() - 5_000,
+            },
+          ],
+        },
+        onStopJob,
+      }),
+    ),
+  );
+  const tray = container.querySelector<HTMLButtonElement>("button")!;
+  expect(tray.textContent).toContain("1 job running");
+  expect(tray.getAttribute("aria-expanded")).toBe("true");
+  expect(container.textContent).toContain("Dev server");
+  expect(container.textContent).toContain("npm run dev");
+  const stop = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Stop Dev server"]',
+  )!;
+  // The action is spelled out, not left to a bare square.
+  expect(stop.textContent).toBe("Stop");
+  act(() => stop.click());
+  expect(onStopJob).toHaveBeenCalledWith("job-1");
+  expect(stop.textContent).toBe("Stopping…");
+  expect(stop.getAttribute("aria-label")).toBe("Stopping Dev server");
+  expect(stop.disabled).toBe(true);
 });
 
 it("opens a running command to show all of it", () => {
@@ -72,7 +108,7 @@ it("opens a running command to show all of it", () => {
   ));
   const tray = container.querySelector<HTMLButtonElement>("button")!;
   expect(tray.textContent).toContain("1 command running");
-  act(() => tray.click());
+  expect(tray.getAttribute("aria-expanded")).toBe("true");
   const row = container.querySelector<HTMLButtonElement>(
     "[data-fork-agents-board] button",
   )!;
@@ -111,7 +147,7 @@ async function openCommand(path: string | undefined = outputPath) {
   act(() => root.render(
     createElement(BackgroundAgentsBar, { session: { busy: true, blocks } }),
   ));
-  act(() => container.querySelector<HTMLButtonElement>("button")!.click());
+  // The tray opens itself when work appears.
   const row = container.querySelector<HTMLButtonElement>(
     "[data-fork-agents-board] button",
   )!;

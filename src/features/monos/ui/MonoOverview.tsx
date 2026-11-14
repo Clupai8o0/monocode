@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconButton } from "../../../app/shell/TitleBar";
 import {
   Clock,
+  DashboardSquare,
   File,
   FileDiff,
   ListBullet,
@@ -38,9 +39,11 @@ import { HARNESSES, type HarnessId } from "../../sessions/model/session";
 import { MonoSidebar, MonoSidebarHeader } from "./MonoSidebar";
 import type { SessionChangeTotals } from "../../sessions/ui/SessionReview";
 import { MonoChangesView, type MonoChangesRequest } from "./MonoChangesView";
+import { MonoDashboard } from "../../../fork/monoDashboard/MonoDashboard";
+import { pastConversations } from "../../../fork/monoPast/pastConversations";
 
 export type MonoOverviewTab =
-  "activity" | "sessions" | "habits" | "documents" | "changes";
+  "dashboard" | "activity" | "sessions" | "habits" | "documents" | "changes";
 
 // Activity sits apart, beside the panel toggle, since it follows the chat.
 const TABS: {
@@ -48,7 +51,8 @@ const TABS: {
   label: string;
   icon: typeof Clock;
 }[] = [
-  { id: "sessions", label: "Sessions", icon: MessageMultiple },
+  { id: "dashboard", label: "Overview", icon: DashboardSquare },
+  { id: "sessions", label: "Sub-agents", icon: MessageMultiple },
   { id: "documents", label: "Documents", icon: File },
   { id: "habits", label: "Habits", icon: Clock },
   { id: "changes", label: "Changes", icon: FileDiff },
@@ -143,7 +147,7 @@ export function MonoOverview({
   if (tab === "changes" && !changesVisited) setChangesVisited(true);
   // The activity button toggles back to the tab it was opened from.
   const lastTab = useRef<MonoOverviewTab>(
-    tab === "activity" ? "sessions" : tab,
+    tab === "activity" ? "dashboard" : tab,
   );
   if (tab !== "activity") lastTab.current = tab;
   // Another Mono starts at its own front page, with all its sessions.
@@ -223,6 +227,7 @@ export function MonoOverview({
 
   const habitsFull = !habits || habits.length >= HABITS_MAX;
   const counts: Record<(typeof TABS)[number]["id"], number | undefined> = {
+    dashboard: undefined,
     sessions: launches.length,
     habits: habits?.length,
     documents: documents.length,
@@ -316,7 +321,25 @@ export function MonoOverview({
           className="min-h-0 flex-1 overflow-y-auto overscroll-none px-2 py-2"
           data-mono-overview={tab === "changes" ? undefined : tab}
         >
-          {tab === "activity" ? (
+          {tab === "dashboard" ? (
+            <MonoDashboard
+              monoId={monoId}
+              agent={agent}
+              state={state}
+              active={open && !pages.length}
+              sessionIds={[
+                ...(changes ? [changes.sessionId] : []),
+                ...pastConversations(monoId).map((past) => past.id),
+                ...launches.map((launch) => launch.sessionId),
+              ]}
+              launches={launches}
+              sessions={sessions}
+              habits={habits}
+              documents={documents}
+              onOpenHabit={(id) => push({ kind: "habit", id })}
+              onOpenDocument={onOpenDocument}
+            />
+          ) : tab === "activity" ? (
             (activity ?? (
               <EmptyState icon={ListBullet}>
                 Select the activity on one of {agent.name}&apos;s messages to
@@ -340,8 +363,8 @@ export function MonoOverview({
               </div>
             ) : (
               <EmptyState icon={MessageMultiple}>
-                Ask {agent.name} to start a session on one of your projects,
-                like a bug fix or a review, and it shows up here.
+                Ask {agent.name} to hand work to a sub-agent on one of your
+                projects, like a bug fix or a review, and it shows up here.
               </EmptyState>
             )
           ) : tab === "habits" ? (
@@ -400,8 +423,8 @@ function SessionSearchBar({
         <input
           type="text"
           value={query}
-          placeholder="Search sessions..."
-          aria-label="Search sessions"
+          placeholder="Search sub-agents..."
+          aria-label="Search sub-agents"
           spellCheck={false}
           autoComplete="off"
           autoCorrect="off"
@@ -419,8 +442,8 @@ function SessionSearchBar({
       <button
         ref={filterButton}
         type="button"
-        title="Filter sessions"
-        aria-label="Filter sessions"
+        title="Filter sub-agents"
+        aria-label="Filter sub-agents"
         aria-expanded={!!menu}
         aria-haspopup="menu"
         onClick={() => {

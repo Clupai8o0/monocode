@@ -16,15 +16,14 @@ for (const theme of ["dark", "light"] as const) {
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.goto(`/tests/browser/agents-board.html?theme=${theme}`);
 
-    // Stays one line until asked, however many runs overlap.
-    await expect(page.locator(board)).toHaveCount(0);
+    // Opens onto the board when work appears so steps stay in view.
+    await expect(page.locator(board)).toBeVisible();
     await expect(page.locator(strip)).toContainText("2 of 5 agents done, 1 command running");
     await expect(page.locator(strip)).toContainText("1 failed");
     await page.screenshot({ path: `${dir}/agents-strip-${theme}.png` });
-    await page.locator(strip).click();
     await expect(page.locator(board)).toBeVisible();
     // Opened, it scrolls inside a small panel instead of pushing the chat up.
-    expect((await page.locator(board).boundingBox())!.height).toBeLessThanOrEqual(168);
+    expect((await page.locator(board).boundingBox())!.height).toBeLessThanOrEqual(352);
     await expect(page.getByText("Done · 14 steps")).toBeVisible();
     await expect(page.getByText("Failed", { exact: true })).toBeVisible();
     await expect(page.getByText(/^Run npm test -- --run src\/features\/auth\/ --reporter=dot$/)).toBeVisible();
@@ -85,7 +84,6 @@ for (const theme of ["dark", "light"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.goto(`/tests/browser/agents-board.html?theme=${theme}&width=420`);
-    await page.locator(strip).click();
     await expect(page.locator(board)).toBeVisible();
     const row = page.getByRole("button", { name: "Show Correctness review's work" });
     const svg = (await row.locator("svg:not(.size-3\\.5):not(.size-3)").last().boundingBox())!;
@@ -105,7 +103,7 @@ for (const theme of ["dark", "light"] as const) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.goto(`/tests/browser/agents-board.html?scene=output&theme=${theme}`);
-    await page.locator(strip).click();
+    await expect(page.locator(board)).toBeVisible();
     await page.getByRole("button", { name: "Show command: cd src-tauri" }).click();
 
     // The whole script, not only its first line.
@@ -126,7 +124,7 @@ for (const theme of ["dark", "light"] as const) {
       view.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
     await expect.poll(distance).toBeLessThan(8);
     const panel = page.locator(board);
-    expect((await panel.boundingBox())!.height).toBeLessThanOrEqual(168);
+    expect((await panel.boundingBox())!.height).toBeLessThanOrEqual(352);
     expect(await panel.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
     await page.screenshot({ path: `${dir}/agents-board-output-${theme}.png` });
 
@@ -155,7 +153,7 @@ test("a command's newest output stays in sight among other rows", async ({ page 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto("/tests/browser/agents-board.html?scene=output-among");
-  await page.locator(strip).click();
+  await expect(page.locator(board)).toBeVisible();
   await page.getByRole("button", { name: "Show command: npm test" }).click();
   const view = page.locator("[data-fork-command-console]");
   const panel = page.locator(board);
@@ -184,10 +182,10 @@ test("a command's newest output stays in sight among other rows", async ({ page 
   expect(await panel.evaluate((el) => el.scrollTop)).toBe(0);
 });
 
-test("sequential runs stay closed", async ({ page }) => {
+test("sequential runs open onto the board", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html?scene=sequential");
   await expect(page.locator(strip)).toContainText("1 of 2 agents done");
-  await expect(page.locator(board)).toHaveCount(0);
+  await expect(page.locator(board)).toBeVisible();
 });
 
 test("the tray clears once all work has finished", async ({ page }) => {
@@ -199,13 +197,41 @@ test("the tray clears once all work has finished", async ({ page }) => {
 test("a single agent keeps the tray's wording", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html?scene=single");
   await expect(page.locator(strip)).toContainText("1 agent running");
-  await expect(page.locator(board)).toHaveCount(0);
+  await expect(page.locator(board)).toBeVisible();
 });
 
 test("the toggle does not leak between sessions", async ({ page }) => {
   await page.goto("/tests/browser/agents-board.html");
-  await page.locator(strip).click();
   await expect(page.locator(board)).toBeVisible();
-  await page.locator("[data-switch-session]").click();
+  await page.locator(board).focus();
+  await page.keyboard.press("Escape");
   await expect(page.locator(board)).toHaveCount(0);
+  await page.locator("[data-switch-session]").click();
+  // A remounted tray opens for its own work; the prior collapse stays behind.
+  await expect(page.locator(board)).toBeVisible();
 });
+
+for (const theme of ["dark", "light"] as const) {
+  test(`a job's stop control says what it does, ${theme}`, async ({ page }, testInfo) => {
+    const dir = process.env.LAB_SHOTS ?? testInfo.outputDir;
+    await page.goto(`/tests/browser/agents-board.html?scene=jobs&theme=${theme}`);
+    await expect(page.locator(strip)).toContainText("3 jobs running");
+    const stops = page.getByRole("button", { name: /^Stop(ping)? / });
+    await expect(stops).toHaveCount(3);
+    await expect(stops.first()).toHaveText("Stop");
+    await page.screenshot({ path: `${dir}/jobs-${theme}.png` });
+
+    await stops.first().click();
+    await expect(stops.first()).toHaveText("Stopping…");
+    await expect(stops.first()).toBeDisabled();
+    await expect(stops.nth(1)).toBeEnabled();
+    await stops.nth(1).hover();
+    await page.screenshot({ path: `${dir}/jobs-stopping-${theme}.png` });
+
+    // Squeezed, the command gives way; the button keeps its word.
+    await page.goto(`/tests/browser/agents-board.html?scene=jobs&theme=${theme}&width=420`);
+    await expect(stops.first()).toHaveText("Stop");
+    await expect(stops.first()).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: `${dir}/jobs-narrow-${theme}.png` });
+  });
+}

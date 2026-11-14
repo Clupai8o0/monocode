@@ -3,6 +3,7 @@ import {
   completeOrchestrationProposal,
   completeOrRepairOrchestrationProposal,
   orchestrationRepairPrompt,
+  orchestrationPlanningInThread,
   orchestrationPlanningPrompt,
   proposalBlock,
   validateProposedTasks,
@@ -330,5 +331,36 @@ describe("orchestration proposals", () => {
     expect(
       sanitizeSessionForPersist(session).blocks[0].orchestration?.status,
     ).toBe("invalid");
+  });
+});
+
+describe("orchestrationPlanningInThread", () => {
+  const user = (text: string, extra = {}) => ({
+    id: text,
+    role: "user" as const,
+    text,
+    ...extra,
+  });
+  const card = (status: OrchestrationProposal["status"]) =>
+    proposalBlock(`p-${status}`, { ...draft, status });
+
+  it("is on from the first /orchestrator turn until the plan is approved", () => {
+    expect(orchestrationPlanningInThread([])).toBe(false);
+    expect(orchestrationPlanningInThread([user("go"), card("planning")])).toBe(true);
+    expect(orchestrationPlanningInThread([user("go"), card("ready")])).toBe(true);
+    expect(orchestrationPlanningInThread([user("go"), card("approved")])).toBe(false);
+  });
+
+  it("ignores hidden app turns but turns off once the user moves on", () => {
+    expect(
+      orchestrationPlanningInThread([
+        user("go"),
+        card("ready"),
+        user("keep going", { internal: true }),
+      ]),
+    ).toBe(true);
+    expect(
+      orchestrationPlanningInThread([user("go"), card("ready"), user("never mind")]),
+    ).toBe(false);
   });
 });

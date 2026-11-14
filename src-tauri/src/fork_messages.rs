@@ -452,7 +452,7 @@ fn read_entries(home: &Path, machine: &str, live: &dyn Fn(&Value) -> bool) -> Ve
     out
 }
 
-fn same_path(a: &str, b: &str) -> bool {
+pub(crate) fn same_path(a: &str, b: &str) -> bool {
     a == b
         || match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
             (Ok(a), Ok(b)) => a == b,

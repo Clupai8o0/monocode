@@ -51,7 +51,7 @@ import {
   startGame,
   type PokerGame,
 } from "./pokerGame";
-import { handScores, logAction, logBlinds, recapHand, type LoggedAction } from "./pokerRecap";
+import { handScores } from "./pokerRecap";
 import { BUTTON_MARK } from "./sprites";
 import { chipsInPlay, formatTokens, rivalShares, tokenStore } from "./tokens";
 
@@ -97,7 +97,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   const [thinking, setThinking] = useState<AgentId | null>(null);
   const [raiseTo, setRaiseTo] = useState(0);
   const [lastWords, setLastWords] = useState("");
-  const [log, setLog] = useState<LoggedAction[]>([]);
 
   const root = useRef<HTMLDivElement>(null);
   const shoe = useRef<HTMLDivElement>(null);
@@ -113,7 +112,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   modeRef.current = mode;
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
-  const logRef = useRef<LoggedAction[]>([]);
 
   const stakes = POKER_STAKES[mode];
   const seated = hand ? ids : picked;
@@ -147,14 +145,8 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     [],
   );
 
-  /** A seat's action: written into the hand's log, then played. */
   const act = useCallback(
     (current: PokerState, action: PokerAction) => {
-      const entry = logAction(current, action);
-      if (entry) {
-        logRef.current = [...logRef.current, entry];
-        setLog(logRef.current);
-      }
       commit(applyAction(current, action));
     },
     [commit],
@@ -267,8 +259,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     button.current = start.button;
     bluffs.current.clear();
     setLastWords("");
-    logRef.current = logBlinds(start);
-    setLog(logRef.current);
     putGame({
       ...run,
       hands: handNumber,
@@ -298,8 +288,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
     setHand(null);
     setIds([]);
     setLastWords("");
-    logRef.current = [];
-    setLog([]);
     putGame(null);
     tilt.current.clear();
     bluffs.current.clear();
@@ -504,8 +492,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
   // Once a hand is over every seat's cards turn up, folded ones too.
   const scores = done && hand ? handScores(hand) : shown;
   const yourScore = scores[0];
-  const recap =
-    done && hand ? recapHand(hand, log, [YOU, ...ids.map((id) => AGENTS[id].name)]) : null;
 
   return (
     <TableFrame active={active} onKey={onKey} onExit={onExit} onInput={onInput} label="Poker table">
@@ -613,22 +599,6 @@ export function PokerTable({ mode, runId, active, waiting, onExit, onInput }: Ta
                 ""
               )}
             </div>
-            {recap ? (
-              <ol
-                data-hand-recap=""
-                aria-label="What happened this hand"
-                className="min-h-0 w-full max-w-[460px] shrink overflow-y-auto px-4 font-mono text-[10px] leading-[14px] text-content/60"
-              >
-                {recap.streets.map((line, index) => (
-                  <li key={`street-${index}`}>{line}</li>
-                ))}
-                {recap.results.map((line, index) => (
-                  <li key={`result-${index}`} className="text-content/85">
-                    {line}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
           </div>
 
           <div className="relative z-10 flex h-[122px] shrink-0 items-end gap-3 px-3 pb-2.5">

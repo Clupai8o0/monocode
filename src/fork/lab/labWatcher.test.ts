@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteMachine } from "../../features/connections/model/protocol";
+import { currentZoneName } from "./agentTimeZone";
 import type { LocalRemoteControl } from "./labModel";
 import type { AgentTimeZoneStatus, LabParams, LabStatus, RemoteControlChoice } from "./labProtocol";
 import { LAB_CHANGED, LAB_SYNCED, runLabPass, startLabWatcher, type LabDeps } from "./labWatcher";
@@ -309,7 +310,8 @@ describe("runLabPass, agent time zone", () => {
     const sent = zoneCalls(calls).map((call) => (call.params as { zone: string | null }).zone);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toBeTruthy();
-    expect(sent[0]).toBe(intl === "Asia/Calcutta" ? "Asia/Kolkata" : intl);
+    // Old names this Mac may report (Asia/Calcutta, Asia/Katmandu) go out by their current name.
+    expect(sent[0]).toBe(currentZoneName(intl));
   });
 
   it("still sends a zone when reading it fails", async () => {
