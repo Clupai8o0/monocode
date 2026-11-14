@@ -16,9 +16,11 @@ export function monoSessionRefs(
     }
     const remote = parseRemotePath(session.cwd);
     if (!remote) {
-      return [{ id: session.id, providerSessionId: session.providerSessionId, placeId: "local" }];
+      return [{ id: session.id, providerSessionId: session.providerSessionId, placeId: "local", cwd: session.cwd }];
     }
     const machine = knownRemoteMachine(remote.environmentId);
-    return machine ? [{ id: session.id, providerSessionId: session.providerSessionId, placeId: machine.id }] : [];
+    return machine
+      ? [{ id: session.id, providerSessionId: session.providerSessionId, placeId: machine.id, cwd: session.cwd }]
+      : [];
   });
 }

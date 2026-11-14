@@ -28,6 +28,9 @@ export type Party = {
   /** The session's name, else its project, else "A session". */
   label: string;
   project?: string;
+  /** The session's folder, as its machine names it (MonoCode's path for
+   *  sessions it runs); for the project icon. */
+  cwd?: string;
   account?: "main" | "cx";
   /** Undefined when it is not known which machine it is on. */
   place?: Place;
