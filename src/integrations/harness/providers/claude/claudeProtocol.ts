@@ -41,6 +41,18 @@ export const MINIMUM_CLAUDE_SONNET_5_VERSION = "2.1.197";
 export const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.169";
 export const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 export const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
+/** First CLI with `--thinking-display`, shipped with Opus 4.7, the first
+ * model that hides its thinking unless summaries are asked for. */
+export const MINIMUM_CLAUDE_THINKING_DISPLAY_VERSION = "2.1.111";
+
+/** Whether a CLI of this version takes `--thinking-display`. An unknown
+ * version gets it: every model MonoCode offers needs a newer CLI anyway. */
+export function claudeSupportsThinkingDisplay(
+  version: string | null,
+): boolean {
+  if (!version) return true;
+  return compareSemver(version, MINIMUM_CLAUDE_THINKING_DISPLAY_VERSION) >= 0;
+}
 
 export const CLAUDE_SETTING_SOURCES = "user,project,local";
 
@@ -255,6 +267,8 @@ export function buildClaudeSpawnArgs(input: {
   includePartialMessages?: boolean;
   maxTurns?: number;
   isolated?: boolean;
+  /** False when the CLI is too old to take `--thinking-display`. */
+  thinkingDisplay?: boolean;
 }): string[] {
   const args = [
     "--output-format",
@@ -290,7 +304,9 @@ export function buildClaudeSpawnArgs(input: {
     // and in print mode only this flag asks (`showThinkingSummaries` is read
     // by the interactive UI alone), so without it the transcript shows
     // "Thinking…" with nothing under it.
-    args.push("--thinking-display", "summarized");
+    if (input.thinkingDisplay !== false) {
+      args.push("--thinking-display", "summarized");
+    }
   }
   if (input.model) args.push("--model", input.model);
   if (input.effort) args.push("--effort", input.effort);

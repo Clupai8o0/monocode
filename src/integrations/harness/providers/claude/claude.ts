@@ -8,6 +8,7 @@ import type {
 } from "../../../../features/sessions/model/session";
 import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
+  execChild,
   killChild,
   resolveClaudeBinary,
   resolveVivobookBinary,
@@ -28,6 +29,8 @@ import {
   contextUsedFromAssistant,
   turnMetricsFromResult,
   buildClaudeSpawnArgs,
+  claudeSupportsThinkingDisplay,
+  parseClaudeVersion,
   buildClaudeUserMessage,
   buildControlRequest,
   buildControlResponse,
@@ -234,6 +237,26 @@ export function setClaudeBinaryResolver(
   fn: () => Promise<{ path: string }>,
 ): void {
   resolveClaudeBinaryImpl = fn;
+}
+
+/** CLI version per binary path, read once per app run. */
+const claudeVersionByPath = new Map<string, Promise<string | null>>();
+
+function claudeVersionAt(path: string): Promise<string | null> {
+  let version = claudeVersionByPath.get(path);
+  if (!version) {
+    version = (async () => {
+      try {
+        return parseClaudeVersion(
+          await execChild(path, ["--version"], undefined, "claude"),
+        );
+      } catch {
+        return null;
+      }
+    })();
+    claudeVersionByPath.set(path, version);
+  }
+  return version;
 }
 
 export async function sendClaudeTurn(input: SendTurnInput): Promise<void> {
@@ -588,7 +611,12 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   await spawnChild(
     input.sessionId,
     path,
-    buildClaudeSpawnArgs(launch),
+    buildClaudeSpawnArgs({
+      ...launch,
+      // The Vivobook gateway runs a current CLI and has no cheap version probe.
+      thinkingDisplay:
+        vivobook || claudeSupportsThinkingDisplay(await claudeVersionAt(path)),
+    }),
     input.cwd,
     // The Vivobook signs in to Claude itself; local profiles stay local.
     vivobook
