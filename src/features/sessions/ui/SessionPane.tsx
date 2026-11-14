@@ -40,6 +40,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Composer } from "./Composer";
+import { operatorEnabledInThread } from "../model/operatorCommand";
 import type { Worktree } from "../../source-control/model/worktrees";
 import {
   orchestrationCheckoutCwd,
@@ -427,6 +428,22 @@ const LocalSessionPane = memo(function LocalSessionPane({
       (run.status === "active" || run.status === "paused") &&
       sameCheckout(orchestrationCheckoutCwd(run), sessionWorkCwd(session)),
   );
+  // Fork: modes that stay on for this thread, shown in the composer.
+  const leadRun = orchestrationRuns.find((run) => run.leadId === session.id);
+  const operatorOn = useMemo(
+    () => operatorEnabledInThread(session.blocks),
+    [session.blocks],
+  );
+  const threadModes = useMemo(
+    () => ({
+      operator: operatorOn,
+      orchestrator:
+        leadRun?.status === "active" || leadRun?.status === "paused"
+          ? leadRun.status
+          : undefined,
+    }),
+    [operatorOn, leadRun?.status],
+  );
   const title = sessionDisplayTitle(session.title, session.harness);
   const isEmpty = session.blocks.length === 0;
   const editedPaths = useMemo(
@@ -800,6 +817,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       key={session.id}
       disabled={workspaceSwitchingSessionId === session.id || isMoveLocked(session.id)}
       remoteSession={remoteSession}
+      threadModes={threadModes}
       remoteFeatures={remoteFeatures}
       allowedModelHarnesses={allowedModelHarnesses}
       enabled={visible}
