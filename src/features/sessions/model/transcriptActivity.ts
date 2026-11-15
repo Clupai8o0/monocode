@@ -178,6 +178,21 @@ export function isProseBlock(block: Block): boolean {
   return block.role === "assistant" && !!block.text.trim();
 }
 
+/**
+ * A mid-turn message written for the reader rather than as narration: it
+ * carries a web link, a block to copy (a prompt or a command), or ends on a
+ * question. These never fold into the work trail, so a link or a prompt the
+ * agent handed over mid-turn is still on screen when the turn moves on.
+ */
+export function isNoteForReader(block: Block): boolean {
+  if (!isProseBlock(block)) return false;
+  const text = block.text;
+  if (/```|~~~/.test(text)) return true;
+  if (/\bhttps?:\/\/[^\s)>\]]+/i.test(text)) return true;
+  const last = text.trim().split("\n").pop()?.trim() ?? "";
+  return /\?[*_)"'”’]*$/.test(last);
+}
+
 export function hasReadableText(text: string): boolean {
   return /[^\s\p{P}]/u.test(text);
 }
@@ -602,6 +617,8 @@ export function groupMonoTurnItems(
       index >= start &&
       index <= end &&
       !(item.type === "block" && followUpReplies.has(item.block.id)) &&
+      // A link, prompt or question for the user stays in the chat.
+      !(item.type === "block" && isNoteForReader(item.block)) &&
       // A reply already delivered before background work resumed stays put.
       !(boundary < items.length && index === boundary - 1) &&
       (item.type !== "block" ||

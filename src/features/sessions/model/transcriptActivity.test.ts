@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Block } from "./session";
 import { INTERRUPT_MESSAGE } from "./inFlight";
 import {
+  isNoteForReader,
   activityPhaseTitle,
   activityStillRunning,
   buildActivityPhases,
@@ -1899,5 +1900,25 @@ describe("subagent model labels", () => {
     expect(subagentModelName(row("custom-model-v2"))).toBe("custom-model-v2");
     for (const model of [undefined, "", "auto", "inherit", "default"])
       expect(subagentModelName(row(model))).toBeUndefined();
+  });
+});
+
+describe("isNoteForReader", () => {
+  const prose = (text: string): Block => ({ id: "p", role: "assistant", text });
+
+  it("marks links, copyable blocks and questions as written for the reader", () => {
+    expect(isNoteForReader(prose("Open http://localhost:5173 to see it."))).toBe(true);
+    expect(isNoteForReader(prose("Run:\n\n```sh\nnpm test\n```"))).toBe(true);
+    expect(isNoteForReader(prose("Want me to push it?"))).toBe(true);
+    expect(isNoteForReader(prose("Which one do you want? **A or B?**"))).toBe(true);
+  });
+
+  it("leaves narration to fold", () => {
+    expect(isNoteForReader(prose("Now let me check the config."))).toBe(false);
+    expect(isNoteForReader(prose("Why is it failing? Checking the logs."))).toBe(false);
+    expect(isNoteForReader(prose("Reading `src/app.ts` next."))).toBe(false);
+    expect(
+      isNoteForReader({ id: "r", role: "reasoning", text: "See https://x.dev" }),
+    ).toBe(false);
   });
 });

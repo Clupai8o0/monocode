@@ -144,6 +144,7 @@ import {
   isThinkingBlock,
   lastActivityIndex,
   isProseBlock,
+  isNoteForReader,
   needsApproval,
   nestedScrollAbsorbsWheel,
   proseSummary,
@@ -293,6 +294,39 @@ type Props = {
   sessionId?: string;
 };
 
+// Work the reader opened stays open when a saved session's transcript is
+// parked and mounted again (switching tabs, the pool evicting it).
+const OPEN_WORK_LIMIT = 400;
+const openWorkMemory = new Map<string, true>();
+const openWorkKey = (sessionId: string, turnId: string) =>
+  `${sessionId}\u0000${turnId}`;
+
+function rememberedOpenWork(sessionId?: string): Record<string, boolean> {
+  if (!sessionId) return {};
+  const prefix = openWorkKey(sessionId, "");
+  const open: Record<string, boolean> = {};
+  for (const key of openWorkMemory.keys())
+    if (key.startsWith(prefix)) open[key.slice(prefix.length)] = true;
+  return open;
+}
+
+function rememberOpenWork(
+  sessionId: string | undefined,
+  open: Record<string, boolean>,
+) {
+  if (!sessionId) return;
+  for (const [turnId, isOpen] of Object.entries(open)) {
+    const key = openWorkKey(sessionId, turnId);
+    if (!isOpen) openWorkMemory.delete(key);
+    else if (!openWorkMemory.has(key)) openWorkMemory.set(key, true);
+  }
+  // Oldest first: a Map iterates in insertion order.
+  for (const key of openWorkMemory.keys()) {
+    if (openWorkMemory.size <= OPEN_WORK_LIMIT) break;
+    openWorkMemory.delete(key);
+  }
+}
+
 function AgentTranscriptComponent({
   blocks: sourceBlocks,
   historicalBlockIds,
@@ -348,6 +382,7 @@ function AgentTranscriptComponent({
   parked = false,
   onScrollerChange,
   managed = false,
+  sessionId,
 }: Props) {
   const isMonoChat = !!agentMascot;
   const blocks = useMemo(() => {
@@ -406,13 +441,33 @@ function AgentTranscriptComponent({
   const [loadEarlierError, setLoadEarlierError] = useState(false);
   const loadEarlierPending = useRef(false);
   // Turns whose folded work the reader has opened, by turn id.
-  const [openWork, setOpenWork] = useState<Record<string, boolean>>({});
+  const [openWork, setOpenWorkState] = useState<Record<string, boolean>>(() =>
+    rememberedOpenWork(sessionId),
+  );
+  const openWorkSession = useRef(sessionId);
+  // The same transcript showing another session reads that session's choices.
+  if (openWorkSession.current !== sessionId) {
+    openWorkSession.current = sessionId;
+    setOpenWorkState(rememberedOpenWork(sessionId));
+  }
+  const setOpenWork = useCallback(
+    (
+      update: (open: Record<string, boolean>) => Record<string, boolean>,
+    ) => {
+      setOpenWorkState((open) => {
+        const next = update(open);
+        rememberOpenWork(openWorkSession.current, next);
+        return next;
+      });
+    },
+    [],
+  );
   const [searchCurrent, setSearchCurrent] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const highlightOwner = useRef(Symbol("transcript-search"));
   const toggleWork = useCallback((turnId: string, currentlyOpen: boolean) => {
     setOpenWork((open) => ({ ...open, [turnId]: !currentlyOpen }));
-  }, []);
+  }, [setOpenWork]);
   // Keep prompt spacing for this transcript's lifetime, including while it
   // is parked in the pool. A cold historical mount uses its natural height.
   const [anchorTurn, setAnchorTurn] = useState(!!busy);
@@ -1518,8 +1573,15 @@ function AgentTranscriptComponent({
           const foldSubagents = foldEntries.filter(
             ({ entry }) => entry.type === "subagents",
           );
+          // A link, prompt or question the agent wrote for the user mid-turn
+          // is lifted out the same way, so it never folds out of sight.
+          const isReaderNote = (entry: TurnItem) =>
+            entry.type === "block" && isNoteForReader(entry.block);
+          const foldNotes = foldEntries.filter(({ entry }) =>
+            isReaderNote(entry),
+          );
           const foldWork = foldEntries.filter(
-            ({ entry }) => entry.type !== "subagents",
+            ({ entry }) => entry.type !== "subagents" && !isReaderNote(entry),
           );
           const foldLineRow = (
             <TurnRow key="work-fold" folded={!showFoldLine}>
@@ -1635,6 +1697,19 @@ function AgentTranscriptComponent({
                           data-transcript-search-current={
                             isCurrentItem(entry) || undefined
                           }
+                          className="flow-root pb-1"
+                        >
+                          {renderItem(entry, index)}
+                        </div>
+                      )),
+                      ...foldNotes.map(({ entry, index }) => (
+                        <div
+                          key={turnItemKey(entry)}
+                          data-transcript-search-item
+                          data-transcript-search-current={
+                            isCurrentItem(entry) || undefined
+                          }
+                          data-reader-note
                           className="flow-root pb-1"
                         >
                           {renderItem(entry, index)}
