@@ -165,6 +165,9 @@ pub(crate) const NO_COMMITS: &str = "This project's git repo has no commits yet,
 /// MonoCode's own checkpoint refs (refs/monocode/...) hold commits even in a
 /// repo the user never committed to.
 fn no_commits_message(root: &Path) -> Option<String> {
+    if git(root, &["rev-parse", "--quiet", "--verify", "HEAD^{commit}"]).is_ok() {
+        return None;
+    }
     git(root, &["rev-list", "--branches", "--max-count=1"])
         .ok()
         .filter(|out| out.trim().is_empty())

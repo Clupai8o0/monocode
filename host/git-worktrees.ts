@@ -131,10 +131,19 @@ export const NO_COMMITS =
 
 /**
  * Git's own error for an empty repo is "Needed a single revision". True when
- * no branch has a commit (MonoCode's checkpoint refs don't count); on any git
- * failure assume commits exist, so git's own error is kept.
+ * HEAD and every branch have no commit (MonoCode's checkpoint refs don't
+ * count); on any git failure assume commits exist, so git's own error is kept.
  */
 async function hasNoCommits(cwd: string): Promise<boolean> {
+  const headHasCommit = await exec(
+    "git",
+    ["rev-parse", "--quiet", "--verify", "HEAD^{commit}"],
+    options(cwd),
+  ).then(
+    () => true,
+    () => false,
+  );
+  if (headHasCommit) return false;
   return exec(
     "git",
     ["rev-list", "--branches", "--max-count=1"],
