@@ -201,6 +201,7 @@ import {
   assertWorktreeFilesClosed,
   createOrchestrationWorktree,
   createWorktree,
+  worktreePossible,
   detachSessionWorktree,
   checkWorktreeRemoval,
   listWorktrees,
@@ -8412,14 +8413,39 @@ function Workspace({
       let completedProposal: OrchestrationProposal | undefined;
       void (async () => {
         let workCwd = initialWorkCwd;
-        if (createDraftWorktree) {
+        // Fork: a repo with no commits (or no Git at all) has nothing to
+        // branch a worktree from, so run in the project folder instead.
+        const worktreeBase = current.worktreeBase || "HEAD";
+        const draftWorktree =
+          createDraftWorktree &&
+          (await worktreePossible(current.cwd, worktreeBase));
+        if (createDraftWorktree && !draftWorktree) {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    workspaceMode: undefined,
+                    worktreeBase: undefined,
+                    worktreePreparing: undefined,
+                  }
+                : session,
+            ),
+          );
+          enqueueHarnessEvent(sessionId, {
+            type: "status",
+            text: "No commits yet, so this session runs in the project folder instead of a worktree.",
+          });
+          flushHarnessEvents();
+        }
+        if (draftWorktree) {
           const tree = await createWorktree(
             current.cwd,
             // Fork: named after the request from the start, with a short id.
             sessionWorktreeBranchName(
               harnessText || attachments.map((file) => file.name).join(" "),
             ),
-            current.worktreeBase || "HEAD",
+            worktreeBase,
             false,
           );
           workCwd = tree.path;

@@ -429,6 +429,8 @@ export type GitBranchInfo = {
 export type GitBranches = {
   current: string | null;
   detached: boolean;
+  /** Fork: on a branch with no commits yet (a fresh `git init`). */
+  unborn?: boolean;
   branches: GitBranchInfo[];
 };
 

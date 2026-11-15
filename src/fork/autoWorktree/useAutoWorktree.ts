@@ -57,7 +57,10 @@ export function useAutoWorktree({
     mode !== "worktree" &&
     !userChoseWorkspace(sessionId, cwd);
   const { branches } = useProjectBranchesState(cwd, active);
-  const base = branch || branches?.current || undefined;
+  // A fresh `git init` has no commit to branch from: stay in the folder.
+  const base = branches?.unborn
+    ? undefined
+    : branch || branches?.current || undefined;
   const checkDirty = active && policy === "smart" && !busy;
   const [dirty, setDirty] = useState<boolean | null>(null);
 

@@ -1727,6 +1727,8 @@ fn github_check_details_with(
 pub struct GitBranches {
     pub current: Option<String>,
     pub detached: bool,
+    /// Fork: on a branch with no commits yet (a fresh `git init`).
+    pub unborn: bool,
     pub branches: Vec<GitBranchEntry>,
 }
 
@@ -4777,6 +4779,7 @@ fn git_branches_for(root: &Path) -> GitBranches {
     let current_branch = git_head_branch(root);
     let head_sha = git_stdout(root, &["rev-parse", "--short", "HEAD"]);
     let detached = current_branch.is_none() && head_sha.is_some();
+    let unborn = current_branch.is_some() && head_sha.is_none();
     let current = current_branch.clone().or(head_sha);
 
     let mut branches = Vec::new();
@@ -4859,6 +4862,7 @@ fn git_branches_for(root: &Path) -> GitBranches {
     GitBranches {
         current,
         detached,
+        unborn,
         branches,
     }
 }
@@ -9561,6 +9565,7 @@ mod tests {
         let listed = git_branches_for(&dir.0);
         assert_eq!(listed.current.as_deref(), Some("main"));
         assert!(!listed.detached);
+        assert!(listed.unborn);
         assert!(listed
             .branches
             .iter()
@@ -9579,6 +9584,7 @@ mod tests {
         );
         let listed = git_branches_for(&dir.0);
         assert_eq!(listed.current.as_deref(), Some("feat/picker"));
+        assert!(!listed.unborn);
         assert_eq!(git_checkout_for(&dir.0, "main", None).unwrap(), "main");
         assert_eq!(git_head_branch(&dir.0).as_deref(), Some("main"));
         assert!(git_create_branch_for(&dir.0, "feat/picker").is_err());

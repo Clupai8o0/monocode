@@ -27,6 +27,15 @@ export type Worktrees = { worktrees: Worktree[]; defaultRoot: string };
 export const listWorktrees = (cwd: string) =>
   invokeWorkspace<Worktrees>("git_worktrees", { cwd });
 
+/**
+ * Fork: false only when Git confirms there is no commit to branch a worktree
+ * from. Other failures resolve true so creating the worktree shows the error.
+ */
+export const worktreePossible = (cwd: string, base?: string) =>
+  invoke<boolean>("git_worktree_possible", { cwd, base: base ?? null }).catch(
+    () => true,
+  );
+
 export async function createWorktree(
   cwd: string,
   branch: string,
