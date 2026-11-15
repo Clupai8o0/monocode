@@ -1,11 +1,15 @@
 import type { HarnessId } from "../../features/sessions/model/session";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
+import {
+  CurrentProjectIcon,
+  useProjectLabel,
+} from "../../features/projects/ui/CurrentProjectIcon";
 import { formatPeerTime, type PeerMessage } from "./peerMessage";
 
 /**
  * A message another session sent into this chat. It sits in the transcript
- * like a quiet note: the sender's agent mark and name, when it came in, and
- * the text. Amber is kept for messages marked urgent, so a routine status
+ * like a quiet note: the sender's project icon (its agent mark when the
+ * project is not known), its name, when it came in, and the text. Amber is kept for messages marked urgent, so a routine status
  * update does not read as an alarm.
  */
 export function PeerMessageCard({
@@ -14,8 +18,11 @@ export function PeerMessageCard({
   at,
   urgent = false,
   onOpen,
+  projectCwd,
 }: {
   message: PeerMessage;
+  /** Project folder the sender works in, when known. */
+  projectCwd?: string | null;
   /** Agent the sender runs on, when the envelope identifies it. */
   harness?: HarnessId;
   /** Arrival time, epoch ms. */
@@ -37,12 +44,26 @@ export function PeerMessageCard({
       }`}
     >
       <header className="flex min-w-0 items-center gap-2 text-[12px] leading-5">
-        <span
-          aria-hidden
-          className="grid size-5 shrink-0 place-items-center rounded-md bg-content/[0.07]"
-        >
-          <HarnessIcon harness={harness} className="size-3.5" />
-        </span>
+        {projectCwd ? (
+          <span
+            aria-hidden
+            data-peer-project={projectCwd}
+            className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-md"
+          >
+            <CurrentProjectIcon
+              cwd={projectCwd}
+              className="size-5"
+              mascotClassName="size-3.5"
+            />
+          </span>
+        ) : (
+          <span
+            aria-hidden
+            className="grid size-5 shrink-0 place-items-center rounded-md bg-content/[0.07]"
+          >
+            <HarnessIcon harness={harness} className="size-3.5" />
+          </span>
+        )}
         <span
           className="min-w-0 truncate font-medium text-content/85"
           title={message.from}
@@ -55,7 +76,13 @@ export function PeerMessageCard({
               Urgent ·{" "}
             </span>
           ) : null}
-          from another session
+          {projectCwd ? (
+            <>
+              from <ProjectName cwd={projectCwd} />
+            </>
+          ) : (
+            "from another session"
+          )}
           {time ? (
             <>
               {" · "}
@@ -84,4 +111,8 @@ export function PeerMessageCard({
       </p>
     </article>
   );
+}
+
+function ProjectName({ cwd }: { cwd: string }) {
+  return <span title={cwd}>{useProjectLabel(cwd)}</span>;
 }

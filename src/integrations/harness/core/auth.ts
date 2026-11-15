@@ -8,7 +8,9 @@ import { clearCachedRateLimits } from "../../../features/providers/model/rateLim
 
 export {
   harnessLoginArgs,
+  isClaudeAuthFailureText,
   isHarnessAuthError,
+  latestTurnHarnessAuthFailure,
   latestTurnNeedsHarnessLogin,
   supportsHarnessLogin,
 } from "./authSupport";

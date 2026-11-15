@@ -21,6 +21,8 @@ import { Popover } from "../../../shared/ui/Popover";
 
 type Props = {
   value: RuntimeMode;
+  /** Per-harness wording; defaults to the general hints. */
+  hints?: Record<RuntimeMode, string>;
   onChange: (mode: RuntimeMode) => void;
   onClose?: () => void;
   busy?: boolean;
@@ -44,6 +46,7 @@ export function AccessPicker({
   busy = false,
   side = "top",
   variant = "pill",
+  hints = RUNTIME_MODE_HINT,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(() =>
@@ -92,7 +95,7 @@ export function AccessPicker({
       <button
         type="button"
         data-access-picker-trigger
-        title={`${RUNTIME_MODE_HINT[value]}${busy ? " Changes apply to the next turn." : ""}`}
+        title={`${hints[value]}${busy ? " Changes apply to the next turn." : ""}`}
         aria-label={RUNTIME_MODE_LABEL[value]}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -172,7 +175,7 @@ export function AccessPicker({
                     {RUNTIME_MODE_LABEL[mode]}
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-4 text-content/50">
-                    {RUNTIME_MODE_HINT[mode]}
+                    {hints[mode]}
                   </span>
                 </span>
               </button>

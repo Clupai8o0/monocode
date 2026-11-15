@@ -256,7 +256,7 @@ export function createHostServer(
     return catalog;
   };
   const mobile = createMobileHandler(engine, providers, models);
-  return createServer(
+  const server = createServer(
     {
       requestTimeout: 20_000,
       headersTimeout: 10_000,
@@ -814,4 +814,6 @@ export function createHostServer(
       }
     },
   );
+  server.on("close", () => workspace.close());
+  return server;
 }

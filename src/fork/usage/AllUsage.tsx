@@ -24,6 +24,8 @@ import { barClass } from "../../features/providers/ui/ProviderAccountUsage";
 import { useShowRemainingUsage } from "../../features/settings/model/displayPrefs";
 import type { HarnessId } from "../../features/sessions/model/session";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
+import { loginHarness } from "../../integrations/harness/core/auth";
+import { isHarnessAuthError } from "../../integrations/harness/core/authSupport";
 import { Gauge, RefreshCw } from "../../shared/ui/icons";
 import { Popover, type PopoverDismissReason } from "../../shared/ui/Popover";
 import { footerAccountLabel } from "./FooterUsage";
@@ -35,6 +37,11 @@ import {
   type ExtraUsageProvider,
   type UsageBar,
 } from "./extraUsage";
+import {
+  meterAccountName,
+  useMeterAccounts,
+  type MeterAccount,
+} from "./meterAccounts"; // Fork: meter-only logins (e.g. a client seat)
 
 const EXTRA: {
   provider: ExtraUsageProvider;
@@ -45,12 +52,13 @@ const EXTRA: {
   { provider: "antigravity", name: "Antigravity", harness: "antigravity" },
   { provider: "muse", name: "Muse" },
   { provider: "deepseek", name: "DeepSeek", harness: "deepseek" },
+  { provider: "grok", name: "Grok", harness: "grok" },
 ];
 
 /**
  * Fork feature: one footer button that lists every account's usage at once:
  * each Claude and Codex account, Cursor Auto/API pools, Antigravity and Muse
- * windows, DeepSeek's balance, and a note for Grok, which reports no plan usage.
+ * windows, DeepSeek's balance, and Grok's shared plan credits.
  */
 export function AllUsageChip({ className }: { className: string }) {
   const [open, setOpen] = useState(false);
@@ -110,6 +118,7 @@ export function AllUsagePanel() {
   const [tab, setTab] = useState<"usage" | "cost">("usage");
   const claude = useAccounts("claude");
   const codex = useAccounts("codex");
+  const meters = useMeterAccounts();
   const [now, setNow] = useState(Date.now);
   const refresh = (force: boolean) => {
     setNow(Date.now());
@@ -119,12 +128,15 @@ export function AllUsagePanel() {
     for (const account of codex) {
       void loadRateLimits("codex", account.id, force);
     }
+    for (const meter of meters) {
+      void loadRateLimits(meter.provider, meter.id, force);
+    }
     for (const { provider } of EXTRA) void loadExtraUsage(provider, force);
   };
   // Read on open and when an account is added; cached answers keep this cheap.
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  const accountKey = [...claude, ...codex]
+  const accountKey = [...claude, ...codex, ...meters]
     .map((account) => `${account.provider}:${account.id}`)
     .join(",");
   useEffect(() => refreshRef.current(false), [accountKey]);
@@ -189,6 +201,7 @@ export function AllUsagePanel() {
             now={now}
           />
         ))}
+        <MeterRows meters={meters} provider="codex" now={now} />
       </Section>
       {EXTRA.map(({ provider, name, harness }) => (
         <ExtraSection
@@ -199,12 +212,40 @@ export function AllUsagePanel() {
           now={now}
         />
       ))}
-      <Section name="Grok" harness="grok">
-        <p className="text-content/45">Grok Build doesn't report plan usage.</p>
-      </Section>
         </>
       ) : null}
     </div>
+  );
+}
+
+/** Meter-only logins: shown like an account, never offered for sessions. */
+function MeterRows({
+  meters,
+  provider,
+  now,
+}: {
+  meters: MeterAccount[];
+  provider: "codex";
+  now: number;
+}) {
+  return (
+    <>
+      {meters
+        .filter((meter) => meter.provider === provider)
+        .map((meter) => (
+          <PlanRow
+            key={meter.id}
+            provider={provider}
+            account={{
+              id: meter.id,
+              provider,
+              label: `${meterAccountName(meter)} · meter only`,
+            }}
+            now={now}
+            meterOnly
+          />
+        ))}
+    </>
   );
 }
 
@@ -250,17 +291,57 @@ function PlanRow({
   provider,
   account,
   now,
+  meterOnly = false,
 }: {
   provider: "claude" | "codex";
   account: ProviderAccount;
   now: number;
+  /** A meter's login is not MonoCode's to replace: no Sign in button. */
+  meterOnly?: boolean;
 }) {
   const limits = useCachedRateLimits(provider, account.id);
   const bars = windowsOf(limits);
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const needsLogin =
+    bars.length === 0 &&
+    ((limits.status === "unavailable" &&
+      /not signed in/i.test(limits.error ?? "")) ||
+      (limits.status === "error" &&
+        !!limits.error &&
+        isHarnessAuthError(limits.error)));
+  const signIn = async () => {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      await loginHarness(provider, account.id);
+      await loadRateLimits(provider, account.id, true);
+    } catch (error) {
+      setSignInError(
+        error instanceof Error ? error.message : "Could not complete sign-in",
+      );
+    } finally {
+      setSigningIn(false);
+    }
+  };
   return (
     <Row label={footerAccountLabel(account)}>
       {bars.length > 0 ? (
         <Bars bars={bars} now={now} />
+      ) : needsLogin && meterOnly ? (
+        <Note>Signed out: sign in from a terminal for this login</Note>
+      ) : needsLogin ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <Note>{signInError ?? limits.error ?? "Not signed in"}</Note>
+          <button
+            type="button"
+            disabled={signingIn}
+            onClick={() => void signIn()}
+            className="shrink-0 rounded-md bg-content/10 px-2 py-0.5 text-[10px] font-medium text-content/80 transition-colors hover:bg-content/15 hover:text-content disabled:opacity-60"
+          >
+            {signingIn ? "Waiting for browser…" : "Sign in"}
+          </button>
+        </span>
       ) : (
         <Note>
           {limits.status === "idle" || limits.status === "fetching"

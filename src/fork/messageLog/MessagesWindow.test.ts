@@ -62,13 +62,13 @@ function click(el: Element) {
 }
 
 describe("MessagesWindow", () => {
-  it("lists rows newest first with status, route and counts", () => {
+  it("lists rows newest first with status, machines and counts", () => {
     render();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Messages");
     expect(rowIds()).toEqual(["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]);
     const dropped = document.querySelector('[data-feed-row="r4"]')!;
     expect(dropped.textContent).toContain("Dropped");
-    expect(dropped.textContent).toContain("Relay");
+    expect(dropped.textContent).toContain("Lost by the relay on Vivobook");
     expect(dropped.textContent).toContain("Vivobook");
     expect(dropped.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("problem");
     expect(document.querySelector('[data-feed-row="r2"] [data-tone]')?.getAttribute("data-tone")).toBe("held");
@@ -98,6 +98,7 @@ describe("MessagesWindow", () => {
     click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(row.textContent).toContain("Lost by the relay on Vivobook: Not picked up within 45 s");
+    expect(row.textContent).toContain("Carried between machines by the MonoCode relay");
     expect(row.textContent).toContain("Dropped on Vivobook: Not picked up within 45 s");
     click(button("Open lab-runner"));
     expect(props.onOpenSession).toHaveBeenCalledWith("mono-9");

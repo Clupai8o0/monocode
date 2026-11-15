@@ -64,6 +64,22 @@ export function applyHarnessEvent(
       return patchStreaming(session, "assistant", event.text, true);
     case "message.completed":
       return finishRole(session, "assistant");
+    case "file.delivered": {
+      const blocks = sealLastStream(session.blocks);
+      // Keep the answer and its files together for transcript folding and
+      // consumers that read the last assistant reply (handoffs, habits, etc.).
+      const turnStart = lastMatchingBlock(blocks, (block) => block.role === "user" &&
+        (block.sentAt == null || block.startedAt != null) &&
+        !session.queuedMessages?.some((message) => message.blockId === block.id));
+      const index = lastMatchingBlock(blocks, (block, at) => at > turnStart && block.role === "assistant");
+      if (index >= 0) {
+        blocks[index] = { ...blocks[index], streaming: false,
+          text: `${blocks[index].text}\n\n${event.text}`, fileDelivery: true };
+      } else {
+        blocks.push({ id: crypto.randomUUID(), role: "assistant", text: event.text, fileDelivery: true });
+      }
+      return { ...session, blocks };
+    }
     case "image.generated":
       if (!("path" in event)) return session;
       return appendImage(session, event);
@@ -159,6 +175,17 @@ export function applyHarnessEvent(
         return rest;
       }
       return { ...session, backgroundTasks: event.tasks };
+    case "background.jobs":
+      if (event.jobs.length === 0) {
+        if (!session.backgroundJobs) return session;
+        const { backgroundJobs: _cleared, ...rest } = session;
+        return rest;
+      }
+      return { ...session, backgroundJobs: event.jobs };
+    case "session.woke":
+      return session.busy ? session : { ...session, busy: true };
+    case "session.idle":
+      return session.busy ? stopStreaming(session) : session;
     case "plan":
       return upsertPlan(session, event);
     case "session.error":
@@ -463,6 +490,7 @@ type UserTurnExtra = {
   internal?: boolean;
   monocode?: boolean;
   intent?: Block["intent"];
+  buildPlanBlockId?: Block["buildPlanBlockId"];
   appRequestId?: string;
   monoSessionCompletion?: Block["monoSessionCompletion"];
 };
@@ -475,6 +503,9 @@ function userTurnFields(extra?: UserTurnExtra) {
     ...(extra?.internal ? { internal: true } : {}),
     ...(extra?.monocode ? { monocode: true } : {}),
     ...(extra?.intent ? { intent: extra.intent } : {}),
+    ...(extra?.buildPlanBlockId
+      ? { buildPlanBlockId: extra.buildPlanBlockId }
+      : {}),
     ...(extra?.appRequestId ? { appRequestId: extra.appRequestId } : {}),
     ...(extra?.monoSessionCompletion
       ? { monoSessionCompletion: extra.monoSessionCompletion }
@@ -540,8 +571,11 @@ export function appendSteerUser(
 }
 
 export function stopStreaming(session: Session, endedAt = Date.now()): Session {
-  const { backgroundTasks: _cleared, ...settled } =
-    settlePendingApprovals(session);
+  const {
+    backgroundTasks: _cleared,
+    backgroundJobs: _stopped,
+    ...settled
+  } = settlePendingApprovals(session);
   return {
     ...settled,
     busy: false,

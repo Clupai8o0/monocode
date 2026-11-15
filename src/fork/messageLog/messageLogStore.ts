@@ -521,7 +521,8 @@ export function publishMonoSessions(sessions: readonly MonoSessionRef[]): void {
       (ref, index) =>
         ref.id === mono[index].id &&
         ref.providerSessionId === mono[index].providerSessionId &&
-        ref.placeId === mono[index].placeId,
+        ref.placeId === mono[index].placeId &&
+        ref.cwd === mono[index].cwd,
     );
   if (same) {
     return;

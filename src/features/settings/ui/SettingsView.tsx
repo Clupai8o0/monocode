@@ -352,6 +352,7 @@ import {
   loadCloseToTray,
   loadCollapsedProjectRailMode,
   loadComposerRunner,
+  loadCursorMultiReview,
   loadDiffViewer,
   loadFileTabMode,
   loadFollowUpBehavior,
@@ -375,6 +376,7 @@ import {
   saveCloseToTray,
   saveCollapsedProjectRailMode,
   saveComposerRunner,
+  saveCursorMultiReview,
   saveDiffViewer,
   saveFileTabMode,
   saveFollowUpBehavior,
@@ -439,6 +441,8 @@ import { WorktreesPage } from "../../source-control/ui/WorktreesPage";
 import { AutoWorktreeSetting } from "../../../fork/autoWorktree/AutoWorktreeSetting"; // Fork
 import { FeatureCoachPage } from "../../../fork/featureCoach/FeatureCoachPage"; // Fork
 import { McpAccessSection } from "../../../fork/mcpAccess/McpAccessSection"; // Fork
+import { GrokBotWebhooksSection } from "../../../fork/grokBot/GrokBotWebhooksSection"; // Fork
+import { IdleCompactSetting } from "../../../fork/idleCompact/IdleCompactSetting"; // Fork
 import {
   removeWorktree,
   type RemoveWorktree,
@@ -661,6 +665,8 @@ export function SettingsView({
                 <div className="flex flex-col gap-10">
                   <ConnectionsSettings />
                   <MobileSettings />
+                  {/* Fork: Grok Bot runs from sessions. */}
+                  <GrokBotWebhooksSection />
                 </div>
               ) : null}
               {/* Fork: Home lab. */}
@@ -1084,6 +1090,9 @@ function ChatPage() {
   const [modelControls, setModelControls] =
     useState<ModelControls>(loadModelControls);
   const [diffViewer, setDiffViewer] = useState<DiffViewer>(loadDiffViewer);
+  const [cursorMultiReview, setCursorMultiReview] = useState(
+    loadCursorMultiReview,
+  );
   const [formatOnSave, setFormatOnSave] = useState(loadFormatOnSave);
   const [composerRunner, setComposerRunner] = useState(loadComposerRunner);
   const composerAutocorrect = useComposerAutocorrect();
@@ -1124,6 +1133,11 @@ function ChatPage() {
   const onDiffViewer = (next: DiffViewer) => {
     saveDiffViewer(next);
     setDiffViewer(next);
+  };
+
+  const onCursorMultiReview = (next: boolean) => {
+    saveCursorMultiReview(next);
+    setCursorMultiReview(next);
   };
 
   const onFormatOnSave = (next: boolean) => {
@@ -1254,6 +1268,17 @@ function ChatPage() {
         title="Code review"
         description="Where a turn's changes open when you go to read them."
       >
+        <Row
+          id="cursor-multi-review"
+          label="Review Cursor turns with other models"
+          description="After Cursor edits files, Claude and another provider review in parallel; a summary returns to Cursor. Reviewers report only and do not edit."
+        >
+          <Toggle
+            label="Review Cursor turns with other models"
+            on={cursorMultiReview}
+            onChange={onCursorMultiReview}
+          />
+        </Row>
         <Row
           id="diff-view"
           label="Diff view"
@@ -3898,6 +3923,8 @@ function ProviderAccountsSettings({ project }: { project?: string }) {
                 disabled={Boolean(working)}
               />
             ) : null}
+            {/* Fork: compact big idle Claude threads. */}
+            {provider === "claude" ? <IdleCompactSetting /> : null}
           </div>
         );
       })}

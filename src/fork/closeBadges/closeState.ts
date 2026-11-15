@@ -79,7 +79,7 @@ export function closeStateOfBlocks(
 type Entry = { at: number; state: CloseState | null };
 
 const STORAGE_KEY = "monocode.fork.closeStates";
-const MAX_ENTRIES = 400;
+const MAX_ENTRIES = 2000;
 
 let entries: Map<string, Entry> | null = null;
 let version = 0;

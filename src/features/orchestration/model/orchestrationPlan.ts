@@ -364,6 +364,29 @@ export function proposalBlock(
   };
 }
 
+/**
+ * True while the thread's newest orchestration proposal is still being drawn
+ * up or waits for approval, and the user has not moved on with a plain turn.
+ */
+export function orchestrationPlanningInThread(blocks: Block[]): boolean
+{
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    if (block.orchestration) {
+      return (
+        block.orchestration.status === "planning" ||
+        block.orchestration.status === "ready" ||
+        block.orchestration.status === "invalid" ||
+        block.orchestration.status === "starting"
+      );
+    }
+    if (block.role === "user" && !block.draft && !block.internal) {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** A reload must never turn a half-generated card into an executable plan. */
 export function restoreOrchestrationProposal(
   value: OrchestrationProposal,

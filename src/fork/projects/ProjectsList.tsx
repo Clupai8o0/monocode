@@ -15,7 +15,6 @@ import {
   useProjectLabel,
 } from "../../features/projects/ui/CurrentProjectIcon";
 import {
-  Archive,
   Check,
   CircleAlert,
   MoreHorizontal,
@@ -37,7 +36,6 @@ export function ProjectsList({
   recents,
   onSelectProject,
   onOpenProject,
-  onCleanUpSessions,
   onProjectContextMenu,
   sectionRef,
   capped = true,
@@ -50,7 +48,6 @@ export function ProjectsList({
   recents?: readonly RecentProject[];
   onSelectProject: (path: string) => void;
   onOpenProject?: () => void;
-  onCleanUpSessions?: () => void;
   onProjectContextMenu: (
     path: string,
     x: number,
@@ -148,17 +145,6 @@ export function ProjectsList({
     >
       <div className="flex h-7 shrink-0 items-center gap-1 px-2 text-[12px] font-medium text-content/50">
         <span className="min-w-0 flex-1">Projects</span>
-        {onCleanUpSessions ? (
-          <button
-            type="button"
-            aria-label="Clean up sessions"
-            title="Clean up sessions across projects"
-            onClick={onCleanUpSessions}
-            className="grid size-6 place-items-center rounded-md outline-none transition-colors duration-150 hover:bg-content/10 hover:text-content focus-visible:ring-1 focus-visible:ring-accent active:bg-content/15"
-          >
-            <Archive className="size-3.5" strokeWidth={1.75} />
-          </button>
-        ) : null}
         {onOpenProject ? (
           <button
             type="button"

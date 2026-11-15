@@ -208,7 +208,11 @@ it("leaves every agent tray openable after switching between busy sessions", () 
     "[data-fork-background-agents] > button",
   );
   expect(toggles.length).toBeGreaterThan(0);
+  // The tray opens itself when work appears, so close it and open it again.
   for (const toggle of toggles) {
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
     act(() => toggle.click());
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
   }

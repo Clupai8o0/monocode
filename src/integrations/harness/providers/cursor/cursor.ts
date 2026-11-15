@@ -63,6 +63,7 @@ type SessionConfigOption = {
 type SessionSetupResult = {
   sessionId?: string;
   configOptions?: unknown;
+  modes?: { currentModeId?: string; availableModes?: Array<{ id: string }> };
 };
 
 type PendingToolEnrichment = {
@@ -77,6 +78,8 @@ type Live = {
   cwd: string;
   modelConfigId: string;
   configOptions: SessionConfigOption[];
+  modeId?: string;
+  availableModes: string[];
   muteUpdates: boolean;
   cancelled: boolean;
   runtimeMode: RuntimeMode;
@@ -89,6 +92,10 @@ type Live = {
   toolEnrichmentTimer?: ReturnType<typeof setTimeout>;
   toolEnrichmentRunning: boolean;
   toolStatuses: Map<string, string>;
+  unresolvedTools: Set<string>;
+  pendingTransportError?: string;
+  promptProgress: boolean;
+  recoveryEpoch: number;
   taskListTools: Set<string>;
   agentTools: Map<string, string>;
   backgroundAgentTools: Set<string>;
@@ -111,6 +118,10 @@ type Resume = {
 const liveByThread = new Map<string, Live>();
 const resumeByThread = new Map<string, Resume>();
 const cancelledThreads = new Set<string>();
+const RECOVERY_PROMPT =
+  "The connection dropped. Check this conversation's last request, the current workspace, git status, the diff, and results of tools already run before continuing. Do not rerun a command until you have checked its effect. Continue only remaining work. If this conversation does not show the last request or a tool outcome is uncertain, stop and explain what needs checking.";
+
+class CursorTransportInterruptedError extends Error {}
 
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -128,22 +139,78 @@ export async function sendCursorTurn(input: SendTurnInput): Promise<void> {
     throw error;
   }
   if (cancelledThreads.delete(input.sessionId)) return;
+  const recoveryEpoch = live.recoveryEpoch;
 
-  live.onEvent = input.onEvent;
-  live.runtimeMode = input.runtimeMode;
-  live.planning = input.intent === "plan";
   live.turns = live.turns
     .catch(() => undefined)
     .then(async () => {
+      if (recoveryEpoch !== live.recoveryEpoch) {
+        const message =
+          "Cursor paused this queued request after an interrupted turn. Check unfinished tool results, then submit it again.";
+        input.onEvent({ type: "session.error", message });
+        throw new Error(message);
+      }
+      live.onEvent = input.onEvent;
+      live.runtimeMode = input.runtimeMode;
+      live.planning = input.intent === "plan";
       live.cancelled = false;
       live.muteUpdates = false;
       scheduleCursorToolEnrichment(live, 0);
       try {
         await applyModelSelection(live, input);
+        await applySessionMode(live);
         if (live.cancelled) return;
-        await prompt(live, input);
+        try {
+          await prompt(live, input);
+        } catch (error) {
+          if (
+            !(error instanceof CursorTransportInterruptedError) ||
+            live.cancelled
+          )
+            throw error;
+          requireSafeCursorContinuation(live, error);
+          await refreshCursorSubagents(live);
+          if (live.cancelled) return;
+          requireSafeCursorContinuation(live, error);
+          live.onEvent({
+            type: "status",
+            key: "cursor-recovery",
+            text: "Cursor connection dropped. Checking completed work before continuing…",
+          });
+          if (live.cancelled) return;
+          // ACP remains alive after this terminal assistant-text error. Keep
+          // its in-memory history and the existing turn queue; never reload or
+          // replay the user's original prompt.
+          try {
+            await prompt(
+              live,
+              {
+                ...input,
+                text: RECOVERY_PROMPT,
+                attachments: [],
+                onAccepted: undefined,
+              },
+              true,
+            );
+          } catch (recoveryError) {
+            throw new CursorTransportInterruptedError(
+              recoveryError instanceof Error
+                ? recoveryError.message
+                : String(recoveryError),
+            );
+          }
+        }
       } catch (error) {
         if (live.cancelled) return;
+        if (!(error instanceof CursorTransportInterruptedError)) {
+          settleCursorBackgroundAgents(live, "failed");
+        } else {
+          live.recoveryEpoch += 1;
+        }
+        live.onEvent({
+          type: "session.error",
+          message: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     });
@@ -270,9 +337,6 @@ export function bindCursorSession(
 async function ensureLive(input: SendTurnInput): Promise<Live> {
   const existing = liveByThread.get(input.sessionId);
   if (existing && existing.cwd === input.cwd) {
-    existing.onEvent = input.onEvent;
-    existing.runtimeMode = input.runtimeMode;
-    existing.planning = input.intent === "plan";
     return existing;
   }
   if (existing) {
@@ -379,6 +443,9 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
       cwd: input.cwd,
       modelConfigId: extractModelConfigId(setup),
       configOptions: readConfigOptions(setup?.configOptions),
+      modeId: setup?.modes?.currentModeId,
+      availableModes:
+        setup?.modes?.availableModes?.map((mode) => mode.id) ?? [],
       muteUpdates: didLoad,
       cancelled: false,
       runtimeMode: input.runtimeMode,
@@ -390,6 +457,9 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
       pendingToolEnrichments: new Map(),
       toolEnrichmentRunning: false,
       toolStatuses: new Map(),
+      unresolvedTools: new Set(),
+      promptProgress: false,
+      recoveryEpoch: 0,
       taskListTools: new Set(),
       agentTools: new Map(),
       backgroundAgentTools: new Set(),
@@ -429,20 +499,36 @@ async function applyModelSelection(
 
   try {
     await setConfigOption(live, live.modelConfigId, base);
-  } catch {
-    await live.acp
-      .request("session/set_model", {
+  } catch (error) {
+    try {
+      await live.acp.request("session/set_model", {
         sessionId: live.acpSessionId,
         modelId: base,
-      })
-      .catch(() => undefined);
+      });
+      const current = live.configOptions.find(
+        (option) => option.id === live.modelConfigId,
+      );
+      if (current) current.currentValue = base;
+    } catch {
+      throw error;
+    }
   }
 
   for (const [settingId, value] of Object.entries(settings)) {
     const configId = resolveSettingConfigId(live.configOptions, settingId);
-    if (!configId) continue;
-    await setConfigOption(live, configId, value).catch(() => undefined);
+    if (!configId) throw new Error(`Unsupported Cursor setting: ${settingId}`);
+    await setConfigOption(live, configId, value);
   }
+}
+
+async function applySessionMode(live: Live): Promise<void> {
+  const modeId = live.planning ? "plan" : "agent";
+  if (!live.availableModes.includes(modeId) || live.modeId === modeId) return;
+  await live.acp.request("session/set_mode", {
+    sessionId: live.acpSessionId,
+    modeId,
+  });
+  live.modeId = modeId;
 }
 
 async function setConfigOption(
@@ -464,10 +550,16 @@ async function setConfigOption(
   if (result?.configOptions) {
     live.configOptions = readConfigOptions(result.configOptions);
     live.modelConfigId = extractModelConfigId(result) || live.modelConfigId;
+  } else if (current) {
+    current.currentValue = value;
   }
 }
 
-async function prompt(live: Live, input: SendTurnInput): Promise<void> {
+async function prompt(
+  live: Live,
+  input: SendTurnInput,
+  recovering = false,
+): Promise<void> {
   try {
     const blocks = promptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
@@ -479,18 +571,40 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     live.backgroundKey = "";
     syncCursorBackgroundWait(live);
     live.taskListTools.clear();
+    live.pendingTransportError = undefined;
+    live.promptProgress = false;
     live.promptActive = true;
-    const pending = live.acp.request("session/prompt", {
-      sessionId: live.acpSessionId,
-      prompt: blocks,
-    });
+    const pending = live.acp.request<{ stopReason?: string }>(
+      "session/prompt",
+      {
+        sessionId: live.acpSessionId,
+        prompt: blocks,
+      },
+    );
     input.onAccepted?.();
-    await pending;
+    const result = await pending;
     live.promptActive = false;
-    if (live.cancelled) {
+    if (live.cancelled || (!recovering && result?.stopReason === "cancelled")) {
+      live.pendingTransportError = undefined;
       live.backgroundAgentTools.clear();
       syncCursorBackgroundWait(live);
       return;
+    }
+    // Notifications can populate this field while the prompt is awaited.
+    const transportError = live.pendingTransportError as string | undefined;
+    if (transportError && result?.stopReason === "end_turn") {
+      const message = transportError.trim();
+      live.pendingTransportError = undefined;
+      throw new CursorTransportInterruptedError(message);
+    }
+    flushCursorTransportError(live);
+    if (
+      recovering &&
+      (result?.stopReason !== "end_turn" || !live.promptProgress)
+    ) {
+      throw new CursorTransportInterruptedError(
+        "Cursor continuation ended without a complete response. Check the conversation and tool results before continuing.",
+      );
     }
     settleCursorBackgroundAgents(live, "completed");
     await refreshCursorSubagents(live);
@@ -503,13 +617,41 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
   } catch (error) {
     live.promptActive = false;
     if (live.cancelled) return;
-    settleCursorBackgroundAgents(live, "failed");
-    live.onEvent({
-      type: "session.error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    flushCursorTransportError(live);
     throw error;
   }
+}
+
+function flushCursorTransportError(live: Live): void {
+  const text = live.pendingTransportError;
+  live.pendingTransportError = undefined;
+  if (text && !live.cancelled && !live.muteUpdates) {
+    live.onEvent({ type: "message.delta", text });
+  }
+}
+
+function requireSafeCursorContinuation(live: Live, error: Error): void {
+  if (
+    !live.promptProgress ||
+    live.unresolvedTools.size ||
+    live.approvals.size ||
+    live.questions.size ||
+    live.backgroundAgentTools.size ||
+    [...live.toolStatuses.values()].some(
+      (status) =>
+        status !== "completed" && status !== "failed" && status !== "cancelled",
+    )
+  ) {
+    throw new CursorTransportInterruptedError(
+      `${error.message}. Check unfinished tool results and the saved conversation before continuing; automatic continuation was stopped to avoid repeating work.`,
+    );
+  }
+}
+
+function isCursorTransportErrorChunk(text: string): boolean {
+  return /^\n\nError: RetriableError: (?:\[unavailable\] (?:(?:(?:read|write|connect) )?(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EPIPE|ENETUNREACH|EHOSTUNREACH)|PING (?:timeout|timed out))|Connection stalled(?: repeatedly)?)\s*$/.test(
+    text,
+  );
 }
 
 function handleNotification(live: Live, method: string, params: unknown) {
@@ -738,30 +880,51 @@ async function handlePermission(live: Live, id: number, params: unknown) {
   }
 
   const options = Array.isArray(rec?.options) ? rec.options : [];
+  const optionsByKind = new Map<string, string>();
+  for (const option of options) {
+    const entry = asRecord(option);
+    if (typeof entry?.kind === "string" && typeof entry.optionId === "string") {
+      optionsByKind.set(entry.kind.replace(/-/g, "_"), entry.optionId);
+    }
+  }
   const optionIds = options
     .map((item) => asRecord(item)?.optionId)
     .filter((value): value is string => typeof value === "string");
+  const select = (preferred: string[]) => {
+    for (const kind of preferred) {
+      const id = optionsByKind.get(kind.replace(/-/g, "_"));
+      if (id) return id;
+    }
+    return pickOption(optionIds, preferred);
+  };
+  const respond = (optionId: string | null) =>
+    live.acp.respond(id, {
+      outcome: optionId
+        ? { outcome: "selected", optionId }
+        : { outcome: "cancelled" },
+    });
 
   if (live.planning) {
     const normalized = (preview?.kind ?? kind ?? "").toLowerCase();
     const readOnly = normalized === "read" || normalized === "search";
     const optionId = readOnly
-      ? pickOption(optionIds, ["allow-once", "allow_once", "allow"])
-      : pickOption(optionIds, ["reject-once", "reject_once", "reject-always"]);
-    await live.acp.respond(id, {
-      outcome: {
-        outcome: "selected",
-        optionId: optionId ?? (readOnly ? "allow-once" : "reject-once"),
-      },
-    });
+      ? select(["allow-once", "allow_once", "allow"])
+      : select([
+          "reject-once",
+          "reject_once",
+          "reject-always",
+          "reject_always",
+        ]);
+    await respond(optionId);
     return;
   }
 
-  const auto = pickAutoOption(live.runtimeMode, kind, optionIds);
+  const auto = pickAutoOption(live.runtimeMode, kind, [
+    ...optionIds,
+    ...optionsByKind.keys(),
+  ]);
   if (auto) {
-    await live.acp.respond(id, {
-      outcome: { outcome: "selected", optionId: auto },
-    });
+    await respond(select([auto]));
     return;
   }
 
@@ -782,21 +945,15 @@ async function handlePermission(live: Live, id: number, params: unknown) {
 
   const optionId =
     decision === "allow"
-      ? pickOption(optionIds, [
-          "allow-once",
-          "allow_once",
-          "allow-always",
-          "allow_always",
-        ])
-      : pickOption(optionIds, ["reject-once", "reject_once", "reject-always"]);
+      ? select(["allow-once", "allow_once", "allow-always", "allow_always"])
+      : select([
+          "reject-once",
+          "reject_once",
+          "reject-always",
+          "reject_always",
+        ]);
 
-  await live.acp.respond(id, {
-    outcome: {
-      outcome: "selected",
-      optionId:
-        optionId ?? (decision === "allow" ? "allow-once" : "reject-once"),
-    },
-  });
+  await respond(optionId);
 }
 
 function handleSessionUpdate(live: Live, params: unknown) {
@@ -847,13 +1004,31 @@ function handleSessionUpdate(live: Live, params: unknown) {
     return;
   }
 
+  if (kind === "current_mode_update") {
+    live.modeId = stringField(update, "currentModeId") ?? live.modeId;
+    return;
+  }
+
   if (kind === "agent_message_chunk" || kind === "agent_message") {
     // Whole-message arrays contain distinct content blocks; chunks are exact deltas.
     const text = textFromContent(
       update.content ?? update.text,
       kind === "agent_message" ? "\n" : "",
     );
-    if (text) emit({ type: "message.delta", text });
+    if (text) {
+      if (!live.subagents.isChild(params)) flushCursorTransportError(live);
+      if (
+        live.promptActive &&
+        !live.subagents.isChild(params) &&
+        kind === "agent_message_chunk" &&
+        isCursorTransportErrorChunk(text)
+      ) {
+        live.pendingTransportError = text;
+        return;
+      }
+      if (text.trim()) live.promptProgress = true;
+      emit({ type: "message.delta", text });
+    }
     return;
   }
   if (kind === "agent_thought_chunk" || kind === "agent_thought") {
@@ -879,10 +1054,23 @@ function handleSessionUpdate(live: Live, params: unknown) {
         "",
     );
     if (!callId) return;
+    if (kind === "tool_call" && !live.subagents.isChild(params)) {
+      flushCursorTransportError(live);
+    }
+    live.promptProgress = true;
     const reportedKind =
       coerceMaybeString(update, "kind") ?? coerceMaybeString(tool, "kind");
     const status =
       coerceMaybeString(update, "status") ?? coerceMaybeString(tool, "status");
+    if (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled"
+    ) {
+      live.unresolvedTools.delete(callId);
+    } else if (kind === "tool_call" || status) {
+      live.unresolvedTools.add(callId);
+    }
     const rawTitle = toolLabel(update, tool);
     const rawInput =
       update.rawInput ??

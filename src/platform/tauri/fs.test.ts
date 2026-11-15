@@ -6,6 +6,7 @@ import {
   gitDiffIndex,
   gitDiffStats,
   gitDiffFiles,
+  invalidateGitReads,
   notifyAgentGitActivity,
   notifyGitChanged,
   type GitDiffIndex,
@@ -330,5 +331,48 @@ it("does not publish a stale failure after a mutation", async () => {
     });
   } finally {
     vi.unstubAllGlobals();
+  }
+});
+
+it("starts a fresh index read after a scoped disk change without invalidating existing callers", async () => {
+  vi.mocked(invoke).mockReset();
+  let finish!: (value: GitDiffIndex) => void;
+  let finishOther!: (value: GitDiffIndex) => void;
+  const stale = { files: [] } as unknown as GitDiffIndex;
+  const fresh = { files: [{ path: "/changed/new.txt" }] } as unknown as GitDiffIndex;
+  vi.mocked(invoke)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishOther = resolve; }))
+    .mockResolvedValue(fresh);
+  const pending = gitDiffIndex("/changed");
+  const other = gitDiffIndex("/other");
+  invalidateGitReads("/changed");
+  const reload = gitDiffIndex("/changed");
+  expect(reload).not.toBe(pending);
+  expect(gitDiffIndex("/other")).toBe(other);
+  finish(stale);
+  finishOther(stale);
+  await expect(pending).resolves.toBe(stale);
+  await expect(reload).resolves.toBe(fresh);
+  await expect(other).resolves.toBe(stale);
+});
+
+it.each([[2000, 2500], [100, 300]])("allows a slow read to settle under watcher ticks every %ims", async (tick, latency) => {
+  vi.useFakeTimers();
+  vi.mocked(invoke).mockReset().mockImplementation(() => new Promise(resolve => {
+    setTimeout(() => resolve({ files: [] }), latency);
+  }));
+  let completed = false;
+  const pending = gitDiffIndex(`/slow-${tick}`).then(() => { completed = true; });
+  const timer = setInterval(() => invalidateGitReads(`/slow-${tick}`), tick);
+  try {
+    await vi.advanceTimersByTimeAsync(latency * 4);
+    expect(completed).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await pending;
+  } finally {
+    clearInterval(timer);
+    vi.clearAllTimers();
+    vi.useRealTimers();
   }
 });

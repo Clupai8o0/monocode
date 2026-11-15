@@ -109,7 +109,9 @@ export async function prepareHandoffContext(
   const path = await write(
     `# Handoff conversation archive\n\nPrior conversation, in chronological order. User messages and plans are unabridged. The newest user message takes precedence over older requests. Tools, private reasoning and unsent drafts are excluded.\n\n${content}`,
   );
-  return `${withoutOldPointer(brief)}\n\n## Conversation archive\nBefore continuing, read the local file ${JSON.stringify(path)} with your file-reading tool. It contains the original assignment and conversation, including instructions omitted from this recap. Recover the task from it automatically; no /operator command or user resend is needed.`.trim();
+  // Fork (handoffBudget): searched on demand, not read whole, so a long
+  // conversation is not loaded into the new agent's context all over again.
+  return `${withoutOldPointer(brief)}\n\n## Conversation archive\nThe whole earlier conversation is in the local file ${JSON.stringify(path)}, one "### <role> (<message id>)" heading per message, oldest first. Do not read the whole file. When you need something this recap leaves out or trims, search it (for example grep for a message id named above, or a keyword) and read only the matching part. No /operator command or user resend is needed.`.trim();
 }
 
 /** Persist the reference so later turns and app restarts know recovery was supplied. */

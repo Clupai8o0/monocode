@@ -11,6 +11,7 @@ import {
   type Session,
 } from "../../features/sessions/model/session";
 import { LAYER } from "../../shared/lib/layers";
+import { remoteControlActive } from "../remoteControl/remoteControlStore";
 import { closeMachines, useMachineHost, useMachineSignal } from "../machines/machinesStore";
 import {
   autoParkStep,
@@ -66,6 +67,7 @@ function sessionFacts(
         needsInput: sessionNeedsInput(session),
         foreground: isForeground(session.id),
         idleSince: harnessIdleSince(session.id),
+        remoteControl: remoteControlActive(session.id),
       },
     ]),
   );

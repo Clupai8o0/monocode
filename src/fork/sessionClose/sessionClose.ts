@@ -6,6 +6,7 @@ import {
 import { shouldPersistSession } from "../../features/sessions/data/sessionStore";
 import { isMonoSession } from "../../features/monos/model/mono";
 import { closeStateOfBlocks } from "../closeBadges/closeState";
+import { remoteControlActive } from "../remoteControl/remoteControlStore";
 import {
   closeLeaf,
   leafIds,
@@ -39,6 +40,8 @@ export function canCloseForMemory(
     !session.usageLimit &&
     !session.pendingSwitch &&
     !isMonoSession(session.id) &&
+    // The phone may be using it.
+    !remoteControlActive(session.id) &&
     !sessionNeedsInput(session) &&
     !sessionDraftBlock(session)
   );

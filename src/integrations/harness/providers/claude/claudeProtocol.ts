@@ -26,6 +26,7 @@ import {
   isAgentToolName,
   titleFromToolInput,
 } from "../../core/preview";
+import { isHarnessAuthError } from "../../core/authSupport";
 import { streamTextDelta } from "../../core/streamText";
 import type { ApprovalDecision, HarnessEvent } from "../../core/types";
 
@@ -41,6 +42,18 @@ export const MINIMUM_CLAUDE_SONNET_5_VERSION = "2.1.197";
 export const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.169";
 export const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 export const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
+/** First CLI with `--thinking-display`, shipped with Opus 4.7, the first
+ * model that hides its thinking unless summaries are asked for. */
+export const MINIMUM_CLAUDE_THINKING_DISPLAY_VERSION = "2.1.111";
+
+/** Whether a CLI of this version takes `--thinking-display`. An unknown
+ * version gets it: every model MonoCode offers needs a newer CLI anyway. */
+export function claudeSupportsThinkingDisplay(
+  version: string | null,
+): boolean {
+  if (!version) return true;
+  return compareSemver(version, MINIMUM_CLAUDE_THINKING_DISPLAY_VERSION) >= 0;
+}
 
 export const CLAUDE_SETTING_SOURCES = "user,project,local";
 
@@ -255,6 +268,9 @@ export function buildClaudeSpawnArgs(input: {
   includePartialMessages?: boolean;
   maxTurns?: number;
   isolated?: boolean;
+  /** Ask for thinking summaries. Defaults to on for interactive sessions;
+   * pass false when the CLI is too old to take `--thinking-display`. */
+  thinkingDisplay?: boolean;
 }): string[] {
   const args = [
     "--output-format",
@@ -286,6 +302,16 @@ export function buildClaudeSpawnArgs(input: {
     args.push("--settings", JSON.stringify(settings));
     // Fork: headless Claude skips the Chrome extension unless asked.
     args.push("--chrome");
+    // Claude echoes each message as it takes it, so a follow-up sent during a
+    // turn is known to be taken mid-turn or still queued when Claude yields.
+    args.push("--replay-user-messages");
+  }
+  // Newer models send empty thinking blocks unless asked for summaries, and
+  // in print mode only this flag asks (`showThinkingSummaries` is read by the
+  // interactive UI alone), so without it the transcript shows "Thinking…"
+  // with nothing under it.
+  if (input.thinkingDisplay ?? !input.isolated) {
+    args.push("--thinking-display", "summarized");
   }
   if (input.model) args.push("--model", input.model);
   if (input.effort) args.push("--effort", input.effort);
@@ -536,6 +562,22 @@ export function isUsageLimitResult(rec: Record<string, unknown>): boolean {
   return [stringField(rec, "result") ?? "", ...errors].some((text) =>
     USAGE_LIMIT_TEXT.test(text),
   );
+}
+
+/**
+ * Claude reports a failed sign-in, such as an expired OAuth session, as a
+ * synthetic assistant message tagged `authentication_failed`. Returns its text
+ * as a provider error the transcript recognizes as a sign-in failure.
+ */
+export function authFailureFromAssistant(
+  rec: Record<string, unknown>,
+): string | null {
+  if (stringField(rec, "error") !== "authentication_failed") return null;
+  const text = assistantTextBlocks(rec).join("").trim();
+  if (isHarnessAuthError(text)) return text;
+  return text
+    ? `Claude Code is not signed in.\n\n${text}`
+    : "Claude Code is not signed in.";
 }
 
 export function streamDeltaFromEvent(

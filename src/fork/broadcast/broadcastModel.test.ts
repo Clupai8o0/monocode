@@ -32,7 +32,10 @@ function facts(extra: Partial<BroadcastFacts> = {}): BroadcastFacts {
 
 describe("planBroadcast", () => {
   it("reaches idle sessions now and busy ones after their turn", () => {
-    const plan = planBroadcast([session("a"), session("b", { busy: true })], facts());
+    const plan = planBroadcast(
+      [session("a"), session("b", { busy: true })],
+      facts({ scope: "project" }),
+    );
     expect(plan.targets).toEqual([
       { id: "a", when: "now" },
       { id: "b", when: "after this turn" },
@@ -40,11 +43,24 @@ describe("planBroadcast", () => {
     expect(plan.leftOut).toEqual({});
   });
 
-  it("keeps to the project on screen, unless asked for all", () => {
-    const sessions = [session("a"), session("b", { cwd: "/q" })];
-    expect(planBroadcast(sessions, facts({ scope: "project" })).targets.map((t) => t.id)).toEqual(["a"]);
-    expect(planBroadcast(sessions, facts({ scope: "all" })).targets.map((t) => t.id)).toEqual(["a", "b"]);
-    expect(planBroadcast(sessions, facts({ scope: "project", project: undefined })).targets).toEqual([]);
+  it("keeps to the project on screen; across all projects only the busy ones", () => {
+    const sessions = [
+      session("a"),
+      session("b", { cwd: "/q" }),
+      session("c", { cwd: "/q", busy: true }),
+    ];
+    expect(planBroadcast(sessions, facts({ scope: "project" })).targets.map((t) => t.id)).toEqual([
+      "a",
+    ]);
+    expect(planBroadcast(sessions, facts({ scope: "all" })).targets).toEqual([
+      { id: "c", when: "after this turn" },
+    ]);
+    expect(planBroadcast(sessions, facts({ scope: "all" })).leftOut).toEqual({
+      "not running": 2,
+    });
+    expect(planBroadcast(sessions, facts({ scope: "project", project: undefined })).targets).toEqual(
+      [],
+    );
   });
 
   it("keeps to one picked project, whichever is on screen, with the same exclusions", () => {
@@ -92,21 +108,25 @@ describe("planBroadcast", () => {
         session("typing"),
         session("blank", { blocks: [] }),
         session("ok"),
+        session("busy", { busy: true }),
+        session("idle"),
       ],
       facts({
+        scope: "all",
         isMono: (id) => id === "mono" || id === "sweep",
         isOrchestrationLead: (s) => s.id === "lead",
         needsInput: (s) => s.id === "asking",
         composerDraft: (id) => (id === "typing" ? "half a thought" : undefined),
       }),
     );
-    expect(plan.targets.map((t) => t.id)).toEqual(["ok"]);
+    expect(plan.targets.map((t) => t.id)).toEqual(["busy"]);
     expect(plan.leftOut).toEqual({
       mono: 2,
       orchestration: 2,
       "needs input": 1,
       draft: 2,
       "not started": 1,
+      "not running": 2,
     });
   });
 
@@ -124,12 +144,19 @@ describe("planBroadcast", () => {
   });
 
   it("ignores a composer holding only spaces", () => {
-    const plan = planBroadcast([session("a")], facts({ composerDraft: () => "  \n" }));
+    const plan = planBroadcast(
+      [session("a")],
+      facts({ scope: "project", composerDraft: () => "  \n" }),
+    );
     expect(plan.targets).toHaveLength(1);
   });
 
   it("blocks a remote session it can't reach, and says why", () => {
-    const remote = facts({ isRemote: () => true, remoteReachable: (id) => id !== "closed" });
+    const remote = facts({
+      scope: "project",
+      isRemote: () => true,
+      remoteReachable: (id) => id !== "closed",
+    });
     const plan = planBroadcast(
       [session("idle"), session("busy", { busy: true }), session("closed")],
       remote,
@@ -143,8 +170,8 @@ describe("planBroadcast", () => {
 describe("leftOutLine and sendLabel", () => {
   it("reads as plain words", () => {
     expect(leftOutLine({})).toBe("");
-    expect(leftOutLine({ "needs input": 2, draft: 1, mono: 1 })).toBe(
-      "Left out: 1 Mono, 2 need your input, 1 holds a draft",
+    expect(leftOutLine({ "needs input": 2, draft: 1, mono: 1, "not running": 3 })).toBe(
+      "Left out: 1 Mono, 2 need your input, 1 holds a draft, 3 not running",
     );
     expect(sendLabel(7)).toBe("Send to 7 sessions");
     expect(sendLabel(1)).toBe("Send to 1 session");
@@ -154,7 +181,7 @@ describe("leftOutLine and sendLabel", () => {
 describe("sendBroadcast", () => {
   const plan = planBroadcast(
     [session("idle"), session("busy", { busy: true }), session("refuses")],
-    facts(),
+    facts({ scope: "project" }),
   );
 
   it("says what became of each, and only sends what was chosen", async () => {

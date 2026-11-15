@@ -20,10 +20,14 @@ mod fork_messages; // Fork: the message log between Claude sessions.
 mod fork_tz;
 mod fork_latex;
 mod fork_office;
+mod fork_grok_bot; // Fork: hand a task to the Grok Bot desktop app.
+mod fork_grok_bot_cache; // Fork: read Grok Bot bots and chats for sessions.
+mod fork_grok_bot_webhook; // Fork: start Grok Bot routines through their webhooks.
 mod fork_shows; // Fork: cache files a remote machine shows on this computer.
 mod fork_html; // Fork: isolated HTML file previews with bounded draft storage.
 mod fork_code_run; // Fork: sandboxed code drills for the Games panel's Code tab.
 mod fork_task_output; // Fork: bounded tails of local background-command output.
+mod fork_mono_contributions; // Fork: Mono's commit and pull request history.
 mod fork_leetcode; // Fork: LeetCode problems as Code tab drills.
 // Fork: named workspaces, one OS window each, with their own saved layout.
 mod fork_workspaces;
@@ -34,6 +38,7 @@ mod fork_worktree_merge; // Fork: Merge back for a session's worktree.
 mod fork_location; // Fork
 mod fork_memory; // Fork: the Memory manager's per-session RAM report.
 mod fork_account_homes; // Fork: which Claude login (main or cx) each account runs on.
+mod fork_meter_accounts; // Fork: usage-meter-only account folders (e.g. a client login).
 // Fork: installs a staged personal build on quit, however MonoCode was opened.
 #[cfg(target_os = "macos")]
 mod fork_update;
@@ -52,6 +57,7 @@ mod devin_config;
 mod devin_usage;
 mod external_editor;
 mod fs;
+mod git_watch;
 mod gitlab;
 mod harness;
 mod harness_updates;
@@ -69,6 +75,7 @@ mod menu;
 mod mobile_access;
 mod mobile_router;
 mod mono;
+mod mono_skills;
 #[cfg(target_os = "macos")]
 mod mono_chat;
 mod mono_transcript;
@@ -319,6 +326,7 @@ pub fn run() {
         })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
+        .manage(git_watch::GitWatchHost::default())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
         .manage(fork_html::HtmlPreviews::default())
@@ -365,6 +373,9 @@ pub fn run() {
             mobile_access::mobile_publish,
             mobile_access::mobile_reply,
             mobile_access::mobile_push,
+            git_watch::reset_git_watches,
+            git_watch::watch_git_changes,
+            git_watch::unwatch_git_changes,
             remote::remote_machines,
             remote::remote_connect,
             remote::remote_disconnect,
@@ -614,6 +625,8 @@ pub fn run() {
             mono::mono_load,
             mono::mono_read,
             mono::mono_save,
+            mono_skills::mono_skill_read,
+            mono_skills::mono_skill_remove,
             checkpoint::session_checkpoint_ensure,
             checkpoint::session_checkpoint_begin_turn,
             checkpoint::session_checkpoint_finish_turn,
@@ -717,6 +730,7 @@ pub fn run() {
             fork_claims::fork_claims_list,    // Fork
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork
+            fork_external_sessions::fork_peer_sender_project, // Fork
             fork_relay::fork_relay_status,
             fork_relay::fork_relay_traffic,    // Fork
             fork_messages::fork_message_log,   // Fork    // Fork
@@ -724,10 +738,19 @@ pub fn run() {
             fork_tz::fork_agent_tz_set,       // Fork
             fork_latex::fork_latex_compile,   // Fork
             fork_office::fork_office_convert, // Fork
+            fork_grok_bot::fork_grok_bot_status, // Fork
+            fork_grok_bot::fork_grok_bot_open, // Fork
+            fork_grok_bot_cache::fork_grok_bot_bots, // Fork
+            fork_grok_bot_cache::fork_grok_bot_chat, // Fork
+            fork_grok_bot_webhook::fork_grok_bot_webhooks, // Fork
+            fork_grok_bot_webhook::fork_grok_bot_webhook_set, // Fork
+            fork_grok_bot_webhook::fork_grok_bot_webhook_remove, // Fork
+            fork_grok_bot_webhook::fork_grok_bot_run, // Fork
             fork_html::fork_html_preview_create, // Fork
             fork_html::fork_html_preview_remove, // Fork
             fork_code_run::fork_code_run,        // Fork
             fork_task_output::fork_task_output_tail, // Fork
+            fork_mono_contributions::fork_mono_contributions, // Fork
             fork_leetcode::fork_leetcode_fetch,  // Fork
             fork_leetcode::fork_leetcode_connect,  // Fork
             fork_leetcode::fork_leetcode_connect_paste,  // Fork
@@ -766,6 +789,7 @@ pub fn run() {
             fork_workspaces::fork_workspace_chrome,         // Fork
             fork_account_homes::fork_account_homes,         // Fork
             fork_account_homes::fork_add_cx_account,        // Fork
+            fork_meter_accounts::fork_meter_accounts,       // Fork
             fork_location::fork_location_status,            // Fork
             fork_location::fork_location_set_mode,          // Fork
             fork_location::fork_place_add,                  // Fork
@@ -815,6 +839,9 @@ pub fn run() {
             control::window_closed(handle, &label);
             #[cfg(target_os = "macos")]
             mono_chat::window_closed(handle, &label);
+            handle
+                .state::<git_watch::GitWatchHost>()
+                .close_window(&label);
             if !other_window {
                 reap_harness_children(handle);
             }
@@ -837,6 +864,7 @@ pub fn run() {
             fork_update::on_quit(); // Fork
             #[cfg(unix)]
             fork_relay::stop(); // Fork
+            handle.state::<git_watch::GitWatchHost>().close_all();
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
         }

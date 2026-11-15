@@ -376,6 +376,174 @@ export const PROJECT_BOT_SPRITES: Record<string, Bot> = {
       [5, 3],
     ]),
   },
+  // Flower (pick only, no project maps to it): a solid bloom with a face and
+  // no gaps between petals, so it holds at 16 px, on a straight stem with one
+  // small leaf. Seven cells wide so the stem sits exactly under the middle.
+  flower: {
+    rest: [
+      "..#.#...",
+      ".#####..",
+      "##.#.##.",
+      ".#####..",
+      "..#.#...",
+      "...#....",
+      "..##....",
+      "...#....",
+    ],
+    talk: [
+      "..#.#...",
+      ".#####..",
+      "##.#.##.",
+      ".##.##..",
+      "..#.#...",
+      "...#....",
+      "..##....",
+      "...#....",
+    ],
+    eyes: same([
+      [2, 2],
+      [4, 2],
+    ]),
+  },
+  // Pig (pick only, no project maps to it): side on, facing right, with a curly
+  // tail, an ear, one eye and a snout. Its snout opens while it talks.
+  pig: {
+    rest: [
+      "......#.",
+      "#.#####.",
+      ".######.",
+      ".####.##",
+      ".#######",
+      ".######.",
+      ".##..##.",
+      "........",
+    ],
+    talk: [
+      "......#.",
+      "#.#####.",
+      ".######.",
+      ".####.##",
+      ".######.",
+      ".######.",
+      ".##..##.",
+      "........",
+    ],
+    eyes: same([[5, 3]]),
+  },
+  // Couple (pick only, no project maps to it; made for Glow Up): two people
+  // holding hands. The heads are 2x2 with no eye holes, so the eye list is
+  // empty. Their legs kick out while they talk.
+  couple: {
+    rest: [
+      ".##..##.",
+      ".##..##.",
+      "........",
+      "########",
+      ".##..##.",
+      ".##..##.",
+      ".#....#.",
+      ".#....#.",
+    ],
+    talk: [
+      ".##..##.",
+      ".##..##.",
+      "........",
+      "########",
+      ".##..##.",
+      ".##..##.",
+      ".#....#.",
+      "#......#",
+    ],
+    eyes: same([]),
+  },
+  // Apple (pick only, no project maps to it; made for nomnom): a bitten apple
+  // with a stalk and leaf, the bite out of its right side. Its leaf flutters
+  // while it talks.
+  apple: {
+    rest: [
+      "...#.##.",
+      "...##...",
+      ".##.##..",
+      "######..",
+      "#.#.#...",
+      "######..",
+      ".######.",
+      "..##.##.",
+    ],
+    talk: [
+      "...#..##",
+      "...##...",
+      ".##.##..",
+      "######..",
+      "#.#.#...",
+      "######..",
+      ".######.",
+      "..##.##.",
+    ],
+    eyes: same([
+      [1, 4],
+      [3, 4],
+    ]),
+  },
+  // Kettlebell (pick only, no project maps to it; made for Tempo): a handle
+  // over a solid bell with two eyes. Its mouth opens while it talks.
+  kettlebell: {
+    rest: [
+      "..####..",
+      ".#....#.",
+      ".#....#.",
+      ".######.",
+      "########",
+      "##.##.##",
+      "########",
+      ".######.",
+    ],
+    talk: [
+      "..####..",
+      ".#....#.",
+      ".#....#.",
+      ".######.",
+      "########",
+      "##.##.##",
+      "###..###",
+      ".######.",
+    ],
+    eyes: same([
+      [2, 5],
+      [5, 5],
+    ]),
+  },
+  // Camera (pick only, no project maps to it; made for Clearroll): a body with
+  // a viewfinder bump and a flash; the 2x2 lens is its one big eye. The flash
+  // pops while it talks.
+  camera: {
+    rest: [
+      "........",
+      ".##..#..",
+      "########",
+      "########",
+      "###..###",
+      "###..###",
+      "########",
+      "........",
+    ],
+    talk: [
+      "........",
+      ".##.###.",
+      "########",
+      "########",
+      "###..###",
+      "###..###",
+      "########",
+      "........",
+    ],
+    eyes: same([
+      [3, 4],
+      [4, 4],
+      [3, 5],
+      [4, 5],
+    ]),
+  },
 };
 
 export const PROJECT_BOT_NAMES: ReadonlySet<string> = new Set(
