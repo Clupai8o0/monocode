@@ -58,8 +58,11 @@ function earliest(
 export function shellModelHarness(block: Block): HarnessId | undefined {
   const tool = block.tool;
   if (!tool) return undefined;
+  // Descriptions read as sentences ("Codex builds..."); command lines
+  // ("rg -n codex src") start lower-case and only count through ROUTES.
   const words = [block.text, tool.title]
-    .filter((text): text is string => Boolean(text?.trim()))
+    .map((text) => text?.trim() ?? "")
+    .filter((text) => /^\p{Lu}/u.test(text))
     .map(prose);
   for (const text of words) {
     const named = earliest(text, NAMES);

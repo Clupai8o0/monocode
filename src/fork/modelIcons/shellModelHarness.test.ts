@@ -31,5 +31,6 @@ describe("shellModelHarness", () => {
     expect(shellModelHarness(shell("Read hooks", "cat ~/.claude/hooks/claims.py"))).toBeUndefined();
     expect(shellModelHarness(shell("Run tests", "vitest run src/codex.test.ts"))).toBeUndefined();
     expect(shellModelHarness(shell("Show working tree status", "git status"))).toBeUndefined();
+    expect(shellModelHarness(shell("Search sources", "rg -n codex src"))).toBeUndefined();
   });
 });
