@@ -13,8 +13,16 @@ import { htmlPreviewUrl } from "./htmlModel";
 export const HTML_PREVIEW_DELAY = 200;
 type PreviewPage = { id: string; urlPath: string; localAssets: boolean };
 
-function removePreview(id: string) {
-  void invoke("fork_html_preview_remove", { id }).catch(() => undefined);
+// Must match the aggregate-budget error in src-tauri/src/fork_html.rs. A single
+// source over the whole budget has its own message, and freeing can't help it.
+const PREVIEW_MEMORY_FULL = "HTML preview memory is full.";
+
+function removePreview(id: string): Promise<unknown> {
+  return invoke("fork_html_preview_remove", { id }).catch(() => undefined);
+}
+
+function errorMessage(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 /** Only native-served, opaque-origin pages run scripts. Never use app srcdoc. */
@@ -40,6 +48,8 @@ export function HtmlPreview({
   );
   const retained = useRef(new Set<string>());
   const currentId = useRef<string | null>(null);
+  // Native calls still holding, or about to release, budget for this preview.
+  const unsettled = useRef(new Set<Promise<unknown>>());
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -70,14 +80,63 @@ export function HtmlPreview({
       return;
     }
     let cancelled = false;
+    const track = <T,>(call: Promise<T>) => {
+      unsettled.current.add(call);
+      const settle = () => unsettled.current.delete(call);
+      call.then(settle, settle);
+      return call;
+    };
+    const release = (id: string) => track(removePreview(id));
+    const create = () =>
+      track(
+        invoke<PreviewPage>("fork_html_preview_create", {
+          source: ASK_CHAT_ENABLED ? withSelectionBridge(source) : source,
+          path,
+          cwd,
+        }).then((created) => {
+          if (cancelled) {
+            void release(created.id);
+            return null;
+          }
+          return created;
+        }),
+      );
+    // The old page's draft and the new one can't both fit once a source passes
+    // half the budget, so a full budget gives up the old page and tries once
+    // more. Only this run's predecessors can be held here: a newer run cancels
+    // this one before it can free anything.
+    const createWithinBudget = async () => {
+      try {
+        return await create();
+      } catch (reason) {
+        const canFree =
+          retained.current.size > 0 || unsettled.current.size > 0;
+        if (
+          cancelled ||
+          !canFree ||
+          !errorMessage(reason).startsWith(PREVIEW_MEMORY_FULL)
+        ) {
+          throw reason;
+        }
+        for (const id of retained.current) {
+          void release(id);
+        }
+        retained.current.clear();
+        currentId.current = null;
+        setPage(null);
+        while (!cancelled && unsettled.current.size > 0) {
+          await Promise.allSettled([...unsettled.current]);
+        }
+        return cancelled ? null : await create();
+      }
+    };
     const timer = setTimeout(() => {
       setError(null);
-      void invoke<PreviewPage>("fork_html_preview_create", {
-        source: ASK_CHAT_ENABLED ? withSelectionBridge(source) : source,
-        path,
-        cwd,
-      }).then(
+      void createWithinBudget().then(
         (created) => {
+          if (!created) {
+            return;
+          }
           if (cancelled) {
             removePreview(created.id);
             return;
@@ -94,7 +153,7 @@ export function HtmlPreview({
             retained.current.clear();
             currentId.current = null;
             setPage(null);
-            setError(reason instanceof Error ? reason.message : String(reason));
+            setError(errorMessage(reason));
           }
         },
       );

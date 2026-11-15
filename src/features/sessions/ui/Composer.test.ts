@@ -1065,6 +1065,71 @@ describe("Composer question focus", () => {
     ).toBeNull();
   });
 
+  it("shows Operator and Orchestrator as on when the thread already has them", async () => {
+    const props = {
+      focused: true,
+      harness: "claude" as const,
+      model: "claude-sonnet",
+      runtimeMode: "supervised" as const,
+      executionCwd: "/repo",
+      hideProjectPicker: true,
+      hideBranchPicker: true,
+      onFocus: vi.fn(),
+      onCwdChange: vi.fn(),
+      onModelChange: vi.fn(),
+      onRuntimeModeChange: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+    await act(async () => root.render(createElement(Composer, props)));
+    expect(container.textContent).not.toContain("Operator on");
+    expect(container.textContent).not.toContain("Orchestrating");
+
+    await act(async () =>
+      root.render(
+        createElement(Composer, {
+          ...props,
+          threadModes: { operator: true, orchestrator: "active" },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("Operator on");
+    expect(container.textContent).toContain("Orchestrating");
+
+    await act(async () =>
+      root.render(
+        createElement(Composer, {
+          ...props,
+          threadModes: { orchestrator: "planning" },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("Orchestrator planning");
+
+    await act(async () =>
+      root.render(
+        createElement(Composer, {
+          ...props,
+          threadModes: { operator: true, orchestrator: "active" },
+        }),
+      ),
+    );
+    // A thread mode can't be switched off from the composer.
+    expect(
+      container.querySelector('[aria-label="Turn off Operator"]'),
+    ).toBeNull();
+
+    // Picking the mode again for the next message shows the usual pill only.
+    await act(async () => {
+      const textarea = container.querySelector("textarea")!;
+      textarea.value = "/operator check sessions";
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain("Operator on");
+    expect(
+      container.querySelector('[aria-label="Turn off Operator"]'),
+    ).not.toBeNull();
+  });
+
   it("clears the parent draft before submit so a remounting composer stays empty", async () => {
     let parentDraft = "Ship the empty-state fix";
     const onDraftChange = vi.fn((text: string) => {

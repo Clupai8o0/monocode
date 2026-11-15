@@ -14,12 +14,14 @@ import {
   askQuestionResponse,
   askQuestionsFromAcp,
   asRecord,
+  contextFromPromptResult,
   contextWindowFromSetup,
   currentModelId,
   eventsFromAcpUpdate,
   grokAuthError,
   grokAuthMethodId,
   grokEffort,
+  grokInterjectText,
   grokPromptBlocks,
   grokSessionNewParams,
   grokSpawnArgs,
@@ -37,7 +39,11 @@ import type {
   SendTurnInput,
   SteerTurnInput,
 } from "../../core/types";
-import { questionPromptTitle, type UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
+import { TurnNotReadyError } from "../../core/types";
+import {
+  questionPromptTitle,
+  type UserQuestionReply,
+} from "../../../../features/sessions/model/userQuestion";
 
 type Live = {
   subagents: AcpSubagents;
@@ -48,6 +54,21 @@ type Live = {
   contextWindow?: number;
   muteUpdates: boolean;
   cancelled: boolean;
+  /** A session/prompt is in flight, so an interjection lands in this turn. */
+  prompting: boolean;
+  /** When this turn last interjected; Grok may answer it in a turn of its own. */
+  interjectedAt?: number;
+  /** Interjections sent but not yet acknowledged. */
+  interjecting: number;
+  /** The latest context size came from an auto-compaction. */
+  compactedLast: boolean;
+  /** Counts context sizes shown, to spot one newer than the prompt result. */
+  contextSeq: number;
+  /** The Grok process exited. */
+  exited: boolean;
+  /** Grok's running prompt id, from `_x.ai/queue/changed`. */
+  queueRunning?: string;
+  queueWaiters: Set<() => void>;
   fullAccess: boolean;
   planning: boolean;
   runtimeMode: RuntimeMode;
@@ -67,6 +88,19 @@ const AUTH_TIMEOUT_MS = 15_000;
 const SESSION_TIMEOUT_MS = 45_000;
 const CONTROL_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 30 * 60_000;
+/** How long to look for Grok's own turn for an interjection that missed ours. */
+const FALLBACK_GRACE_MS = 750;
+const FALLBACK_PREFIX = "interject-fallback-";
+/** How long a follow-up waits for a starting turn to reach Grok. */
+const STEER_WAIT_MS = 60_000;
+/** Threads with a sendGrokTurn call still running, by count. */
+const startingTurns = new Map<string, number>();
+/** Counts stops and cancels per thread, so a waiting steer can see one. */
+const steerStops = new Map<string, number>();
+
+function noteSteerStop(sessionId: string): void {
+  steerStops.set(sessionId, (steerStops.get(sessionId) ?? 0) + 1);
+}
 
 const CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -82,6 +116,18 @@ const cancelledThreads = new Set<string>();
  * Grok accepts ACP image blocks despite advertising image: false.
  */
 export async function sendGrokTurn(input: SendTurnInput): Promise<void> {
+  const id = input.sessionId;
+  startingTurns.set(id, (startingTurns.get(id) ?? 0) + 1);
+  try {
+    await runGrokTurn(input);
+  } finally {
+    const left = (startingTurns.get(id) ?? 1) - 1;
+    if (left > 0) startingTurns.set(id, left);
+    else startingTurns.delete(id);
+  }
+}
+
+async function runGrokTurn(input: SendTurnInput): Promise<void> {
   let live: Live;
   try {
     live = await ensureLive(input);
@@ -146,8 +192,55 @@ export async function compactGrokContext(
   await live.turns;
 }
 
-export async function steerGrokTurn(_input: SteerTurnInput): Promise<void> {
-  throw new Error("Grok Build does not support steering an in-flight turn");
+/**
+ * Mid-turn follow-up through Grok's own interjection, the TUI's Ctrl+Enter.
+ * Grok reads it before its next model call, or answers it in a turn of its
+ * own if it came too late (see waitForFallbackTurns). It takes text only, so
+ * files go as paths; a pasted image with no file waits for the next turn.
+ */
+export async function steerGrokTurn(input: SteerTurnInput): Promise<void> {
+  const text = grokInterjectText(input.text, input.attachments)?.trim();
+  if (text == null) {
+    throw new TurnNotReadyError(
+      "Grok Build can't take a pasted image mid-turn. Send it again after this turn.",
+    );
+  }
+  if (!text) return;
+  // MonoCode marks the turn busy before Grok has started or resumed. Wait for
+  // the prompt to be in flight so the interjection lands in this turn.
+  const live = await promptingLive(input.sessionId);
+  if (!live) throw new TurnNotReadyError("No Grok Build turn is running");
+  // Mark before sending: the turn may end while the request is in flight,
+  // and Grok then answers it in a turn of its own that we must wait for.
+  live.interjectedAt = Date.now();
+  live.interjecting += 1;
+  try {
+    await live.acp.request(
+      "_x.ai/interject",
+      { sessionId: live.acpSessionId, text },
+      CONTROL_TIMEOUT_MS,
+    );
+  } finally {
+    live.interjecting -= 1;
+    live.interjectedAt = Date.now();
+    wakeQueueWaiters(live);
+  }
+}
+
+async function promptingLive(sessionId: string): Promise<Live | undefined> {
+  const deadline = Date.now() + STEER_WAIT_MS;
+  const stops = steerStops.get(sessionId) ?? 0;
+  for (;;) {
+    // Stop or cancel since the follow-up came in: don't hold it any longer.
+    if ((steerStops.get(sessionId) ?? 0) !== stops) return undefined;
+    const live = liveByThread.get(sessionId);
+    if (live?.prompting && !live.cancelled) return live;
+    // Only wait for a turn that is on its way (starting Grok, resuming,
+    // setting the model); with none running the follow-up is a new turn.
+    if (!startingTurns.has(sessionId)) return undefined;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 export function respondGrokApproval(
@@ -167,6 +260,7 @@ export function respondGrokQuestion(
 }
 
 export async function cancelGrokTurn(sessionId: string): Promise<void> {
+  noteSteerStop(sessionId);
   const live = liveByThread.get(sessionId);
   if (!live) {
     cancelledThreads.add(sessionId);
@@ -174,6 +268,7 @@ export async function cancelGrokTurn(sessionId: string): Promise<void> {
   }
   live.cancelled = true;
   live.muteUpdates = true;
+  wakeQueueWaiters(live);
   for (const [, resolve] of live.approvals) resolve("deny");
   live.approvals.clear();
   for (const [, resolve] of live.questions) resolve({ kind: "skipped" });
@@ -185,11 +280,14 @@ export async function cancelGrokTurn(sessionId: string): Promise<void> {
 }
 
 export async function stopGrokSession(sessionId: string): Promise<void> {
+  noteSteerStop(sessionId);
   cancelledThreads.delete(sessionId);
   const live = liveByThread.get(sessionId);
   liveByThread.delete(sessionId);
   if (live) {
     live.muteUpdates = true;
+    live.queueRunning = undefined;
+    wakeQueueWaiters(live);
     for (const [, resolve] of live.approvals) resolve("deny");
     live.approvals.clear();
     for (const [, resolve] of live.questions) resolve({ kind: "skipped" });
@@ -246,8 +344,9 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   const muteGate = { current: false };
 
   handlers.onNotification = (method, params) => {
-    if (muteGate.current) return;
     const live = liveRef.current;
+    if (live && trackQueue(live, method, params)) return;
+    if (muteGate.current) return;
     if (!live || live.muteUpdates) return;
     handleNotification(live, method, params);
   };
@@ -273,6 +372,12 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     input.sessionId,
     (line) => acp.pushLine(line),
     (code) => {
+      if (liveRef.current) {
+        liveRef.current.muteUpdates = true;
+        liveRef.current.exited = true;
+        liveRef.current.queueRunning = undefined;
+        wakeQueueWaiters(liveRef.current);
+      }
       acp.close(new Error("Grok Build exited"));
       liveByThread.delete(input.sessionId);
       emit({ type: "session.ended", code });
@@ -339,7 +444,11 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       try {
         setup = await acp.request(
           "session/resume",
-          { sessionId: resume.acpSessionId },
+          {
+            sessionId: resume.acpSessionId,
+            cwd: input.cwd,
+            mcpServers: [],
+          },
           SESSION_TIMEOUT_MS,
         );
         acpSessionId = sessionIdFromResult(setup) ?? resume.acpSessionId;
@@ -393,6 +502,12 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
         contextWindowFromSetup(setup) ?? contextWindowFromSetup(init),
       muteUpdates: didLoad,
       cancelled: false,
+      prompting: false,
+      queueWaiters: new Set(),
+      interjecting: 0,
+      compactedLast: false,
+      contextSeq: 0,
+      exited: false,
       fullAccess: wantFullAccess,
       planning: wantPlanning,
       runtimeMode: input.runtimeMode,
@@ -442,14 +557,19 @@ async function applyModelSelection(
 
   const effort = grokEffort(input.modelSettings);
   if (!effort) return;
+  // Grok's session modes are permission modes; reasoning is a config option.
   await live.acp
     .request(
-      "session/set_mode",
-      { sessionId: live.acpSessionId, modeId: effort },
+      "session/set_config_option",
+      {
+        sessionId: live.acpSessionId,
+        configId: "reasoning_effort",
+        value: effort,
+      },
       CONTROL_TIMEOUT_MS,
     )
     .catch((error: unknown) => {
-      ignoreUnsupportedControl("set_mode", error);
+      ignoreUnsupportedControl("set_config_option", error);
     });
 }
 
@@ -457,15 +577,42 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
   try {
     const blocks = grokPromptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
-    await live.acp.request(
-      "session/prompt",
-      {
-        sessionId: live.acpSessionId,
-        prompt: blocks,
-      },
-      PROMPT_TIMEOUT_MS,
-    );
-    if (live.cancelled) return;
+    let result: unknown;
+    let useResultSize = false;
+    let seqAtResult = 0;
+    live.prompting = true;
+    live.interjectedAt = undefined;
+    live.compactedLast = false;
+    try {
+      const pending = live.acp.request(
+        "session/prompt",
+        {
+          sessionId: live.acpSessionId,
+          prompt: blocks,
+        },
+        PROMPT_TIMEOUT_MS,
+      );
+      // Marks the turn ready, which is what lets a queued follow-up steer it.
+      input.onAccepted?.();
+      result = await pending;
+      // The result's size is only a backstop: not over a compaction, and not
+      // over a size a fallback turn reports while we wait.
+      useResultSize = !live.compactedLast;
+      seqAtResult = live.contextSeq;
+      await waitForFallbackTurns(live);
+    } finally {
+      live.prompting = false;
+    }
+    if (live.exited && !live.cancelled) {
+      throw new Error("Grok Build exited before the turn finished");
+    }
+    // Stopped or cancelled while waiting: the session is gone.
+    if (live.cancelled || live.muteUpdates) return;
+    if (useResultSize && live.contextSeq === seqAtResult) {
+      for (const event of contextFromPromptResult(result)) {
+        live.onEvent(withWindow(live, event));
+      }
+    }
     live.onEvent({ type: "message.completed" });
     live.onEvent({ type: "reasoning.completed" });
   } catch (error) {
@@ -496,17 +643,80 @@ function handleNotification(live: Live, method: string, params: unknown) {
         ? unwrapSessionNotification(params)
         : null;
   if (!updateParams) return;
-  for (const event of live.subagents.route(updateParams, eventsFromAcpUpdate(updateParams))) {
-    if (
-      event.type === "context" &&
-      event.window == null &&
-      live.contextWindow
-    ) {
-      live.onEvent({ ...event, window: live.contextWindow });
-    } else {
-      live.onEvent(event);
+  const rec = asRecord(updateParams);
+  const update = asRecord(rec?.update) ?? rec;
+  const updateKind =
+    update?.sessionUpdate ?? update?.session_update ?? update?.type;
+  for (const event of live.subagents.route(
+    updateParams,
+    eventsFromAcpUpdate(updateParams),
+  )) {
+    if (event.type === "context") {
+      live.compactedLast = updateKind === "auto_compact_completed";
+      live.contextSeq += 1;
     }
+    live.onEvent(withWindow(live, event));
   }
+}
+
+/** Returns true when the notification was Grok's queue state. */
+function trackQueue(live: Live, method: string, params: unknown): boolean {
+  if (method !== "_x.ai/queue/changed" && method !== "x.ai/queue/changed") {
+    return false;
+  }
+  const running = asRecord(params)?.runningPromptId;
+  live.queueRunning =
+    typeof running === "string" && running ? running : undefined;
+  wakeQueueWaiters(live);
+  return true;
+}
+
+function wakeQueueWaiters(live: Live): void {
+  for (const wake of [...live.queueWaiters]) wake();
+}
+
+/**
+ * An interjection sent during the turn's last model call is not read in that
+ * turn. Grok answers it in a turn of its own ("interject-fallback-…") with no
+ * session/prompt behind it. Keep MonoCode's turn open, and its events flowing,
+ * until that turn is done so the follow-up is neither lost nor orphaned.
+ */
+async function waitForFallbackTurns(live: Live): Promise<void> {
+  if (live.interjectedAt == null) return;
+  const deadline = Date.now() + PROMPT_TIMEOUT_MS;
+  let graceUntil = Date.now() + FALLBACK_GRACE_MS;
+  let wasRunning = false;
+  while (!live.cancelled && !live.muteUpdates) {
+    const running =
+      live.interjecting > 0 ||
+      live.queueRunning?.startsWith(FALLBACK_PREFIX) === true;
+    const now = Date.now();
+    // A follow-up steered in while we wait gets its own grace, and so does
+    // the moment a fallback turn ends, in case another one is queued.
+    graceUntil = Math.max(
+      graceUntil,
+      (live.interjectedAt ?? 0) + FALLBACK_GRACE_MS,
+      wasRunning && !running ? now + FALLBACK_GRACE_MS : 0,
+    );
+    wasRunning = running;
+    if (!running && now >= graceUntil) return;
+    if (now >= deadline) return;
+    await new Promise<void>((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        live.queueWaiters.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, (running ? deadline : graceUntil) - now);
+      live.queueWaiters.add(wake);
+    });
+  }
+}
+
+function withWindow(live: Live, event: HarnessEvent): HarnessEvent {
+  return event.type === "context" && event.window == null && live.contextWindow
+    ? { ...event, window: live.contextWindow }
+    : event;
 }
 
 function unwrapSessionNotification(params: unknown): unknown {

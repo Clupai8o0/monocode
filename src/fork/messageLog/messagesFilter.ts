@@ -78,13 +78,6 @@ export const STATUS_LABEL: Record<RowStatus, string> = {
   expired: "Expired",
 };
 
-export const ROUTE_LABEL: Record<RowRoute, string> = {
-  local: "Local",
-  relay: "Relay",
-  bridge: "Bridge",
-  unknown: "Route unknown",
-};
-
 export const ROUTE_TITLE: Record<RowRoute, string> = {
   local: "Both sessions are on the same machine",
   relay: "Carried between machines by the MonoCode relay",
@@ -132,4 +125,56 @@ export function countsLine(view: MessageLogView, shown: number, filtered: boolea
   }
   const line = parts.join(", ");
   return filtered ? `${shown} shown of ${line}` : line;
+}
+
+/**
+ * A row's status in a few words, for the folded row. The whole sentence
+ * (statusText) shows when the row is opened.
+ */
+export function shortStatus(row: FeedRow): string {
+  const text = row.statusText;
+  switch (row.status) {
+    case "failed":
+      // Not `settled`: a dismissed or resent failure is settled too.
+      if (/has ended/i.test(text)) {
+        return "That session has ended";
+      }
+      if (/no (agent|session) named|not reachable|isn't running|is not running/i.test(text)) {
+        return "No session by that name";
+      }
+      if (/ambiguous|more than one/i.test(text)) {
+        return "That name fits more than one session";
+      }
+      return firstClause(text) || "Not sent";
+    case "dropped":
+      return text.split(":")[0];
+    case "expired":
+      return "Not approved in time";
+    case "held":
+      return "Needs approval";
+    case "waiting":
+      if (/not seen by/.test(text)) {
+        return "Not seen yet";
+      }
+      if (/after this turn/.test(text)) {
+        return "Sees it after this turn";
+      }
+      if (/has ended/.test(text)) {
+        return "That session has ended";
+      }
+      if (/can't see (.+) to check/.test(text)) {
+        return `Can't check ${/can't see (.+) to check/.exec(text)![1]}`;
+      }
+      if (/can't tell where/.test(text)) {
+        return "Destination unknown";
+      }
+      return firstClause(text);
+    default:
+      return text;
+  }
+}
+
+function firstClause(text: string): string {
+  const clause = text.split(/(?<=[.;?!])\s/)[0].replace(/[.;]$/, "");
+  return clause.length > 60 ? `${clause.slice(0, 59)}…` : clause;
 }

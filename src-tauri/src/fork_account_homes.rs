@@ -97,7 +97,8 @@ pub(crate) fn read_homes(home: &Path, accounts_root: &Path) -> AccountHomes {
         .flatten()
         .filter_map(|entry| {
             let id = entry.file_name().to_str()?.to_string();
-            if !valid_id(&id) || id == DEFAULT_ACCOUNT_ID {
+            // meter-* folders only feed the usage panel; never a session's login.
+            if !valid_id(&id) || id == DEFAULT_ACCOUNT_ID || id.starts_with("meter-") {
                 return None;
             }
             let path = entry.path();

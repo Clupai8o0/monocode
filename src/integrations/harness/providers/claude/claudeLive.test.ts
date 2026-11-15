@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyHarnessEvent } from "../../core/apply";
+import {
+  __resetRemoteControlStore,
+  remoteControlActive,
+  remoteControlState,
+  setRemoteControlWanted,
+} from "../../../../fork/remoteControl/remoteControlStore";
 import { newSession } from "../../../../features/sessions/model/session";
+import { latestTurnNeedsHarnessLogin } from "../../core/authSupport";
 import {
   foldableWork,
   foldedBlocks,
   groupTurnItems,
   workSummaryLine,
+  groupMonoTurnItems,
 } from "../../../../features/sessions/model/transcriptActivity";
 
 const sent: string[] = [];
@@ -42,9 +50,12 @@ const {
   respondClaudeQuestion,
   restoreClaudeTaskLists,
   sendClaudeTurn,
+  setClaudeRemoteControl,
+  steerClaudeTurn,
   stopClaudeSession,
   __claudeTestReset,
 } = await import("./claude");
+const { sanitizeSessionForPersist } = await import("../../../../features/sessions/data/sessionStore");
 import type { HarnessEvent } from "../../core/types";
 import type { RuntimeMode, TurnIntent } from "../../../../features/sessions/model/session";
 
@@ -55,6 +66,139 @@ function parse() {
 function emit(rec: Record<string, unknown>) {
   onLine!(JSON.stringify(rec));
 }
+
+describe("file delivery", () => {
+  it("keeps delivery links separate from prose before and after the tool", async () => {
+    const { events, turn } = await startTurn("delivery-boundaries");
+    emit({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Here is the preview." },
+          {
+            type: "tool_use",
+            id: "delivery",
+            name: "SendUserFile",
+            input: { files: ["/tmp/preview.html"] },
+          },
+        ],
+      },
+    });
+    emit({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "delivery",
+            content: "1 file delivered to user.",
+          },
+        ],
+      },
+    });
+    emit({ type: "assistant", message: { content: [{
+      type: "tool_use", id: "after-delivery", name: "Bash", input: { command: "echo checking" },
+    }] } });
+    emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "after-delivery", content: "checking" }] } });
+    emit({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Try each version." },
+      },
+    });
+    emit({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Try each version." }] },
+    });
+    emit({ type: "result", subtype: "success" });
+    await turn;
+    const session = events.reduce(
+      applyHarnessEvent,
+      newSession("claude", "/repo"),
+    );
+    expect(
+      session.blocks
+        .filter((block) => block.role === "assistant")
+        .map((block) => block.text),
+    ).toEqual([
+      "Here is the preview.\n\n[preview.html](</tmp/preview.html>)",
+      "Try each version.",
+    ]);
+    const saved = sanitizeSessionForPersist(session);
+    expect(saved.blocks.some((block) => block.fileDelivery)).toBe(true);
+    for (const items of [groupTurnItems(saved.blocks), groupMonoTurnItems(saved.blocks, { live: true })]) {
+      expect(items.some((item) => item.type === "block" && item.block.fileDelivery)).toBe(true);
+      const fold = foldableWork(items);
+      expect(fold ? foldedBlocks(items, fold).some((block) => block.fileDelivery) : false).toBe(false);
+    }
+  });
+
+  it.each([false, true])(
+    "keeps successful deliveries visible (error=%s)",
+    async (isError) => {
+      const { events, turn } = await startTurn(`delivery-${isError}`);
+      emit({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "delivery",
+              name: "SendUserFile",
+              input: {
+                files: ["/tmp/flower plan.html"],
+                caption: "Four versions",
+              },
+            },
+          ],
+        },
+      });
+      const result = {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "delivery",
+              is_error: isError,
+              content: isError
+                ? "Delivery failed"
+                : "1 file delivered to user.",
+            },
+          ],
+        },
+      };
+      emit(result);
+      emit(result);
+      emit({ type: "result", subtype: "success" });
+      await turn;
+      const replies = events.filter((event) => event.type === "file.delivered");
+      expect(replies).toEqual(
+        isError
+          ? []
+          : [
+              {
+                type: "file.delivered",
+                text: "Four versions\n\n[flower plan.html](</tmp/flower%20plan.html>)",
+              },
+            ],
+      );
+      if (!isError) {
+        let session = newSession("claude", "/repo");
+        for (const event of events) session = applyHarnessEvent(session, event);
+        expect(
+          session.blocks.some(
+            (block) =>
+              block.role === "assistant" &&
+              block.text.includes("flower%20plan.html"),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+});
 
 const waitFor = async (pred: () => boolean, label: string) => {
   for (let i = 0; i < 200; i++) {
@@ -279,6 +423,188 @@ beforeEach(() => {
 afterEach(async () => {
   await stopClaudeSession("s1");
   __claudeTestReset();
+});
+
+describe("claude follow-ups sent during a turn", () => {
+  async function steer(sessionId: string, text: string) {
+    await steerClaudeTurn({
+      sessionId,
+      text,
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      attachments: [],
+      modelSettings: {},
+    });
+  }
+
+  /** Claude's echo of a message it took from stdin, uuid kept. */
+  function emitTaken(text: string) {
+    const sentMessage = parse()
+      .filter((m) => m.type === "user")
+      .reverse()
+      .find((m) => {
+        const content = (m.message as { content: { text?: string }[] })
+          .content;
+        return content.some((part) => part.text === text);
+      });
+    emit({
+      type: "user",
+      isReplay: true,
+      ...(sentMessage?.uuid ? { uuid: sentMessage.uuid } : {}),
+      session_id: "sess_1",
+      message: { role: "user", content: [{ type: "text", text }] },
+    });
+  }
+
+  function watch(turn: Promise<void>) {
+    const state = { settled: false };
+    void turn.then(() => {
+      state.settled = true;
+    });
+    return state;
+  }
+
+  const flush = () => new Promise((r) => setTimeout(r, 10));
+
+  it("asks Claude to echo the messages it takes", async () => {
+    const { turn } = await startTurn("s1");
+    expect(spawned.at(-1)).toContain("--replay-user-messages");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("ends at the result when Claude took the follow-up mid-turn", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "also do this");
+    emitTaken("also do this");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(true);
+  });
+
+  it("stays open for a follow-up Claude runs as its own turn", async () => {
+    const { events, turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "Setup project");
+    // Claude yields before taking it, then runs it next.
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(false);
+
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emitTaken("Setup project");
+    emitFollowUpTurn("Setting up now.");
+    await flush();
+    expect(state.settled).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "message.delta" && event.text === "Setting up now.",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not show Claude's echo as a message", async () => {
+    const { events, turn } = await startTurn("s1");
+    const before = events.length;
+    emitTaken("explore the codebase");
+    expect(events.length).toBe(before);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("still shows a message from another session marked as a replay", async () => {
+    const { events, turn } = await startTurn("s1");
+    emit({
+      type: "user",
+      isReplay: true,
+      session_id: "sess_1",
+      origin: { kind: "peer", name: "Other", body: "hello there" },
+      message: { role: "user", content: [{ type: "text", text: "hello there" }] },
+    });
+    expect(events.some((event) => event.type === "interjection")).toBe(true);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("matches the echo by uuid, not by text", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    // Same text as the prompt: the prompt's own echo must not count for it.
+    await steer("s1", "explore the codebase");
+    emit({
+      type: "user",
+      isReplay: true,
+      session_id: "sess_1",
+      uuid: "prompt-uuid",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "explore the codebase" }],
+      },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await flush();
+    expect(state.settled).toBe(false);
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emitTaken("explore the codebase");
+    emitFollowUpTurn("Done.");
+    await flush();
+    expect(state.settled).toBe(true);
+  });
+
+  it("keeps the turn open past the wait once Claude took the follow-up", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "slow one");
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      emitTaken("slow one");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state.settled).toBe(false);
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits again for a follow-up sent while the turn is held", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "first");
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await steer("s1", "second");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the turn go if Claude never takes the follow-up", async () => {
+    const { turn } = await startTurn("s1");
+    const state = watch(turn);
+    await steer("s1", "lost");
+
+    vi.useFakeTimers();
+    try {
+      emit({ type: "result", subtype: "success", session_id: "sess_1" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state.settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("claude ultracode", () => {
@@ -921,6 +1247,58 @@ describe("claude assistant message boundaries", () => {
       { type: "message.delta", text: progress },
       { type: "message.delta", text: update },
     ]);
+  });
+});
+
+describe("claude sign-in failures", () => {
+  it("reports an authentication_failed reply as a sign-in error", async () => {
+    const { events, turn } = await startTurn("s1");
+    const text =
+      "Failed to authenticate: OAuth session expired and could not be refreshed";
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      error: "authentication_failed",
+      message: { model: "<synthetic>", content: [{ type: "text", text }] },
+    });
+    emit({
+      type: "result",
+      subtype: "success",
+      session_id: "sess_1",
+      is_error: true,
+      result: text,
+    });
+    await turn;
+
+    expect(events.some((event) => event.type === "message.delta")).toBe(false);
+    expect(events.filter((event) => event.type === "session.error")).toEqual([
+      { type: "session.error", message: text },
+    ]);
+    const session = events.reduce(
+      applyHarnessEvent,
+      newSession("claude", "/repo"),
+    );
+    expect(latestTurnNeedsHarnessLogin(session.blocks)).toBe(true);
+  });
+
+  it("keeps Claude's wording recognizable when it does not name sign-in", async () => {
+    const { events, turn } = await startTurn("s1");
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      error: "authentication_failed",
+      message: {
+        model: "<synthetic>",
+        content: [{ type: "text", text: "API Error: 401" }],
+      },
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+
+    expect(events).toContainEqual({
+      type: "session.error",
+      message: "Claude Code is not signed in.\n\nAPI Error: 401",
+    });
   });
 });
 
@@ -2185,6 +2563,10 @@ describe("claude manual compaction", () => {
 });
 
 describe("claude Remote Control at startup (fork)", () => {
+  beforeEach(() => {
+    __resetRemoteControlStore();
+  });
+
   async function startWithInitReply(reply: Record<string, unknown>) {
     const turn = sendClaudeTurn({
       sessionId: "s1",
@@ -2246,6 +2628,199 @@ describe("claude Remote Control at startup (fork)", () => {
     emit({ type: "result", subtype: "success", session_id: "sess_1" });
     await turn;
     expect(remoteControlRequests()).toHaveLength(1);
+  });
+
+  it("starts it when the user turned it on, and keeps the phone link", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: true,
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    expect(remoteControlState("s1")).toEqual({ status: "starting" });
+    const onId = remoteControlRequests()[0]?.request_id;
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: onId,
+        response: { session_url: "https://claude.ai/code/session_1" },
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    expect(remoteControlState("s1")).toEqual({
+      status: "on",
+      url: "https://claude.ai/code/session_1",
+    });
+
+    // Off again while the session runs, as the composer button does it.
+    setRemoteControlWanted("s1", false);
+    expect(setClaudeRemoteControl("s1", false)).toBe(true);
+    await waitFor(() => remoteControlRequests().length > 1, "remote_control off");
+    const off = remoteControlRequests().at(-1);
+    expect(off?.request).toEqual({ subtype: "remote_control", enabled: false });
+    emit({
+      type: "control_response",
+      response: { subtype: "success", request_id: off?.request_id, response: {} },
+    });
+    await waitFor(() => remoteControlState("s1").status === "off", "off");
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("stays on, and says why, when turning it off fails", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: true,
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: remoteControlRequests()[0]?.request_id,
+        response: { session_url: "https://claude.ai/code/session_1" },
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    // A cancelled turn mutes updates; the switch and its answer still count.
+    await cancelClaudeTurn("s1");
+    setRemoteControlWanted("s1", false);
+    expect(setClaudeRemoteControl("s1", false)).toBe(true);
+    await waitFor(() => remoteControlRequests().length > 1, "remote_control off");
+    expect(remoteControlActive("s1")).toBe(true);
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "error",
+        request_id: remoteControlRequests().at(-1)?.request_id,
+        error: "bridge busy",
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on" &&
+      "error" in remoteControlState("s1"), "still on");
+    expect(remoteControlState("s1")).toEqual({
+      status: "on",
+      url: "https://claude.ai/code/session_1",
+      error: "bridge busy",
+    });
+    await turn.catch(() => undefined);
+  });
+
+  it("lets a turn from the phone through after one cancelled here", async () => {
+    setRemoteControlWanted("s1", true);
+    const events: HarnessEvent[] = [];
+    const turn = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    await waitFor(
+      () =>
+        parse().some(
+          (m) => (m.request as Record<string, unknown> | undefined)?.subtype === "initialize",
+        ),
+      "initialize",
+    );
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "monocode_1",
+        response: { remote_control_available: true },
+      },
+    });
+    await waitFor(() => remoteControlRequests().length > 0, "remote_control");
+    emit({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: remoteControlRequests()[0]?.request_id,
+        response: {},
+      },
+    });
+    await waitFor(() => remoteControlState("s1").status === "on", "on");
+    await cancelClaudeTurn("s1");
+    await turn.catch(() => undefined);
+    events.length = 0;
+
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({
+      type: "assistant",
+      session_id: "sess_1",
+      message: { id: "m_phone", role: "assistant", content: [{ type: "text", text: "from phone" }] },
+    });
+    await waitFor(
+      () => events.some((e) => e.type === "message.delta" && e.text.includes("from phone")),
+      "phone reply",
+    );
+    // A message sent here meanwhile waits for the phone's turn to end.
+    const next = sendClaudeTurn({
+      sessionId: "s1",
+      cwd: "/repo",
+      model: "claude:claude-sonnet-5",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "again",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    let settled = false;
+    void next.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(parse().filter((m) => m.type === "user")).toHaveLength(1);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await waitFor(
+      () => events.some((e) => e.type === "message.completed"),
+      "phone reply completed",
+    );
+
+    // Then it runs to its own result, not the phone's.
+    await waitFor(
+      () => parse().filter((m) => m.type === "user").length > 1,
+      "second prompt",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    emit({ type: "system", subtype: "init", session_id: "sess_1" });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await next;
+  });
+
+  it("says so when the account can't use Remote Control", async () => {
+    setRemoteControlWanted("s1", true);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: false,
+      remote_control_available: false,
+    });
+    await waitFor(() => remoteControlState("s1").status === "failed", "failed");
+    expect(remoteControlRequests()).toHaveLength(0);
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+  });
+
+  it("can't switch a session whose Claude isn't running", () => {
+    expect(setClaudeRemoteControl("nobody", true)).toBe(false);
+  });
+
+  it("keeps it off when the user turned it off, whatever Claude's setting", async () => {
+    setRemoteControlWanted("s1", false);
+    const { turn } = await startWithInitReply({
+      remote_control_auto_enable: true,
+      remote_control_available: true,
+    });
+    emit({ type: "result", subtype: "success", session_id: "sess_1" });
+    await turn;
+    expect(remoteControlRequests()).toHaveLength(0);
   });
 
   it("leaves Remote Control off when the setting is off", async () => {

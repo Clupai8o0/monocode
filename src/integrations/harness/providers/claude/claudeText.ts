@@ -12,6 +12,7 @@ import {
   assistantTextBlocks,
   buildClaudeSpawnArgs,
   buildClaudeUserMessage,
+  claudeSupportsThinkingDisplay,
   inputJsonDeltaFromEvent,
   isClaudeUltracodeEffort,
   normalizeClaudeCliEffort,
@@ -27,6 +28,7 @@ import {
   tryParseJsonRecord,
   turnStatusFromResult,
 } from "./claudeProtocol";
+import { claudeVersionAt } from "./claudeVersion";
 import type { TurnIntent } from "../../../../features/sessions/model/session";
 import type { HarnessEvent } from "../../core/types";
 import { mergeStream } from "../../core/streamText";
@@ -313,6 +315,10 @@ async function startLive(
         settings: settings.settings,
         permissionMode: settings.permissionMode,
         maxTurns: settings.maxTurns,
+        // Side questions (BTW) show their thinking in the transcript.
+        thinkingDisplay: claudeSupportsThinkingDisplay(
+          await claudeVersionAt(path),
+        ),
       }),
       cwd,
       { provider: "claude", id: providerAccountId ?? "default" },

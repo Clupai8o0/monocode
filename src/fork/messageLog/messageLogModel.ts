@@ -111,6 +111,8 @@ export type MonoSessionRef = {
   providerSessionId: string;
   /** "local", or the paired machine id it runs on. */
   placeId: string;
+  /** Its folder, as MonoCode names it (remote:// paths on a host). */
+  cwd?: string;
 };
 
 export type SourceInput = {
@@ -239,6 +241,10 @@ function party(
     };
     if (session?.project) {
       out.project = session.project;
+    }
+    const cwd = mono?.cwd || session?.cwd;
+    if (cwd) {
+      out.cwd = cwd;
     }
     const acct = session?.account ?? account;
     if (acct) {

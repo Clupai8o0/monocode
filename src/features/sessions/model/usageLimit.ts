@@ -2,6 +2,23 @@ import { formatResetDuration } from "../../providers/model/rateLimits";
 import { sameProviderAccountId } from "../../providers/model/providerAccounts";
 import type { Session, UsageLimit } from "./session";
 
+/** A quota recovery must not turn a planning request into an execution turn. */
+export function usageLimitContinuationIntent(session: Session): "plan" | undefined {
+  const user = [...session.blocks].reverse().find((block) => block.role === "user" && !block.draft);
+  return user?.intent === "plan" || user?.intent === "orchestrate" ? "plan" : undefined;
+}
+
+/** A cancelled copy may restore its source binding only while the user still
+ * owns that same provider conversation; never overwrite a newer account/thread. */
+export function cancelledAccountTransferSession(original: Session, latest?: Session): Session | undefined {
+  if (!original.providerSessionId || !latest || latest.id !== original.id || latest.harness !== original.harness ||
+    latest.providerSessionId !== original.providerSessionId ||
+    !sameProviderAccountId(latest.providerAccountId, original.providerAccountId)) {
+    return undefined;
+  }
+  return latest;
+}
+
 /** A fallback for adapters that report exhausted accounts as plain errors. */
 export function usageLimitFromError(
   message: string,

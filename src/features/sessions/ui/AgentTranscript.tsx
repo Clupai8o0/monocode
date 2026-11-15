@@ -80,9 +80,10 @@ import type { MessageDelivery } from "../../monos/model/monoMessaging";
 import { monoReactionBlocks } from "../../monos/model/monoReaction";
 import type { ApprovalDecision } from "../../../integrations/harness";
 import {
-  isHarnessAuthError,
+  latestTurnHarnessAuthFailure,
   supportsHarnessLogin,
 } from "../../../integrations/harness/core/authSupport";
+import { ProviderSignInNotice } from "./ProviderSignInNotice";
 import {
   isEditTool,
   isReadTool,
@@ -125,6 +126,11 @@ import { AgentMarkdown } from "./AgentMarkdown";
 import { TaskPicksReply } from "../../../fork/taskPicks/TaskPicks";
 import { MonoWorkTicker } from "./MonoWorkTicker";
 import { monoWorkStatus } from "../model/monoWorkStatus";
+import {
+  LIVE_FOLD_QUIET_MS,
+  liveActivityFingerprint,
+  liveFoldStatusText,
+} from "../model/liveFoldStatus";
 import { isEmojiOnlyMessage } from "../model/emojiMessage";
 import { attachmentPreviewSrc } from "../model/attachments";
 import { TranscriptSelectionMenu } from "./TranscriptSelectionMenu";
@@ -282,6 +288,13 @@ type Props = {
   ) => void;
   /** Session-level output shown after the latest reply and before its action row. */
   latestTurnAccessory?: ReactNode;
+  /**
+   * Signs in to the provider from a notice under a latest turn that failed on
+   * authentication, in place of the provider's error.
+   */
+  onProviderSignIn?: () => Promise<void>;
+  /** Sends the failed turn's message again once that sign-in succeeds. */
+  onRetryAfterSignIn?: () => void;
   /** False while another tab is in front; local transcript state is retained. */
   visible?: boolean;
   /** Kept mounted after its pane closed. Showing it again counts as a new visit. */
@@ -292,6 +305,31 @@ type Props = {
   /** Saved session that omitted tool output is fetched from. */
   sessionId?: string;
 };
+
+/**
+ * Drop the failure a sign-in notice is replacing, and exact repeats of its text
+ * in the same latest turn. Earlier turns and different errors are left alone.
+ */
+function withoutReplacedAuthFailure(
+  blocks: readonly Block[],
+  failure: Block,
+): Block[] {
+  const text = failure.text.trim();
+  let turnStart = blocks.length;
+  while (turnStart > 0 && blocks[turnStart - 1].role !== "user") {
+    turnStart -= 1;
+  }
+  return blocks.filter(
+    (block, index) =>
+      block !== failure &&
+      !(
+        index >= turnStart &&
+        block.text.trim() === text &&
+        (block.role === "assistant" ||
+          (block.role === "system" && block.notice === "error"))
+      ),
+  );
+}
 
 function AgentTranscriptComponent({
   blocks: sourceBlocks,
@@ -343,6 +381,8 @@ function AgentTranscriptComponent({
   onRevealReady,
   onNavigateReady,
   latestTurnAccessory,
+  onProviderSignIn,
+  onRetryAfterSignIn,
 
   visible = true,
   parked = false,
@@ -350,24 +390,31 @@ function AgentTranscriptComponent({
   managed = false,
 }: Props) {
   const isMonoChat = !!agentMascot;
-  const blocks = useMemo(() => {
+  const signInOffered = !!onProviderSignIn;
+  const { blocks, authFailure } = useMemo(() => {
     // A Mono's reaction sits on the message it answers, not in a bubble.
     const chatBlocks = isMonoChat
       ? monoReactionBlocks(sourceBlocks)
       : sourceBlocks;
-    if (!harness || !supportsHarnessLogin(harness)) return chatBlocks;
-    const visibleBlocks = chatBlocks.filter(
-      (block) =>
-        !(
-          block.role === "system" &&
-          block.notice === "error" &&
-          isHarnessAuthError(block.text)
-        ),
-    );
-    return visibleBlocks.length === chatBlocks.length
-      ? chatBlocks
-      : visibleBlocks;
-  }, [harness, isMonoChat, sourceBlocks]);
+    if (!harness || !supportsHarnessLogin(harness)) {
+      return { blocks: chatBlocks, authFailure: undefined };
+    }
+    // Only a block the sign-in notice really replaces leaves the transcript.
+    // Without a live notice (no sign-in action, a running turn, a parked pane)
+    // and for earlier turns, the provider's error stays readable.
+    const failure =
+      signInOffered && !busy && !parked
+        ? latestTurnHarnessAuthFailure(chatBlocks, harness)
+        : undefined;
+    const visibleBlocks = failure
+      ? withoutReplacedAuthFailure(chatBlocks, failure)
+      : chatBlocks;
+    // A transcript holding nothing else has no turn to carry the notice.
+    if (visibleBlocks.length === 0) {
+      return { blocks: chatBlocks, authFailure: undefined };
+    }
+    return { blocks: visibleBlocks, authFailure: failure };
+  }, [busy, harness, isMonoChat, parked, signInOffered, sourceBlocks]);
   const editableUserBlockId = useMemo(
     () => lastUserTurnBlock(blocks)?.id,
     [blocks],
@@ -1327,6 +1374,7 @@ function AgentTranscriptComponent({
                 }
                 background={backgroundTasks}
                 modelName={turnModelName}
+                blocks={turn}
               />
             ) : agentMascot && agentName ? (
               // A Mono signs its settled turns with just its mascot and name.
@@ -1430,6 +1478,9 @@ function AgentTranscriptComponent({
                 <InitialThinking
                   key={item.blocks[0].id}
                   live={visible && !settled}
+                  blocks={item.blocks}
+                  cwd={cwd}
+                  onOpenFile={onOpenFile}
                 />
               ) : (
                 <ActivityPhases
@@ -1710,6 +1761,20 @@ function AgentTranscriptComponent({
                   ))}
                 </div>
               ) : null}
+              {isLastTurn &&
+              settled &&
+              authFailure &&
+              harness &&
+              onProviderSignIn &&
+              !parked ? (
+                <ProviderSignInNotice
+                  key={authFailure.id}
+                  harness={harness}
+                  message={authFailure.text}
+                  onSignIn={onProviderSignIn}
+                  onRetry={onRetryAfterSignIn}
+                />
+              ) : null}
               {/* The accessory keeps the pane's props, which go stale once parked. */}
               {isLastTurn && latestTurnAccessory && !parked
                 ? latestTurnAccessory
@@ -1885,14 +1950,47 @@ function DaySeparator({ at }: { at: number }) {
   );
 }
 
-/** Placeholder for private reasoning before the first assistant text arrives. */
+/**
+ * Private reasoning before the first assistant text. While it streams, the
+ * thought itself is shown so a long think does not read as a silent stall.
+ */
 function InitialThinking({
   live,
+  blocks,
+  cwd,
+  onOpenFile,
   embedded = false,
 }: {
   live: boolean;
+  blocks?: Block[];
+  cwd?: string;
+  onOpenFile?: (path: string) => void;
   embedded?: boolean;
 }) {
+  const thinking = (blocks ?? [])
+    .filter(isThinkingBlock)
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (thinking) {
+    return (
+      <div
+        className={`min-w-0 pt-1 pb-0.5 font-sans ${embedded ? "" : "px-4"}`}
+      >
+        <blockquote
+          className={`agent-thinking-quote ${live ? "zen-thinking-pulse" : ""}`}
+          aria-label="Thinking"
+        >
+          <AgentMarkdown
+            className="agent-reasoning agent-reasoning-compact"
+            text={thinking}
+            cwd={cwd}
+            onOpenFile={onOpenFile}
+          />
+        </blockquote>
+      </div>
+    );
+  }
   return (
     <div
       className={`min-w-0 pt-3 pb-1 font-sans text-sm text-content/50 ${embedded ? "" : "px-4"}`}
@@ -1903,10 +2001,11 @@ function InitialThinking({
 }
 
 /**
- * The clock on a turn's fold line: how long the agent has been at it, or what
- * it is waiting on. The band that sweeps the text is sized off this element,
- * so it shrinks to the words — stretched across the row, the sweep spends its
- * time on empty space and the line just sits there looking dim.
+ * The clock on a turn's fold line: who is working, what they are doing, how
+ * long, and whether anything new has landed. The band that sweeps the text is
+ * sized off this element, so it shrinks to the words — stretched across the
+ * row, the sweep spends its time on empty space and the line just sits there
+ * looking dim.
  */
 function LiveFoldTitle({
   startedAt,
@@ -1914,23 +2013,46 @@ function LiveFoldTitle({
   waitingLabel,
   background,
   modelName,
+  blocks,
 }: {
   startedAt?: number;
   paused: boolean;
   waitingLabel?: string;
   background?: string[];
   modelName?: string;
+  blocks: Block[];
 }) {
   const elapsedMs = useElapsedFrom(startedAt, paused);
-  // Yielding with a command still going is not the end of the turn. The clock
-  // keeps running and the line says what it is waiting on.
-  const text = paused
-    ? (waitingLabel ?? "Waiting for approval")
-    : background?.length
-      ? `${formatWorkingDuration(elapsedMs, modelName)} · ${backgroundLabel(background)}`
-      : formatWorkingDuration(elapsedMs, modelName);
+  const fingerprint = liveActivityFingerprint(blocks, background);
+  const lastActivityAt = useRef(Date.now());
+  const seenFingerprint = useRef(fingerprint);
+  if (seenFingerprint.current !== fingerprint) {
+    seenFingerprint.current = fingerprint;
+    lastActivityAt.current = Date.now();
+  }
+  // The elapsed tick already re-renders each second; reuse it for quiet age.
+  const quietMs =
+    !paused && elapsedMs != null
+      ? Math.max(0, Date.now() - lastActivityAt.current)
+      : null;
+  const text = liveFoldStatusText({
+    elapsedMs,
+    modelName,
+    blocks,
+    paused,
+    waitingLabel,
+    backgroundTasks: background,
+    quietMs,
+  });
+  const quiet =
+    quietMs != null && quietMs >= LIVE_FOLD_QUIET_MS
+      ? "text-amber-700 dark:text-amber-400"
+      : undefined;
   const shimmer = (
-    <Shimmer className="min-w-0 truncate font-sans text-sm" duration={1}>
+    <Shimmer
+      className={`min-w-0 truncate font-sans text-sm ${quiet ?? ""}`}
+      duration={1}
+    >
       {text}
     </Shimmer>
   );
@@ -1941,12 +2063,6 @@ function LiveFoldTitle({
   ) : (
     shimmer
   );
-}
-
-function backgroundLabel(tasks: string[]): string {
-  return tasks.length === 1
-    ? "running in background"
-    : `${tasks.length} tasks running in background`;
 }
 
 /**
@@ -4454,7 +4570,8 @@ function ActivityThinkingRow({
   bare?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Streamed thoughts stay open so a long think is readable as it lands.
+  const [open, setOpen] = useState(() => !!block.streaming);
   const text = proseSummary(block.text) || "Thinking";
   // In a group the rail is the bullet, so there is nothing to breathe while
   // reasoning streams in — the line itself does.
@@ -4476,6 +4593,30 @@ function ActivityThinkingRow({
   );
 
   if (!expandable) {
+    // Non-expandable rows still show the body while streaming.
+    if (block.streaming && block.text.trim()) {
+      return (
+        <div
+          aria-label={`Thinking: ${text}`}
+          className="flex min-w-0 flex-col gap-1 py-1"
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            {icon}
+            <span className="font-sans text-sm text-content/50">Thinking</span>
+          </div>
+          <blockquote
+            className={`agent-thinking-quote min-w-0 ${bare ? "" : "ml-5"}`}
+          >
+            <AgentMarkdown
+              className={`agent-reasoning agent-reasoning-compact ${pulse}`}
+              text={block.text}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+            />
+          </blockquote>
+        </div>
+      );
+    }
     return (
       <div
         aria-label={`Thinking: ${text}`}
@@ -4507,14 +4648,16 @@ function ActivityThinkingRow({
         </span>
       </button>
       {open ? (
-        <div className={`min-w-0 pb-2 ${bare ? "" : "pl-5"}`}>
+        <blockquote
+          className={`agent-thinking-quote min-w-0 pb-2 ${bare ? "" : "ml-5"}`}
+        >
           <AgentMarkdown
-            className="agent-reasoning"
+            className="agent-reasoning agent-reasoning-compact"
             text={block.text}
             cwd={cwd}
             onOpenFile={onOpenFile}
           />
-        </div>
+        </blockquote>
       ) : null}
     </div>
   );

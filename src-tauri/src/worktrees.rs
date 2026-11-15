@@ -30,22 +30,10 @@ pub struct Worktrees {
 }
 
 pub(crate) fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    run_git(root, args, false)
-}
-
-/// Fork: same as `git`, with untranslated messages for callers that read them.
-fn git_c_locale(root: &Path, args: &[&str]) -> Result<String, String> {
-    run_git(root, args, true)
-}
-
-fn run_git(root: &Path, args: &[&str], c_locale: bool) -> Result<String, String> {
     // `status` runs git-lfs on LFS files; see `fs::git_cmd`.
     let path = crate::harness::cached_gui_search_path();
     let mut command = Command::new(crate::harness::git_program(&path));
     crate::hide_window_console(&mut command);
-    if c_locale {
-        command.env("LC_ALL", "C").env("LANGUAGE", "C");
-    }
     let output = command
         .arg("-C")
         .arg(root)
@@ -169,61 +157,21 @@ pub fn git_worktrees(cwd: String, store: State<'_, SessionStore>) -> Result<Work
     })
 }
 
-/// Fork: a worktree branches from a commit. A folder that is not a Git
-/// repository, or a repository with no commits yet, has none to branch from.
-pub(crate) const NO_COMMIT_MESSAGE: &str =
-    "This project has no commits yet, so it can't have a worktree. Make a first commit, or run the session in the project folder.";
+pub(crate) const NO_COMMITS: &str = "This project's git repo has no commits yet, so there is nothing to copy into a new working copy. Make a first commit, or start the session in the main checkout.";
 
-fn resolves_to_commit(root: &Path, rev: &str) -> bool {
-    let rev = rev.trim();
-    !rev.is_empty()
-        && !rev.starts_with('-')
-        && git(
-            root,
-            &[
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "--end-of-options",
-                &format!("{rev}^{{commit}}"),
-            ],
-        )
-        .is_ok()
-}
-
-/// Fork: Ok(false) only when Git confirms there is no commit to branch from
-/// (not a repository, or a repository with no commits yet). Any other Git
-/// failure (missing Git, an unsafe repository...) is an error, so callers
-/// never quietly drop the worktree the user asked for.
-fn can_branch(root: &Path, base: &str) -> Result<bool, String> {
-    if resolves_to_commit(root, base) || resolves_to_commit(root, "HEAD") {
-        return Ok(true);
-    }
-    if let Err(error) = git_c_locale(root, &["rev-parse", "--git-dir"]) {
-        return if error.contains("not a git repository") {
-            Ok(false)
-        } else {
-            Err(error)
-        };
-    }
-    // Unborn: Git says so in as many words. A broken ref ("bad object") or
-    // any other failure is an error, not an empty repository.
-    match git_c_locale(root, &["log", "-1", "--format=%H"]) {
-        Ok(_) => Ok(true),
-        Err(error) if error.contains("does not have any commits yet") => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-#[tauri::command(async)]
-pub fn git_worktree_possible(cwd: String, base: Option<String>) -> Result<bool, String> {
-    can_branch(&expand_home(&cwd), base.as_deref().unwrap_or("HEAD"))
+/// Git's own error for an empty repo is "Needed a single revision", which
+/// means nothing to most people. Say what is wrong when no branch has a
+/// commit; any other failure keeps git's own error. Only branches count:
+/// MonoCode's own checkpoint refs (refs/monocode/...) hold commits even in a
+/// repo the user never committed to.
+fn no_commits_message(root: &Path) -> Option<String> {
+    git(root, &["rev-list", "--branches", "--max-count=1"])
+        .ok()
+        .filter(|out| out.trim().is_empty())
+        .map(|_| NO_COMMITS.to_owned())
 }
 
 fn create(root: &Path, branch: &str, base: &str, existing: bool) -> Result<Worktree, String> {
-    if !existing && can_branch(root, base) == Ok(false) {
-        return Err(NO_COMMIT_MESSAGE.into());
-    }
     let branch = branch.trim();
     if branch.starts_with('-') || branch.starts_with('@') || branch.is_empty() {
         return Err("Enter a valid branch name".into());
@@ -270,7 +218,8 @@ fn create(root: &Path, branch: &str, base: &str, existing: bool) -> Result<Workt
             "--end-of-options",
             &format!("{source}^{{commit}}"),
         ],
-    )?;
+    )
+    .map_err(|error| no_commits_message(root).unwrap_or(error))?;
     std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
     let path_str = path_to_js(&path);
     if existing {
@@ -878,47 +827,36 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_worktree_in_a_repo_with_no_commits() {
+    fn empty_repo_says_there_are_no_commits() {
         let dir =
             std::env::temp_dir().join(format!("monocode-worktree-test-{}", uuid::Uuid::new_v4()));
-        let root = dir.join("repo");
-        std::fs::create_dir_all(&root).unwrap();
-        let _cleanup = Repo(dir.clone());
-        // A plain folder with no Git at all.
-        assert_eq!(git_worktree_possible(path_to_js(&root), None), Ok(false));
-        git_checked(&root, &["init", "-b", "main"]).unwrap();
-        assert_eq!(
-            git_worktree_possible(path_to_js(&root), Some("main".into())),
-            Ok(false)
-        );
-        assert_eq!(
-            create(&root, "mc/first", "main", false).unwrap_err(),
-            NO_COMMIT_MESSAGE
-        );
-        assert!(!dir.join("repo-worktrees").exists());
-    }
-
-    #[test]
-    fn reports_a_broken_head_instead_of_skipping_the_worktree() {
-        let repo = repo();
+        let repo = Repo(dir);
         let root = repo.0.join("repo");
-        std::fs::write(
-            root.join(".git/refs/heads/main"),
-            "0000000000000000000000000000000000000001\n",
+        std::fs::create_dir_all(&root).unwrap();
+        git_checked(&root, &["init", "-b", "main"]).unwrap();
+        assert_eq!(create(&root, "feature", "HEAD", false).unwrap_err(), NO_COMMITS);
+        assert_eq!(create(&root, "feature", "main", false).unwrap_err(), NO_COMMITS);
+        // MonoCode's checkpoint refs hold commits; they are not branches.
+        let checkpoint = git(
+            &root,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit-tree",
+                "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "-m",
+                "checkpoint",
+            ],
         )
         .unwrap();
-        assert!(git_worktree_possible(path_to_js(&root), None).is_err());
-    }
-
-    #[test]
-    fn allows_a_worktree_once_there_is_a_commit() {
-        let repo = repo();
-        let root = repo.0.join("repo");
-        assert_eq!(
-            git_worktree_possible(path_to_js(&root), Some("main".into())),
-            Ok(true)
-        );
-        assert_eq!(git_worktree_possible(path_to_js(&root), None), Ok(true));
+        git_checked(
+            &root,
+            &["update-ref", "refs/monocode/checkpoints/s/t/before", checkpoint.trim()],
+        )
+        .unwrap();
+        assert_eq!(create(&root, "feature", "HEAD", false).unwrap_err(), NO_COMMITS);
     }
 
     #[test]

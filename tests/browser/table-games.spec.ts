@@ -246,13 +246,11 @@ test("a stack carries into the next hand, and the finished hand waits to be read
     page.locator('[data-table-board="Poker table"] [data-table-status]'),
   ).toContainText("blinds 25/50 · hand 2");
 
-  // The hand stays up: every seat's cards face up, and what happened in words.
+  // The hand stays up: every seat's cards face up, and no wall of text.
   await expect(
     page.locator('[data-table-board="Poker table"] [data-seat]:not([data-seat="you"]) [data-card="back"]'),
   ).toHaveCount(0);
-  const recap = page.locator("[data-hand-recap] li");
-  await expect(recap.first()).toContainText(/^Preflop: blinds /);
-  await expect(recap.last()).toContainText(/(win|wins|take|takes|split|back)/);
+  await expect(page.locator("[data-hand-recap]")).toHaveCount(0);
   await page.waitForTimeout(4000);
   await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "done");
 
@@ -260,7 +258,6 @@ test("a stack carries into the next hand, and the finished hand waits to be read
   await setPokerStacks(page, [4200, 5000, 5000, 5000, 5000]);
   await page.keyboard.press(" ");
   await expect(phase(page, "Poker table")).toHaveAttribute("data-table-phase", "preflop");
-  await expect(page.locator("[data-hand-recap]")).toHaveCount(0);
   expect((await youStack(page)) + (await youBet(page))).toBe(4200);
 });
 

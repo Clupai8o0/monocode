@@ -404,6 +404,7 @@ function emit() {
   catalogVersion += 1;
   baseByHarness = null;
   indexById = null;
+  indexByReference = null;
   allCache = null;
   for (const listener of listeners) listener();
 }
@@ -451,6 +452,7 @@ export function defaultModelId(harness: HarnessId): string {
 let baseByHarness: Partial<Record<HarnessId, AgentModel[]>> | null = null;
 let allCache: AgentModel[] | null = null;
 let indexById: Map<string, AgentModel> | null = null;
+let indexByReference: Map<string, AgentModel> | null = null;
 
 function baseModelsFor(harness: HarnessId): AgentModel[] {
   if (!baseByHarness) {
@@ -481,6 +483,25 @@ export function findModel(id: string): AgentModel | undefined {
     indexById = index;
   }
   return indexById.get(id);
+}
+
+/**
+ * First catalog row whose id or native id is `id`, in list order. Separate
+ * from `findModel`, which only matches ids: a native id can equal another
+ * row's id, and that lookup must keep preferring the id.
+ */
+export function findModelReference(id: string): AgentModel | undefined {
+  if (!indexByReference) {
+    const index = new Map<string, AgentModel>();
+    for (const model of allModels()) {
+      if (!index.has(model.id)) index.set(model.id, model);
+      if (model.nativeId && !index.has(model.nativeId)) {
+        index.set(model.nativeId, model);
+      }
+    }
+    indexByReference = index;
+  }
+  return indexByReference.get(id);
 }
 
 /** The bundled list never changes, so index it once for `lookupModel`. */

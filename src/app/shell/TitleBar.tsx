@@ -146,6 +146,8 @@ type Props = {
   inset?: boolean;
   /** Inset layout: the current project's worktree picker in the left toolbar. */
   worktreeControl?: ReactNode;
+  /** Fork: the cross-project session cleanup, beside notifications. */
+  sessionCleanupControl?: ReactNode;
   /** Inset layout: the right sidebar holding the project tools. */
   rightPanelOpen?: boolean;
   onToggleRightPanel?: () => void;
@@ -774,6 +776,7 @@ function TitleBarComponent({
   compactRail = false,
   inset = false,
   worktreeControl,
+  sessionCleanupControl,
   rightPanelOpen = false,
   onToggleRightPanel,
   rightPanelDot = false,
@@ -1177,6 +1180,7 @@ function TitleBarComponent({
           ) : null}
           {/* Fork: app-wide activity stays reachable when the sidebar is closed. */}
           <NotificationsButton />
+          {sessionCleanupControl}
           {worktreeControl}
           {onOpenSettings ? (
             <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>

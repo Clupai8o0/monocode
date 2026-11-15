@@ -9,6 +9,7 @@ import {
   askUserQuestionAllowInput,
   backgroundOutputPath,
   buildClaudeSpawnArgs,
+  claudeSupportsThinkingDisplay,
   buildClaudeUserMessage,
   contextFromResult,
   contextUsedFromAssistant,
@@ -165,8 +166,20 @@ describe("buildClaudeSpawnArgs", () => {
     );
     expect(args).toEqual(expect.arrayContaining(["--session-id", "sess-1"]));
     expect(args).toContain("--chrome");
+    expect(args).toEqual(
+      expect.arrayContaining(["--thinking-display", "summarized"]),
+    );
     const settings = args[args.indexOf("--settings") + 1];
     expect(JSON.parse(settings).disableAllHooks).toBeUndefined();
+  });
+
+  it("leaves out the thinking display flag for CLIs too old to take it", () => {
+    expect(buildClaudeSpawnArgs({ thinkingDisplay: false })).not.toContain(
+      "--thinking-display",
+    );
+    expect(claudeSupportsThinkingDisplay("2.1.110")).toBe(false);
+    expect(claudeSupportsThinkingDisplay("2.1.111")).toBe(true);
+    expect(claudeSupportsThinkingDisplay(null)).toBe(true);
   });
 
   it("only disables hooks for interactive sessions when asked", () => {
@@ -184,6 +197,10 @@ describe("buildClaudeSpawnArgs", () => {
     expect(args).toContain("--no-session-persistence");
     expect(args).toContain("--strict-mcp-config");
     expect(args).not.toContain("--chrome");
+    expect(args).not.toContain("--thinking-display");
+    expect(
+      buildClaudeSpawnArgs({ isolated: true, thinkingDisplay: true }),
+    ).toEqual(expect.arrayContaining(["--thinking-display", "summarized"]));
     expect(args).toEqual(expect.arrayContaining(["--max-turns", "1"]));
     const settings = args[args.indexOf("--settings") + 1];
     expect(JSON.parse(settings)).toMatchObject({ disableAllHooks: true });

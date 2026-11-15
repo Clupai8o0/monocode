@@ -29,6 +29,7 @@ import {
   CircleDashed,
   CircleDot,
   Clock,
+  DashboardSquare,
   FileScript,
   Folder,
   GitBranch,
@@ -85,7 +86,14 @@ import { useTrafficLightsVisible } from "../../platform/tauri/useTrafficLightsVi
 import { copyText } from "../../platform/tauri/clipboard";
 import { resolveModel } from "../../features/sessions/model/models";
 import type { OpenFileFn } from "../../features/search/model/search";
-import { sessionDisplayTitle } from "../../features/sessions/model/session";
+import { sessionDisplayTitle, sessionWorkCwd } from "../../features/sessions/model/session";
+import {
+  GROK_BOT_MENU_ID,
+  GROK_BOT_MENU_LABEL,
+  grokBotAvailable,
+  grokBotHost,
+  useGrokBotStatusVersion,
+} from "../../fork/grokBot/grokBot"; // Fork
 import { ParticleText } from "../../shared/ui/ParticleText";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
 import { orchestrationTaskLabel } from "../../features/orchestration/model/orchestrationSummary";
@@ -190,7 +198,6 @@ import {
   CloseBadge,
 } from "../../fork/closeBadges/CloseBadges";
 import { FreeMemoryButton } from "../../fork/sessionClose/FreeMemoryButton"; // Fork
-import { SessionCleanup } from "../../fork/sessionCleanup/SessionCleanup"; // Fork
 import { SplitHandle } from "../../fork/sidebarSplit/SplitHandle"; // Fork
 import {
   loadStoredSize,
@@ -203,6 +210,8 @@ import {
   elsewhereTarget,
 } from "../../fork/externalSessions/ElsewhereGroup"; // Fork
 import { RunningBadge } from "../../fork/backgroundAgents/RunningBadge"; // Fork
+import { ProjectHomeRow } from "../../fork/projectHome/ProjectHomeRow"; // Fork
+import { useHomePage } from "../../fork/projectHome/homeStore"; // Fork
 import { ProjectsList } from "../../fork/projects/ProjectsList"; // Fork
 import {
   CurrentProjectIcon,
@@ -302,7 +311,6 @@ function sectionSplitMax(pane: HTMLElement): number {
   return own + list.getBoundingClientRect().height - SESSIONS_MIN_HEIGHT;
 }
 const NO_SESSION_IDS: ReadonlySet<string> = new Set();
-const NO_OPEN_SESSION_IDS: readonly string[] = [];
 const CLOSE_SESSION_LABEL = "Close to free memory";
 
 type SidebarTab = SidebarTabId;
@@ -375,8 +383,6 @@ type Props = {
   ) => void;
   /** Fork: loaded sessions that can close to free memory. */
   closableSessionIds?: ReadonlySet<string>;
-  /** Fork: every loaded session in any project, for the cleanup panel. */
-  allOpenSessionIds?: readonly string[];
   /** Fork: closes sessions to free memory, keeping them in the list. */
   onCloseSessions?: (sessionIds: readonly string[]) => void;
   /** Fork: how many closable sessions are off screen. */
@@ -393,10 +399,6 @@ type Props = {
   onCancelReminders?: (sessionIds: readonly string[]) => void;
   onDeleteSession?: (sessionId: string) => void;
   onDeleteSessions?: (sessionIds: readonly string[]) => void;
-  /** Fork: what the cleanup panel must leave alone: busy, or leading a run. */
-  cleanupBusySessionIds?: ReadonlySet<string>;
-  /** Fork: the cleanup panel's delete, which has already asked. */
-  onDeleteCleanupSession?: (row: SessionSummary) => Promise<boolean>;
   onOpenFile: OpenFileFn;
   onOpenTerminal?: (cwd: string) => void;
   onFileMoved?: (from: string, to: string) => void;
@@ -432,6 +434,9 @@ type Props = {
   onOpenInboxItem?: (item: LinkedWorkItem, sessionId: string) => void;
   onOpenNotes?: () => void;
   onOpenAutomations?: () => void;
+  /** Fork: Project home for the current project, and All projects. */
+  onOpenProjectHome?: () => void;
+  onOpenAllProjects?: () => void;
   onGoToFile?: () => void;
   searchActive?: boolean;
   inboxActive?: boolean;
@@ -503,7 +508,6 @@ function SidebarComponent({
   onArchiveSession: onArchiveLocalSession,
   onArchiveSessions: onArchiveLocalSessions,
   closableSessionIds = NO_SESSION_IDS,
-  allOpenSessionIds = NO_OPEN_SESSION_IDS,
   onCloseSessions,
   idleClosableCount = 0,
   onCloseIdleSessions,
@@ -515,8 +519,6 @@ function SidebarComponent({
   onCancelReminders,
   onDeleteSession: onDeleteLocalSession,
   onDeleteSessions: onDeleteLocalSessions,
-  cleanupBusySessionIds,
-  onDeleteCleanupSession,
   onOpenFile,
   onOpenTerminal,
   onFileMoved,
@@ -551,6 +553,8 @@ function SidebarComponent({
   onOpenInboxItem,
   onOpenNotes,
   onOpenAutomations,
+  onOpenProjectHome, // Fork
+  onOpenAllProjects, // Fork
   onGoToFile,
   searchActive = false,
   inboxActive = false,
@@ -789,6 +793,7 @@ function SidebarComponent({
   const sessionsScrollRef = useRef<HTMLDivElement>(null);
   const { machines: moveMachines } = useRemoteMachines(FORK_SESSION_MOVE); // Fork
   useMoveVersion(); // Fork: the menu's move item follows the host's answer.
+  useGrokBotStatusVersion(); // Fork: the Grok Bot item appears once its check loads.
   const [sessionMenu, setSessionMenu] = useState<{
     x: number;
     y: number;
@@ -1097,7 +1102,6 @@ function SidebarComponent({
   // open the sidebar temporarily until the user clicks away.
   const drawerMode = compactRailVisible && !open;
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [cleanupOpen, setCleanupOpen] = useState(false); // Fork
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerVisible = drawerMode && drawerOpen && sidebarAvailable;
   // A dismissed drawer stays mounted while it slides shut. Anything that takes
@@ -1633,6 +1637,25 @@ function SidebarComponent({
           }));
         })()
       : []),
+    // Fork: hand the session to the Grok Bot app, when the folder allows it.
+    ...(!multipleMenuSessions &&
+    menuSessions[0] &&
+    grokBotAvailable(sessionWorkCwd(menuSessions[0]))
+      ? (() => {
+          const can = Boolean(grokBotHost()?.canHandOver(menuSessions[0].id));
+          return [
+            {
+              kind: "item" as const,
+              id: GROK_BOT_MENU_ID,
+              label: GROK_BOT_MENU_LABEL,
+              disabled: !can,
+              description: can
+                ? "Opens Grok Bot with a short prompt; the full brief is copied"
+                : "Open the session first",
+            },
+          ];
+        })()
+      : []),
     // Fork: move the session and its work to another machine.
     ...(!multipleMenuSessions && menuSessions[0]
       ? moveMenuItems(menuSessions[0], moveMachines)
@@ -1801,6 +1824,10 @@ function SidebarComponent({
     if (id.startsWith("continue-elsewhere:")) {
       const target = id.slice("continue-elsewhere:".length) as HarnessId;
       continueHost()?.continueSession(sessionIds[0], target);
+      return;
+    }
+    if (id === GROK_BOT_MENU_ID) {
+      grokBotHost()?.handOver(sessionIds[0]); // Fork
       return;
     }
     if (pickMoveItem(id, sessionIds[0], moveMachines)) return; // Fork
@@ -2572,6 +2599,7 @@ function SidebarComponent({
     </SidebarSectionLabel>
   ) : null;
 
+  const homePage = useHomePage(); // Fork
   const navList = inset ? (
     <SidebarNavList
       search={
@@ -2605,6 +2633,13 @@ function SidebarComponent({
           icon: Zap,
           active: automationsActive,
           onClick: onOpenAutomations,
+        },
+        // Fork: Project home's cross-project page.
+        onOpenAllProjects && {
+          label: "All projects",
+          icon: DashboardSquare,
+          active: homePage?.kind === "all",
+          onClick: onOpenAllProjects,
         },
       ]}
     />
@@ -2732,9 +2767,6 @@ function SidebarComponent({
             recents={recents}
             onSelectProject={onSelectProject}
             onOpenProject={onOpenProject}
-            onCleanUpSessions={
-              onArchiveLocalSession ? () => setCleanupOpen(true) : undefined
-            }
             onProjectContextMenu={headerProjectMenu.open}
             sectionRef={projectsSplit.setPaneRef}
             capped={projectsSplit.capped}
@@ -2749,21 +2781,6 @@ function SidebarComponent({
         </>
       ) : null}
       {headerProjectMenu.element}
-      {/* Fork: archive sessions from every project in one place. */}
-      {cleanupOpen && onArchiveLocalSession ? (
-        <SessionCleanup
-          projectPaths={projectRailItems(recents, cwd)
-            .map((project) => project.path)
-            .filter((path) => !isRemoteProjectPath(path))}
-          activeSessionId={activeSessionId}
-          busySessionIds={cleanupBusySessionIds ?? busySessionIds}
-          approvalSessionIds={approvalSessionIds}
-          openSessionIds={allOpenSessionIds}
-          onArchive={onArchiveLocalSession}
-          onDelete={onDeleteCleanupSession}
-          onClose={() => setCleanupOpen(false)}
-        />
-      ) : null}
       {/* Inset project selection lives in Projects and worktrees in the title bar. */}
       {railVisible || inset ? (
         <>
@@ -2862,6 +2879,7 @@ function SidebarComponent({
             monosSplit.height != null || projectsSplit.height != null
           }
           onNew={onNew}
+          onOpenHome={onOpenProjectHome}
           ref={(el) => {
             if (inset) slideRefs.current[0] = el;
           }}
@@ -4343,6 +4361,7 @@ function ProjectSessionsCard({
   hidden,
   keepRoom = false,
   onNew,
+  onOpenHome,
   ref,
   children,
 }: {
@@ -4352,6 +4371,8 @@ function ProjectSessionsCard({
   /** Fork: resized sections above shrink before this list does. */
   keepRoom?: boolean;
   onNew?: () => string | void;
+  /** Fork: opens the Project home. */
+  onOpenHome?: () => void;
   ref?: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
@@ -4367,6 +4388,9 @@ function ProjectSessionsCard({
       }`}
     >
       {project ? <ProjectSessionsHeader cwd={cwd} onNew={onNew} /> : null}
+      {project && onOpenHome ? (
+        <ProjectHomeRow cwd={cwd} onOpen={onOpenHome} />
+      ) : null}
       {children}
     </div>
   );

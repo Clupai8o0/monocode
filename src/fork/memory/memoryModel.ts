@@ -27,6 +27,8 @@ export type SessionFacts = {
   foreground: boolean;
   /** When its warm child's turn settled; undefined while running or parked. */
   idleSince?: number;
+  /** Fork: Remote Control is on, so the phone may be using it. */
+  remoteControl?: boolean;
 };
 
 export type RowState = "idle" | "running" | "waiting" | "onScreen" | "helper";
@@ -130,7 +132,8 @@ export function buildRows(
         processCount: entry.processCount,
         state,
         idleMs,
-        parkable: state === "idle",
+        // The phone may be driving a session with Remote Control on.
+        parkable: state === "idle" && session?.remoteControl !== true,
       };
     })
     .sort((a, b) => b.rssBytes - a.rssBytes);

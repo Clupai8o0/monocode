@@ -93,6 +93,26 @@ export function tickedByDefault(
   return checked && filter !== "all" && !open && kind !== "unsafe";
 }
 
+/** The tab the panel opens on: the first with something in it. */
+export function firstFilledFilter(
+  count: (filter: CleanupFilter) => number,
+): CleanupFilter {
+  return CLEANUP_FILTERS.find((choice) => count(choice.id) > 0)?.id ?? "safe";
+}
+
+/** How many said they can close: the title bar's count, Safe plus Handover. */
+export function readyToClose(kinds: readonly (CloseKind | undefined)[]): number {
+  return kinds.filter((kind) => kind === "safe" || kind === "handover").length;
+}
+
+/** A handover's path, short: from the project when it sits inside the project. */
+export function handoverLocation(detail: string, cwd: string): string {
+  const root = cwd.replace(/\/+$/, "");
+  return root && detail.startsWith(`${root}/`)
+    ? detail.slice(root.length + 1)
+    : detail;
+}
+
 export type CleanupGroup<T> = { cwd: string; rows: T[] };
 
 /** Rows by project, in the order the projects were first seen. */

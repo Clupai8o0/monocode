@@ -27,15 +27,6 @@ export type Worktrees = { worktrees: Worktree[]; defaultRoot: string };
 export const listWorktrees = (cwd: string) =>
   invokeWorkspace<Worktrees>("git_worktrees", { cwd });
 
-/**
- * Fork: false only when Git confirms there is no commit to branch a worktree
- * from. Other failures resolve true so creating the worktree shows the error.
- */
-export const worktreePossible = (cwd: string, base?: string) =>
-  invoke<boolean>("git_worktree_possible", { cwd, base: base ?? null }).catch(
-    () => true,
-  );
-
 export async function createWorktree(
   cwd: string,
   branch: string,
@@ -51,6 +42,18 @@ export async function createWorktree(
   notifyGitChanged();
   return tree;
 }
+
+/** Start of the Rust error for a repo with no commits (`worktrees.rs`). */
+const NO_COMMITS_ERROR = "This project's git repo has no commits yet";
+
+/** Git cannot branch a worktree off a repo that has no commits. */
+export function isNoCommitsError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.startsWith(NO_COMMITS_ERROR);
+}
+
+export const NO_COMMITS_FALLBACK_NOTE =
+  "Working in the main checkout: this repo has no commits yet, so it can't have a separate worktree. Commit once to get worktrees for new sessions.";
 
 export async function createOrchestrationWorktree(
   cwd: string,
