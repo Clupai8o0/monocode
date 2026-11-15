@@ -1247,7 +1247,9 @@ function titleTabsEqual(a: TitleTab[], b: TitleTab[]): boolean {
       tab.blank === other.blank &&
       tab.terminal === other.terminal &&
       tab.previewFileId === other.previewFileId &&
-      tab.groupId === other.groupId
+      tab.groupId === other.groupId &&
+      tab.sessionIds?.monocode === other.sessionIds?.monocode &&
+      tab.sessionIds?.harness === other.sessionIds?.harness
     );
   });
 }
