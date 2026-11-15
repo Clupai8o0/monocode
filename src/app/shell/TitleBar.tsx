@@ -65,6 +65,7 @@ import {
 } from "../../features/workspace/model/paneDrop";
 import type { PaneEdge } from "../../features/workspace/model/layout";
 import { useForkTitle } from "../../fork/alerts/ForkTitle";
+import { copyText } from "../../platform/tauri/clipboard";
 import { NotificationsButton } from "../../fork/notifications/NotificationsButton";
 import { MachinePill, useMachineTitle } from "../../fork/machines/MachinePill";
 import {
@@ -110,6 +111,8 @@ export type Tab = {
   terminal?: boolean;
   /** File id when the whole tab is one preview file; double-click pins it. */
   previewFileId?: string;
+  /** Fork: the focused conversation's ids, shown on hover and copyable. */
+  sessionIds?: { monocode: string; harness?: string };
 };
 
 /** How far below the tab bar a dragged tab must go before it targets a pane. */
@@ -235,6 +238,12 @@ export function tabCopy(tab: Tab): {
   tooltipParts.push(...tab.more);
   if (tab.files.length > 0) tooltipParts.push(tab.files.join(", "));
   if (tab.dirty) tooltipParts.push("Unsaved changes");
+  // Fork: the agent's own id is the one other tools and sessions use.
+  if (tab.sessionIds) {
+    tooltipParts.push(
+      `Session ID ${tab.sessionIds.harness ?? tab.sessionIds.monocode}`,
+    );
+  }
 
   return { headline, meta, tooltip: tooltipParts.join(" · ") };
 }
@@ -997,6 +1006,32 @@ function TitleBarComponent({
               },
             ]
           : []),
+        // Fork: same choices as the sidebar's Copy session ID.
+        ...(contextTab.sessionIds
+          ? [
+              { kind: "sep" as const },
+              {
+                kind: "item" as const,
+                id: "copy-session-id",
+                label: "Copy session ID",
+                submenu: [
+                  {
+                    kind: "item" as const,
+                    id: "copy-harness-session-id",
+                    label: "Harness session ID",
+                    description: contextTab.sessionIds.harness,
+                    disabled: !contextTab.sessionIds.harness,
+                  },
+                  {
+                    kind: "item" as const,
+                    id: "copy-monocode-session-id",
+                    label: "MonoCode session ID",
+                    description: contextTab.sessionIds.monocode,
+                  },
+                ],
+              },
+            ]
+          : []),
         ...(contextTab.sessionCount > 0 && (onArchiveTab || onDeleteTab)
           ? [
               { kind: "sep" as const },
@@ -1037,6 +1072,18 @@ function TitleBarComponent({
     setTabMenu(null);
     if (id === "close") {
       onClose(contextTab.id);
+      return;
+    }
+    if (id === "copy-harness-session-id" || id === "copy-monocode-session-id") {
+      const value =
+        id === "copy-harness-session-id"
+          ? contextTab.sessionIds?.harness
+          : contextTab.sessionIds?.monocode;
+      if (value) {
+        void copyText(value).catch((error) => {
+          console.error("Failed to copy session ID:", error);
+        });
+      }
       return;
     }
     if (id === "archive") {

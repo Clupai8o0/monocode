@@ -16671,6 +16671,14 @@ function toTitleTab(
     terminal: hasTerminal && harnesses.length === 0,
     previewFileId: previewWorkspaceFile(tab)?.id,
     groupId: tab.groupId,
+    // Fork: hover the tab to see the session ID; right-click to copy it.
+    sessionIds:
+      focused && !fileFocused
+        ? {
+            monocode: focused.id,
+            harness: focused.providerSessionId || undefined,
+          }
+        : undefined,
   };
 }
 

@@ -65,6 +65,7 @@ import { ArtifactCard } from "../../artifacts/ui/ArtifactCard";
 import { artifactCards } from "../../artifacts/artifacts";
 
 import { TerminalSpinner } from "./TerminalSpinner";
+import { shellModelHarness } from "../../../fork/modelIcons/shellModelHarness";
 import { Popover } from "../../../shared/ui/Popover";
 import { ProjectMascot } from "../../projects/ui/ProjectMascot";
 import { PixelMascot } from "../../projects/ui/PixelMascot";
@@ -3813,9 +3814,17 @@ function ActivityPhaseGroup({
   // A lone call the agent never introduced is not a group: a header repeating
   // the single row under it says nothing twice.
   if (!phase.headline && phase.steps.length === 1) {
+    const loneModel =
+      phase.kind === "run" ? shellModelHarness(phase.steps[0]) : undefined;
     return (
       <div className="flex min-w-0 items-start gap-1.5">
-        {monoCodePhase ? null : (
+        {monoCodePhase ? null : loneModel ? (
+          // Fork: a call that hands work to another model wears its mark.
+          <HarnessIcon
+            harness={loneModel}
+            className="mt-[7px] size-3.5 shrink-0 text-content/60"
+          />
+        ) : (
           <ActivityPhaseIcon kind={phase.kind} className="mt-[7px]" />
         )}
         <div className="min-w-0 flex-1">
