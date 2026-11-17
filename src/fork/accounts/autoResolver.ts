@@ -36,10 +36,11 @@ export function autoCandidates(
     const limits = isRateLimitProvider(provider)
       ? getCachedRateLimits(provider, account.id)
       : undefined;
-    const headroom = accountHeadroom(limits, now) ?? undefined;
+    const available = limits?.status === "ok" || limits?.status === "fetching";
+    const headroom = available ? accountHeadroom(limits, now) ?? undefined : undefined;
     return {
       id: account.id,
-      tone: accountStatus(limits, now).tone,
+      tone: available ? accountStatus(limits, now).tone : "unknown",
       ...(headroom === undefined ? {} : { headroom }),
     };
   });

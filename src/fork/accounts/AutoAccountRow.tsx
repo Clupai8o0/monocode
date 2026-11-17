@@ -4,7 +4,7 @@ import { footerAccountLabel } from "../usage/FooterUsage";
 import { resolveAutoAccount } from "./autoResolver";
 
 /**
- * Fork: the "Auto" row at the top of the Claude account picker. It shows
+ * Fork: the "Auto" row at the top of the account picker. It shows
  * which account Auto would start the next session on.
  */
 export function AutoAccountRow({

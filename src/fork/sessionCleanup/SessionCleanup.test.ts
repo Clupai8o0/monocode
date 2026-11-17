@@ -16,6 +16,8 @@ vi.mock("../sessionRead", () => ({
 
 const { SessionCleanup } = await import("./SessionCleanup");
 const { setCloseState } = await import("../closeBadges/closeState");
+const { cachedCleanupRows, resetCleanupRows } = await import("./cleanupRows");
+const { readSession } = await import("../sessionRead");
 
 type Row = {
   id: string;
@@ -39,6 +41,7 @@ let root: Root;
 let onArchive: ReturnType<typeof vi.fn>;
 let onDelete: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn>;
+let onOpenSession: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -52,6 +55,7 @@ beforeEach(() => {
     "/p/alpha": [session("a1", "/p/alpha"), session("a2", "/p/alpha")],
     "/p/beta": [session("b1", "/p/beta")],
   };
+  resetCleanupRows();
   sessionHeldElsewhere.mockReset();
   sessionHeldElsewhere.mockResolvedValue(false);
   listSessionsByProject.mockReset();
@@ -62,6 +66,7 @@ beforeEach(() => {
   onArchive = vi.fn(async () => true);
   onDelete = vi.fn(async () => true);
   onClose = vi.fn();
+  onOpenSession = vi.fn();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -90,6 +95,7 @@ async function mount(
         openSessionIds: extra.openSessionIds ?? [],
         onArchive: onArchive as never,
         onDelete: onDelete as never,
+        onOpenSession: onOpenSession as never,
         onClose: onClose as never,
       }),
     );
@@ -156,7 +162,7 @@ it("marks an open session and does not tick it", async () => {
   await mount({ openSessionIds: ["a1"] });
   expect(rowBox("a1")?.checked).toBe(false);
   expect(rowBox("b1")?.checked).toBe(true);
-  expect(document.body.textContent).toContain("Open");
+  expect(document.body.textContent).toContain("In a tab");
 });
 
 it("Everything starts with nothing ticked, and shows not-safe rows", async () => {
@@ -354,4 +360,192 @@ it("closes on Cancel", async () => {
   await mount();
   await click(buttonNamed(/^Cancel$/));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("opens on the first tab with something in it", async () => {
+  setCloseState("a1", SAVED, { kind: "handover", detail: "" });
+  setCloseState("b1", SAVED, null);
+  await mount();
+  expect(buttonNamed(/^Handover/).getAttribute("aria-pressed")).toBe("true");
+  expect(rowBox("a1")?.checked).toBe(true);
+});
+
+it("stays on a tab once something was ticked", async () => {
+  setCloseState("a1", SAVED, null);
+  setCloseState("b1", SAVED, null);
+  await mount();
+  await click(buttonNamed(/^Safe to close/));
+  expect(buttonNamed(/^Safe to close/).getAttribute("aria-pressed")).toBe("true");
+});
+
+it("opens filled from the last look, before the new read answers", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  listSessionsByProject.mockImplementation(() => new Promise(() => {}));
+  await mount();
+  expect(rowBox("a1")).toBeDefined();
+  expect(rowBox("b1")?.checked).toBe(true);
+});
+
+it("keeps a project's rows when reading it again fails", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  listSessionsByProject.mockImplementation(async (cwd: string) => {
+    if (cwd === "/p/beta") {
+      throw new Error("no");
+    }
+    return projects[cwd];
+  });
+  await mount();
+  expect(rowBox("b1")).toBeDefined();
+  expect(document.body.textContent).toContain("Could not read 1 project");
+});
+
+it("shows where a handover is, from the project", async () => {
+  setCloseState("a1", SAVED, {
+    kind: "handover",
+    detail: "/p/alpha/.claude/handoff.md",
+  });
+  await mount();
+  await click(buttonNamed(/^Handover/));
+  const path = document.body.querySelector("[data-fork-handover-path]");
+  expect(path?.textContent).toBe(".claude/handoff.md");
+});
+
+it("goes to a session and closes the panel without ticking it", async () => {
+  await mount();
+  const before = rowBox("a1")?.checked;
+  const go = document.body.querySelector('button[aria-label="Go to a1"]');
+  await click(go!);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(onOpenSession).toHaveBeenCalledWith("a1");
+  expect(rowBox("a1")?.checked).toBe(before);
+});
+
+it("picks the tab only after unread sessions have been checked", async () => {
+  vi.mocked(readSession).mockResolvedValueOnce({
+    blocks: [
+      { role: "assistant", text: "**Close:** Safe to close: nothing left to do." },
+    ],
+  } as never);
+  projects = { "/p/alpha": [session("fresh", "/p/alpha", { updatedAt: SAVED + 1 })], "/p/beta": [] };
+  await mount();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(buttonNamed(/^Safe to close/).getAttribute("aria-pressed")).toBe("true");
+  expect(rowBox("fresh")?.checked).toBe(true);
+});
+
+it("takes archived sessions out of the shared list, so the count falls", async () => {
+  await mount();
+  expect(cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id)).toContain("a1");
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const left = cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id);
+  expect(left).not.toContain("a1");
+  expect(left).not.toContain("b1");
+  expect(left).toContain("a2");
+});
+
+it("Undo puts sessions back in the shared list, so the count returns", async () => {
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await click(buttonNamed(/^Undo$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const ids = cachedCleanupRows(["/p/alpha", "/p/beta"]).map((r) => r.id);
+  expect(ids).toEqual(expect.arrayContaining(["a1", "b1"]));
+});
+
+it("a later project's read does not undo an Undo", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  const flush = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  let holdAlpha = true;
+  let holdBeta = false;
+  let finishAlpha = () => {};
+  let finishBeta = () => {};
+  listSessionsByProject.mockImplementation((cwd: string) => {
+    if (holdAlpha) {
+      holdAlpha = false;
+      return new Promise((resolve) => {
+        finishAlpha = () => resolve(projects["/p/alpha"]);
+      });
+    }
+    if (holdBeta && cwd === "/p/beta") {
+      return new Promise((resolve) => {
+        finishBeta = () => resolve(projects["/p/beta"]);
+      });
+    }
+    return Promise.resolve(projects[cwd]);
+  });
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await flush();
+  holdBeta = true;
+  projects["/p/alpha"] = [
+    session("a1", "/p/alpha", { archived: true }),
+    session("a2", "/p/alpha"),
+  ];
+  await act(async () => {
+    finishAlpha();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await click(buttonNamed(/^Undo$/));
+  await flush();
+  expect(rowBox("a1")).toBeDefined();
+  holdBeta = false;
+  await act(async () => {
+    finishBeta();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeDefined();
+});
+
+it("Undo brings back a session a slow read saw as archived", async () => {
+  await mount();
+  act(() => root.unmount());
+  root = createRoot(container);
+  let finish = () => {};
+  listSessionsByProject.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(projects["/p/alpha"]);
+      }),
+  );
+  await mount();
+  await click(buttonNamed(/^Archive 2$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  projects["/p/alpha"] = [
+    session("a1", "/p/alpha", { archived: true }),
+    session("a2", "/p/alpha"),
+  ];
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeUndefined();
+  await click(buttonNamed(/^Undo$/));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(rowBox("a1")).toBeDefined();
+  expect(
+    cachedCleanupRows(["/p/alpha"]).find((r) => r.id === "a1")?.archived,
+  ).toBeFalsy();
 });

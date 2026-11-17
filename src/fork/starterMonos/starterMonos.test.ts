@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleAgentApp, type AgentAppHost } from "../../features/agent-app/model/agentApp";
 import { newSession, type Session } from "../../features/sessions/model/session";
-import { findMono, listMonos, MONO_COLORS, monoForSession, removeMono, saveMonoSessionId } from "../../features/monos/model/mono";
+import { findMono, listMonos, MONO_COLORS, monoForSession, removeMono, saveMonoSessionId, updateMono } from "../../features/monos/model/mono";
 import type { Habit } from "../../features/monos/model/monoHabits";
 import { loadRecents, rememberProject } from "../../features/projects/model/recents";
 import { PROJECT_MASCOTS } from "../../features/projects/model/projectMascots";
@@ -11,6 +11,8 @@ import { KICKOFF_MONO } from "./kickoffMono";
 import { MONO_MAKER } from "./makerMono";
 import { DOJO_MONO } from "./dojoMono"; // Fork
 import { SWEEP_MONO } from "./sweepMono";
+import { isStarterMono, STARTER_MONOS } from "./allStarterMonos";
+import { monoShowsIn } from "./monoShowsIn";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke, convertFileSrc: (path: string) => path }));
@@ -74,9 +76,9 @@ function chatOf(monoId: string, mode: Session["runtimeMode"] = "full-access"): S
 
 describe("starter Monos", () => {
   it("are made once each, with their look and instructions, and no projects", async () => {
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]);
-    await seedStarterMonos([KICKOFF_MONO, MONO_MAKER, SWEEP_MONO, DOJO_MONO]);
-    expect(listMonos()).toHaveLength(4);
+    await seedStarterMonos(STARTER_MONOS);
+    await seedStarterMonos(STARTER_MONOS);
+    expect(listMonos()).toHaveLength(6);
     const kickoff = findMono(starterMonoId(KICKOFF_MONO)!)!;
     expect(kickoff).toMatchObject({ name: "Kickoff", mascot: "rocket", projects: [] });
     expect(kickoff.instructions).toMatch(/You are Kickoff/);
@@ -87,7 +89,32 @@ describe("starter Monos", () => {
     const dojo = findMono(starterMonoId(DOJO_MONO)!)!;
     expect(dojo).toMatchObject({ name: "Dojo", mascot: "belt", projects: [] });
     expect(dojo.instructions).toMatch(/You are Dojo/);
-    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom", "belt"]));
+    expect(PROJECT_MASCOTS.map((mascot) => mascot.name)).toEqual(expect.arrayContaining(["rocket", "anvil", "broom", "belt", "flower"]));
+  });
+
+  it.each(["Graft", "Auditor"])("seeds %s with a valid look and soul, and keeps user edits and deletion", async (name) => {
+    await seedStarterMonos(STARTER_MONOS);
+    const mono = listMonos().find((entry) => entry.name === name);
+    expect(mono).toBeDefined();
+    if (!mono) throw new Error(`Missing starter Mono: ${name}`);
+    expect(PROJECT_MASCOTS.some((mascot) => mascot.name === mono.mascot)).toBe(true);
+    expect(MONO_COLORS).toContain(mono.color);
+    expect(mono.projects).toEqual([]);
+    expect(mono.instructions).toContain(`You are ${name}.`);
+    expect(isStarterMono(mono.id)).toBe(true);
+    expect(monoShowsIn({ ...mono, projects: [APP] }, SITE)).toBe(true);
+
+    const spec = STARTER_MONOS.find((entry) => entry.name === name)!;
+    // A later launch must preserve the user's configuration.
+    updateMono(mono.id, (current) => ({ ...current, name: "My helper", instructions: "My rules", projects: [APP] }));
+    await seedStarterMonos(STARTER_MONOS);
+    expect(findMono(mono.id)).toMatchObject({ name: "My helper", instructions: "My rules", projects: [APP] });
+    expect(starterMonoId(spec)).toBe(mono.id);
+
+    removeMono(mono.id);
+    await seedStarterMonos(STARTER_MONOS);
+    expect(starterMonoId(spec)).toBeUndefined();
+    expect(listMonos()).toHaveLength(5);
   });
 
   it("stays deleted once the user deletes it", () => {

@@ -284,3 +284,31 @@ it.skipIf(process.platform === "win32")(
     ).rejects.toThrow();
   },
 );
+
+it("reads and saves HTML larger than the old remote text edit limit", async () => {
+  const { commands, repo } = fixture();
+  const project = repo();
+  const path = join(project.cwd, "design.html");
+  const source = `<!doctype html><p>${"x".repeat(9 * 1024 * 1024)}</p>`;
+  project.write("design.html", source);
+  expect(await commands.run("read_text_file", { path })).toBe(source);
+  const content = `${source}<!-- saved -->`;
+  await commands.run("write_text_file", { path, content });
+  expect(readFileSync(path, "utf8")).toBe(content);
+});
+
+it("rejects remote text above the transport ceiling before reading its content", async () => {
+  const { commands, repo } = fixture();
+  const project = repo();
+  const path = join(project.cwd, "too-large.txt");
+  project.write("too-large.txt", "x".repeat(16 * 1024 * 1024 + 1));
+  await expect(commands.run("read_text_file", { path })).rejects.toThrow("16 MB remote transport limit");
+});
+
+it("reports escaped JSON text exceeding the remote response ceiling", async () => {
+  const { commands, repo } = fixture();
+  const project = repo();
+  const path = join(project.cwd, "escaped.txt");
+  project.write("escaped.txt", "\n".repeat(9 * 1024 * 1024));
+  await expect(commands.run("read_text_file", { path })).rejects.toThrow("16 MB remote transport limit");
+});

@@ -9,6 +9,7 @@ import AddSquareIcon from "@hugeicons/core-free-icons/AddSquareIcon";
 import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import AppWindowIcon from "@hugeicons/core-free-icons/AppWindowIcon";
 import Archive02Icon from "@hugeicons/core-free-icons/Archive02Icon";
+import ArchiveArrowDownIcon from "@hugeicons/core-free-icons/ArchiveArrowDownIcon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
 import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon";
@@ -118,6 +119,8 @@ import Notification01Icon from "@hugeicons/core-free-icons/Notification01Icon";
 import Location01Icon from "@hugeicons/core-free-icons/Location01Icon";
 // Fork: the footer Home lab button.
 import HomeWifiIcon from "@hugeicons/core-free-icons/HomeWifiIcon";
+// Fork: Project home.
+import Home01Icon from "@hugeicons/core-free-icons/Home01Icon";
 import LaptopIcon from "@hugeicons/core-free-icons/LaptopIcon";
 import ServerStack01Icon from "@hugeicons/core-free-icons/ServerStack01Icon"; // Fork
 import { forwardRef, type Ref } from "react";
@@ -175,6 +178,7 @@ const UnfoldVerticalIcon: IconSvgElement = [
 export const AlertCircle = wrap(AlertCircleIcon, "AlertCircle");
 export const AppWindow = wrap(AppWindowIcon, "AppWindow");
 export const Archive = wrap(Archive02Icon, "Archive");
+export const ArchiveDown = wrap(ArchiveArrowDownIcon, "ArchiveDown");
 export const ArrowDownCircle = wrap(CircleArrowDown01Icon, "ArrowDownCircle");
 export const ArrowLeft = wrap(ArrowLeft01Icon, "ArrowLeft");
 export const ArrowUp = wrap(ArrowUp01Icon, "ArrowUp");
@@ -311,4 +315,6 @@ export const Bell = wrap(Notification01Icon, "Bell");
 export const MapPin = wrap(Location01Icon, "MapPin");
 // Fork: the footer Home lab button.
 export const HomeLab = wrap(HomeWifiIcon, "HomeLab");
+// Fork: Project home.
+export const Home = wrap(Home01Icon, "Home");
 export const ServerStack = wrap(ServerStack01Icon, "ServerStack"); // Fork

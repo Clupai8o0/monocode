@@ -87,4 +87,19 @@ describe("PeerMessageCard", () => {
     expect(card.getAttribute("data-urgent")).toBe("true");
     expect(card.textContent).toContain("Urgent");
   });
+
+  it("names the sender's project and shows its icon when known", () => {
+    act(() =>
+      root.render(
+        createElement(PeerMessageCard, {
+          message: { name: "cr-9a", body: "GO: the phone is free." },
+          projectCwd: "/Users/me/projects/clearroll",
+        }),
+      ),
+    );
+    const card = container.querySelector("[data-peer-message]")!;
+    expect(card.querySelector("[data-peer-project]")).not.toBeNull();
+    expect(card.textContent).toContain("from clearroll");
+    expect(card.textContent).not.toContain("from another session");
+  });
 });

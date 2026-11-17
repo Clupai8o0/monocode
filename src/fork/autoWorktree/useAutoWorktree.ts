@@ -56,8 +56,14 @@ export function useAutoWorktree({
     policy !== "never" &&
     mode !== "worktree" &&
     !userChoseWorkspace(sessionId, cwd);
-  const { branches } = useProjectBranchesState(cwd, active);
-  const base = branch || branches?.current || undefined;
+  const { branches, settled } = useProjectBranchesState(cwd, active);
+  // Wait for the lookup, then stay in the folder on a fresh `git init`:
+  // it has no commit to branch a worktree from.
+  const picked = branch || branches?.current || undefined;
+  const base =
+    !settled || (branches?.unborn && picked === (branches.current ?? undefined))
+      ? undefined
+      : picked;
   const checkDirty = active && policy === "smart" && !busy;
   const [dirty, setDirty] = useState<boolean | null>(null);
 

@@ -34,6 +34,12 @@ function limited(patch: Partial<Session> = {}): Session {
 }
 
 describe("Mono usage recovery", () => {
+  it.each(["plan", "orchestrate"] as const)("keeps planning restrictions without restarting an orchestration (%s)", (intent) => {
+    const original = limited({ runtimeMode: "supervised", blocks: [{ id: "request", role: "user", text: "Plan this", intent }] });
+    const resumed = switchMonoUsageLimitAccount(original, "second", true);
+    expect(resumed.queuedMessages?.[0].intent).toBe("plan");
+    expect(resumed.runtimeMode).toBe("supervised");
+  });
   it("continues the stopped work once when there are no queued messages", () => {
     const original = limited();
     const resumed = resumeMonoUsageLimit(original);

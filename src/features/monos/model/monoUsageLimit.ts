@@ -4,6 +4,7 @@ import { sameProviderAccountId } from "../../providers/model/providerAccounts";
 import {
   resumeUsageLimitedSession,
   withUsageLimitAccount,
+  usageLimitContinuationIntent,
 } from "../../sessions/model/usageLimit";
 import { enqueueMonoMessage } from "./monoMessaging";
 
@@ -17,6 +18,7 @@ export function resumeMonoUsageLimit(session: Session): Session {
         id: crypto.randomUUID(),
         text: CONTINUE_PROMPT,
         attachments: [],
+        intent: usageLimitContinuationIntent(session),
       });
 }
 

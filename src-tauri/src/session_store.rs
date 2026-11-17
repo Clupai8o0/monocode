@@ -71,6 +71,18 @@ impl SessionStore {
             .lock()
             .map_err(|_| "Session store is locked".into())
     }
+
+    // Fork: read saved history without blocking session writes.
+    pub(crate) fn with_read_conn<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let conn = self
+            .read_conn
+            .lock()
+            .map_err(|_| "Session read store is locked")?;
+        read(conn.as_ref().ok_or("Session read store is unavailable")?)
+    }
 }
 
 pub fn init(app: &AppHandle) -> Result<(), String> {

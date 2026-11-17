@@ -3,6 +3,7 @@
 //! Muse and Antigravity print theirs without a model turn (`muse usage
 //! --json`, `agy -p /quota --output-format json`). Cursor reports Auto and
 //! API pools from its dashboard API with the Agent CLI's access token.
+//! Grok reads the same credits endpoint and login as its `/usage` screen.
 //! DeepSeek reports the prepaid balance of the key `dsh` uses (Keychain
 //! item `deepseek-api`). The raw JSON goes back to the webview, which parses it.
 
@@ -33,6 +34,7 @@ pub async fn fork_extra_usage(provider: String) -> ExtraUsage {
         "antigravity" => cli("agy", &["-p", "/quota", "--output-format", "json"]),
         "cursor" => cursor_usage(),
         "deepseek" => deepseek_balance(),
+        "grok" => grok_usage(),
         _ => unavailable("No usage source for this provider"),
     })
     .await
@@ -41,6 +43,63 @@ pub async fn fork_extra_usage(provider: String) -> ExtraUsage {
 
 const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+
+// Matches Grok Build's official OIDC login slot; never use an arbitrary
+// custom-provider token from auth.json against the first-party endpoint.
+const GROK_AUTH_SLOT: &str = "https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828";
+const GROK_USAGE_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+
+fn read_grok_auth_file(path: &std::path::Path) -> Option<(String, String)> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let auth = value.get(GROK_AUTH_SLOT)?;
+    let token = auth.get("key")?.as_str()?.trim();
+    let user_id = auth.get("user_id")?.as_str()?.trim();
+    if token.is_empty() || user_id.is_empty() {
+        return None;
+    }
+    Some((token.to_owned(), user_id.to_owned()))
+}
+
+/// Same request as xai-grok-shell's `x.ai/billing` extension, without
+/// starting a model turn. Credentials remain in the native process.
+fn grok_usage() -> ExtraUsage {
+    let home = std::env::var_os("GROK_HOME")
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::dirs_home().map(|home| std::path::PathBuf::from(home).join(".grok")));
+    let auth = home.and_then(|home| read_grok_auth_file(&home.join("auth.json")));
+    let Some((token, user_id)) = auth else {
+        return unavailable("Grok Build is not signed in; run `grok login`");
+    };
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let response = agent
+        .get(GROK_USAGE_URL)
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("X-XAI-Token-Auth", "xai-grok-cli")
+        .set("x-userid", &user_id)
+        .set("Accept", "application/json")
+        .timeout(Duration::from_secs(15))
+        .call();
+    match response {
+        Ok(response) => {
+            let mut body = String::new();
+            match response
+                .into_reader()
+                .take(MAX_OUTPUT + 1)
+                .read_to_string(&mut body)
+            {
+                Ok(_) if body.len() as u64 <= MAX_OUTPUT => ExtraUsage::Ok { body },
+                _ => error("Grok's usage could not be read"),
+            }
+        }
+        Err(ureq::Error::Status(401 | 403, _)) => {
+            unavailable("Open Grok Build to refresh usage; if needed, run `grok login`")
+        }
+        Err(ureq::Error::Status(code, _)) => error(&format!("Grok answered HTTP {code}")),
+        Err(_) => error("Could not reach Grok"),
+    }
+}
 
 /// Cursor Agent's plan meters. The CLI stores the same Bearer token the
 /// dashboard uses; on macOS that secret usually lives only in the Keychain.
@@ -272,5 +331,28 @@ mod tests {
             None
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn grok_credentials_use_only_the_official_cli_login() {
+        let path = std::env::temp_dir().join(format!("mc-grok-auth-{}.json", std::process::id()));
+        std::fs::write(&path, r#"{
+            "https://other.example::custom": {"key":"wrong", "user_id":"other"},
+            "https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": {"key":"token", "user_id":"user"}
+        }"#).unwrap();
+        assert_eq!(
+            read_grok_auth_file(&path),
+            Some(("token".into(), "user".into()))
+        );
+        for body in [
+            "{}",
+            "invalid",
+            r#"{"key":"legacy-or-unknown"}"#,
+            r#"{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828":{"key":"", "user_id":"user"}}"#,
+        ] {
+            std::fs::write(&path, body).unwrap();
+            assert!(read_grok_auth_file(&path).is_none());
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }

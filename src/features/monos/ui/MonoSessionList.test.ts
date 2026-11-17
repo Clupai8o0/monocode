@@ -292,7 +292,70 @@ it("narrows its cards by search, project and the sidebar's filters", async () =>
   expect(cards()[0]).toContain("Saved review");
   await show({ query: "nothing like it" });
   expect(cards()).toHaveLength(0);
-  expect(container.textContent).toContain("No sessions match this search.");
+  expect(container.textContent).toContain("No sub-agents match this search.");
+});
+
+it("puts running and waiting sub-agents first, then the latest update", async () => {
+  const saved = (id: string, updatedAt: number) =>
+    ({
+      id,
+      cwd: "/repo",
+      harness: "codex",
+      model: "gpt-6",
+      runtimeMode: "default",
+      title: id,
+      createdAt: 1,
+      updatedAt,
+    }) as SessionSummary;
+  vi.mocked(listSessionsByProject).mockResolvedValue([
+    saved("old", 10),
+    saved("recent", 30),
+    saved("tied-first", 20),
+    saved("tied-second", 20),
+    saved("running", 1),
+    saved("waiting", 2),
+  ]);
+  const launches = [
+    "old",
+    "tied-first",
+    "tied-second",
+    "recent",
+    "waiting",
+    "running",
+    "unsaved",
+  ].map((sessionId) => ({ ...launch, sessionId }));
+  await render(
+    [
+      { ...newSession("codex", "/repo"), id: "unsaved" },
+      { ...newSession("codex", "/repo"), id: "running", busy: true },
+      {
+        ...newSession("codex", "/repo"),
+        id: "waiting",
+        blocks: [
+          {
+            id: "approval",
+            role: "tool",
+            text: "Run command",
+            approval: { requestId: 42 },
+          },
+        ],
+      },
+    ],
+    launches,
+  );
+  expect(
+    [...container.querySelectorAll("[data-mono-session]")].map((row) =>
+      row.getAttribute("data-mono-session"),
+    ),
+  ).toEqual([
+    "waiting",
+    "running",
+    "unsaved",
+    "recent",
+    "tied-first",
+    "tied-second",
+    "old",
+  ]);
 });
 
 it("mounts a page of cards at a time and the next as the list nears its end", async () => {

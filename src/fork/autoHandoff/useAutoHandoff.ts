@@ -24,6 +24,19 @@ function requestOf(session: Session): string | undefined {
   );
 }
 
+function lastTurnIntent(
+  blocks: Session["blocks"],
+): "plan" | "orchestrate" | undefined {
+  for (let index = blocks.length - 1; index >= 0; index--) {
+    const block = blocks[index];
+    if (block.role !== "user" || block.draft) continue;
+    return block.intent === "plan" || block.intent === "orchestrate"
+      ? block.intent
+      : undefined;
+  }
+  return undefined;
+}
+
 function canContinue(
   session: Session,
   connected: (session: Session) => boolean,
@@ -87,14 +100,7 @@ export function useAutoHandoff(
             return;
           }
           attempted.current.add(request);
-          const user = [...now.blocks]
-            .reverse()
-            .find((block) => block.role === "user" && !block.draft);
-          const intent =
-            now.handoffCard?.intent ??
-            (user?.intent === "plan" || user?.intent === "orchestrate"
-              ? user.intent
-              : undefined);
+          const intent = now.handoffCard?.intent ?? lastTurnIntent(now.blocks);
           void Promise.resolve(
             submit.current(now.id, AUTO_HANDOFF_PROMPT, [], { intent }),
           ).catch(() => undefined);

@@ -23,6 +23,17 @@ function tab(overrides: Partial<Tab> = {}): Tab {
 }
 
 describe("tabCopy", () => {
+  it("shows the agent's session ID on hover, else MonoCode's", () => {
+    expect(
+      tabCopy(
+        tab({ title: "Fix", sessionIds: { monocode: "mc-1", harness: "abc-123" } }),
+      ).tooltip,
+    ).toContain("Session ID abc-123");
+    expect(
+      tabCopy(tab({ title: "Fix", sessionIds: { monocode: "mc-1" } })).tooltip,
+    ).toContain("Session ID mc-1");
+  });
+
   it.each(["inbox", "search", "notes", "automations"] as const)(
     "uses a standalone label for the %s app tab",
     (appView) => {
