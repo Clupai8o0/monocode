@@ -104,6 +104,69 @@ describe.each(providers)("$id ACP protocol", ({ id, protocol, mode, blocks, mode
     expect(protocol.autoPermissionOption("full-access", "execute", request.optionIds, request.optionKinds)).toBe("yes-7");
   });
 
+  it("extracts advertised session mode ids from session setup", () => {
+    expect(protocol.availableModesFromSession(null)).toEqual([]);
+    expect(protocol.availableModesFromSession({ modes: {} })).toEqual([]);
+    expect(
+      protocol.availableModesFromSession({
+        modes: { availableModes: [{ id: "default" }, { id: "auto" }, {}] },
+      }),
+    ).toEqual(["default", "auto"]);
+  });
+});
+
+describe("antigravity CLI mode mapping", () => {
+  const cli = ["default", "accept-edits", "auto", "plan"] as const;
+
+  it.each([
+    ["supervised", false, "default"],
+    ["auto-accept-edits", false, "accept-edits"],
+    ["auto", false, "default"],
+    ["full-access", false, "auto"],
+  ] as const)(
+    "maps %s to %s",
+    (runtimeMode, planning, expected) => {
+      expect(antigravity.antigravityModeId(runtimeMode, planning, cli)).toBe(
+        expected,
+      );
+    },
+  );
+
+  it("uses plan when advertised and falls back when it is not", () => {
+    expect(antigravity.antigravityModeId("full-access", true, cli)).toBe("plan");
+    expect(
+      antigravity.antigravityModeId("full-access", true, ["default", "auto"]),
+    ).toBe("default");
+  });
+
+  it("prefers legacy yolo and auto_edit over CLI ids on the .par server", () => {
+    const legacy = ["default", "auto_edit", "yolo"];
+    expect(antigravity.antigravityModeId("full-access", false, legacy)).toBe(
+      "yolo",
+    );
+    expect(
+      antigravity.antigravityModeId("auto-accept-edits", false, legacy),
+    ).toBe("auto_edit");
+  });
+});
+
+describe("antigravity spawn cwd", () => {
+  it("uses the binary directory only for the bundled .par server", () => {
+    expect(
+      antigravity.antigravitySpawnCwd("/opt/agy/agy_acp_server.par", "/repo"),
+    ).toBe("/opt/agy/");
+    expect(
+      antigravity.antigravitySpawnCwd("/opt/agy/agy_acp_server", "/repo"),
+    ).toBe("/opt/agy/");
+    expect(antigravity.antigravitySpawnCwd("/usr/local/bin/agy", "/repo")).toBe(
+      "/repo",
+    );
+  });
+});
+
+describe("antigravity ACP events", () => {
+  const protocol = antigravity;
+
   it("maps text, reasoning, tools and plans without fx-specific result decoding", () => {
     const parse = (update: unknown) => protocol.eventsFromAcpUpdate({ update });
     expect(parse({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } }))

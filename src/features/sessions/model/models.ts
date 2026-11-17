@@ -6,6 +6,11 @@ import {
   isHarnessAvailable,
 } from "../../../integrations/harness/core/availabilityState";
 import { HIDDEN_PROVIDERS } from "../../../fork/hiddenFeatures";
+import {
+  antigravityRoute,
+  isRoutePaused,
+  pausedRoutesSnapshot,
+} from "../../../fork/pausedRoutes/pausedRoutes";
 import { cappedStartSettings } from "../../../fork/effortAsk/effortCap";
 
 export type ModelSettingChoice = {
@@ -298,6 +303,18 @@ export const MODELS: AgentModel[] = [
     harness: "antigravity",
     name: "Gemini 3.8 Flash (High)",
     nativeId: "gemini-3.8-flash-high",
+  },
+  {
+    id: "antigravity:claude-sonnet-5-5",
+    harness: "antigravity",
+    name: "Claude Sonnet 5.5",
+    nativeId: "claude-sonnet-5-5",
+  },
+  {
+    id: "antigravity:claude-opus-5-5",
+    harness: "antigravity",
+    name: "Claude Opus 5.5",
+    nativeId: "claude-opus-5-5",
   },
   {
     id: "devin:adaptive",
@@ -1231,6 +1248,22 @@ function pickDefaultId(harness: HarnessId, models: AgentModel[]): string {
       models[0]?.id ??
       DEFAULT_MODEL_ID.fx
     );
+  }
+  if (harness === "antigravity") {
+    const paused = pausedRoutesSnapshot();
+    const routePaused = (nativeId: string | undefined) =>
+      nativeId != null && isRoutePaused(antigravityRoute(nativeId), paused);
+    const anyPaused = models.some((model) => routePaused(model.nativeId));
+    if (anyPaused) {
+      const open = models.filter((model) => !routePaused(model.nativeId));
+      return (
+        open.find((model) => model.id === DEFAULT_MODEL_ID.antigravity)?.id ??
+        open.find((model) => model.nativeId === "claude-sonnet-5-5")?.id ??
+        open[0]?.id ??
+        models[0]?.id ??
+        DEFAULT_MODEL_ID.antigravity
+      );
+    }
   }
   return (
     models.find((model) => model.id === DEFAULT_MODEL_ID[harness])?.id ??

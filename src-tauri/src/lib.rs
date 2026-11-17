@@ -11,6 +11,8 @@ mod fork_session_move; // Fork: move a session and its work to another machine.
 mod fork_poll_cache; // Fork: share short-lived helper reads across windows.
 // Fork: who is editing which file (vault claims.py), for file tab and Explorer tags.
 mod fork_claims;
+// Fork: the owner's paused model route prefixes, read-only.
+mod fork_paused_routes;
 // Fork: agent sessions MonoCode did not start ("Elsewhere"), read-only.
 mod fork_external_sessions;
 // Fork: the relay, so Claude sessions on other machines can message ours.
@@ -715,6 +717,7 @@ pub fn run() {
             fork_lab::fork_lab_open_rdp,      // Fork
             fork_memory::fork_memory_report, // Fork
             fork_claims::fork_claims_list,    // Fork
+            fork_paused_routes::fork_paused_routes, // Fork
             fork_external_sessions::fork_external_sessions_list, // Fork
             fork_external_sessions::fork_external_sessions_read, // Fork
             fork_relay::fork_relay_status,

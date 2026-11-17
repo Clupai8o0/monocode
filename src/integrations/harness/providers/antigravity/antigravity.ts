@@ -12,6 +12,7 @@ import {
 import {
   autoPermissionOption,
   asRecord,
+  availableModesFromSession,
   eventsFromAcpUpdate,
   extractModelConfigId,
   antigravityModeId,
@@ -48,6 +49,7 @@ type Live = {
   cwd: string;
   modelConfigId: string;
   configOptions: SessionConfigOption[];
+  availableModes: string[];
   muteUpdates: boolean;
   cancelled: boolean;
   /** Server state is unknowable after a mid-prompt cancel; recycle before reuse. */
@@ -548,6 +550,7 @@ async function startLive(input: SendTurnInput, life: number): Promise<Live> {
     if (retired()) throw new Error("Antigravity session stopped during startup");
 
     const configOptions = readConfigOptions(setup?.configOptions);
+    const availableModes = availableModesFromSession(setup);
     const live: Live = {
       threadId: input.sessionId,
       childKey,
@@ -557,6 +560,7 @@ async function startLive(input: SendTurnInput, life: number): Promise<Live> {
       cwd: input.cwd,
       modelConfigId: extractModelConfigId(configOptions),
       configOptions,
+      availableModes,
       muteUpdates: didLoad,
       cancelled: false,
       stale: false,
@@ -633,7 +637,7 @@ async function applyRuntimeMode(
       "session/set_mode",
       {
         sessionId: live.acpSessionId,
-        modeId: antigravityModeId(runtimeMode, planning),
+        modeId: antigravityModeId(runtimeMode, planning, live.availableModes),
       },
       CONTROL_TIMEOUT_MS,
     );

@@ -12,7 +12,13 @@ import {
 } from "../../core/preview";
 import { acpAgentInfo } from "../../core/acpSubagents";
 
-export type AntigravityModeId = "default" | "auto_edit" | "yolo";
+export type AntigravityModeId =
+  | "default"
+  | "auto_edit"
+  | "yolo"
+  | "auto"
+  | "accept-edits"
+  | "plan";
 
 export type AntigravityPermissionRequest = {
   title: string;
@@ -39,20 +45,67 @@ export function antigravityPromptBlocks(
   return promptBlocks(text, attachments);
 }
 
+function binaryBaseName(binary: string): string {
+  const separator = Math.max(binary.lastIndexOf("/"), binary.lastIndexOf("\\"));
+  return separator >= 0 ? binary.slice(separator + 1) : binary;
+}
+
 /** The raw .par locates sibling resources relative to its process directory. */
 export function antigravitySpawnCwd(binary: string, fallback: string): string {
+  const base = binaryBaseName(binary);
+  const isParServer = base.endsWith(".par") || base === "agy_acp_server";
+  if (!isParServer) return fallback;
   const separator = Math.max(binary.lastIndexOf("/"), binary.lastIndexOf("\\"));
   return separator >= 0 ? binary.slice(0, separator + 1) : fallback;
+}
+
+function firstAdvertisedMode(
+  candidates: readonly string[],
+  available: readonly string[],
+): string | undefined {
+  for (const id of candidates) {
+    if (available.includes(id)) return id;
+  }
+  return undefined;
+}
+
+export function availableModesFromSession(raw: unknown): string[] {
+  const rec = asRecord(raw);
+  const modes = asRecord(rec?.modes);
+  const advertised = Array.isArray(modes?.availableModes)
+    ? modes.availableModes
+    : [];
+  return advertised.flatMap((item) => {
+    const mode = asRecord(item);
+    const id = mode?.id;
+    return typeof id === "string" && id.trim() ? [id.trim()] : [];
+  });
 }
 
 export function antigravityModeId(
   runtimeMode: RuntimeMode,
   planning = false,
+  available?: readonly string[],
 ): AntigravityModeId {
-  // No native plan mode. Use default and deny non-read permissions on the client.
-  if (planning) return "default";
-  if (runtimeMode === "full-access") return "yolo";
-  if (runtimeMode === "auto-accept-edits") return "auto_edit";
+  if (available == null || available.length === 0) {
+    // Legacy .par server: no native plan mode — deny non-read on the client.
+    if (planning) return "default";
+    if (runtimeMode === "full-access") return "yolo";
+    if (runtimeMode === "auto-accept-edits") return "auto_edit";
+    return "default";
+  }
+  if (planning) {
+    return (firstAdvertisedMode(["plan"], available) ?? "default") as AntigravityModeId;
+  }
+  if (runtimeMode === "full-access") {
+    return (firstAdvertisedMode(["yolo", "auto"], available) ?? "default") as AntigravityModeId;
+  }
+  if (runtimeMode === "auto-accept-edits") {
+    return (firstAdvertisedMode(
+      ["auto_edit", "accept-edits"],
+      available,
+    ) ?? "default") as AntigravityModeId;
+  }
   return "default";
 }
 

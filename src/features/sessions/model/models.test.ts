@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  loadPausedRoutes,
+  resetPausedRoutesCache,
+} from "../../../fork/pausedRoutes/pausedRoutes";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 import { newSession, type HarnessId } from "./session";
 import {
   MODELS,
@@ -502,6 +511,66 @@ describe("live catalog overlays", () => {
       harness: "codex",
       name: "Codex",
     });
+  });
+
+  it("skips paused Gemini routes when picking the Antigravity default", async () => {
+    resetPausedRoutesCache();
+    vi.mocked(invoke).mockResolvedValueOnce({ "agy:gemini": "competition" });
+    await loadPausedRoutes();
+    setHarnessModels("antigravity", [
+      {
+        id: "antigravity:gemini-4-carbon",
+        harness: "antigravity",
+        name: "Gemini 4 Carbon",
+        nativeId: "gemini-4-carbon",
+      },
+      {
+        id: "antigravity:claude-sonnet-5-5",
+        harness: "antigravity",
+        name: "Claude Sonnet 5.5",
+        nativeId: "claude-sonnet-5-5",
+      },
+    ]);
+    expect(defaultModelId("antigravity")).toBe("antigravity:claude-sonnet-5-5");
+    resetHarnessModelOverlays();
+    resetPausedRoutesCache();
+  });
+
+  it("skips a paused Claude route too, falling back to an open Gemini model", async () => {
+    resetPausedRoutesCache();
+    vi.mocked(invoke).mockResolvedValueOnce({ "agy:claude": "owner" });
+    await loadPausedRoutes();
+    setHarnessModels("antigravity", [
+      {
+        id: "antigravity:claude-sonnet-5-5",
+        harness: "antigravity",
+        name: "Claude Sonnet 5.5",
+        nativeId: "claude-sonnet-5-5",
+      },
+      {
+        id: "antigravity:gemini-4-carbon",
+        harness: "antigravity",
+        name: "Gemini 4 Carbon",
+        nativeId: "gemini-4-carbon",
+      },
+    ]);
+    expect(defaultModelId("antigravity")).toBe("antigravity:gemini-4-carbon");
+    resetHarnessModelOverlays();
+    resetPausedRoutesCache();
+  });
+
+  it("keeps the first live model as default when no routes are paused", () => {
+    resetPausedRoutesCache();
+    setHarnessModels("antigravity", [
+      {
+        id: "antigravity:gemini-4-carbon",
+        harness: "antigravity",
+        name: "Gemini 4 Carbon",
+        nativeId: "gemini-4-carbon",
+      },
+    ]);
+    expect(defaultModelId("antigravity")).toBe("antigravity:gemini-4-carbon");
+    resetHarnessModelOverlays();
   });
 
   it("is empty until a CLI catalog replaces the fallback list", () => {

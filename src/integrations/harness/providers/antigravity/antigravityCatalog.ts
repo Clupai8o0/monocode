@@ -1,5 +1,13 @@
 import { homeDir } from "../../../../platform/tauri/fs";
-import { setHarnessModels } from "../../../../features/sessions/model/models";
+import {
+  antigravityRoute,
+  isRoutePaused,
+  loadPausedRoutes,
+} from "../../../../fork/pausedRoutes/pausedRoutes";
+import {
+  type AgentModel,
+  setHarnessModels,
+} from "../../../../features/sessions/model/models";
 import { AcpClient } from "../../core/acp";
 import {
   killChild,
@@ -20,8 +28,14 @@ let inflight: Promise<void> | null = null;
 export function refreshAntigravityCatalog(): Promise<void> {
   if (inflight) return inflight;
   inflight = discoverAntigravityModels()
-    .then((models) => {
-      if (models.length > 0) setHarnessModels("antigravity", models);
+    .then(async (models) => {
+      if (models.length === 0) return;
+      const paused = await loadPausedRoutes();
+      const suffix = " (paused)";
+      const annotated = models.map((model) =>
+        annotatePausedModel(model, paused, suffix),
+      );
+      setHarnessModels("antigravity", annotated);
     })
     .catch((error: unknown) => {
       // Preserve the last live catalog (or startup seeds) when offline/logged out.
@@ -31,6 +45,19 @@ export function refreshAntigravityCatalog(): Promise<void> {
       inflight = null;
     });
   return inflight;
+}
+
+function annotatePausedModel(
+  model: AgentModel,
+  paused: Record<string, string>,
+  suffix: string,
+): AgentModel {
+  const nativeId = model.nativeId;
+  if (!nativeId) return model;
+  const route = antigravityRoute(nativeId);
+  if (!isRoutePaused(route, paused)) return model;
+  if (model.name.endsWith(suffix)) return model;
+  return { ...model, name: `${model.name}${suffix}` };
 }
 
 export async function discoverAntigravityModels(workingDirectory?: string) {
