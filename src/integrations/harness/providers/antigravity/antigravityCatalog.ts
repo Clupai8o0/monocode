@@ -28,20 +28,21 @@ let inflight: Promise<void> | null = null;
 export function refreshAntigravityCatalog(): Promise<void> {
   if (inflight) return inflight;
   // Read the pause list even when the probe fails, so the seed default skips paused routes.
-  void loadPausedRoutes();
+  const pausedLoad = loadPausedRoutes();
   inflight = discoverAntigravityModels()
     .then(async (models) => {
+      const paused = await pausedLoad;
       if (models.length === 0) return;
-      const paused = await loadPausedRoutes();
       const suffix = " (paused)";
       const annotated = models.map((model) =>
         annotatePausedModel(model, paused, suffix),
       );
       setHarnessModels("antigravity", annotated);
     })
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
       // Preserve the last live catalog (or startup seeds) when offline/logged out.
       console.debug("[monocode] antigravity catalog", error);
+      await pausedLoad;
     })
     .finally(() => {
       inflight = null;
