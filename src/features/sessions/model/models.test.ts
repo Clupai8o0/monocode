@@ -561,6 +561,30 @@ describe("live catalog overlays", () => {
     resetPausedRoutesCache();
   });
 
+  it("keeps the usual default when only another model is paused", async () => {
+    resetPausedRoutesCache();
+    vi.mocked(invoke).mockResolvedValueOnce({ "agy:claude-opus": "owner" });
+    await loadPausedRoutes();
+    setHarnessModels("antigravity", [
+      { id: "antigravity:gemini-4-carbon", harness: "antigravity", name: "Gemini 4 Carbon", nativeId: "gemini-4-carbon" },
+      { id: "antigravity:claude-sonnet-5-5", harness: "antigravity", name: "Claude Sonnet 5.5", nativeId: "claude-sonnet-5-5" },
+      { id: "antigravity:claude-opus-5-5", harness: "antigravity", name: "Claude Opus 5.5", nativeId: "claude-opus-5-5" },
+    ]);
+    expect(defaultModelId("antigravity")).toBe("antigravity:gemini-4-carbon");
+    resetHarnessModelOverlays();
+    resetPausedRoutesCache();
+  });
+
+  it("skips a paused bundled default before any live catalog lands", async () => {
+    resetHarnessModelOverlays();
+    resetPausedRoutesCache();
+    expect(defaultModelId("antigravity")).toBe("antigravity:gemini-3.8-flash-high");
+    vi.mocked(invoke).mockResolvedValueOnce({ "agy:gemini": "owner" });
+    await loadPausedRoutes();
+    expect(defaultModelId("antigravity")).toBe("antigravity:claude-sonnet-5-5");
+    resetPausedRoutesCache();
+  });
+
   it("keeps the first live model as default when no routes are paused", () => {
     resetPausedRoutesCache();
     setHarnessModels("antigravity", [

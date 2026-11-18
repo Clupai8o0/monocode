@@ -27,6 +27,8 @@ let inflight: Promise<void> | null = null;
 
 export function refreshAntigravityCatalog(): Promise<void> {
   if (inflight) return inflight;
+  // Read the pause list even when the probe fails, so the seed default skips paused routes.
+  void loadPausedRoutes();
   inflight = discoverAntigravityModels()
     .then(async (models) => {
       if (models.length === 0) return;

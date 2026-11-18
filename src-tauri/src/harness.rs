@@ -1890,7 +1890,8 @@ fn looks_like_harness_argv(args: &str) -> bool {
     }
     let is_acp = args.split_whitespace().any(|part| part == "acp");
     args.split_whitespace().any(|part| {
-        is_harness_argv_token(part) || (is_acp && binary_name_eq(Path::new(part), "agy"))
+        is_harness_argv_token(part)
+            || (is_acp && Path::new(part).file_name().and_then(|name| name.to_str()) == Some("agy"))
     })
 }
 
@@ -4263,6 +4264,7 @@ mod tests {
         assert!(!looks_like_harness_argv("agy --help"));
         assert!(!looks_like_harness_argv("agy --acp"));
         assert!(!looks_like_harness_argv("agy acp-other"));
+        assert!(!looks_like_harness_argv("node tool.js acp ./agy.json"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -460,7 +460,11 @@ export function resetHarnessModelOverlays() {
 }
 
 export function defaultModelId(harness: HarnessId): string {
-  return overlayDefaults[harness] ?? DEFAULT_MODEL_ID[harness];
+  const overlay = overlayDefaults[harness];
+  if (overlay) return overlay;
+  // Before a live catalog lands, the bundled Antigravity seeds still honour paused routes.
+  if (harness === "antigravity") return pickDefaultId(harness, baseModelsFor(harness));
+  return DEFAULT_MODEL_ID[harness];
 }
 
 // `modelsFor`/`findModel` sit in render bodies (every session card, every
@@ -1276,9 +1280,13 @@ function pickDefaultId(harness: HarnessId, models: AgentModel[]): string {
       nativeId != null && isRoutePaused(antigravityRoute(nativeId), paused);
     const anyPaused = models.some((model) => routePaused(model.nativeId));
     if (anyPaused) {
+      // Same pick as with nothing paused (the bundled default, else the first
+      // model) while those are open; Sonnet only once the first model is paused.
       const open = models.filter((model) => !routePaused(model.nativeId));
+      const first = models[0] && open.includes(models[0]) ? models[0] : undefined;
       return (
         open.find((model) => model.id === DEFAULT_MODEL_ID.antigravity)?.id ??
+        first?.id ??
         open.find((model) => model.nativeId === "claude-sonnet-5-5")?.id ??
         open[0]?.id ??
         models[0]?.id ??

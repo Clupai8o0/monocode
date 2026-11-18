@@ -31,6 +31,20 @@ describe("pausedRoutes", () => {
     expect(isRoutePaused("agy:gemini-4-carbon")).toBe(false);
   });
 
+  it("keeps the last good list when a later read fails", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(invoke).mockResolvedValueOnce({ "agy:gemini": "paused" });
+      await loadPausedRoutes();
+      vi.advanceTimersByTime(61_000);
+      vi.mocked(invoke).mockRejectedValueOnce(new Error("read failed"));
+      await expect(loadPausedRoutes()).resolves.toEqual({ "agy:gemini": "paused" });
+      expect(isRoutePaused("agy:gemini-4-carbon")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps only string values from the fork map", async () => {
     vi.mocked(invoke).mockResolvedValueOnce({
       "agy:gemini": "paused",

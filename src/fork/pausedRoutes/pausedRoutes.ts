@@ -24,10 +24,10 @@ export async function loadPausedRoutes(): Promise<Record<string, string>> {
     try {
       const raw = await invoke<unknown>("fork_paused_routes");
       cached = normalizePaused(raw);
+      cachedAt = Date.now();
     } catch {
-      cached = {};
+      // Keep the last good list; a failed read must not unpause anything. Retry on the next call.
     }
-    cachedAt = Date.now();
     inflight = null;
     return cached;
   })();
